@@ -168,7 +168,7 @@ export function deleteTokenRange(rangeId: string) {
   return jsonRequest(`${base}/persistent/ranges/${rangeId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createPersistentTier(rangeId: string, payload: { is_premium: boolean; description?: string }) {
+export function createPersistentTier(rangeId: string, payload: { is_premium?: boolean; is_max?: boolean; description?: string }) {
   return jsonRequest(`${base}/persistent/ranges/${rangeId}/tiers/`, withCsrf(payload))
 }
 

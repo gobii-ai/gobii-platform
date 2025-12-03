@@ -531,9 +531,13 @@ def _coerce_reasoning_effort(value) -> str | None:
     return effort
 
 
-def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool) -> int:
+def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool, is_max: bool = False) -> int:
     last = (
-        PersistentLLMTier.objects.filter(token_range=token_range, is_premium=is_premium)
+        PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_premium=is_premium,
+            is_max=is_max,
+        )
         .order_by("-order")
         .first()
     )
@@ -1220,14 +1224,18 @@ class PersistentTierListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
 
         is_premium = _coerce_bool(payload.get("is_premium", False))
+        is_max = _coerce_bool(payload.get("is_max", False))
+        if is_premium and is_max:
+            return HttpResponseBadRequest("Tier cannot be both premium and max")
         description = (payload.get("description") or "").strip()
-        order = _next_order_for_range(token_range, is_premium=is_premium)
+        order = _next_order_for_range(token_range, is_premium=is_premium, is_max=is_max)
 
         tier = PersistentLLMTier.objects.create(
             token_range=token_range,
             order=order,
             description=description,
             is_premium=is_premium,
+            is_max=is_max,
         )
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_id=str(tier.id))
@@ -1252,6 +1260,7 @@ class PersistentTierDetailAPIView(SystemAdminAPIView):
             sibling_qs = PersistentLLMTier.objects.filter(
                 token_range=tier.token_range,
                 is_premium=tier.is_premium,
+                is_max=tier.is_max,
             )
             changed = _swap_orders(sibling_qs, tier, direction)
             if not changed:

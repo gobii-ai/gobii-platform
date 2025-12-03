@@ -27,7 +27,7 @@ import {
   Sparkles,
   Crown,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
@@ -729,6 +729,207 @@ function ConfirmActionModal({
         </div>
       </div>
     </div>
+  )
+}
+
+function ConfirmModalWrapper({
+  options,
+  onResolve,
+  onReject,
+  onClose,
+}: {
+  options: ConfirmDialogConfig
+  onResolve: () => void
+  onReject: (error?: unknown) => void
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const { title, message, confirmLabel, cancelLabel, intent, onConfirm } = options
+
+  return createPortal(
+    <ConfirmActionModal
+      title={title}
+      message={message}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+      intent={intent}
+      busy={busy}
+      onConfirm={async () => {
+        setBusy(true)
+        try {
+          await onConfirm?.()
+          onResolve()
+          onClose()
+        } catch (error) {
+          onReject(error)
+          onClose()
+        } finally {
+          setBusy(false)
+        }
+      }}
+      onCancel={() => {
+        onResolve()
+        onClose()
+      }}
+    />,
+    document.body,
+  )
+}
+
+function CreateProfileModal({
+  onCreate,
+  onClose,
+}: {
+  onCreate: (name: string) => Promise<void>
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!name.trim()) return
+    setSubmitting(true)
+    try {
+      await onCreate(name.trim())
+      onClose()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
+          <button type="button" className={button.icon} onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g., Production, Staging, Eval A"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              autoFocus
+              disabled={submitting}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              A unique identifier will be generated from the name.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
+              Cancel
+            </button>
+            <button type="submit" className={button.primary} disabled={!name.trim() || submitting}>
+              {submitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Profile'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function EditProfileModal({
+  profile,
+  onSave,
+  onClose,
+}: {
+  profile: {
+    id: string
+    display_name: string | null
+    name: string
+    description: string | null
+  }
+  onSave: (payload: { display_name: string; description: string }) => Promise<void>
+  onClose: () => void
+}) {
+  const [displayName, setDisplayName] = useState(profile.display_name || profile.name)
+  const [description, setDescription] = useState(profile.description || '')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!displayName.trim()) return
+    setSubmitting(true)
+    try {
+      await onSave({ display_name: displayName.trim(), description: description.trim() })
+      onClose()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
+          <button type="button" className={button.icon} onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="e.g., Production, Staging, Eval A"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              autoFocus
+              disabled={submitting}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional description for this profile"
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+              disabled={submitting}
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={button.primary}
+              disabled={!displayName.trim() || submitting}
+            >
+              {submitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -1546,6 +1747,7 @@ function RangeSection({
   onUpdate,
   onRemove,
   onAddTier,
+  onAddMaxTier,
   onMoveTier,
   onRemoveTier,
   onAddEndpoint,
@@ -1563,6 +1765,7 @@ function RangeSection({
   onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => Promise<void> | void
   onRemove: () => void
   onAddTier: (isPremium: boolean) => void
+  onAddMaxTier: () => void
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tier: Tier) => void
   onAddEndpoint: (tier: Tier) => void
@@ -1575,7 +1778,7 @@ function RangeSection({
   dirtyTierIds: Set<string>
   isActionBusy: (key: string) => boolean
 }) {
-  const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
+  const standardTiers = tiers.filter((tier) => !tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
   const premiumTiers = tiers.filter((tier) => tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
   const maxTiers = tiers.filter((tier) => tier.isMax).sort((a, b) => a.order - b.order)
   const [nameInput, setNameInput] = useState(range.name)
@@ -1735,7 +1938,7 @@ function RangeSection({
         <div className="bg-indigo-50/60 p-4 space-y-3 rounded-xl">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-semibold text-indigo-800 flex items-center gap-2"><Crown className="size-4" /> Max tiers</h4>
-            <button type="button" className={button.secondary} onClick={() => onAddTier(true)}>
+            <button type="button" className={button.secondary} onClick={onAddMaxTier}>
               <PlusCircle className="size-4" /> Add
             </button>
           </div>
@@ -1782,9 +1985,6 @@ export function LlmConfigScreen() {
 
   // Profile-related state
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
-  const [newProfileName, setNewProfileName] = useState('')
-  const [editProfileDisplayName, setEditProfileDisplayName] = useState('')
-  const [editProfileDescription, setEditProfileDescription] = useState('')
 
   // Fetch list of routing profiles
   const profilesQuery = useQuery({
@@ -1893,37 +2093,15 @@ export function LlmConfigScreen() {
     if (!value) return null
     return value.trim()
   }
-  const [confirmBusy, setConfirmBusy] = useState(false)
   const requestConfirmation = (options: ConfirmDialogConfig) =>
     new Promise<void>((resolve, reject) => {
       showModal((onClose) =>
-        createPortal(
-          <ConfirmActionModal
-            title={options.title}
-            message={options.message}
-            confirmLabel={options.confirmLabel ?? 'Confirm'}
-            cancelLabel={options.cancelLabel ?? 'Cancel'}
-            intent={options.intent ?? 'danger'}
-            busy={confirmBusy}
-            onConfirm={async () => {
-              setConfirmBusy(true)
-              try {
-                await options.onConfirm?.()
-                resolve()
-              } catch (error) {
-                reject(error)
-              } finally {
-                setConfirmBusy(false)
-                onClose()
-              }
-            }}
-            onCancel={() => {
-              onClose()
-              resolve()
-            }}
-          />,
-          document.body,
-        ),
+        <ConfirmModalWrapper
+          options={options}
+          onResolve={resolve}
+          onReject={reject}
+          onClose={onClose}
+        />,
       )
     })
 
@@ -2169,13 +2347,16 @@ export function LlmConfigScreen() {
         }),
     })
 
-  const handleTierAdd = (rangeId: string, isPremium: boolean) =>
-    runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), {
+  const handleTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
+    const isPremium = Boolean(options?.isPremium)
+    const isMax = Boolean(options?.isMax)
+    return runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium, is_max: isMax }), {
       successMessage: 'Tier added',
       label: 'Creating tier…',
-      busyKey: actionKey('range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+      busyKey: actionKey('range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
       context: 'Persistent tier',
     })
+  }
   const handleTierMove = (rangeId: string, tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
@@ -2476,83 +2657,11 @@ export function LlmConfigScreen() {
   }
 
   const openCreateProfileModal = () => {
-    setNewProfileName('')
     showModal((onClose) =>
-      createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
-              <button
-                type="button"
-                className={button.icon}
-                onClick={() => {
-                  setNewProfileName('')
-                  onClose()
-                }}
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!newProfileName.trim()) return
-                try {
-                  await handleCreateProfile(newProfileName.trim())
-                  setNewProfileName('')
-                  onClose()
-                } catch {
-                  // Error handled by runWithFeedback
-                }
-              }}
-              className="p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
-                <input
-                  type="text"
-                  value={newProfileName}
-                  onChange={(e) => setNewProfileName(e.target.value)}
-                  placeholder="e.g., Production, Staging, Eval A"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  autoFocus
-                />
-                <p className="mt-1 text-xs text-slate-500">
-                  A unique identifier will be generated from the name.
-                </p>
-              </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  className={button.secondary}
-                  onClick={() => {
-                    setNewProfileName('')
-                    onClose()
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className={button.primary}
-                  disabled={!newProfileName.trim() || isBusy('profile-create')}
-                >
-                  {isBusy('profile-create') ? (
-                    <>
-                      <LoaderCircle className="size-4 animate-spin" />
-                      Creating...
-                    </>
-                  ) : (
-                    'Create Profile'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body,
-      ),
+      <CreateProfileModal
+        onCreate={(name) => handleCreateProfile(name)}
+        onClose={onClose}
+      />,
     )
   }
 
@@ -2636,97 +2745,17 @@ export function LlmConfigScreen() {
 
   const openEditProfileModal = (profile: typeof selectedProfile) => {
     if (!profile) return
-    setEditProfileDisplayName(profile.display_name || profile.name)
-    setEditProfileDescription(profile.description || '')
     showModal((onClose) =>
-      createPortal(
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-              <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
-              <button
-                type="button"
-                className={button.icon}
-                onClick={() => {
-                  setEditProfileDisplayName('')
-                  setEditProfileDescription('')
-                  onClose()
-                }}
-              >
-                <X className="size-5" />
-              </button>
-            </div>
-            <form
-              onSubmit={async (e) => {
-                e.preventDefault()
-                if (!editProfileDisplayName.trim()) return
-                try {
-                  await handleUpdateProfile(profile.id, {
-                    display_name: editProfileDisplayName.trim(),
-                    description: editProfileDescription.trim(),
-                  })
-                  setEditProfileDisplayName('')
-                  setEditProfileDescription('')
-                  onClose()
-                } catch {
-                  // Error handled by runWithFeedback
-                }
-              }}
-              className="p-6 space-y-4"
-            >
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
-                <input
-                  type="text"
-                  value={editProfileDisplayName}
-                  onChange={(e) => setEditProfileDisplayName(e.target.value)}
-                  placeholder="e.g., Production, Staging, Eval A"
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                  autoFocus
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea
-                  value={editProfileDescription}
-                  onChange={(e) => setEditProfileDescription(e.target.value)}
-                  placeholder="Optional description for this profile"
-                  rows={3}
-                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
-                />
-              </div>
-              <div className="flex justify-end gap-3">
-                <button
-                  type="button"
-                  className={button.secondary}
-                  onClick={() => {
-                    setEditProfileDisplayName('')
-                    setEditProfileDescription('')
-                    onClose()
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className={button.primary}
-                  disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', profile.id, 'update'))}
-                >
-                  {isBusy(actionKey('profile', profile.id, 'update')) ? (
-                    <>
-                      <LoaderCircle className="size-4 animate-spin" />
-                      Saving...
-                    </>
-                  ) : (
-                    'Save Changes'
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>,
-        document.body,
-      ),
+      <EditProfileModal
+        profile={{
+          id: profile.id,
+          display_name: profile.display_name,
+          name: profile.name,
+          description: profile.description,
+        }}
+        onSave={(payload) => handleUpdateProfile(profile.id, payload)}
+        onClose={onClose}
+      />,
     )
   }
 
@@ -2810,17 +2839,19 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleProfileTierAdd = (rangeId: string, isPremium: boolean) => {
-    if (!selectedProfile) return handleTierAdd(rangeId, isPremium)
+  const handleProfileTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
+    const isPremium = Boolean(options?.isPremium)
+    const isMax = Boolean(options?.isMax)
+    if (!selectedProfile) return handleTierAdd(rangeId, { isPremium, isMax })
     return runWithFeedback(
       async () => {
-        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium })
+        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium, is_max: isMax })
         await invalidateProfileDetail()
       },
       {
         successMessage: 'Tier added',
         label: 'Creating tier…',
-        busyKey: actionKey('profile-range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+        busyKey: actionKey('profile-range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
         context: 'Persistent tier',
       },
     )
@@ -3318,7 +3349,8 @@ export function LlmConfigScreen() {
                 key={range.id}
                 range={range}
                 tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, isPremium) : handleTierAdd(range.id, isPremium)}
+                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, { isPremium }) : handleTierAdd(range.id, { isPremium })}
+                onAddMaxTier={() => selectedProfile ? handleProfileTierAdd(range.id, { isMax: true }) : handleTierAdd(range.id, { isMax: true })}
                 onUpdate={(field, value) => selectedProfile ? handleProfileRangeUpdate(range.id, field, value) : handleRangeUpdate(range.id, field, value)}
                 onRemove={() => selectedProfile ? handleProfileRangeRemove(range) : handleRangeRemove(range)}
                 onMoveTier={(tierId, direction) => selectedProfile ? handleProfileTierMove(range.id, tierId, direction) : handleTierMove(range.id, tierId, direction)}
