@@ -5754,6 +5754,17 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
 
         plan_id = str(owner_plan.get("id", "")).lower() if owner_plan else ""
 
+        show_pro_scale_upsell = plan_id == PlanNamesChoices.FREE.value
+        show_scale_upsell = plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.STARTUP.value)
+
+        upsell_count = 0
+        if show_pro_scale_upsell:
+            upsell_count += 1
+        if show_scale_upsell:
+            upsell_count += 1
+        if agent.organization_id and not org_has_paid_seats:
+            upsell_count += 1
+
         context.update({
             'owner_plan': owner_plan,
             'owner_plan_id': plan_id,
@@ -5761,8 +5772,9 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
             'agent_has_org': bool(agent.organization_id),
             'agent_org_name': organization_name,
             'org_has_paid_seats': org_has_paid_seats if agent.organization_id else None,
-            'show_pro_scale_upsell': plan_id == PlanNamesChoices.FREE.value,
-            'show_scale_upsell': plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.STARTUP.value),
+            'show_pro_scale_upsell': show_pro_scale_upsell,
+            'show_scale_upsell': show_scale_upsell,
+            'upsell_count': upsell_count,
         })
 
         return context
