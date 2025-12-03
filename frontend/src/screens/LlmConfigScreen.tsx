@@ -32,6 +32,7 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
+import { useModal } from '../hooks/useModal'
 import * as llmApi from '../api/llmConfig'
 import { HttpError } from '../api/http'
 
@@ -168,15 +169,6 @@ type ConfirmDialogConfig = {
   onConfirm: () => Promise<void> | void
 }
 
-type ActiveConfirmDialog = {
-  title: string
-  message: string
-  confirmLabel: string
-  cancelLabel: string
-  intent: 'danger' | 'primary'
-  onConfirm: () => Promise<void> | void
-}
-
 type AsyncFeedback = {
   runWithFeedback: <T>(operation: () => Promise<T>, options?: MutationOptions) => Promise<T>
   isBusy: (key: string) => boolean
@@ -252,13 +244,6 @@ function useAsyncFeedback(): AsyncFeedback {
     notices,
     dismissNotice: (id: string) => setNotices((prev) => prev.filter((notice) => notice.id !== id)),
   }
-}
-
-const modalRoot = typeof document !== 'undefined' ? document.body : null
-
-function ModalPortal({ children }: { children: ReactNode }) {
-  if (!modalRoot) return null
-  return createPortal(children, modalRoot)
 }
 
 const UNIT_SCALE = 10000
@@ -652,51 +637,49 @@ function AddEndpointModal({
     }
   }
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
-            <button onClick={onClose} className={button.icon}>
-              <X className="size-5" />
-            </button>
-          </div>
-          <div className="mt-4">
-            {endpoints.length === 0 ? (
-              <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
-            ) : (
-              <>
-                <label className="text-sm font-medium text-slate-700">Endpoint</label>
-                <select
-                  className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                  value={selected}
-                  onChange={(event) => setSelected(event.target.value)}
-                >
-                  {endpoints.map((endpoint) => (
-                    <option key={endpoint.id} value={endpoint.id}>
-                      {endpoint.label || endpoint.model}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={button.primary}
-              onClick={handleAdd}
-              disabled={!selected || isSubmitting}
-            >
-              {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
-            </button>
-          </div>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
+          <button onClick={onClose} className={button.icon}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mt-4">
+          {endpoints.length === 0 ? (
+            <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
+          ) : (
+            <>
+              <label className="text-sm font-medium text-slate-700">Endpoint</label>
+              <select
+                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                value={selected}
+                onChange={(event) => setSelected(event.target.value)}
+              >
+                {endpoints.map((endpoint) => (
+                  <option key={endpoint.id} value={endpoint.id}>
+                    {endpoint.label || endpoint.model}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={button.primary}
+            onClick={handleAdd}
+            disabled={!selected || isSubmitting}
+          >
+            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
+          </button>
         </div>
       </div>
-    </ModalPortal>
+    </div>
   )
 }
 
@@ -724,30 +707,28 @@ function ConfirmActionModal({
       ? { iconBg: 'bg-rose-100 text-rose-600', button: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 disabled:opacity-50' }
       : { iconBg: 'bg-blue-100 text-blue-600', button: button.primary }
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
-          <div className="flex items-start gap-3">
-            <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
-              <AlertCircle className="size-5" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-              <p className="text-sm text-slate-600">{message}</p>
-            </div>
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+        <div className="flex items-start gap-3">
+          <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
+            <AlertCircle className="size-5" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
-              {cancelLabel}
-            </button>
-            <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              <span>{confirmLabel}</span>
-            </button>
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+            <p className="text-sm text-slate-600">{message}</p>
           </div>
         </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </button>
+          <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            <span>{confirmLabel}</span>
+          </button>
+        </div>
       </div>
-    </ModalPortal>
+    </div>
   )
 }
 
@@ -761,14 +742,66 @@ type ProviderCardHandlers = {
   onTestEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
 }
 
-function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined> }) {
+function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, closeModal }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined>; showModal: (renderer: (onClose: () => void) => ReactNode) => void; closeModal: () => void }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
-  const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
   const rotateBusy = isBusy(actionKey('provider', provider.id, 'rotate'))
   const clearBusy = isBusy(actionKey('provider', provider.id, 'clear'))
   const toggleBusy = isBusy(actionKey('provider', provider.id, 'toggle'))
   const creatingEndpoint = isBusy(actionKey('provider', provider.id, 'create-endpoint'))
+
+  const openEndpointEditor = (endpoint: ProviderEndpointCard) => {
+    const isEditing = editingEndpointId === endpoint.id
+    if (isEditing) {
+      setEditingEndpointId(null)
+      closeModal()
+      return
+    }
+    setEditingEndpointId(endpoint.id)
+    showModal((onClose) =>
+      createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                {endpoint.type === 'persistent' ? 'Edit persistent endpoint' : endpoint.type === 'browser' ? 'Edit browser endpoint' : 'Edit embedding endpoint'}
+              </h3>
+              <button
+                onClick={() => {
+                  setEditingEndpointId(null)
+                  onClose()
+                }}
+                className={button.icon}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mt-1">{provider.name}</p>
+            <div className="mt-4">
+              <EndpointEditor
+                endpoint={endpoint}
+                saving={isBusy(actionKey('endpoint', endpoint.id, 'update'))}
+                onCancel={() => {
+                  setEditingEndpointId(null)
+                  onClose()
+                }}
+                onSave={async (values) => {
+                  try {
+                    await handlers.onSaveEndpoint(endpoint, values)
+                    setEditingEndpointId(null)
+                    onClose()
+                  } catch {
+                    // feedback already shown
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ),
+    )
+  }
 
   return (
     <article className="rounded-2xl border border-slate-200/80 bg-white">
@@ -797,13 +830,67 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-600">Manage provider endpoints</p>
               <div className="flex gap-2">
-                <button className={button.secondary} onClick={() => setAddingType('persistent')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="persistent"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'persistent', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Persistent
                 </button>
-                <button className={button.secondary} onClick={() => setAddingType('browser')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="browser"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'browser', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Browser
                 </button>
-                <button className={button.secondary} onClick={() => setAddingType('embedding')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="embedding"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'embedding', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Embedding
                 </button>
               </div>
@@ -813,7 +900,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
               {provider.endpoints.map((endpoint) => {
                 const isEditing = editingEndpointId === endpoint.id
                 const deleteBusy = isBusy(actionKey('endpoint', endpoint.id, 'delete'))
-                const endpointSaving = isBusy(actionKey('endpoint', endpoint.id, 'update'))
                 const testBusy = isBusy(actionKey('endpoint', endpoint.id, 'test'))
                 const status = testStatuses[endpoint.id]
                 const tone = status?.state === 'success'
@@ -838,7 +924,7 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
                         <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
                           {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
                         </button>
-                        <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
+                        <button className={button.secondary} onClick={() => openEndpointEditor(endpoint)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
                         <button className={button.iconDanger} onClick={() => handlers.onDeleteEndpoint(endpoint).catch(() => {})} disabled={deleteBusy}>
@@ -846,38 +932,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
                         </button>
                       </div>
                     </div>
-                    {isEditing && (
-                      <ModalPortal>
-                        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-                          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-                            <div className="flex items-center justify-between">
-                              <h3 className="text-lg font-semibold">
-                                {endpoint.type === 'persistent' ? 'Edit persistent endpoint' : endpoint.type === 'browser' ? 'Edit browser endpoint' : 'Edit embedding endpoint'}
-                              </h3>
-                              <button onClick={() => setEditingEndpointId(null)} className={button.icon}>
-                                <X className="size-5" />
-                              </button>
-                            </div>
-                            <p className="text-sm text-slate-500 mt-1">{provider.name}</p>
-                            <div className="mt-4">
-                              <EndpointEditor
-                                endpoint={endpoint}
-                                saving={endpointSaving}
-                                onCancel={() => setEditingEndpointId(null)}
-                                onSave={async (values) => {
-                                  try {
-                                    await handlers.onSaveEndpoint(endpoint, values)
-                                    setEditingEndpointId(null)
-                                  } catch {
-                                    // feedback already shown
-                                  }
-                                }}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      </ModalPortal>
-                    )}
                     {status && (
                       <div className={`mt-3 text-xs ${tone}`}>
                         <p className="font-medium">
@@ -949,22 +1003,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
           </div>
         )}
       </div>
-      {addingType && (
-        <AddProviderEndpointModal
-          providerName={provider.name}
-          type={addingType}
-          busy={creatingEndpoint}
-          onClose={() => setAddingType(null)}
-          onSubmit={async (values) => {
-            try {
-              await handlers.onAddEndpoint(provider, addingType!, values)
-              setAddingType(null)
-            } catch {
-              // feedback already shown
-            }
-          }}
-        />
-      )}
     </article>
   )
 }
@@ -1147,14 +1185,13 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   }
 
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <button onClick={onClose} className={button.icon}>
-              <X className="size-5" />
-            </button>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <button onClick={onClose} className={button.icon}>
+            <X className="size-5" />
+          </button>
         </div>
         <p className="text-sm text-slate-500 mt-1">{providerName}</p>
         <div className="mt-4 space-y-3">
@@ -1244,8 +1281,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
           </button>
         </div>
       </div>
-      </div>
-    </ModalPortal>
+    </div>
   )
 }
 
@@ -1736,7 +1772,7 @@ function RangeSection({
 export function LlmConfigScreen() {
   const queryClient = useQueryClient()
   const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
-  const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
+  const [modal, showModal, closeModal] = useModal()
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [endpointTestStatuses, setEndpointTestStatuses] = useState<Record<string, EndpointTestStatus>>({})
   const resetEndpointTestStatuses = () => setEndpointTestStatuses({})
@@ -1746,9 +1782,7 @@ export function LlmConfigScreen() {
 
   // Profile-related state
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
-  const [profileModalOpen, setProfileModalOpen] = useState(false)
   const [newProfileName, setNewProfileName] = useState('')
-  const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
   const [editProfileDisplayName, setEditProfileDisplayName] = useState('')
   const [editProfileDescription, setEditProfileDescription] = useState('')
 
@@ -1859,40 +1893,40 @@ export function LlmConfigScreen() {
     if (!value) return null
     return value.trim()
   }
-  const [confirmDialog, setConfirmDialog] = useState<ActiveConfirmDialog | null>(null)
   const [confirmBusy, setConfirmBusy] = useState(false)
-  const confirmDeferredRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null)
-  const requestConfirmation = (options: ConfirmDialogConfig) => new Promise<void>((resolve, reject) => {
-    const dialog: ActiveConfirmDialog = {
-      title: options.title,
-      message: options.message,
-      confirmLabel: options.confirmLabel ?? 'Confirm',
-      cancelLabel: options.cancelLabel ?? 'Cancel',
-      intent: options.intent ?? 'danger',
-      onConfirm: options.onConfirm,
-    }
-    setConfirmDialog(dialog)
-    confirmDeferredRef.current = { resolve, reject }
-  })
-  const handleConfirmDialogConfirm = async () => {
-    if (!confirmDialog) return
-    setConfirmBusy(true)
-    try {
-      await confirmDialog.onConfirm()
-      confirmDeferredRef.current?.resolve()
-    } catch (error) {
-      confirmDeferredRef.current?.reject(error)
-    } finally {
-      setConfirmBusy(false)
-      setConfirmDialog(null)
-      confirmDeferredRef.current = null
-    }
-  }
-  const handleConfirmDialogCancel = () => {
-    confirmDeferredRef.current?.resolve()
-    confirmDeferredRef.current = null
-    setConfirmDialog(null)
-  }
+  const requestConfirmation = (options: ConfirmDialogConfig) =>
+    new Promise<void>((resolve, reject) => {
+      showModal((onClose) =>
+        createPortal(
+          <ConfirmActionModal
+            title={options.title}
+            message={options.message}
+            confirmLabel={options.confirmLabel ?? 'Confirm'}
+            cancelLabel={options.cancelLabel ?? 'Cancel'}
+            intent={options.intent ?? 'danger'}
+            busy={confirmBusy}
+            onConfirm={async () => {
+              setConfirmBusy(true)
+              try {
+                await options.onConfirm?.()
+                resolve()
+              } catch (error) {
+                reject(error)
+              } finally {
+                setConfirmBusy(false)
+                onClose()
+              }
+            }}
+            onCancel={() => {
+              onClose()
+              resolve()
+            }}
+          />,
+          document.body,
+        ),
+      )
+    })
+
   const confirmDestructiveAction = (options: ConfirmDialogConfig) =>
     requestConfirmation({
       ...options,
@@ -2334,12 +2368,21 @@ export function LlmConfigScreen() {
       }),
     })
 
-  const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
+  const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
+    showModal((onClose) => createPortal(
+      <AddEndpointModal
+        tier={tier}
+        scope={scope}
+        choices={endpointChoices}
+        busy={isBusy(actionKey(selectedProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
+        onAdd={(endpointId) => (selectedProfile ? submitProfileTierEndpoint(tier, scope, endpointId) : submitTierEndpoint(tier, scope, endpointId))}
+        onClose={onClose}
+      />,
+      document.body,
+    ))
+  }
 
-  const submitTierEndpoint = async (endpointId: string) => {
-    if (!endpointModal) return
-    const { tier, scope } = endpointModal
-
+  const submitTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
@@ -2432,6 +2475,87 @@ export function LlmConfigScreen() {
     )
   }
 
+  const openCreateProfileModal = () => {
+    setNewProfileName('')
+    showModal((onClose) =>
+      createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
+              <button
+                type="button"
+                className={button.icon}
+                onClick={() => {
+                  setNewProfileName('')
+                  onClose()
+                }}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!newProfileName.trim()) return
+                try {
+                  await handleCreateProfile(newProfileName.trim())
+                  setNewProfileName('')
+                  onClose()
+                } catch {
+                  // Error handled by runWithFeedback
+                }
+              }}
+              className="p-6 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
+                <input
+                  type="text"
+                  value={newProfileName}
+                  onChange={(e) => setNewProfileName(e.target.value)}
+                  placeholder="e.g., Production, Staging, Eval A"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  autoFocus
+                />
+                <p className="mt-1 text-xs text-slate-500">
+                  A unique identifier will be generated from the name.
+                </p>
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  className={button.secondary}
+                  onClick={() => {
+                    setNewProfileName('')
+                    onClose()
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={button.primary}
+                  disabled={!newProfileName.trim() || isBusy('profile-create')}
+                >
+                  {isBusy('profile-create') ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    'Create Profile'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body,
+      ),
+    )
+  }
+
   const handleCloneProfile = async (profileId: string, newName?: string) => {
     return runWithFeedback(
       async () => {
@@ -2507,6 +2631,102 @@ export function LlmConfigScreen() {
         busyKey: actionKey('profile', profileId, 'update'),
         context: 'Routing profile',
       },
+    )
+  }
+
+  const openEditProfileModal = (profile: typeof selectedProfile) => {
+    if (!profile) return
+    setEditProfileDisplayName(profile.display_name || profile.name)
+    setEditProfileDescription(profile.description || '')
+    showModal((onClose) =>
+      createPortal(
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+              <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
+              <button
+                type="button"
+                className={button.icon}
+                onClick={() => {
+                  setEditProfileDisplayName('')
+                  setEditProfileDescription('')
+                  onClose()
+                }}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault()
+                if (!editProfileDisplayName.trim()) return
+                try {
+                  await handleUpdateProfile(profile.id, {
+                    display_name: editProfileDisplayName.trim(),
+                    description: editProfileDescription.trim(),
+                  })
+                  setEditProfileDisplayName('')
+                  setEditProfileDescription('')
+                  onClose()
+                } catch {
+                  // Error handled by runWithFeedback
+                }
+              }}
+              className="p-6 space-y-4"
+            >
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+                <input
+                  type="text"
+                  value={editProfileDisplayName}
+                  onChange={(e) => setEditProfileDisplayName(e.target.value)}
+                  placeholder="e.g., Production, Staging, Eval A"
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+                <textarea
+                  value={editProfileDescription}
+                  onChange={(e) => setEditProfileDescription(e.target.value)}
+                  placeholder="Optional description for this profile"
+                  rows={3}
+                  className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  type="button"
+                  className={button.secondary}
+                  onClick={() => {
+                    setEditProfileDisplayName('')
+                    setEditProfileDescription('')
+                    onClose()
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={button.primary}
+                  disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', profile.id, 'update'))}
+                >
+                  {isBusy(actionKey('profile', profile.id, 'update')) ? (
+                    <>
+                      <LoaderCircle className="size-4 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>,
+        document.body,
+      ),
     )
   }
 
@@ -2829,10 +3049,8 @@ export function LlmConfigScreen() {
     })
   }
 
-  const submitProfileTierEndpoint = async (endpointId: string) => {
-    if (!endpointModal || !selectedProfile) return submitTierEndpoint(endpointId)
-    const { tier, scope } = endpointModal
-
+  const submitProfileTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
+    if (!selectedProfile) return submitTierEndpoint(tier, scope, endpointId)
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
@@ -2909,6 +3127,7 @@ export function LlmConfigScreen() {
 
   return (
     <>
+      {modal}
       <ActivityDock notices={notices} activeLabels={activeLabels} onDismiss={dismissNotice} />
       <div className="space-y-8">
         <div className="gobii-card-base space-y-2 px-6 py-6">
@@ -2987,11 +3206,7 @@ export function LlmConfigScreen() {
                       <button
                         type="button"
                         className={button.secondary}
-                        onClick={() => {
-                          setEditProfileDisplayName(selectedProfile.display_name || selectedProfile.name)
-                          setEditProfileDescription(selectedProfile.description || '')
-                          setEditProfileModalOpen(true)
-                        }}
+                        onClick={() => openEditProfileModal(selectedProfile)}
                         disabled={isBusy(actionKey('profile', selectedProfile.id, 'update'))}
                         title="Edit this profile"
                       >
@@ -3022,7 +3237,7 @@ export function LlmConfigScreen() {
                     <button
                       type="button"
                       className={button.secondary}
-                      onClick={() => setProfileModalOpen(true)}
+                      onClick={openCreateProfileModal}
                     >
                       <Plus className="size-4" />
                       New
@@ -3060,6 +3275,8 @@ export function LlmConfigScreen() {
                 provider={provider}
                 isBusy={isBusy}
                 testStatuses={endpointTestStatuses}
+                showModal={showModal}
+                closeModal={closeModal}
                 handlers={{
                   onRotateKey: handleProviderRotateKey,
                   onToggleEnabled: handleProviderToggle,
@@ -3302,193 +3519,6 @@ export function LlmConfigScreen() {
             </div>
           </div>
         </SectionCard>
-        {endpointModal && (
-          <AddEndpointModal
-            tier={endpointModal.tier}
-            scope={endpointModal.scope}
-            choices={endpointChoices}
-            busy={isBusy(actionKey(selectedProfile ? 'profile' : endpointModal.scope, endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
-            onAdd={(endpointId) => selectedProfile ? submitProfileTierEndpoint(endpointId) : submitTierEndpoint(endpointId)}
-            onClose={() => setEndpointModal(null)}
-          />
-        )}
-        {confirmDialog && (
-          <ConfirmActionModal
-            title={confirmDialog.title}
-            message={confirmDialog.message}
-            confirmLabel={confirmDialog.confirmLabel}
-            cancelLabel={confirmDialog.cancelLabel}
-            intent={confirmDialog.intent}
-            busy={confirmBusy}
-            onConfirm={handleConfirmDialogConfirm}
-            onCancel={handleConfirmDialogCancel}
-          />
-        )}
-        {profileModalOpen && (
-          <ModalPortal>
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                  <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
-                  <button
-                    type="button"
-                    className={button.icon}
-                    onClick={() => {
-                      setProfileModalOpen(false)
-                      setNewProfileName('')
-                    }}
-                  >
-                    <X className="size-5" />
-                  </button>
-                </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault()
-                    if (!newProfileName.trim()) return
-                    try {
-                      await handleCreateProfile(newProfileName.trim())
-                      setProfileModalOpen(false)
-                      setNewProfileName('')
-                    } catch {
-                      // Error handled by runWithFeedback
-                    }
-                  }}
-                  className="p-6 space-y-4"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
-                    <input
-                      type="text"
-                      value={newProfileName}
-                      onChange={(e) => setNewProfileName(e.target.value)}
-                      placeholder="e.g., Production, Staging, Eval A"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                      autoFocus
-                    />
-                    <p className="mt-1 text-xs text-slate-500">
-                      A unique identifier will be generated from the name.
-                    </p>
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      type="button"
-                      className={button.secondary}
-                      onClick={() => {
-                        setProfileModalOpen(false)
-                        setNewProfileName('')
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className={button.primary}
-                      disabled={!newProfileName.trim() || isBusy('profile-create')}
-                    >
-                      {isBusy('profile-create') ? (
-                        <>
-                          <LoaderCircle className="size-4 animate-spin" />
-                          Creating...
-                        </>
-                      ) : (
-                        'Create Profile'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </ModalPortal>
-        )}
-        {editProfileModalOpen && selectedProfile && (
-          <ModalPortal>
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                  <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
-                  <button
-                    type="button"
-                    className={button.icon}
-                    onClick={() => {
-                      setEditProfileModalOpen(false)
-                      setEditProfileDisplayName('')
-                      setEditProfileDescription('')
-                    }}
-                  >
-                    <X className="size-5" />
-                  </button>
-                </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault()
-                    if (!editProfileDisplayName.trim()) return
-                    try {
-                      await handleUpdateProfile(selectedProfile.id, {
-                        display_name: editProfileDisplayName.trim(),
-                        description: editProfileDescription.trim(),
-                      })
-                      setEditProfileModalOpen(false)
-                      setEditProfileDisplayName('')
-                      setEditProfileDescription('')
-                    } catch {
-                      // Error handled by runWithFeedback
-                    }
-                  }}
-                  className="p-6 space-y-4"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
-                    <input
-                      type="text"
-                      value={editProfileDisplayName}
-                      onChange={(e) => setEditProfileDisplayName(e.target.value)}
-                      placeholder="e.g., Production, Staging, Eval A"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                      autoFocus
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                    <textarea
-                      value={editProfileDescription}
-                      onChange={(e) => setEditProfileDescription(e.target.value)}
-                      placeholder="Optional description for this profile"
-                      rows={3}
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      type="button"
-                      className={button.secondary}
-                      onClick={() => {
-                        setEditProfileModalOpen(false)
-                        setEditProfileDisplayName('')
-                        setEditProfileDescription('')
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className={button.primary}
-                      disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', selectedProfile.id, 'update'))}
-                    >
-                      {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
-                        <>
-                          <LoaderCircle className="size-4 animate-spin" />
-                          Saving...
-                        </>
-                      ) : (
-                        'Save Changes'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </ModalPortal>
-        )}
       </div>
     </>
   )
