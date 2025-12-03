@@ -451,7 +451,7 @@ def get_llm_config() -> Tuple[str, dict]:
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_reasoning", "reasoning_effort")
     }
     return model, params
 
@@ -627,11 +627,17 @@ def _collect_failover_configs(
             else:
                 params.pop("temperature", None)
 
+            supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
+            reasoning_effort = getattr(endpoint, "reasoning_effort", None)
+
             params_with_hints = dict(params)
             params_with_hints["supports_temperature"] = supports_temperature
             params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
             params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
             params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+            params_with_hints["supports_reasoning"] = supports_reasoning
+            if supports_reasoning and reasoning_effort:
+                params_with_hints["reasoning_effort"] = reasoning_effort
 
             failover_configs.append((endpoint.key, effective_model, params_with_hints))
 
@@ -983,7 +989,7 @@ def get_summarization_llm_config(
     supports_temperature = bool(params_with_hints.get("supports_temperature", True))
     params = {
         k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature")
+        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature", "supports_reasoning", "reasoning_effort")
     }
 
     # Default to deterministic temperature unless the endpoint already

@@ -1743,6 +1743,12 @@ class LLMProvider(models.Model):
 class PersistentModelEndpoint(models.Model):
     """Model endpoint for persistent agents (LiteLLM)."""
 
+    class ReasoningEffort(models.TextChoices):
+        MINIMAL = "minimal", "Minimal"
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt5'")
     provider = models.ForeignKey(LLMProvider, on_delete=models.CASCADE, related_name="persistent_endpoints")
@@ -1760,6 +1766,18 @@ class PersistentModelEndpoint(models.Model):
     supports_vision = models.BooleanField(
         default=False,
         help_text="Indicates the model can process image or multimodal inputs",
+    )
+    supports_reasoning = models.BooleanField(
+        default=False,
+        help_text="Indicates the model accepts reasoning parameters",
+    )
+    reasoning_effort = models.CharField(
+        max_length=16,
+        choices=ReasoningEffort.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Default reasoning effort to pass when reasoning is supported",
     )
     # For OpenAI-compatible endpoints via LiteLLM (model startswith 'openai/...')
     # provide the custom base URL used by your proxy (e.g., http://vllm-host:port/v1)

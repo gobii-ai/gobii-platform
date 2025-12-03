@@ -5,6 +5,15 @@ from typing import Any, Iterable
 
 import litellm
 
+_HINT_KEYS = (
+    "supports_temperature",
+    "supports_tool_choice",
+    "use_parallel_tool_calls",
+    "supports_vision",
+    "supports_reasoning",
+    "reasoning_effort",
+)
+
 
 def run_completion(
     *,
@@ -17,7 +26,7 @@ def run_completion(
 ):
     """Invoke ``litellm.completion`` with shared parameter handling.
 
-    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, and ``supports_vision``).
+    - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``supports_vision``, and ``supports_reasoning``).
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
@@ -25,21 +34,37 @@ def run_completion(
     """
     params = dict(params or {})
 
-    supports_temperature = params.pop("supports_temperature", True)
+    parallel_hint_provided = "use_parallel_tool_calls" in params
+    hints: dict[str, Any] = {key: params.pop(key, None) for key in _HINT_KEYS}
+
+    supports_temperature_hint = hints.get("supports_temperature")
+    supports_temperature = True if supports_temperature_hint is None else supports_temperature_hint
     if not supports_temperature:
         params.pop("temperature", None)
 
-    tool_choice_supported = params.pop("supports_tool_choice", True)
-    parallel_hint_provided = "use_parallel_tool_calls" in params
-    use_parallel_tool_calls = params.pop("use_parallel_tool_calls", True)
-    params.pop("supports_vision", None)
+    tool_choice_hint = hints.get("supports_tool_choice")
+    tool_choice_supported = True if tool_choice_hint is None else tool_choice_hint
 
+    parallel_hint = hints.get("use_parallel_tool_calls")
+    use_parallel_tool_calls = True if parallel_hint is None else parallel_hint
+
+    supports_reasoning_hint = hints.get("supports_reasoning")
+    supports_reasoning = False if supports_reasoning_hint is None else supports_reasoning_hint
+    reasoning_effort = hints.get("reasoning_effort", None)
+
+    extra_reasoning_effort = extra_kwargs.get("reasoning_effort")
     kwargs: dict[str, Any] = {
         "model": model,
         "messages": list(messages),
         **params,
         **extra_kwargs,
     }
+
+    kwargs.pop("reasoning_effort", None)
+    if supports_reasoning:
+        selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
+        if selected_reasoning_effort:
+            kwargs["reasoning_effort"] = selected_reasoning_effort
 
     if drop_params:
         kwargs["drop_params"] = True
