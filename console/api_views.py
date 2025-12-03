@@ -210,6 +210,13 @@ def _build_completion_params(
         params["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
     if hasattr(endpoint, "supports_vision"):
         params["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+    if hasattr(endpoint, "supports_reasoning"):
+        supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
+        params["supports_reasoning"] = supports_reasoning
+        if supports_reasoning:
+            effort = getattr(endpoint, "reasoning_effort", None)
+            if effort:
+                params["reasoning_effort"] = effort
 
     if api_base:
         params["api_base"] = api_base
@@ -509,6 +516,19 @@ def _coerce_bool(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"1", "true", "yes", "on"}
     return bool(value)
+
+
+_REASONING_EFFORT_VALUES = set(PersistentModelEndpoint.ReasoningEffort.values)
+
+
+def _coerce_reasoning_effort(value) -> str | None:
+    if value in (None, ""):
+        return None
+    effort = str(value).strip().lower()
+    if effort not in _REASONING_EFFORT_VALUES:
+        allowed = ", ".join(sorted(_REASONING_EFFORT_VALUES))
+        raise ValueError(f"reasoning_effort must be one of: {allowed}")
+    return effort
 
 
 def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool) -> int:
@@ -1033,6 +1053,10 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
         temperature_override = None
         if temp_value not in (None, ""):
             temperature_override = float(temp_value)
+        try:
+            reasoning_effort = _coerce_reasoning_effort(payload.get("reasoning_effort"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
 
         endpoint = PersistentModelEndpoint.objects.create(
             key=key,
@@ -1043,6 +1067,8 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
             use_parallel_tool_calls=_coerce_bool(payload.get("use_parallel_tool_calls", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            supports_reasoning=_coerce_bool(payload.get("supports_reasoning", False)),
+            reasoning_effort=reasoning_effort,
             api_base=(payload.get("api_base") or "").strip(),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
@@ -1080,6 +1106,14 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.use_parallel_tool_calls = _coerce_bool(payload.get("use_parallel_tool_calls"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "supports_reasoning" in payload:
+            endpoint.supports_reasoning = _coerce_bool(payload.get("supports_reasoning"))
+        if "reasoning_effort" in payload:
+            try:
+                reasoning_effort = _coerce_reasoning_effort(payload.get("reasoning_effort"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            endpoint.reasoning_effort = reasoning_effort
         if "api_base" in payload:
             endpoint.api_base = (payload.get("api_base") or "").strip()
         if "enabled" in payload:

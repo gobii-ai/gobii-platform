@@ -61,6 +61,8 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
             "supports_tool_choice": endpoint.supports_tool_choice,
             "use_parallel_tool_calls": endpoint.use_parallel_tool_calls,
             "supports_vision": endpoint.supports_vision,
+            "supports_reasoning": endpoint.supports_reasoning,
+            "reasoning_effort": endpoint.reasoning_effort,
             "api_base": endpoint.api_base,
             "provider_id": str(endpoint.provider_id),
             "type": "persistent",

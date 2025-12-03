@@ -3641,8 +3641,10 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "supports_tool_choice",
         "use_parallel_tool_calls",
         "supports_vision",
+        "supports_reasoning",
+        "reasoning_effort",
     )
-    list_filter = ("enabled", "provider", "supports_vision")
+    list_filter = ("enabled", "provider", "supports_vision", "supports_reasoning")
     search_fields = ("key", "litellm_model")
     fields = (
         "key",
@@ -3655,6 +3657,8 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "supports_tool_choice",
         "use_parallel_tool_calls",
         "supports_vision",
+        "supports_reasoning",
+        "reasoning_effort",
     )
 
 
