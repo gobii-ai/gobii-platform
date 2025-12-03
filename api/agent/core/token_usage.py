@@ -178,8 +178,8 @@ def extract_token_usage(
     if usage is None:
         usage = usage_attribute(response, "usage")
 
-    resolved_model = model or usage_attribute(response, "model") or getattr(response, "model", None)
-    if usage and resolved_model is None:
+    resolved_model = model or usage_attribute(response, "model")
+    if resolved_model is None and usage is not None:
         resolved_model = usage_attribute(usage, "model")
 
     resolved_provider = provider or usage_attribute(response, "provider")
@@ -286,6 +286,7 @@ def extract_reasoning_content(response: Any) -> Optional[str]:
         else:
             reasoning_raw = getattr(message, "reasoning_content", None)
             if reasoning_raw is None and isinstance(getattr(message, "__dict__", None), dict):
+                # Some LiteLLM message objects only expose extra fields via __dict__ even when attribute access fails.
                 reasoning_raw = message.__dict__.get("reasoning_content")
 
         if reasoning_raw is None and hasattr(message, "model_dump"):
