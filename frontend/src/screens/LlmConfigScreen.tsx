@@ -25,6 +25,7 @@ import {
   Pencil,
   Scale,
   Sparkles,
+  Crown,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -71,6 +72,7 @@ type Tier = {
   order: number
   rangeId: string
   premium: boolean
+  isMax?: boolean
   endpoints: TierEndpoint[]
 }
 
@@ -510,6 +512,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
         order: tier.order,
         rangeId: range.id,
         premium: tier.is_premium,
+        isMax: tier.is_max,
         endpoints: tier.endpoints.map((endpoint) => ({
           id: endpoint.id,
           endpointId: endpoint.endpoint_id,
@@ -1057,7 +1060,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
             value={reasoningEffort}
             onChange={(event) => setReasoningEffort(event.target.value)}
             disabled={!supportsReasoning}
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
           >
             {reasoningEffortOptions.map((option) => (
               <option key={option.value || 'default'} value={option.value}>{option.label}</option>
@@ -1521,7 +1524,8 @@ function RangeSection({
   isActionBusy: (key: string) => boolean
 }) {
   const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
-  const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
+  const premiumTiers = tiers.filter((tier) => tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
+  const maxTiers = tiers.filter((tier) => tier.isMax).sort((a, b) => a.order - b.order)
   const [nameInput, setNameInput] = useState(range.name)
   const [minInput, setMinInput] = useState(range.min_tokens.toString())
   const [maxInput, setMaxInput] = useState(range.max_tokens?.toString() ?? '')
@@ -1654,6 +1658,38 @@ function RangeSection({
           {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
           {premiumTiers.map((tier, index) => {
             const lastIndex = premiumTiers.length - 1
+            return (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                pendingWeights={pendingWeights}
+                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
+                scope="persistent"
+                canMoveUp={index > 0}
+                canMoveDown={index < lastIndex}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={onRemoveTier}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
+                onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
+                isActionBusy={isActionBusy}
+              />
+            )
+          })}
+        </div>
+        <div className="bg-indigo-50/60 p-4 space-y-3 rounded-xl">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-indigo-800 flex items-center gap-2"><Crown className="size-4" /> Max tiers</h4>
+            <button type="button" className={button.secondary} onClick={() => onAddTier(true)}>
+              <PlusCircle className="size-4" /> Add
+            </button>
+          </div>
+          {maxTiers.length === 0 && <p className="text-center text-xs text-slate-500 py-4">No max tiers.</p>}
+          {maxTiers.map((tier, index) => {
+            const lastIndex = maxTiers.length - 1
             return (
               <TierCard
                 key={tier.id}
