@@ -226,6 +226,47 @@ class TestLLMFailover(TestCase):
         self.assertEqual(model, 'openai/gpt-5')
         self.assertEqual(params.get("temperature"), 1.0)
 
+    def test_reasoning_effort_override_respected(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openai',
+            display_name='OpenAI',
+            enabled=True,
+            env_var_name='OPENAI_API_KEY',
+            browser_backend='OPENAI',
+        )
+        endpoint = PersistentModelEndpoint.objects.create(
+            key='openai_reasoner',
+            provider=provider,
+            enabled=True,
+            litellm_model='openai/gpt-4o-mini',
+            supports_tool_choice=True,
+            supports_reasoning=True,
+            reasoning_effort='low',
+        )
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        PersistentTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=1.0,
+            reasoning_effort_override='high',
+        )
+
+        with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True):
+            configs = get_llm_config_with_failover(token_count=0)
+
+        self.assertTrue(configs)
+        _, _, params = configs[0]
+        self.assertTrue(params.get("supports_reasoning"))
+        self.assertEqual(params.get("reasoning_effort"), "high")
+
     def test_temperature_param_dropped_when_unsupported(self):
         seed_persistent_basic(include_openrouter=False)
         PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')

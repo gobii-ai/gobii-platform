@@ -531,9 +531,20 @@ def _coerce_reasoning_effort(value) -> str | None:
     return effort
 
 
-def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool) -> int:
+def _validate_reasoning_override(endpoint, value) -> str | None:
+    reasoning_override = _coerce_reasoning_effort(value)
+    if reasoning_override and not getattr(endpoint, "supports_reasoning", False):
+        raise ValueError("Endpoint does not support reasoning; cannot set reasoning_effort_override")
+    return reasoning_override
+
+
+def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool, is_max: bool = False) -> int:
     last = (
-        PersistentLLMTier.objects.filter(token_range=token_range, is_premium=is_premium)
+        PersistentLLMTier.objects.filter(
+            token_range=token_range,
+            is_premium=is_premium,
+            is_max=is_max,
+        )
         .order_by("-order")
         .first()
     )
@@ -1220,14 +1231,18 @@ class PersistentTierListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
 
         is_premium = _coerce_bool(payload.get("is_premium", False))
+        is_max = _coerce_bool(payload.get("is_max", False))
+        if is_premium and is_max:
+            return HttpResponseBadRequest("Tier cannot be both premium and max")
         description = (payload.get("description") or "").strip()
-        order = _next_order_for_range(token_range, is_premium=is_premium)
+        order = _next_order_for_range(token_range, is_premium=is_premium, is_max=is_max)
 
         tier = PersistentLLMTier.objects.create(
             token_range=token_range,
             order=order,
             description=description,
             is_premium=is_premium,
+            is_max=is_max,
         )
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_id=str(tier.id))
@@ -1252,6 +1267,7 @@ class PersistentTierDetailAPIView(SystemAdminAPIView):
             sibling_qs = PersistentLLMTier.objects.filter(
                 token_range=tier.token_range,
                 is_premium=tier.is_premium,
+                is_max=tier.is_max,
             )
             changed = _swap_orders(sibling_qs, tier, direction)
             if not changed:
@@ -1289,10 +1305,16 @@ class PersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
 
+        try:
+            reasoning_override = _validate_reasoning_override(endpoint, payload.get("reasoning_effort_override"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
         te = PersistentTierEndpoint.objects.create(
             tier=tier,
             endpoint=endpoint,
             weight=weight,
+            reasoning_effort_override=reasoning_override,
         )
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_endpoint_id=str(te.id))
@@ -1316,6 +1338,12 @@ class PersistentTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             tier_endpoint.weight = weight
+        if "reasoning_effort_override" in payload:
+            try:
+                reasoning_override = _validate_reasoning_override(tier_endpoint.endpoint, payload.get("reasoning_effort_override"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            tier_endpoint.reasoning_effort_override = reasoning_override
         tier_endpoint.save()
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
@@ -1876,6 +1904,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                             tier=new_tier,
                             endpoint=src_te.endpoint,
                             weight=src_te.weight,
+                            reasoning_effort_override=getattr(src_te, "reasoning_effort_override", None),
                         )
 
             # Clone browser config: tiers -> endpoints
@@ -2082,6 +2111,9 @@ class ProfilePersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
             "endpoint_id": str(te.endpoint_id),
             "label": f"{te.endpoint.provider.display_name} · {te.endpoint.litellm_model}",
             "weight": float(te.weight),
+            "reasoning_effort_override": te.reasoning_effort_override,
+            "supports_reasoning": te.endpoint.supports_reasoning,
+            "endpoint_reasoning_effort": te.endpoint.reasoning_effort,
         } for te in endpoints]
         return JsonResponse({"endpoints": payload})
 
@@ -2105,7 +2137,17 @@ class ProfilePersistentTierEndpointListCreateAPIView(SystemAdminAPIView):
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
 
-        te = ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        try:
+            reasoning_override = _validate_reasoning_override(endpoint, payload.get("reasoning_effort_override"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        te = ProfilePersistentTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=weight,
+            reasoning_effort_override=reasoning_override,
+        )
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -2129,6 +2171,12 @@ class ProfilePersistentTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             te.weight = weight
+        if "reasoning_effort_override" in payload:
+            try:
+                reasoning_override = _validate_reasoning_override(te.endpoint, payload.get("reasoning_effort_override"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            te.reasoning_effort_override = reasoning_override
         te.save()
         return _json_ok(tier_endpoint_id=str(te.id))
 

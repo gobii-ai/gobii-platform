@@ -24,12 +24,15 @@ import {
   Settings2,
   Pencil,
   Scale,
+  Sparkles,
+  Crown,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
+import { useModal } from '../hooks/useModal'
 import * as llmApi from '../api/llmConfig'
 import { HttpError } from '../api/http'
 
@@ -46,11 +49,22 @@ const button = {
   iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition',
 }
 
+const reasoningEffortOptions = [
+  { value: '', label: 'Use endpoint default' },
+  { value: 'minimal', label: 'Minimal' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+]
+
 type TierEndpoint = {
   id: string
   endpointId: string
   label: string
   weight: number
+  supportsReasoning?: boolean
+  reasoningEffortOverride?: string | null
+  endpointReasoningEffort?: string | null
 }
 
 type Tier = {
@@ -59,6 +73,7 @@ type Tier = {
   order: number
   rangeId: string
   premium: boolean
+  isMax?: boolean
   endpoints: TierEndpoint[]
 }
 
@@ -81,6 +96,8 @@ type ProviderEndpointCard = {
   supports_vision?: boolean
   supports_tool_choice?: boolean
   use_parallel_tool_calls?: boolean
+  supports_reasoning?: boolean
+  reasoning_effort?: string | null
   type: llmApi.ProviderEndpoint['type']
 }
 
@@ -121,6 +138,8 @@ type EndpointFormValues = {
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
   supportsVision?: boolean
+  supportsReasoning?: boolean
+  reasoningEffort?: string | null
 }
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
@@ -147,15 +166,6 @@ type ConfirmDialogConfig = {
   confirmLabel?: string
   cancelLabel?: string
   intent?: 'danger' | 'primary'
-  onConfirm: () => Promise<void> | void
-}
-
-type ActiveConfirmDialog = {
-  title: string
-  message: string
-  confirmLabel: string
-  cancelLabel: string
-  intent: 'danger' | 'primary'
   onConfirm: () => Promise<void> | void
 }
 
@@ -234,13 +244,6 @@ function useAsyncFeedback(): AsyncFeedback {
     notices,
     dismissNotice: (id: string) => setNotices((prev) => prev.filter((notice) => notice.id !== id)),
   }
-}
-
-const modalRoot = typeof document !== 'undefined' ? document.body : null
-
-function ModalPortal({ children }: { children: ReactNode }) {
-  if (!modalRoot) return null
-  return createPortal(children, modalRoot)
 }
 
 const UNIT_SCALE = 10000
@@ -446,6 +449,8 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_vision: endpoint.supports_vision,
       supports_tool_choice: endpoint.supports_tool_choice,
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
+      supports_reasoning: endpoint.supports_reasoning,
+      reasoning_effort: endpoint.reasoning_effort ?? null,
       type: endpoint.type,
     })),
   }))
@@ -492,11 +497,15 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
         order: tier.order,
         rangeId: range.id,
         premium: tier.is_premium,
+        isMax: tier.is_max,
         endpoints: tier.endpoints.map((endpoint) => ({
           id: endpoint.id,
           endpointId: endpoint.endpoint_id,
           label: endpoint.label,
           weight: normalized[endpoint.id] ?? 0,
+          supportsReasoning: endpoint.supports_reasoning,
+          reasoningEffortOverride: endpoint.reasoning_effort_override ?? null,
+          endpointReasoningEffort: endpoint.endpoint_reasoning_effort ?? null,
         })),
       })
     })
@@ -628,51 +637,49 @@ function AddEndpointModal({
     }
   }
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
-            <button onClick={onClose} className={button.icon}>
-              <X className="size-5" />
-            </button>
-          </div>
-          <div className="mt-4">
-            {endpoints.length === 0 ? (
-              <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
-            ) : (
-              <>
-                <label className="text-sm font-medium text-slate-700">Endpoint</label>
-                <select
-                  className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                  value={selected}
-                  onChange={(event) => setSelected(event.target.value)}
-                >
-                  {endpoints.map((endpoint) => (
-                    <option key={endpoint.id} value={endpoint.id}>
-                      {endpoint.label || endpoint.model}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
-          </div>
-          <div className="mt-6 flex justify-end gap-3">
-            <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
-              Cancel
-            </button>
-            <button
-              type="button"
-              className={button.primary}
-              onClick={handleAdd}
-              disabled={!selected || isSubmitting}
-            >
-              {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
-            </button>
-          </div>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">Add endpoint to {tier.name}</h3>
+          <button onClick={onClose} className={button.icon}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mt-4">
+          {endpoints.length === 0 ? (
+            <p className="text-sm text-slate-500">No endpoints available for this tier.</p>
+          ) : (
+            <>
+              <label className="text-sm font-medium text-slate-700">Endpoint</label>
+              <select
+                className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                value={selected}
+                onChange={(event) => setSelected(event.target.value)}
+              >
+                {endpoints.map((endpoint) => (
+                  <option key={endpoint.id} value={endpoint.id}>
+                    {endpoint.label || endpoint.model}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+        </div>
+        <div className="mt-6 flex justify-end gap-3">
+          <button type="button" className={button.secondary} onClick={onClose} disabled={isSubmitting}>
+            Cancel
+          </button>
+          <button
+            type="button"
+            className={button.primary}
+            onClick={handleAdd}
+            disabled={!selected || isSubmitting}
+          >
+            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />} Add endpoint
+          </button>
         </div>
       </div>
-    </ModalPortal>
+    </div>
   )
 }
 
@@ -700,30 +707,236 @@ function ConfirmActionModal({
       ? { iconBg: 'bg-rose-100 text-rose-600', button: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 disabled:opacity-50' }
       : { iconBg: 'bg-blue-100 text-blue-600', button: button.primary }
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
-          <div className="flex items-start gap-3">
-            <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
-              <AlertCircle className="size-5" />
-            </div>
-            <div className="space-y-1">
-              <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-              <p className="text-sm text-slate-600">{message}</p>
-            </div>
+    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+        <div className="flex items-start gap-3">
+          <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
+            <AlertCircle className="size-5" />
           </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
-              {cancelLabel}
-            </button>
-            <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
-              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              <span>{confirmLabel}</span>
-            </button>
+          <div className="space-y-1">
+            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+            <p className="text-sm text-slate-600">{message}</p>
           </div>
         </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
+            {cancelLabel}
+          </button>
+          <button type="button" className={accentClasses.button} onClick={onConfirm} disabled={busy}>
+            {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+            <span>{confirmLabel}</span>
+          </button>
+        </div>
       </div>
-    </ModalPortal>
+    </div>
+  )
+}
+
+function ConfirmModalWrapper({
+  options,
+  onResolve,
+  onReject,
+  onClose,
+}: {
+  options: ConfirmDialogConfig
+  onResolve: () => void
+  onReject: (error?: unknown) => void
+  onClose: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const {
+    title,
+    message,
+    confirmLabel = 'Confirm',
+    cancelLabel = 'Cancel',
+    intent = 'danger',
+    onConfirm,
+  } = options
+
+  return createPortal(
+    <ConfirmActionModal
+      title={title}
+      message={message}
+      confirmLabel={confirmLabel}
+      cancelLabel={cancelLabel}
+      intent={intent}
+      busy={busy}
+      onConfirm={async () => {
+        setBusy(true)
+        try {
+          await onConfirm?.()
+          onResolve()
+          onClose()
+        } catch (error) {
+          onReject(error)
+          onClose()
+        } finally {
+          setBusy(false)
+        }
+      }}
+      onCancel={() => {
+        onResolve()
+        onClose()
+      }}
+    />,
+    document.body,
+  )
+}
+
+function CreateProfileModal({
+  onCreate,
+  onClose,
+}: {
+  onCreate: (name: string) => Promise<unknown>
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!name.trim()) return
+    setSubmitting(true)
+    try {
+      await onCreate(name.trim())
+      onClose()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
+          <button type="button" className={button.icon} onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="e.g., Production, Staging, Eval A"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              autoFocus
+              disabled={submitting}
+            />
+            <p className="mt-1 text-xs text-slate-500">
+              A unique identifier will be generated from the name.
+            </p>
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
+              Cancel
+            </button>
+            <button type="submit" className={button.primary} disabled={!name.trim() || submitting}>
+              {submitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Create Profile'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function EditProfileModal({
+  profile,
+  onSave,
+  onClose,
+}: {
+  profile: {
+    id: string
+    display_name: string | null
+    name: string
+    description: string | null
+  }
+  onSave: (payload: { display_name: string; description: string }) => Promise<void>
+  onClose: () => void
+}) {
+  const [displayName, setDisplayName] = useState(profile.display_name || profile.name)
+  const [description, setDescription] = useState(profile.description || '')
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    if (!displayName.trim()) return
+    setSubmitting(true)
+    try {
+      await onSave({ display_name: displayName.trim(), description: description.trim() })
+      onClose()
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+          <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
+          <button type="button" className={button.icon} onClick={onClose}>
+            <X className="size-5" />
+          </button>
+        </div>
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
+            <input
+              type="text"
+              value={displayName}
+              onChange={(event) => setDisplayName(event.target.value)}
+              placeholder="e.g., Production, Staging, Eval A"
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
+              autoFocus
+              disabled={submitting}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Optional description for this profile"
+              rows={3}
+              className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
+              disabled={submitting}
+            />
+          </div>
+          <div className="flex justify-end gap-3">
+            <button type="button" className={button.secondary} onClick={onClose} disabled={submitting}>
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className={button.primary}
+              disabled={!displayName.trim() || submitting}
+            >
+              {submitting ? (
+                <>
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                'Save Changes'
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -737,14 +950,66 @@ type ProviderCardHandlers = {
   onTestEndpoint: (endpoint: ProviderEndpointCard) => Promise<void>
 }
 
-function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined> }) {
+function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, closeModal }: { provider: ProviderCardData; handlers: ProviderCardHandlers; isBusy: (key: string) => boolean; testStatuses: Record<string, EndpointTestStatus | undefined>; showModal: (renderer: (onClose: () => void) => ReactNode) => void; closeModal: () => void }) {
   const [activeTab, setActiveTab] = useState<'endpoints' | 'settings'>('endpoints')
   const [editingEndpointId, setEditingEndpointId] = useState<string | null>(null)
-  const [addingType, setAddingType] = useState<llmApi.ProviderEndpoint['type'] | null>(null)
   const rotateBusy = isBusy(actionKey('provider', provider.id, 'rotate'))
   const clearBusy = isBusy(actionKey('provider', provider.id, 'clear'))
   const toggleBusy = isBusy(actionKey('provider', provider.id, 'toggle'))
   const creatingEndpoint = isBusy(actionKey('provider', provider.id, 'create-endpoint'))
+
+  const openEndpointEditor = (endpoint: ProviderEndpointCard) => {
+    const isEditing = editingEndpointId === endpoint.id
+    if (isEditing) {
+      setEditingEndpointId(null)
+      closeModal()
+      return
+    }
+    setEditingEndpointId(endpoint.id)
+    showModal((onClose) =>
+      createPortal(
+        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold">
+                {endpoint.type === 'persistent' ? 'Edit persistent endpoint' : endpoint.type === 'browser' ? 'Edit browser endpoint' : 'Edit embedding endpoint'}
+              </h3>
+              <button
+                onClick={() => {
+                  setEditingEndpointId(null)
+                  onClose()
+                }}
+                className={button.icon}
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <p className="text-sm text-slate-500 mt-1">{provider.name}</p>
+            <div className="mt-4">
+              <EndpointEditor
+                endpoint={endpoint}
+                saving={isBusy(actionKey('endpoint', endpoint.id, 'update'))}
+                onCancel={() => {
+                  setEditingEndpointId(null)
+                  onClose()
+                }}
+                onSave={async (values) => {
+                  try {
+                    await handlers.onSaveEndpoint(endpoint, values)
+                    setEditingEndpointId(null)
+                    onClose()
+                  } catch {
+                    // feedback already shown
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>,
+        document.body,
+      ),
+    )
+  }
 
   return (
     <article className="rounded-2xl border border-slate-200/80 bg-white">
@@ -773,13 +1038,67 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-600">Manage provider endpoints</p>
               <div className="flex gap-2">
-                <button className={button.secondary} onClick={() => setAddingType('persistent')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="persistent"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'persistent', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Persistent
                 </button>
-                <button className={button.secondary} onClick={() => setAddingType('browser')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="browser"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'browser', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Browser
                 </button>
-                <button className={button.secondary} onClick={() => setAddingType('embedding')}>
+                <button className={button.secondary} onClick={() => {
+                  showModal((onClose) => createPortal(
+                    <AddProviderEndpointModal
+                      providerName={provider.name}
+                      type="embedding"
+                      busy={creatingEndpoint}
+                      onClose={onClose}
+                      onSubmit={async (values) => {
+                        try {
+                          await handlers.onAddEndpoint(provider, 'embedding', values)
+                          onClose()
+                        } catch {
+                          // feedback already shown
+                        }
+                      }}
+                    />,
+                    document.body,
+                  ))
+                }}>
                   <Plus className="size-4" /> Embedding
                 </button>
               </div>
@@ -789,7 +1108,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
               {provider.endpoints.map((endpoint) => {
                 const isEditing = editingEndpointId === endpoint.id
                 const deleteBusy = isBusy(actionKey('endpoint', endpoint.id, 'delete'))
-                const endpointSaving = isBusy(actionKey('endpoint', endpoint.id, 'update'))
                 const testBusy = isBusy(actionKey('endpoint', endpoint.id, 'test'))
                 const status = testStatuses[endpoint.id]
                 const tone = status?.state === 'success'
@@ -814,7 +1132,7 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
                         <button type="button" className={button.secondary} onClick={() => handlers.onTestEndpoint(endpoint).catch(() => {})} disabled={testBusy}>
                           {testBusy ? <Loader2 className="size-4 animate-spin" /> : 'Test'}
                         </button>
-                        <button className={button.muted} onClick={() => setEditingEndpointId(isEditing ? null : endpoint.id)}>
+                        <button className={button.secondary} onClick={() => openEndpointEditor(endpoint)}>
                           {isEditing ? 'Close' : 'Edit'}
                         </button>
                         <button className={button.iconDanger} onClick={() => handlers.onDeleteEndpoint(endpoint).catch(() => {})} disabled={deleteBusy}>
@@ -822,21 +1140,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
                         </button>
                       </div>
                     </div>
-                    {isEditing && (
-                      <EndpointEditor
-                        endpoint={endpoint}
-                        saving={endpointSaving}
-                        onCancel={() => setEditingEndpointId(null)}
-                        onSave={async (values) => {
-                          try {
-                            await handlers.onSaveEndpoint(endpoint, values)
-                            setEditingEndpointId(null)
-                          } catch {
-                            // feedback already shown
-                          }
-                        }}
-                      />
-                    )}
                     {status && (
                       <div className={`mt-3 text-xs ${tone}`}>
                         <p className="font-medium">
@@ -908,22 +1211,6 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses }: { provider: 
           </div>
         )}
       </div>
-      {addingType && (
-        <AddProviderEndpointModal
-          providerName={provider.name}
-          type={addingType}
-          busy={creatingEndpoint}
-          onClose={() => setAddingType(null)}
-          onSubmit={async (values) => {
-            try {
-              await handlers.onAddEndpoint(provider, addingType!, values)
-              setAddingType(null)
-            } catch {
-              // feedback already shown
-            }
-          }}
-        />
-      )}
     </article>
   )
 }
@@ -946,6 +1233,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
+  const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
+  const [reasoningEffort, setReasoningEffort] = useState(endpoint.reasoning_effort ?? '')
 
   const handleSave = () => {
     const values: EndpointFormValues = {
@@ -958,6 +1247,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
       supportsVision: supportsVision,
+      supportsReasoning,
+      reasoningEffort,
     }
     onSave(values)
   }
@@ -966,7 +1257,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isEmbedding = endpoint.type === 'embedding'
 
   return (
-    <div className="mt-3 space-y-3">
+    <div className="space-y-3">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label className="text-xs text-slate-500">Model identifier</label>
@@ -998,6 +1289,20 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
         </label>
+        {!isBrowser && !isEmbedding && (
+          <label className="inline-flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={supportsReasoning}
+              onChange={(event) => {
+                setSupportsReasoning(event.target.checked)
+                if (!event.target.checked) setReasoningEffort('')
+              }}
+              className="rounded border-slate-300 text-blue-600 shadow-sm"
+            />
+            Reasoning
+          </label>
+        )}
         {!isEmbedding && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -1011,6 +1316,21 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           </label>
         )}
       </div>
+      {!isBrowser && !isEmbedding && (
+        <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+          <span className="font-semibold text-slate-700">Default reasoning effort</span>
+          <select
+            value={reasoningEffort}
+            onChange={(event) => setReasoningEffort(event.target.value)}
+            disabled={!supportsReasoning}
+            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {reasoningEffortOptions.map((option) => (
+              <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div className="flex justify-end gap-2">
         <button className={button.secondary} onClick={onCancel} disabled={saving}>Cancel</button>
         <button className={button.primary} onClick={handleSave} disabled={saving}>
@@ -1038,6 +1358,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
   const [parallelTools, setParallelTools] = useState(true)
+  const [supportsReasoning, setSupportsReasoning] = useState(false)
+  const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = busy || submitting
@@ -1062,6 +1384,8 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsToolChoice: supportsTools,
         useParallelToolCalls: parallelTools,
         temperature,
+        supportsReasoning,
+        reasoningEffort,
       })
     } finally {
       setSubmitting(false)
@@ -1069,14 +1393,13 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   }
 
   return (
-    <ModalPortal>
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
-        <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">{title}</h3>
-            <button onClick={onClose} className={button.icon}>
-              <X className="size-5" />
-            </button>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/60">
+      <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-semibold">{title}</h3>
+          <button onClick={onClose} className={button.icon}>
+            <X className="size-5" />
+          </button>
         </div>
         <p className="text-sm text-slate-500 mt-1">{providerName}</p>
         <div className="mt-4 space-y-3">
@@ -1115,6 +1438,20 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Vision
             </label>
+            {type === 'persistent' && (
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={supportsReasoning}
+                  onChange={(event) => {
+                    setSupportsReasoning(event.target.checked)
+                    if (!event.target.checked) setReasoningEffort('')
+                  }}
+                  className="rounded border-slate-300 text-blue-600 shadow-sm"
+                />
+                Reasoning
+              </label>
+            )}
             {type !== 'embedding' && (
               <>
                 <label className="inline-flex items-center gap-2">
@@ -1128,6 +1465,22 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               </>
             )}
           </div>
+          {type === 'persistent' && (
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
+          <span className="font-semibold text-slate-700">Default reasoning effort</span>
+          <select
+            value={reasoningEffort}
+            onChange={(event) => setReasoningEffort(event.target.value)}
+            disabled={!supportsReasoning}
+            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+          >
+            {reasoningEffortOptions.map((option) => (
+              <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+              <span className="text-slate-400">Optional override when reasoning is enabled.</span>
+            </div>
+          )}
         </div>
         <div className="mt-6 flex justify-end gap-2">
           <button className={button.secondary} onClick={onClose} disabled={isSubmitting}>Cancel</button>
@@ -1136,8 +1489,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
           </button>
         </div>
       </div>
-      </div>
-    </ModalPortal>
+    </div>
   )
 }
 
@@ -1207,6 +1559,7 @@ function TierCard({
   onStageEndpointWeight,
   onCommitEndpointWeights,
   onRemoveEndpoint,
+  onUpdateEndpointReasoning,
   isActionBusy,
 }: {
   tier: Tier
@@ -1222,8 +1575,10 @@ function TierCard({
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
+  onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
   isActionBusy: (key: string) => boolean
 }) {
+  const [openReasoningFor, setOpenReasoningFor] = useState<string | null>(null)
   const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
   const canAdjustWeights = tier.endpoints.length > 1
   const disabledHint = canAdjustWeights ? '' : 'At least two endpoints are required to rebalance weights.'
@@ -1285,46 +1640,96 @@ function TierCard({
           {tier.endpoints.map((endpoint) => {
             const unitWeight = pendingWeights[endpoint.id] ?? endpoint.weight
             const displayWeight = roundToDisplayUnit(unitWeight)
+            const reasoningValue = endpoint.reasoningEffortOverride ?? ''
+            const reasoningBusy = isActionBusy(actionKey('tier-endpoint', endpoint.id, 'reasoning')) || isActionBusy(actionKey('profile-tier-endpoint', endpoint.id, 'reasoning'))
+            const handleReasoningChange = (value: string) => {
+              if (!onUpdateEndpointReasoning) return
+              Promise.resolve(onUpdateEndpointReasoning(tier, endpoint, value || null, scope))
+                .finally(() => setOpenReasoningFor(null))
+                .catch(() => {})
+            }
+            const effortOptions = reasoningEffortOptions.map((option, index) =>
+              index === 0
+                ? { ...option, label: `Use default (${endpoint.endpointReasoningEffort || 'none'})` }
+                : option
+            )
+            const isMenuOpen = openReasoningFor === endpoint.id
             return (
-              <div key={endpoint.id} className="grid grid-cols-12 items-center gap-3 text-sm font-medium text-slate-900/90">
-                <span className="col-span-6 flex items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
-                <div className="col-span-6 flex items-center gap-2">
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={displayWeight}
-                    onChange={(event) => {
-                      if (!canAdjustWeights) return
-                      const decimal = parseUnitInput(event.target.valueAsNumber)
-                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
-                    }}
-                    disabled={!canAdjustWeights}
-                    onMouseUp={handleCommit}
-                    onTouchEnd={handleCommit}
-                    onPointerUp={handleCommit}
-                    className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={displayWeight.toFixed(2)}
-                    onChange={(event) => {
-                      if (!canAdjustWeights) return
-                      const decimal = parseUnitInput(event.target.valueAsNumber)
-                      onStageEndpointWeight(tier, endpoint.id, decimal, scope)
-                    }}
-                    disabled={!canAdjustWeights}
-                    onBlur={handleCommit}
-                    inputMode="decimal"
-                    className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                  />
-                  <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
-                    <Trash className="size-4" />
-                  </button>
+              <div key={endpoint.id} className="space-y-2">
+                <div className="flex flex-wrap items-center gap-2 text-sm font-medium text-slate-900/90">
+                  <span className="flex min-w-0 flex-1 items-center gap-2 truncate" title={endpoint.label}><PlugZap className="size-4 flex-shrink-0 text-slate-400" /> {endpoint.label}</span>
+                  <div className="flex items-center gap-2 relative">
+                    {endpoint.supportsReasoning ? (
+                      <div className="relative">
+                        <button
+                          type="button"
+                          className={`${button.icon} ${reasoningValue ? 'text-blue-600' : ''}`}
+                          aria-label="Set reasoning effort"
+                          disabled={!onUpdateEndpointReasoning || reasoningBusy}
+                          onClick={() => setOpenReasoningFor(isMenuOpen ? null : endpoint.id)}
+                        >
+                          {reasoningBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                        </button>
+                        {isMenuOpen && (
+                          <div className="absolute right-0 top-10 z-20 w-48 rounded-xl border border-slate-200 bg-white shadow-xl">
+                            {effortOptions.map((option) => (
+                              <button
+                                key={option.value || 'default'}
+                                className="flex w-full items-center justify-between px-3 py-2 text-left text-xs hover:bg-slate-50"
+                                onClick={() => handleReasoningChange(option.value)}
+                                disabled={reasoningBusy}
+                              >
+                                <span>{option.label}</span>
+                                {option.value === reasoningValue ? <Check className="size-3 text-blue-600" /> : null}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                    <button onClick={() => onRemoveEndpoint(tier, endpoint)} className={button.iconDanger} aria-label="Remove endpoint">
+                      <Trash className="size-4" />
+                    </button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-12 items-center gap-3">
+                  <div className="col-span-12 md:col-span-7">
+                    <input
+                      type="range"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={displayWeight}
+                      onChange={(event) => {
+                        if (!canAdjustWeights) return
+                        const decimal = parseUnitInput(event.target.valueAsNumber)
+                        onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                      }}
+                      disabled={!canAdjustWeights}
+                      onMouseUp={handleCommit}
+                      onTouchEnd={handleCommit}
+                      onPointerUp={handleCommit}
+                      className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer"
+                    />
+                  </div>
+                  <div className="col-span-12 md:col-span-5 flex items-center gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      max="1"
+                      step="0.01"
+                      value={displayWeight.toFixed(2)}
+                      onChange={(event) => {
+                        if (!canAdjustWeights) return
+                        const decimal = parseUnitInput(event.target.valueAsNumber)
+                        onStageEndpointWeight(tier, endpoint.id, decimal, scope)
+                      }}
+                      disabled={!canAdjustWeights}
+                      onBlur={handleCommit}
+                      inputMode="decimal"
+                      className="block w-24 rounded-lg border-slate-300 text-right shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    />
+                  </div>
                 </div>
               </div>
             )
@@ -1349,12 +1754,14 @@ function RangeSection({
   onUpdate,
   onRemove,
   onAddTier,
+  onAddMaxTier,
   onMoveTier,
   onRemoveTier,
   onAddEndpoint,
   onStageEndpointWeight,
   onCommitEndpointWeights,
   onRemoveEndpoint,
+  onUpdateEndpointReasoning,
   pendingWeights,
   savingTierIds,
   dirtyTierIds,
@@ -1365,19 +1772,22 @@ function RangeSection({
   onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => Promise<void> | void
   onRemove: () => void
   onAddTier: (isPremium: boolean) => void
+  onAddMaxTier: () => void
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tier: Tier) => void
   onAddEndpoint: (tier: Tier) => void
   onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
+  onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
   pendingWeights: Record<string, number>
   savingTierIds: Set<string>
   dirtyTierIds: Set<string>
   isActionBusy: (key: string) => boolean
 }) {
-  const standardTiers = tiers.filter((tier) => !tier.premium).sort((a, b) => a.order - b.order)
-  const premiumTiers = tiers.filter((tier) => tier.premium).sort((a, b) => a.order - b.order)
+  const standardTiers = tiers.filter((tier) => !tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
+  const premiumTiers = tiers.filter((tier) => tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
+  const maxTiers = tiers.filter((tier) => tier.isMax).sort((a, b) => a.order - b.order)
   const [nameInput, setNameInput] = useState(range.name)
   const [minInput, setMinInput] = useState(range.min_tokens.toString())
   const [maxInput, setMaxInput] = useState(range.max_tokens?.toString() ?? '')
@@ -1494,6 +1904,7 @@ function RangeSection({
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
                 onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1525,6 +1936,39 @@ function RangeSection({
                 onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
                 onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
                 onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
+                isActionBusy={isActionBusy}
+              />
+            )
+          })}
+        </div>
+        <div className="bg-indigo-50/60 p-4 space-y-3 rounded-xl">
+          <div className="flex items-center justify-between">
+            <h4 className="text-sm font-semibold text-indigo-800 flex items-center gap-2"><Crown className="size-4" /> Max tiers</h4>
+            <button type="button" className={button.secondary} onClick={onAddMaxTier}>
+              <PlusCircle className="size-4" /> Add
+            </button>
+          </div>
+          {maxTiers.length === 0 && <p className="text-center text-xs text-slate-500 py-4">No max tiers.</p>}
+          {maxTiers.map((tier, index) => {
+            const lastIndex = maxTiers.length - 1
+            return (
+              <TierCard
+                key={tier.id}
+                tier={tier}
+                pendingWeights={pendingWeights}
+                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
+                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
+                scope="persistent"
+                canMoveUp={index > 0}
+                canMoveDown={index < lastIndex}
+                onMove={(direction) => onMoveTier(tier.id, direction)}
+                onRemove={onRemoveTier}
+                onAddEndpoint={() => onAddEndpoint(tier)}
+                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
+                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
+                onRemoveEndpoint={onRemoveEndpoint}
+                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
                 isActionBusy={isActionBusy}
               />
             )
@@ -1538,7 +1982,7 @@ function RangeSection({
 export function LlmConfigScreen() {
   const queryClient = useQueryClient()
   const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
-  const [endpointModal, setEndpointModal] = useState<{ tier: Tier; scope: TierScope } | null>(null)
+  const [modal, showModal, closeModal] = useModal()
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [endpointTestStatuses, setEndpointTestStatuses] = useState<Record<string, EndpointTestStatus>>({})
   const resetEndpointTestStatuses = () => setEndpointTestStatuses({})
@@ -1548,11 +1992,6 @@ export function LlmConfigScreen() {
 
   // Profile-related state
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
-  const [profileModalOpen, setProfileModalOpen] = useState(false)
-  const [newProfileName, setNewProfileName] = useState('')
-  const [editProfileModalOpen, setEditProfileModalOpen] = useState(false)
-  const [editProfileDisplayName, setEditProfileDisplayName] = useState('')
-  const [editProfileDescription, setEditProfileDescription] = useState('')
 
   // Fetch list of routing profiles
   const profilesQuery = useQuery({
@@ -1661,40 +2100,18 @@ export function LlmConfigScreen() {
     if (!value) return null
     return value.trim()
   }
-  const [confirmDialog, setConfirmDialog] = useState<ActiveConfirmDialog | null>(null)
-  const [confirmBusy, setConfirmBusy] = useState(false)
-  const confirmDeferredRef = useRef<{ resolve: () => void; reject: (reason?: unknown) => void } | null>(null)
-  const requestConfirmation = (options: ConfirmDialogConfig) => new Promise<void>((resolve, reject) => {
-    const dialog: ActiveConfirmDialog = {
-      title: options.title,
-      message: options.message,
-      confirmLabel: options.confirmLabel ?? 'Confirm',
-      cancelLabel: options.cancelLabel ?? 'Cancel',
-      intent: options.intent ?? 'danger',
-      onConfirm: options.onConfirm,
-    }
-    setConfirmDialog(dialog)
-    confirmDeferredRef.current = { resolve, reject }
-  })
-  const handleConfirmDialogConfirm = async () => {
-    if (!confirmDialog) return
-    setConfirmBusy(true)
-    try {
-      await confirmDialog.onConfirm()
-      confirmDeferredRef.current?.resolve()
-    } catch (error) {
-      confirmDeferredRef.current?.reject(error)
-    } finally {
-      setConfirmBusy(false)
-      setConfirmDialog(null)
-      confirmDeferredRef.current = null
-    }
-  }
-  const handleConfirmDialogCancel = () => {
-    confirmDeferredRef.current?.resolve()
-    confirmDeferredRef.current = null
-    setConfirmDialog(null)
-  }
+  const requestConfirmation = (options: ConfirmDialogConfig) =>
+    new Promise<void>((resolve, reject) => {
+      showModal((onClose) =>
+        <ConfirmModalWrapper
+          options={options}
+          onResolve={resolve}
+          onReject={reject}
+          onClose={onClose}
+        />,
+      )
+    })
+
   const confirmDestructiveAction = (options: ConfirmDialogConfig) =>
     requestConfirmation({
       ...options,
@@ -1821,6 +2238,8 @@ export function LlmConfigScreen() {
       payload.supports_tool_choice = values.supportsToolChoice ?? true
       payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
       payload.supports_vision = values.supportsVision ?? false
+      payload.supports_reasoning = values.supportsReasoning ?? false
+      payload.reasoning_effort = values.reasoningEffort ? values.reasoningEffort : null
       payload.enabled = true
     }
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
@@ -1861,6 +2280,10 @@ export function LlmConfigScreen() {
     if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (kind === 'persistent') {
+      if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
+      if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
+    }
     return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
       successMessage: 'Endpoint updated',
       label: 'Saving endpoint…',
@@ -1931,13 +2354,16 @@ export function LlmConfigScreen() {
         }),
     })
 
-  const handleTierAdd = (rangeId: string, isPremium: boolean) =>
-    runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium }), {
+  const handleTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
+    const isPremium = Boolean(options?.isPremium)
+    const isMax = Boolean(options?.isMax)
+    return runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium, is_max: isMax }), {
       successMessage: 'Tier added',
       label: 'Creating tier…',
-      busyKey: actionKey('range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+      busyKey: actionKey('range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
       context: 'Persistent tier',
     })
+  }
   const handleTierMove = (rangeId: string, tierId: string, direction: 'up' | 'down') =>
     runMutation(() => llmApi.updatePersistentTier(tierId, { move: direction }), {
       label: direction === 'up' ? 'Moving tier up…' : 'Moving tier down…',
@@ -2052,6 +2478,31 @@ export function LlmConfigScreen() {
       },
     })
 
+  const handleTierEndpointReasoning = (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => {
+    if (scope !== 'persistent') return
+    const payload: Record<string, unknown> = { reasoning_effort_override: value || null }
+    const busyKey = selectedProfile ? actionKey('profile-tier-endpoint', endpoint.id, 'reasoning') : actionKey('tier-endpoint', endpoint.id, 'reasoning')
+    const context = tier.name
+    if (selectedProfile) {
+      return runWithFeedback(
+        async () => {
+          await llmApi.updateProfilePersistentTierEndpoint(endpoint.id, payload)
+          await invalidateProfileDetail()
+        },
+        {
+          label: 'Saving reasoning…',
+          busyKey,
+          context,
+        },
+      )
+    }
+    return runMutation(() => llmApi.updatePersistentTierEndpoint(endpoint.id, payload), {
+      label: 'Saving reasoning…',
+      busyKey,
+      context,
+    })
+  }
+
   const handleBrowserTierAdd = (isPremium: boolean) =>
     runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
       successMessage: 'Browser tier added',
@@ -2105,12 +2556,21 @@ export function LlmConfigScreen() {
       }),
     })
 
-  const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => setEndpointModal({ tier, scope })
+  const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
+    showModal((onClose) => createPortal(
+      <AddEndpointModal
+        tier={tier}
+        scope={scope}
+        choices={endpointChoices}
+        busy={isBusy(actionKey(selectedProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
+        onAdd={(endpointId) => (selectedProfile ? submitProfileTierEndpoint(tier, scope, endpointId) : submitTierEndpoint(tier, scope, endpointId))}
+        onClose={onClose}
+      />,
+      document.body,
+    ))
+  }
 
-  const submitTierEndpoint = async (endpointId: string) => {
-    if (!endpointModal) return
-    const { tier, scope } = endpointModal
-
+  const submitTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
@@ -2203,6 +2663,15 @@ export function LlmConfigScreen() {
     )
   }
 
+  const openCreateProfileModal = () => {
+    showModal((onClose) =>
+      <CreateProfileModal
+        onCreate={(name) => handleCreateProfile(name)}
+        onClose={onClose}
+      />,
+    )
+  }
+
   const handleCloneProfile = async (profileId: string, newName?: string) => {
     return runWithFeedback(
       async () => {
@@ -2278,6 +2747,22 @@ export function LlmConfigScreen() {
         busyKey: actionKey('profile', profileId, 'update'),
         context: 'Routing profile',
       },
+    )
+  }
+
+  const openEditProfileModal = (profile: typeof selectedProfile) => {
+    if (!profile) return
+    showModal((onClose) =>
+      <EditProfileModal
+        profile={{
+          id: profile.id,
+          display_name: profile.display_name,
+          name: profile.name,
+          description: profile.description,
+        }}
+        onSave={(payload) => handleUpdateProfile(profile.id, payload)}
+        onClose={onClose}
+      />,
     )
   }
 
@@ -2361,17 +2846,19 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleProfileTierAdd = (rangeId: string, isPremium: boolean) => {
-    if (!selectedProfile) return handleTierAdd(rangeId, isPremium)
+  const handleProfileTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
+    const isPremium = Boolean(options?.isPremium)
+    const isMax = Boolean(options?.isMax)
+    if (!selectedProfile) return handleTierAdd(rangeId, { isPremium, isMax })
     return runWithFeedback(
       async () => {
-        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium })
+        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium, is_max: isMax })
         await invalidateProfileDetail()
       },
       {
         successMessage: 'Tier added',
         label: 'Creating tier…',
-        busyKey: actionKey('profile-range', rangeId, isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+        busyKey: actionKey('profile-range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
         context: 'Persistent tier',
       },
     )
@@ -2600,10 +3087,8 @@ export function LlmConfigScreen() {
     })
   }
 
-  const submitProfileTierEndpoint = async (endpointId: string) => {
-    if (!endpointModal || !selectedProfile) return submitTierEndpoint(endpointId)
-    const { tier, scope } = endpointModal
-
+  const submitProfileTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
+    if (!selectedProfile) return submitTierEndpoint(tier, scope, endpointId)
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
@@ -2680,6 +3165,7 @@ export function LlmConfigScreen() {
 
   return (
     <>
+      {modal}
       <ActivityDock notices={notices} activeLabels={activeLabels} onDismiss={dismissNotice} />
       <div className="space-y-8">
         <div className="gobii-card-base space-y-2 px-6 py-6">
@@ -2758,11 +3244,7 @@ export function LlmConfigScreen() {
                       <button
                         type="button"
                         className={button.secondary}
-                        onClick={() => {
-                          setEditProfileDisplayName(selectedProfile.display_name || selectedProfile.name)
-                          setEditProfileDescription(selectedProfile.description || '')
-                          setEditProfileModalOpen(true)
-                        }}
+                        onClick={() => openEditProfileModal(selectedProfile)}
                         disabled={isBusy(actionKey('profile', selectedProfile.id, 'update'))}
                         title="Edit this profile"
                       >
@@ -2793,7 +3275,7 @@ export function LlmConfigScreen() {
                     <button
                       type="button"
                       className={button.secondary}
-                      onClick={() => setProfileModalOpen(true)}
+                      onClick={openCreateProfileModal}
                     >
                       <Plus className="size-4" />
                       New
@@ -2831,6 +3313,8 @@ export function LlmConfigScreen() {
                 provider={provider}
                 isBusy={isBusy}
                 testStatuses={endpointTestStatuses}
+                showModal={showModal}
+                closeModal={closeModal}
                 handlers={{
                   onRotateKey: handleProviderRotateKey,
                   onToggleEnabled: handleProviderToggle,
@@ -2872,7 +3356,8 @@ export function LlmConfigScreen() {
                 key={range.id}
                 range={range}
                 tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, isPremium) : handleTierAdd(range.id, isPremium)}
+                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, { isPremium }) : handleTierAdd(range.id, { isPremium })}
+                onAddMaxTier={() => selectedProfile ? handleProfileTierAdd(range.id, { isMax: true }) : handleTierAdd(range.id, { isMax: true })}
                 onUpdate={(field, value) => selectedProfile ? handleProfileRangeUpdate(range.id, field, value) : handleRangeUpdate(range.id, field, value)}
                 onRemove={() => selectedProfile ? handleProfileRangeRemove(range) : handleRangeRemove(range)}
                 onMoveTier={(tierId, direction) => selectedProfile ? handleProfileTierMove(range.id, tierId, direction) : handleTierMove(range.id, tierId, direction)}
@@ -2881,6 +3366,7 @@ export function LlmConfigScreen() {
                 onStageEndpointWeight={stageTierEndpointWeight}
                 onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'persistent') : commitTierEndpointWeights(tier, 'persistent')}
                 onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'persistent') : handleTierEndpointRemove(tier, endpoint, 'persistent')}
+                onUpdateEndpointReasoning={handleTierEndpointReasoning}
                 pendingWeights={pendingWeights}
                 savingTierIds={savingTierIds}
                 dirtyTierIds={dirtyTierIds}
@@ -3072,193 +3558,6 @@ export function LlmConfigScreen() {
             </div>
           </div>
         </SectionCard>
-        {endpointModal && (
-          <AddEndpointModal
-            tier={endpointModal.tier}
-            scope={endpointModal.scope}
-            choices={endpointChoices}
-            busy={isBusy(actionKey(selectedProfile ? 'profile' : endpointModal.scope, endpointModal.scope, endpointModal.tier.id, 'attach-endpoint'))}
-            onAdd={(endpointId) => selectedProfile ? submitProfileTierEndpoint(endpointId) : submitTierEndpoint(endpointId)}
-            onClose={() => setEndpointModal(null)}
-          />
-        )}
-        {confirmDialog && (
-          <ConfirmActionModal
-            title={confirmDialog.title}
-            message={confirmDialog.message}
-            confirmLabel={confirmDialog.confirmLabel}
-            cancelLabel={confirmDialog.cancelLabel}
-            intent={confirmDialog.intent}
-            busy={confirmBusy}
-            onConfirm={handleConfirmDialogConfirm}
-            onCancel={handleConfirmDialogCancel}
-          />
-        )}
-        {profileModalOpen && (
-          <ModalPortal>
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                  <h3 className="text-lg font-semibold text-slate-900">Create Routing Profile</h3>
-                  <button
-                    type="button"
-                    className={button.icon}
-                    onClick={() => {
-                      setProfileModalOpen(false)
-                      setNewProfileName('')
-                    }}
-                  >
-                    <X className="size-5" />
-                  </button>
-                </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault()
-                    if (!newProfileName.trim()) return
-                    try {
-                      await handleCreateProfile(newProfileName.trim())
-                      setProfileModalOpen(false)
-                      setNewProfileName('')
-                    } catch {
-                      // Error handled by runWithFeedback
-                    }
-                  }}
-                  className="p-6 space-y-4"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Profile Name</label>
-                    <input
-                      type="text"
-                      value={newProfileName}
-                      onChange={(e) => setNewProfileName(e.target.value)}
-                      placeholder="e.g., Production, Staging, Eval A"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                      autoFocus
-                    />
-                    <p className="mt-1 text-xs text-slate-500">
-                      A unique identifier will be generated from the name.
-                    </p>
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      type="button"
-                      className={button.secondary}
-                      onClick={() => {
-                        setProfileModalOpen(false)
-                        setNewProfileName('')
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className={button.primary}
-                      disabled={!newProfileName.trim() || isBusy('profile-create')}
-                    >
-                      {isBusy('profile-create') ? (
-                        <>
-                          <LoaderCircle className="size-4 animate-spin" />
-                          Creating...
-                        </>
-                      ) : (
-                        'Create Profile'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </ModalPortal>
-        )}
-        {editProfileModalOpen && selectedProfile && (
-          <ModalPortal>
-            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-              <div className="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
-                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
-                  <h3 className="text-lg font-semibold text-slate-900">Edit Routing Profile</h3>
-                  <button
-                    type="button"
-                    className={button.icon}
-                    onClick={() => {
-                      setEditProfileModalOpen(false)
-                      setEditProfileDisplayName('')
-                      setEditProfileDescription('')
-                    }}
-                  >
-                    <X className="size-5" />
-                  </button>
-                </div>
-                <form
-                  onSubmit={async (e) => {
-                    e.preventDefault()
-                    if (!editProfileDisplayName.trim()) return
-                    try {
-                      await handleUpdateProfile(selectedProfile.id, {
-                        display_name: editProfileDisplayName.trim(),
-                        description: editProfileDescription.trim(),
-                      })
-                      setEditProfileModalOpen(false)
-                      setEditProfileDisplayName('')
-                      setEditProfileDescription('')
-                    } catch {
-                      // Error handled by runWithFeedback
-                    }
-                  }}
-                  className="p-6 space-y-4"
-                >
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Display Name</label>
-                    <input
-                      type="text"
-                      value={editProfileDisplayName}
-                      onChange={(e) => setEditProfileDisplayName(e.target.value)}
-                      placeholder="e.g., Production, Staging, Eval A"
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40"
-                      autoFocus
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                    <textarea
-                      value={editProfileDescription}
-                      onChange={(e) => setEditProfileDescription(e.target.value)}
-                      placeholder="Optional description for this profile"
-                      rows={3}
-                      className="w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/40 resize-none"
-                    />
-                  </div>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      type="button"
-                      className={button.secondary}
-                      onClick={() => {
-                        setEditProfileModalOpen(false)
-                        setEditProfileDisplayName('')
-                        setEditProfileDescription('')
-                      }}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      className={button.primary}
-                      disabled={!editProfileDisplayName.trim() || isBusy(actionKey('profile', selectedProfile.id, 'update'))}
-                    >
-                      {isBusy(actionKey('profile', selectedProfile.id, 'update')) ? (
-                        <>
-                          <LoaderCircle className="size-4 animate-spin" />
-                          Saving...
-                        </>
-                      ) : (
-                        'Save Changes'
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          </ModalPortal>
-        )}
       </div>
     </>
   )

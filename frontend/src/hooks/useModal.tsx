@@ -1,9 +1,9 @@
-import type { JSX } from 'react'
-import { useCallback, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
+import { useCallback, useState } from 'react'
 
-type ModalRenderer = (onClose: () => void) => JSX.Element
+type ModalRenderer = (onClose: () => void) => ReactNode
 
-export function useModal(): [JSX.Element | null, (renderer: ModalRenderer) => void, () => void] {
+export function useModal(): [ReactNode | null, (renderer: ModalRenderer) => void, () => void] {
   const [renderer, setRenderer] = useState<ModalRenderer | null>(null)
 
   const close = useCallback(() => {
@@ -14,12 +14,7 @@ export function useModal(): [JSX.Element | null, (renderer: ModalRenderer) => vo
     setRenderer(() => nextRenderer)
   }, [])
 
-  const modal = useMemo(() => {
-    if (!renderer) {
-      return null
-    }
-    return renderer(close)
-  }, [renderer, close])
+  const modal = renderer ? renderer(close) : null
 
   return [modal, showModal, close]
 }
