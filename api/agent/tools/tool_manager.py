@@ -34,7 +34,7 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
     Check if the sqlite tool should be available for this agent.
 
-    SQLite is only available for paid accounts with max intelligence.
+    SQLite is only available for paid accounts with premium or max intelligence.
     Free accounts never have access, regardless of premium grace period.
     """
     if agent is None:
@@ -56,9 +56,9 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
         # Free accounts: never allowed
         return False
 
-    # Paid accounts: only allowed on max intelligence
+    # Paid accounts: allowed on premium or max intelligence
     preferred_tier = getattr(agent, "preferred_llm_tier", None)
-    return preferred_tier == AgentLLMTier.MAX.value
+    return preferred_tier in (AgentLLMTier.PREMIUM.value, AgentLLMTier.MAX.value)
 
 
 BUILTIN_TOOL_REGISTRY = {

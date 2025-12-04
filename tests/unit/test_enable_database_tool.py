@@ -17,7 +17,7 @@ from constants.plans import PlanNames
 
 @tag("enable_database")
 class EnableDatabaseToolTests(TestCase):
-    """Tests for enable_database tool with eligible (paid + max intelligence) agents."""
+    """Tests for enable_database tool with eligible (paid + premium/max intelligence) agents."""
 
     @classmethod
     def setUpTestData(cls):
@@ -62,6 +62,39 @@ class EnableDatabaseToolTests(TestCase):
         self.assertIn(
             SQLITE_TOOL_NAME,
             result["tool_manager"]["already_enabled"],
+        )
+
+    def test_enable_database_works_for_premium_tier(self):
+        """enable_database should work for paid accounts with premium intelligence."""
+        User = get_user_model()
+        premium_user = User.objects.create_user(
+            username="premium-user@example.com",
+            email="premium-user@example.com",
+            password="secret",
+        )
+        billing, _ = UserBilling.objects.get_or_create(user=premium_user)
+        billing.subscription = PlanNames.STARTUP
+        billing.save(update_fields=["subscription"])
+
+        browser_agent = BrowserUseAgent.objects.create(user=premium_user, name="PremiumBrowser")
+        agent = PersistentAgent.objects.create(
+            user=premium_user,
+            name="PremiumAgent",
+            charter="test premium",
+            browser_use_agent=browser_agent,
+            created_at=timezone.now(),
+            preferred_llm_tier=AgentLLMTier.PREMIUM.value,
+        )
+
+        result = execute_enable_database(agent, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn(SQLITE_TOOL_NAME, result["tool_manager"]["enabled"])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=SQLITE_TOOL_NAME,
+            ).exists()
         )
 
     def test_enable_database_tool_removed_once_sqlite_enabled(self):
@@ -144,12 +177,12 @@ class SqliteToolRestrictionTests(TestCase):
         )
         self.assertFalse(is_sqlite_enabled_for_agent(agent))
 
-    def test_paid_premium_tier_not_eligible(self):
-        """Paid accounts with premium intelligence should not be eligible."""
+    def test_paid_premium_tier_is_eligible(self):
+        """Paid accounts with premium intelligence should be eligible."""
         agent = self._create_agent(
             self.paid_user, self.paid_browser, "PaidPremium", AgentLLMTier.PREMIUM.value
         )
-        self.assertFalse(is_sqlite_enabled_for_agent(agent))
+        self.assertTrue(is_sqlite_enabled_for_agent(agent))
 
     def test_paid_max_tier_is_eligible(self):
         """Paid accounts with max intelligence should be eligible."""
@@ -179,10 +212,10 @@ class SqliteToolRestrictionTests(TestCase):
             ).exists()
         )
 
-    def test_enable_database_rejected_for_paid_non_max(self):
-        """enable_database should reject paid accounts without max intelligence."""
+    def test_enable_database_rejected_for_paid_standard(self):
+        """enable_database should reject paid accounts with standard intelligence."""
         agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidPremiumReject", AgentLLMTier.PREMIUM.value
+            self.paid_user, self.paid_browser, "PaidStandardReject", AgentLLMTier.STANDARD.value
         )
         result = execute_enable_database(agent, {})
 
@@ -234,8 +267,8 @@ class SqliteToolRestrictionTests(TestCase):
             ).exists()
         )
 
-        # Downgrade agent to premium tier
-        agent.preferred_llm_tier = AgentLLMTier.PREMIUM.value
+        # Downgrade agent to standard tier
+        agent.preferred_llm_tier = AgentLLMTier.STANDARD.value
         agent.save(update_fields=["preferred_llm_tier"])
 
         # sqlite_batch should not appear in tool definitions
@@ -255,8 +288,8 @@ class SqliteToolRestrictionTests(TestCase):
         )
         execute_enable_database(agent, {})
 
-        # Downgrade agent to premium tier
-        agent.preferred_llm_tier = AgentLLMTier.PREMIUM.value
+        # Downgrade agent to standard tier
+        agent.preferred_llm_tier = AgentLLMTier.STANDARD.value
         agent.save(update_fields=["preferred_llm_tier"])
 
         # Execution should be blocked
