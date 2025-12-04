@@ -744,7 +744,14 @@ function ConfirmModalWrapper({
   onClose: () => void
 }) {
   const [busy, setBusy] = useState(false)
-  const { title, message, confirmLabel, cancelLabel, intent, onConfirm } = options
+  const {
+    title,
+    message,
+    confirmLabel = 'Confirm',
+    cancelLabel = 'Cancel',
+    intent = 'danger',
+    onConfirm,
+  } = options
 
   return createPortal(
     <ConfirmActionModal
@@ -780,7 +787,7 @@ function CreateProfileModal({
   onCreate,
   onClose,
 }: {
-  onCreate: (name: string) => Promise<void>
+  onCreate: (name: string) => Promise<unknown>
   onClose: () => void
 }) {
   const [name, setName] = useState('')
