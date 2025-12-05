@@ -11,10 +11,10 @@ tags:
   - openrouter
   - deepseek v3.2
 ---
-*PRESS RELEASE — FOR IMMEDIATE RELEASE**  
+**PRESS RELEASE — FOR IMMEDIATE RELEASE**  
  **Gobii Becomes the \#1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release**
 
-San Francisco, CA — December 5, 2025 — Gobii, the open-core AI agent platform backed by Open Core Ventures, is now the \#1 application on OpenRouter for DeepSeek V3.2, the frontier model released on Monday, December 1\. After integrating the new model into its system — enabling teams to run DeepSeek V3.2 through Gobii's always-on, self-hosted agents — usage climbed steadily over the first 72 hours.
+San Francisco, CA — December 5, 2025 — Gobii, the open-core AI agent platform backed by Open Core Ventures, is now the \#1 application on OpenRouter for DeepSeek V3.2, the frontier model released on Monday, December 1. After integrating the new model into its system — enabling teams to run DeepSeek V3.2 through Gobii's always-on, self-hosted agents — usage climbed steadily over the first 72 hours.
 
 DeepSeek V3.2 sits in the same class as OpenAI's GPT-5.1 and Google's Gemini Pro 3, surpassing them on several public benchmarks **while offering a 20–40× cost advantage (approximately $0.42 vs. $10–$20 for comparable models).** Its strong on-premise viability aligns with Gobii's architecture, which is designed for organizations requiring control, auditability, and data locality.
 
