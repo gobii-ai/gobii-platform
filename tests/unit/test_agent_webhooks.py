@@ -6,7 +6,7 @@ from django.urls import reverse
 from requests import RequestException
 
 from api.agent.tools.webhook_sender import execute_send_webhook_event
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentWebhook
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentWebhook, ProxyServer
 
 
 class AgentWebhookToolTests(TestCase):
@@ -18,7 +18,17 @@ class AgentWebhookToolTests(TestCase):
             email="owner@example.com",
             password="password123",
         )
-        cls.browser_agent = BrowserUseAgent.objects.create(user=cls.user, name="Browser Agent")
+        cls.proxy = ProxyServer.objects.create(
+            name="Webhook Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTP,
+            host="proxy.example.com",
+            port=8080,
+        )
+        cls.browser_agent = BrowserUseAgent.objects.create(
+            user=cls.user,
+            name="Browser Agent",
+            preferred_proxy=cls.proxy,
+        )
         agent = PersistentAgent.objects.create(
             user=cls.user,
             name="Webhook Tester",
@@ -36,6 +46,7 @@ class AgentWebhookToolTests(TestCase):
     def setUp(self):
         self.agent = PersistentAgent.objects.get(pk=self.agent_id)
         self.webhook = PersistentAgentWebhook.objects.get(pk=self.webhook_id)
+        self.proxy = type(self).proxy
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_success(self):
@@ -61,6 +72,10 @@ class AgentWebhookToolTests(TestCase):
             called_kwargs = mock_post.call_args.kwargs
             self.assertEqual(called_kwargs["json"]["payload"], payload)
             self.assertEqual(called_kwargs["headers"]["User-Agent"], "Gobii-AgentWebhook/1.0")
+            self.assertEqual(
+                called_kwargs["proxies"],
+                {"http": self.proxy.proxy_url, "https": self.proxy.proxy_url},
+            )
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_http_error(self):
@@ -96,6 +111,26 @@ class AgentWebhookToolTests(TestCase):
             self.webhook.refresh_from_db()
             self.assertIsNone(self.webhook.last_response_status)
             self.assertIn("timeout", self.webhook.last_error_message)
+
+    @tag("batch_agent_webhooks")
+    def test_execute_send_webhook_event_requires_proxy(self):
+        with patch(
+            "api.agent.tools.webhook_sender.select_proxy_for_persistent_agent",
+            return_value=None,
+        ) as mock_select, patch("api.agent.tools.webhook_sender.requests.post") as mock_post:
+            result = execute_send_webhook_event(
+                self.agent,
+                {"webhook_id": str(self.webhook.id), "payload": {"value": 1}},
+            )
+
+        mock_select.assert_called_once_with(self.agent, allow_no_proxy_in_debug=False)
+        mock_post.assert_not_called()
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("proxy", result.get("message", ""))
+
+        self.webhook.refresh_from_db()
+        self.assertIsNone(self.webhook.last_response_status)
+        self.assertIn("proxy", self.webhook.last_error_message)
 
     @tag("batch_agent_webhooks")
     def test_execute_send_webhook_event_requires_json_object(self):

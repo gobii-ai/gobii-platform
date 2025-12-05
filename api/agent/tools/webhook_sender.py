@@ -13,6 +13,7 @@ from requests import RequestException
 from django.core.exceptions import ValidationError
 
 from ...models import PersistentAgent, PersistentAgentWebhook
+from ...proxy_selection import select_proxy_for_persistent_agent
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,29 @@ def _track_webhook_attempt(
     )
 
 
+def _select_webhook_proxy(agent: PersistentAgent) -> tuple[dict[str, str] | None, str | None]:
+    """Select a proxy for webhook delivery, preferring the agent's configured proxy."""
+    try:
+        proxy_server = select_proxy_for_persistent_agent(agent, allow_no_proxy_in_debug=False)
+    except RuntimeError as exc:
+        logger.error("Agent %s webhook proxy selection failed: %s", agent.id, exc)
+        return None, str(exc)
+
+    if not proxy_server:
+        message = "No proxy server available for webhook delivery"
+        logger.warning("Agent %s webhook proxy unavailable", agent.id)
+        return None, message
+
+    proxy_url = proxy_server.proxy_url
+    logger.info(
+        "Agent %s using proxy %s:%s for webhook delivery",
+        agent.id,
+        proxy_server.host,
+        proxy_server.port,
+    )
+    return {"http": proxy_url, "https": proxy_url}, None
+
+
 def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_webhook_event tool."""
     webhook_id = params.get("webhook_id")
@@ -157,12 +181,32 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         payload_keys,
     )
 
+    proxies, proxy_error = _select_webhook_proxy(agent)
+    if proxy_error:
+        webhook.record_delivery(status_code=None, error_message=proxy_error)
+        _track_webhook_attempt(
+            agent,
+            webhook,
+            result="proxy_unavailable",
+            status_code=None,
+            error_message=proxy_error,
+            payload_keys=payload_keys,
+            custom_header_count=custom_header_count,
+        )
+        return {
+            "status": "error",
+            "message": f"Webhook request failed: {proxy_error}",
+            "webhook_id": str(webhook.id),
+            "webhook_name": webhook.name,
+        }
+
     try:
         response = requests.post(
             webhook.url,
             json=body,
             headers=request_headers,
             timeout=DEFAULT_TIMEOUT_SECONDS,
+            proxies=proxies,
         )
         status_code = response.status_code
         response_preview = (response.text or "")[:500]
