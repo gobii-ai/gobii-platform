@@ -36,7 +36,7 @@ Gobii also became the **\#1 application for Mistral Large 3** in December. These
 
 ### **How Gobii Began**
 
-Gobii was created to meet rising demand for AI systems that operate securely inside existing infrastructure and remain fully auditable. Christianson, a former DoD contractor and senior engineer specializing in mission-critical distributed systems, designed the platform to provide transparency, reliability, and predictable behavior.
+Gobii was created to meet rising demand for AI systems that operate securely inside existing infrastructure and remain fully auditable. Christianson, a former DoD contractor who contributed to Apache NiFi, designed the platform to provide transparency, reliability, and predictable behavior.
 
 "In environments where correctness and traceability matter, black-box AI is a liability," Christianson said. "Gobii gives organizations full visibility into how their agents work and confidence that they'll behave consistently."
 
