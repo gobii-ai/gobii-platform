@@ -45,4 +45,4 @@ Gobii was created to meet rising demand for AI systems that operate securely ins
 Gobii is the open-core AI workforce platform that delivers autonomous, always-on AI agents for regulated and high-assurance environments. Built for transparency and control, Gobii can be deployed on-premise, in the cloud, or fully air-gapped. Backed by Open Core Ventures, Gobii provides organizations with AI systems that are auditable, secure, and aligned with their internal standards.
 
 Website: [https://gobii.ai](https://gobii.ai)  
-Media Contact: Tracy Schmidt, Tracy@ThePRAccelerator.com
+Media Contact: Tracy Schmidt, [Tracy@ThePRAccelerator.com](mailto:Tracy@ThePRAccelerator.com)
