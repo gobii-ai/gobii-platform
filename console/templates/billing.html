@@ -450,8 +450,12 @@
               </button>
             </div>
             {% endif %}
+          {% endif %}
 
-            <div class="border-t border-gray-100"></div>
+          {% if has_paid_plan %}
+            {% if not paid_subscriber %}
+              <div class="border-t border-gray-100"></div>
+            {% endif %}
 
             <div class="flex flex-col space-y-3">
               <div class="flex items-center justify-between">

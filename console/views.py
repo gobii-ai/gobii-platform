@@ -1350,6 +1350,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         # Personal billing fallback
         subscription_plan = get_user_plan(self.request.user)
+        has_paid_plan = (subscription_plan or {}).get("id") != PlanNamesChoices.FREE.value
         context['subscription_plan'] = subscription_plan
         sub = get_active_subscription(self.request.user)
         paid_subscriber = sub is not None
@@ -1363,6 +1364,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
+        context['has_paid_plan'] = has_paid_plan
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
