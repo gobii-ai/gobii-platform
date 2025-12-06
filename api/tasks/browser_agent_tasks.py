@@ -322,6 +322,85 @@ PROVIDER_PRIORITY: List[List[Any]] = getattr(
 DEFAULT_GOOGLE_MODEL = getattr(settings, "GOOGLE_LLM_MODEL", "gemini-2.5-pro")
 
 
+def _build_extraction_payload(te: Any) -> dict[str, Any] | None:
+    """Return extraction endpoint payload for a tier endpoint or None if unusable."""
+    extraction_endpoint = getattr(te, "extraction_endpoint", None)
+    if not extraction_endpoint:
+        return None
+
+    extraction_provider = extraction_endpoint.provider
+    if not (extraction_provider and extraction_provider.enabled and extraction_endpoint.enabled):
+        return None
+
+    extraction_api_key = None
+    has_admin_key = bool(extraction_provider.api_key_encrypted)
+    has_env_key = bool(extraction_provider.env_var_name and os.getenv(extraction_provider.env_var_name))
+    if has_admin_key:
+        try:
+            from api.encryption import SecretsEncryption
+            extraction_api_key = SecretsEncryption.decrypt_value(extraction_provider.api_key_encrypted)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Failed to decrypt extraction API key for provider %s: %s",
+                extraction_provider.key,
+                exc,
+            )
+            extraction_api_key = None
+    if extraction_api_key is None and has_env_key:
+        extraction_api_key = os.getenv(extraction_provider.env_var_name)
+    if not extraction_api_key and extraction_provider.browser_backend == 'OPENAI_COMPAT' and extraction_endpoint.browser_base_url:
+        extraction_api_key = 'sk-noauth'
+
+    raw_extraction_model = (extraction_endpoint.browser_model or "").strip()
+    extraction_base_url = extraction_endpoint.browser_base_url or ""
+    if extraction_provider.key == "openrouter" and not extraction_base_url:
+        extraction_base_url = DEFAULT_API_BASE
+    if not (extraction_api_key and raw_extraction_model):
+        return None
+
+    return {
+        'provider_key': extraction_provider.key,
+        'endpoint_key': extraction_endpoint.key,
+        'browser_model': raw_extraction_model,
+        'base_url': extraction_base_url,
+        'backend': extraction_provider.browser_backend,
+        'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
+        'max_output_tokens': extraction_endpoint.max_output_tokens,
+        'api_key': extraction_api_key,
+    }
+
+
+def _init_chat_llm(
+    *,
+    backend: str | None,
+    provider_key: str | None,
+    api_key: str | None,
+    model_name: str | None,
+    base_url: str | None,
+    max_output_tokens: int | None = None,
+) -> Any:
+    """Instantiate Chat* client based on backend/provider."""
+    if not api_key or not model_name:
+        return None
+    params: dict[str, Any] = {"api_key": api_key, "temperature": 0, "model": model_name}
+    if max_output_tokens is not None:
+        params["max_output_tokens"] = int(max_output_tokens)
+
+    resolved_backend = backend or "OPENAI"
+    if resolved_backend == "GOOGLE":
+        return ChatGoogle(**params)
+    if resolved_backend == "ANTHROPIC":
+        return ChatAnthropic(**params)
+
+    if provider_key == "openrouter":
+        headers = get_attribution_headers()
+        if headers:
+            params["default_headers"] = headers
+    if base_url:
+        params["base_url"] = base_url
+    return ChatOpenAI(**params)
+
+
 def _resolve_browser_provider_priority_from_db(
     *,
     prefer_premium: bool = False,
@@ -414,39 +493,7 @@ def _resolve_browser_from_profile(
                     if not raw_model:
                         continue
 
-                    extraction_payload = None
-                    extraction_endpoint = getattr(te, "extraction_endpoint", None)
-                    if extraction_endpoint:
-                        extraction_provider = extraction_endpoint.provider
-                        if extraction_provider and extraction_provider.enabled and extraction_endpoint.enabled:
-                            extraction_api_key = None
-                            has_admin_key = bool(extraction_provider.api_key_encrypted)
-                            has_env_key = bool(extraction_provider.env_var_name and os.getenv(extraction_provider.env_var_name))
-                            if has_admin_key:
-                                try:
-                                    from api.encryption import SecretsEncryption
-                                    extraction_api_key = SecretsEncryption.decrypt_value(extraction_provider.api_key_encrypted)
-                                except Exception:
-                                    extraction_api_key = None
-                            if extraction_api_key is None and has_env_key:
-                                extraction_api_key = os.getenv(extraction_provider.env_var_name)
-                            if not extraction_api_key and extraction_provider.browser_backend == 'OPENAI_COMPAT' and extraction_endpoint.browser_base_url:
-                                extraction_api_key = 'sk-noauth'
-                            raw_extraction_model = (extraction_endpoint.browser_model or "").strip()
-                            extraction_base_url = extraction_endpoint.browser_base_url or ""
-                            if extraction_provider.key == "openrouter" and not extraction_base_url:
-                                extraction_base_url = DEFAULT_API_BASE
-                            if extraction_api_key and raw_extraction_model:
-                                extraction_payload = {
-                                    'provider_key': extraction_provider.key,
-                                    'endpoint_key': extraction_endpoint.key,
-                                    'browser_model': raw_extraction_model,
-                                    'base_url': extraction_base_url,
-                                    'backend': extraction_provider.browser_backend,
-                                    'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
-                                    'max_output_tokens': extraction_endpoint.max_output_tokens,
-                                    'api_key': extraction_api_key,
-                                }
+                    extraction_payload = _build_extraction_payload(te)
 
                     entries.append({
                         'provider_key': provider.key,
@@ -529,39 +576,7 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
                     if not raw_model:
                         continue
 
-                    extraction_payload = None
-                    extraction_endpoint = getattr(te, "extraction_endpoint", None)
-                    if extraction_endpoint:
-                        extraction_provider = extraction_endpoint.provider
-                        if extraction_provider and extraction_provider.enabled and extraction_endpoint.enabled:
-                            extraction_api_key = None
-                            has_admin_key = bool(extraction_provider.api_key_encrypted)
-                            has_env_key = bool(extraction_provider.env_var_name and os.getenv(extraction_provider.env_var_name))
-                            if has_admin_key:
-                                try:
-                                    from api.encryption import SecretsEncryption
-                                    extraction_api_key = SecretsEncryption.decrypt_value(extraction_provider.api_key_encrypted)
-                                except Exception:
-                                    extraction_api_key = None
-                            if extraction_api_key is None and has_env_key:
-                                extraction_api_key = os.getenv(extraction_provider.env_var_name)
-                            if not extraction_api_key and extraction_provider.browser_backend == 'OPENAI_COMPAT' and extraction_endpoint.browser_base_url:
-                                extraction_api_key = 'sk-noauth'
-                            raw_extraction_model = (extraction_endpoint.browser_model or "").strip()
-                            extraction_base_url = extraction_endpoint.browser_base_url or ""
-                            if extraction_provider.key == "openrouter" and not extraction_base_url:
-                                extraction_base_url = DEFAULT_API_BASE
-                            if extraction_api_key and raw_extraction_model:
-                                extraction_payload = {
-                                    'provider_key': extraction_provider.key,
-                                    'endpoint_key': extraction_endpoint.key,
-                                    'browser_model': raw_extraction_model,
-                                    'base_url': extraction_base_url,
-                                    'backend': extraction_provider.browser_backend,
-                                    'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
-                                    'max_output_tokens': extraction_endpoint.max_output_tokens,
-                                    'api_key': extraction_api_key,
-                                }
+                    extraction_payload = _build_extraction_payload(te)
 
                     entries.append({
                         'provider_key': provider.key,
@@ -1043,28 +1058,21 @@ async def _run_agent(
                 extraction_base = DEFAULT_API_BASE
 
             if extraction_llm_api_key and extraction_model_name:
-                try:
-                    extraction_params = {"api_key": extraction_llm_api_key, "temperature": 0, "model": extraction_model_name}
-                    if extraction_max_output_tokens is not None:
-                        extraction_params["max_output_tokens"] = int(extraction_max_output_tokens)
-                    if extraction_backend_resolved == "GOOGLE":
-                        extraction_llm = ChatGoogle(**extraction_params)
-                    elif extraction_backend_resolved == "ANTHROPIC":
-                        extraction_llm = ChatAnthropic(**extraction_params)
-                    else:
-                        if extraction_provider_key == "openrouter":
-                            headers = get_attribution_headers()
-                            if headers:
-                                extraction_params["default_headers"] = headers
-                        if extraction_base:
-                            extraction_params["base_url"] = extraction_base
-                        extraction_llm = ChatOpenAI(**extraction_params)
+                extraction_llm = _init_chat_llm(
+                    backend=extraction_backend_resolved,
+                    provider_key=extraction_provider_key,
+                    api_key=extraction_llm_api_key,
+                    model_name=extraction_model_name,
+                    base_url=extraction_base,
+                    max_output_tokens=extraction_max_output_tokens,
+                )
+                if extraction_llm:
                     agent_span.set_attribute("llm.extraction.model", extraction_model_name)
                     agent_span.set_attribute("llm.extraction.provider", extraction_provider_key or "")
                     if extraction_supports_vision is not None:
                         agent_span.set_attribute("llm.extraction.supports_vision", bool(extraction_supports_vision))
-                except Exception:
-                    logger.warning("Failed to initialize extraction LLM", exc_info=True)
+                else:
+                    logger.info("Extraction LLM not initialized; falling back to primary model")
 
             # Get current time with timezone for context
             current_time = timezone.now()
