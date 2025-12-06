@@ -543,8 +543,17 @@ def build_prompt_context(
         non_shrinkable=True
     )
 
+    # Unified history is built early so the contacts block can align with it
+    unified_history_group = prompt.group("unified_history", weight=3)
+    messages_in_unified_history = _get_unified_history_prompt(agent, unified_history_group)
+
     # Contacts block - use promptree natively
-    recent_contacts_text = _build_contacts_block(agent, important_group, span)
+    recent_contacts_text = _build_contacts_block(
+        agent,
+        important_group,
+        span,
+        allowed_message_ids=messages_in_unified_history,
+    )
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
@@ -589,10 +598,6 @@ def build_prompt_context(
             weight=2,
             non_shrinkable=True
         )
-
-    # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
-    unified_history_group = prompt.group("unified_history", weight=3)
-    _get_unified_history_prompt(agent, unified_history_group)
 
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
@@ -806,10 +811,17 @@ def build_prompt_context(
     )
 
 
-def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str | None:
+def _build_contacts_block(
+    agent: PersistentAgent,
+    contacts_group,
+    span,
+    allowed_message_ids: set[UUID] | None = None,
+) -> str | None:
     """Add contact information sections to the provided promptree group.
 
     Returns the rendered recent contacts text so it can be placed in a critical section.
+    If allowed_message_ids is provided, only messages with matching IDs contribute to the
+    recent contacts list (useful for aligning with unified history).
     """
     limit_msg_history = message_history_limit(agent)
 
@@ -855,44 +867,91 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         )
 
     # Recent conversation parties (unique endpoints from the configured message history window)
-    recent_messages = (
+    recent_messages_qs = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
-        .select_related("from_endpoint", "to_endpoint")
-        .order_by("-timestamp")[:limit_msg_history]
+        .select_related("from_endpoint", "to_endpoint", "conversation")
+        .order_by("-timestamp")
     )
+    if allowed_message_ids is not None:
+        if not allowed_message_ids:
+            recent_messages = []
+        else:
+            recent_messages_qs = recent_messages_qs.filter(id__in=allowed_message_ids)
+            recent_messages = list(recent_messages_qs)
+    else:
+        recent_messages = list(recent_messages_qs[:limit_msg_history])
     span.set_attribute("persistent_agent.recent_messages.count", len(recent_messages))
 
-    # Map endpoint -> extra context (e.g., last email subject or message snippet)
+    def _get_message_contact_info(
+        message: PersistentAgentMessage,
+    ) -> tuple[str, str, str] | None:
+        if message.is_outbound:
+            channel = (
+                message.to_endpoint.channel
+                if message.to_endpoint
+                else message.from_endpoint.channel
+                if message.from_endpoint
+                else None
+            )
+            counterpart = message.to_endpoint.address if message.to_endpoint else None
+            direction_label = "outbound to"
+        else:
+            channel = (
+                message.from_endpoint.channel
+                if message.from_endpoint
+                else message.to_endpoint.channel
+                if message.to_endpoint
+                else None
+            )
+            counterpart = message.from_endpoint.address if message.from_endpoint else None
+            direction_label = "inbound from"
+
+        if not channel:
+            return None
+        if not counterpart:
+            if channel == CommsChannel.WEB and message.is_outbound:
+                counterpart = getattr(message.conversation, "address", None)
+        if not counterpart:
+            if channel == CommsChannel.WEB and message.is_outbound:
+                counterpart = "unknown web chat user"
+        if not counterpart:
+            counterpart = "unknown contact"
+
+        return channel, counterpart, direction_label
+
+    # Map (channel, counterpart) -> recent message details (most recent wins)
     recent_meta: dict[tuple[str, str], str] = {}
     for msg in recent_messages:
-        if msg.is_outbound and msg.to_endpoint:
-            key = (msg.to_endpoint.channel, msg.to_endpoint.address)
-        elif not msg.is_outbound:
-            key = (msg.from_endpoint.channel, msg.from_endpoint.address)
-        else:
+        contact_info = _get_message_contact_info(msg)
+        if not contact_info:
+            continue
+        channel, counterpart, direction_label = contact_info
+        key = (channel, counterpart)
+        if key in recent_meta:
             continue
 
-        # Prefer earlier (more recent in loop) context only if not already stored
-        if key not in recent_meta:
-            meta_str = ""
-            if key[0] == CommsChannel.EMAIL:
-                subject = ""
-                if isinstance(msg.raw_payload, dict):
-                    subject = msg.raw_payload.get("subject") or ""
-                if subject:
-                    meta_str = f" (recent subj: {subject[:80]})"
-            else:
-                # For SMS or other channels, include a short body preview
+        meta_str = ""
+        if channel == CommsChannel.EMAIL:
+            subject = ""
+            if isinstance(msg.raw_payload, dict):
+                subject = msg.raw_payload.get("subject") or ""
+            if subject:
+                meta_str = f" (recent subj: {subject[:80]})"
+            elif msg.body:
                 body_preview = (msg.body or "")[:60].replace("\n", " ")
-                if body_preview:
-                    meta_str = f" (recent msg: {body_preview}...)"
-            recent_meta[key] = meta_str
+                meta_str = f" (recent msg: {body_preview}...)"
+        else:
+            body_preview = (msg.body or "")[:60].replace("\n", " ")
+            if body_preview:
+                meta_str = f" (recent msg: {body_preview}...)"
+
+        recent_meta[key] = f"{direction_label} {counterpart}{meta_str}"
 
     recent_contacts_text: str | None = None
     if recent_meta:
         recent_lines = []
-        for ch, addr in sorted(recent_meta.keys()):
-            recent_lines.append(f"- {ch}: {addr}{recent_meta[(ch, addr)]}")
+        for channel, counterpart in sorted(recent_meta.keys()):
+            recent_lines.append(f"- {channel}: {recent_meta[(channel, counterpart)]}")
 
         recent_contacts_text = "\n".join(recent_lines)
 
@@ -1577,8 +1636,11 @@ def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
            """)
     return ""
 
-def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
-    """Add summaries + interleaved recent steps & messages to the provided promptree group."""
+def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> set[UUID]:
+    """Add summaries + interleaved recent steps & messages to the provided promptree group.
+
+    Returns a set of message IDs that were included in the unified history.
+    """
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
     configured_tool_limit = tool_call_history_limit(agent)
@@ -1587,6 +1649,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
     limit_tool_history = max(configured_tool_limit, unified_fetch_span)
     limit_msg_history = max(configured_msg_limit, unified_fetch_span)
+    messages_in_history: set[UUID] = set()
 
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
@@ -1644,7 +1707,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     )
 
     # Collect structured events with their components grouped together
-    structured_events: List[Tuple[datetime, str, dict]] = []  # (timestamp, event_type, components)
+    structured_events: List[Tuple[datetime, str, dict, UUID | None]] = []  # (timestamp, event_type, components, message_id)
 
     completed_tasks: Sequence[BrowserUseAgentTask]
     browser_agent_id = getattr(agent, "browser_use_agent_id", None)
@@ -1686,12 +1749,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             if tc.result:
                 components["result"] = str(tc.result)
 
-            structured_events.append((s.created_at, "tool_call", components))
+            structured_events.append((s.created_at, "tool_call", components, None))
         except ObjectDoesNotExist:
             components = {
                 "description": f"[{s.created_at.isoformat()}] {s.description or 'No description'}"
             }
-            structured_events.append((s.created_at, "step_description", components))
+            structured_events.append((s.created_at, "step_description", components, None))
 
     # format messages
     for m in messages:
@@ -1755,7 +1818,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             else:
                 components["content"] = body if body else "(no content)"
 
-        structured_events.append((m.timestamp, event_type, components))
+        structured_events.append((m.timestamp, event_type, components, m.id))
 
     # Include most recent completed browser tasks as structured events
     for t in completed_tasks:
@@ -1767,7 +1830,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         if result_step and result_step.result_value:
             components["result"] = json.dumps(result_step.result_value)
         
-        structured_events.append((t.updated_at, "browser_task", components))
+        structured_events.append((t.updated_at, "browser_task", components, None))
 
     # Create structured promptree groups for each event
     if structured_events:
@@ -1778,6 +1841,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             drop_chunks = extra // unified_hysteresis
             keep = len(structured_events) - (drop_chunks * unified_hysteresis)
             structured_events = structured_events[-keep:]
+
+        messages_in_history = {
+            msg_id for _, _, _, msg_id in structured_events if msg_id is not None
+        }
 
         # Pre‑compute constants for exponential decay
         now = structured_events[-1][0]
@@ -1808,7 +1875,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "body": 1,        # Low priority - email body (can be long and shrunk)
         }
 
-        for idx, (timestamp, event_type, components) in enumerate(structured_events):
+        for idx, (timestamp, event_type, components, msg_id) in enumerate(structured_events):
             time_str = timestamp.strftime("%m%d_%H%M%S")
             event_name = f"event_{idx:03d}_{time_str}_{event_type}"
 
@@ -1838,6 +1905,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     shrinker=shrinker
                 )
 
+    return messages_in_history
 
 def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
     """Get all available tools for an agent, including dynamically enabled MCP tools."""
