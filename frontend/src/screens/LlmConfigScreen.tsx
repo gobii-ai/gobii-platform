@@ -2649,17 +2649,24 @@ export function LlmConfigScreen() {
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const requestPayload: Record<string, unknown> = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
+        endpoint_id: endpointId,
+        weight: encodeServerWeight(initialUnit),
+      }
       if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
-        requestPayload.extraction_endpoint_id = extractionEndpointId || null
+        browserPayload.extraction_endpoint_id = extractionEndpointId || null
+      }
+      const basePayload: { endpoint_id: string; weight: number } = {
+        endpoint_id: endpointId,
+        weight: encodeServerWeight(initialUnit),
       }
       let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
-        response = await llmApi.addBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
       } else if (scope === 'embedding') {
-        response = await llmApi.addEmbeddingTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else {
-        response = await llmApi.addPersistentTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addPersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       }
       const newTierEndpointId = response?.tier_endpoint_id
       if (!newTierEndpointId) {
@@ -3175,17 +3182,24 @@ export function LlmConfigScreen() {
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const requestPayload: Record<string, unknown> = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
+        endpoint_id: endpointId,
+        weight: encodeServerWeight(initialUnit),
+      }
       if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
-        requestPayload.extraction_endpoint_id = extractionEndpointId || null
+        browserPayload.extraction_endpoint_id = extractionEndpointId || null
+      }
+      const basePayload: { endpoint_id: string; weight: number } = {
+        endpoint_id: endpointId,
+        weight: encodeServerWeight(initialUnit),
       }
       let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
-        response = await llmApi.addProfileBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addProfileBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
       } else if (scope === 'embedding') {
-        response = await llmApi.addProfileEmbeddingTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addProfileEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else {
-        response = await llmApi.addProfilePersistentTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
+        response = await llmApi.addProfilePersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       }
       const newTierEndpointId = response?.tier_endpoint_id
       if (!newTierEndpointId) {
