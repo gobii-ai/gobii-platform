@@ -620,7 +620,7 @@ function AddEndpointModal({
   tier: Tier
   scope: TierScope
   choices: llmApi.EndpointChoices
-  onAdd: (endpointId: string) => Promise<void> | void
+  onAdd: (selection: { endpointId: string; extractionEndpointId?: string | null }) => Promise<void> | void
   onClose: () => void
   busy?: boolean
 }) {
@@ -630,6 +630,7 @@ function AddEndpointModal({
       ? choices.embedding_endpoints
       : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
+  const [extractionSelected, setExtractionSelected] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = Boolean(busy || submitting)
 
@@ -637,7 +638,7 @@ function AddEndpointModal({
     if (!selected) return
     setSubmitting(true)
     try {
-      await onAdd(selected)
+      await onAdd({ endpointId: selected, extractionEndpointId: scope === 'browser' ? (extractionSelected || null) : undefined })
       onClose()
     } catch {
       // feedback already shown
@@ -671,6 +672,24 @@ function AddEndpointModal({
                   </option>
                 ))}
               </select>
+              {scope === 'browser' ? (
+                <div className="mt-4 space-y-1">
+                  <label className="text-sm font-medium text-slate-700">Extraction endpoint (optional)</label>
+                  <select
+                    className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    value={extractionSelected}
+                    onChange={(event) => setExtractionSelected(event.target.value)}
+                  >
+                    <option value="">No separate extraction model</option>
+                    {endpoints.map((endpoint) => (
+                      <option key={endpoint.id} value={endpoint.id}>
+                        {endpoint.label || endpoint.model}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-slate-500">If set, page extraction uses this endpoint; otherwise it falls back to the primary model.</p>
+                </div>
+              ) : null}
             </>
           )}
         </div>
@@ -1569,6 +1588,8 @@ function TierCard({
   onCommitEndpointWeights,
   onRemoveEndpoint,
   onUpdateEndpointReasoning,
+  onUpdateExtraction,
+  browserChoices,
   isActionBusy,
 }: {
   tier: Tier
@@ -1585,6 +1606,8 @@ function TierCard({
   onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
   onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
   onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
+  onUpdateExtraction?: (tier: Tier, endpoint: TierEndpoint, extractionId: string | null, scope: TierScope) => void
+  browserChoices?: llmApi.ProviderEndpoint[]
   isActionBusy: (key: string) => boolean
 }) {
   const [openReasoningFor, setOpenReasoningFor] = useState<string | null>(null)
@@ -1651,11 +1674,16 @@ function TierCard({
             const displayWeight = roundToDisplayUnit(unitWeight)
             const reasoningValue = endpoint.reasoningEffortOverride ?? ''
             const reasoningBusy = isActionBusy(actionKey('tier-endpoint', endpoint.id, 'reasoning')) || isActionBusy(actionKey('profile-tier-endpoint', endpoint.id, 'reasoning'))
+            const extractionBusy = isActionBusy(actionKey('tier-endpoint', endpoint.id, 'extraction')) || isActionBusy(actionKey('profile-tier-endpoint', endpoint.id, 'extraction'))
             const handleReasoningChange = (value: string) => {
               if (!onUpdateEndpointReasoning) return
               Promise.resolve(onUpdateEndpointReasoning(tier, endpoint, value || null, scope))
                 .finally(() => setOpenReasoningFor(null))
                 .catch(() => {})
+            }
+            const handleExtractionChange = (value: string | null) => {
+              if (!onUpdateExtraction) return
+              Promise.resolve(onUpdateExtraction(tier, endpoint, value, scope)).catch(() => {})
             }
             const effortOptions = reasoningEffortOptions.map((option, index) =>
               index === 0
@@ -1701,6 +1729,28 @@ function TierCard({
                     </button>
                   </div>
                 </div>
+                {scope === 'browser' && browserChoices ? (
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    <span className="rounded-full bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">Extraction</span>
+                    <select
+                      className="min-w-[180px] rounded-lg border-slate-300 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      value={endpoint.extractionEndpointId || ''}
+                      onChange={(event) => handleExtractionChange(event.target.value || null)}
+                      disabled={extractionBusy}
+                    >
+                      <option value="">Use primary model</option>
+                      {browserChoices.map((choice) => (
+                        <option key={choice.id} value={choice.id}>
+                          {choice.label || choice.model}
+                        </option>
+                      ))}
+                    </select>
+                    {extractionBusy ? <Loader2 className="size-4 animate-spin text-blue-500" /> : null}
+                    <span className="text-slate-500">
+                      {endpoint.extractionLabel ? `Using ${endpoint.extractionLabel}` : 'Fallbacks to primary if unset'}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="grid grid-cols-12 items-center gap-3">
                   <div className="col-span-12 md:col-span-7">
                     <input
@@ -2512,6 +2562,17 @@ export function LlmConfigScreen() {
     })
   }
 
+  const handleTierEndpointExtraction = (tier: Tier, endpoint: TierEndpoint, extractionId: string | null, scope: TierScope) => {
+    if (scope !== 'browser') return
+    const payload: Record<string, unknown> = { extraction_endpoint_id: extractionId || null }
+    const busyKey = actionKey('tier-endpoint', endpoint.id, 'extraction')
+    return runMutation(() => llmApi.updateBrowserTierEndpoint(endpoint.id, payload), {
+      label: 'Saving extraction…',
+      busyKey,
+      context: tier.name,
+    })
+  }
+
   const handleBrowserTierAdd = (isPremium: boolean) =>
     runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
       successMessage: 'Browser tier added',
@@ -2572,18 +2633,26 @@ export function LlmConfigScreen() {
         scope={scope}
         choices={endpointChoices}
         busy={isBusy(actionKey(selectedProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
-        onAdd={(endpointId) => (selectedProfile ? submitProfileTierEndpoint(tier, scope, endpointId) : submitTierEndpoint(tier, scope, endpointId))}
+        onAdd={(selection) => (selectedProfile ? submitProfileTierEndpoint(tier, scope, selection) : submitTierEndpoint(tier, scope, selection))}
         onClose={onClose}
       />,
       document.body,
     ))
   }
 
-  const submitTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
+  const submitTierEndpoint = async (
+    tier: Tier,
+    scope: TierScope,
+    selection: { endpointId: string; extractionEndpointId?: string | null },
+  ) => {
+    const { endpointId, extractionEndpointId } = selection
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const requestPayload = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      const requestPayload: Record<string, unknown> = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
+        requestPayload.extraction_endpoint_id = extractionEndpointId || null
+      }
       let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
         response = await llmApi.addBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
@@ -3096,12 +3165,20 @@ export function LlmConfigScreen() {
     })
   }
 
-  const submitProfileTierEndpoint = async (tier: Tier, scope: TierScope, endpointId: string) => {
-    if (!selectedProfile) return submitTierEndpoint(tier, scope, endpointId)
+  const submitProfileTierEndpoint = async (
+    tier: Tier,
+    scope: TierScope,
+    selection: { endpointId: string; extractionEndpointId?: string | null },
+  ) => {
+    if (!selectedProfile) return submitTierEndpoint(tier, scope, selection)
+    const { endpointId, extractionEndpointId } = selection
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const requestPayload = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      const requestPayload: Record<string, unknown> = { endpoint_id: endpointId, weight: encodeServerWeight(initialUnit) }
+      if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
+        requestPayload.extraction_endpoint_id = extractionEndpointId || null
+      }
       let response: { tier_endpoint_id?: string } = {}
       if (scope === 'browser') {
         response = await llmApi.addProfileBrowserTierEndpoint(tier.id, requestPayload) as { tier_endpoint_id?: string }
@@ -3163,6 +3240,23 @@ export function LlmConfigScreen() {
       })
       throw error
     }
+  }
+
+  const handleProfileTierEndpointExtraction = (tier: Tier, endpoint: TierEndpoint, extractionId: string | null, scope: TierScope) => {
+    if (!selectedProfile || scope !== 'browser') return handleTierEndpointExtraction(tier, endpoint, extractionId, scope)
+    const payload: Record<string, unknown> = { extraction_endpoint_id: extractionId || null }
+    const busyKey = actionKey('profile-tier-endpoint', endpoint.id, 'extraction')
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateProfileBrowserTierEndpoint(endpoint.id, payload)
+        await invalidateProfileDetail()
+      },
+      {
+        label: 'Saving extraction…',
+        busyKey,
+        context: tier.name,
+      },
+    )
   }
 
   const statsCards = [
@@ -3426,6 +3520,12 @@ export function LlmConfigScreen() {
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                   onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
                   onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
+                  onUpdateExtraction={(currentTier, endpoint, extractionId) =>
+                    selectedProfile
+                      ? handleProfileTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
+                      : handleTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
+                  }
+                  browserChoices={endpointChoices.browser_endpoints}
                   isActionBusy={isBusy}
                 />
                 )
@@ -3457,6 +3557,12 @@ export function LlmConfigScreen() {
                   onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
                   onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
                   onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
+                  onUpdateExtraction={(currentTier, endpoint, extractionId) =>
+                    selectedProfile
+                      ? handleProfileTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
+                      : handleTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
+                  }
+                  browserChoices={endpointChoices.browser_endpoints}
                   isActionBusy={isBusy}
                 />
                 )
