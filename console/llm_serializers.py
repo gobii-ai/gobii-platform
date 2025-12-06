@@ -214,11 +214,14 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch(
                 "tiers",
                 queryset=BrowserLLMTier.objects.order_by("is_premium", "order").prefetch_related(
-                    Prefetch(
-                        "tier_endpoints",
-                        queryset=BrowserTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__browser_model"),
-                    )
-                ),
+            Prefetch(
+                "tier_endpoints",
+                queryset=BrowserTierEndpoint.objects.select_related(
+                    "endpoint__provider",
+                    "extraction_endpoint__provider",
+                ).order_by("endpoint__browser_model"),
+            )
+        ),
             )
         )
         .first()
@@ -231,6 +234,7 @@ def build_llm_overview() -> dict[str, Any]:
             tier_endpoints = []
             for te in tier.tier_endpoints.all():
                 endpoint = te.endpoint
+                extraction = te.extraction_endpoint
                 tier_endpoints.append(
                     {
                         "id": str(te.id),
@@ -238,6 +242,13 @@ def build_llm_overview() -> dict[str, Any]:
                         "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
                         "weight": float(te.weight),
                         "endpoint_key": endpoint.key,
+                        "extraction_endpoint_id": str(extraction.id) if extraction else None,
+                        "extraction_endpoint_key": extraction.key if extraction else None,
+                        "extraction_label": (
+                            f"{extraction.provider.display_name} · {extraction.browser_model}"
+                            if extraction
+                            else None
+                        ),
                     }
                 )
             tiers_payload.append(
@@ -373,12 +384,20 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         tier_endpoints = []
         for te in tier.tier_endpoints.all():
             endpoint = te.endpoint
+            extraction = te.extraction_endpoint
             tier_endpoints.append({
                 "id": str(te.id),
                 "endpoint_id": str(endpoint.id),
                 "label": f"{endpoint.provider.display_name} · {endpoint.browser_model}",
                 "weight": float(te.weight),
                 "endpoint_key": endpoint.key,
+                "extraction_endpoint_id": str(extraction.id) if extraction else None,
+                "extraction_endpoint_key": extraction.key if extraction else None,
+                "extraction_label": (
+                    f"{extraction.provider.display_name} · {extraction.browser_model}"
+                    if extraction
+                    else None
+                ),
             })
         browser_tiers.append({
             "id": str(tier.id),
@@ -468,7 +487,10 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
     # Prefetch for browser: browser_tiers -> tier_endpoints -> endpoint.provider
     browser_tier_endpoint_prefetch = Prefetch(
         "tier_endpoints",
-        queryset=ProfileBrowserTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__browser_model"),
+        queryset=ProfileBrowserTierEndpoint.objects.select_related(
+            "endpoint__provider",
+            "extraction_endpoint__provider",
+        ).order_by("endpoint__browser_model"),
     )
     browser_tier_prefetch = Prefetch(
         "browser_tiers",

@@ -2082,6 +2082,14 @@ class BrowserTierEndpoint(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     tier = models.ForeignKey(BrowserLLMTier, on_delete=models.CASCADE, related_name="tier_endpoints")
     endpoint = models.ForeignKey(BrowserModelEndpoint, on_delete=models.CASCADE, related_name="in_tiers")
+    extraction_endpoint = models.ForeignKey(
+        BrowserModelEndpoint,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="as_extraction_in_tiers",
+        help_text="Optional paired endpoint used for page extraction LLM calls.",
+    )
     weight = models.FloatField(help_text="Relative weight within the tier; > 0")
     is_premium = models.BooleanField(
         default=False,
@@ -2370,6 +2378,14 @@ class ProfileBrowserTierEndpoint(models.Model):
         BrowserModelEndpoint,
         on_delete=models.CASCADE,
         related_name="in_profile_tiers",
+    )
+    extraction_endpoint = models.ForeignKey(
+        BrowserModelEndpoint,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="as_extraction_in_profile_tiers",
+        help_text="Optional paired endpoint used for page extraction LLM calls.",
     )
     weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
     is_premium = models.BooleanField(

@@ -50,6 +50,9 @@ export type TierEndpoint = {
   reasoning_effort_override?: string | null
   supports_reasoning?: boolean
   endpoint_reasoning_effort?: string | null
+   extraction_endpoint_id?: string | null
+   extraction_endpoint_key?: string | null
+   extraction_label?: string | null
 }
 
 export type PersistentTier = {
@@ -204,7 +207,10 @@ export function deleteBrowserTier(tierId: string) {
   return jsonRequest(`${base}/browser/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function addBrowserTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+export function addBrowserTierEndpoint(
+  tierId: string,
+  payload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null },
+) {
   return jsonRequest(`${base}/browser/tiers/${tierId}/endpoints/`, withCsrf(payload))
 }
 
@@ -421,7 +427,10 @@ export function deleteProfileBrowserTier(tierId: string) {
   return jsonRequest(`${profileBase}/browser-tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function addProfileBrowserTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+export function addProfileBrowserTierEndpoint(
+  tierId: string,
+  payload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null },
+) {
   return jsonRequest(`${profileBase}/browser-tiers/${tierId}/endpoints/`, withCsrf(payload))
 }
 

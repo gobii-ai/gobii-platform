@@ -382,7 +382,10 @@ def _resolve_browser_from_profile(
             tiers: list[list[dict[str, Any]]] = []
             for tier in ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium).order_by('order'):
                 entries = []
-                for te in ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
+                for te in ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related(
+                    'endpoint__provider',
+                    'extraction_endpoint__provider',
+                ).all():
                     endpoint = te.endpoint
                     provider = endpoint.provider
                     if not (provider.enabled and endpoint.enabled):
@@ -411,6 +414,40 @@ def _resolve_browser_from_profile(
                     if not raw_model:
                         continue
 
+                    extraction_payload = None
+                    extraction_endpoint = getattr(te, "extraction_endpoint", None)
+                    if extraction_endpoint:
+                        extraction_provider = extraction_endpoint.provider
+                        if extraction_provider and extraction_provider.enabled and extraction_endpoint.enabled:
+                            extraction_api_key = None
+                            has_admin_key = bool(extraction_provider.api_key_encrypted)
+                            has_env_key = bool(extraction_provider.env_var_name and os.getenv(extraction_provider.env_var_name))
+                            if has_admin_key:
+                                try:
+                                    from api.encryption import SecretsEncryption
+                                    extraction_api_key = SecretsEncryption.decrypt_value(extraction_provider.api_key_encrypted)
+                                except Exception:
+                                    extraction_api_key = None
+                            if extraction_api_key is None and has_env_key:
+                                extraction_api_key = os.getenv(extraction_provider.env_var_name)
+                            if not extraction_api_key and extraction_provider.browser_backend == 'OPENAI_COMPAT' and extraction_endpoint.browser_base_url:
+                                extraction_api_key = 'sk-noauth'
+                            raw_extraction_model = (extraction_endpoint.browser_model or "").strip()
+                            extraction_base_url = extraction_endpoint.browser_base_url or ""
+                            if extraction_provider.key == "openrouter" and not extraction_base_url:
+                                extraction_base_url = DEFAULT_API_BASE
+                            if extraction_api_key and raw_extraction_model:
+                                extraction_payload = {
+                                    'provider_key': extraction_provider.key,
+                                    'endpoint_key': extraction_endpoint.key,
+                                    'browser_model': raw_extraction_model,
+                                    'base_url': extraction_base_url,
+                                    'backend': extraction_provider.browser_backend,
+                                    'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
+                                    'max_output_tokens': extraction_endpoint.max_output_tokens,
+                                    'api_key': extraction_api_key,
+                                }
+
                     entries.append({
                         'provider_key': provider.key,
                         'endpoint_key': endpoint.key,
@@ -423,6 +460,7 @@ def _resolve_browser_from_profile(
                         'api_key': api_key,
                         'has_key': True,
                         'is_premium': is_premium,
+                        'extraction': extraction_payload,
                     })
                 if entries:
                     tiers.append(entries)
@@ -459,7 +497,10 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
             tiers: list[list[dict[str, Any]]] = []
             for tier in BrowserLLMTier.objects.filter(policy=active, is_premium=is_premium).order_by('order'):
                 entries = []
-                for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related('endpoint__provider').all():
+                for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related(
+                    'endpoint__provider',
+                    'extraction_endpoint__provider',
+                ).all():
                     endpoint = te.endpoint
                     provider = endpoint.provider
                     if not (provider.enabled and endpoint.enabled):
@@ -488,6 +529,40 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
                     if not raw_model:
                         continue
 
+                    extraction_payload = None
+                    extraction_endpoint = getattr(te, "extraction_endpoint", None)
+                    if extraction_endpoint:
+                        extraction_provider = extraction_endpoint.provider
+                        if extraction_provider and extraction_provider.enabled and extraction_endpoint.enabled:
+                            extraction_api_key = None
+                            has_admin_key = bool(extraction_provider.api_key_encrypted)
+                            has_env_key = bool(extraction_provider.env_var_name and os.getenv(extraction_provider.env_var_name))
+                            if has_admin_key:
+                                try:
+                                    from api.encryption import SecretsEncryption
+                                    extraction_api_key = SecretsEncryption.decrypt_value(extraction_provider.api_key_encrypted)
+                                except Exception:
+                                    extraction_api_key = None
+                            if extraction_api_key is None and has_env_key:
+                                extraction_api_key = os.getenv(extraction_provider.env_var_name)
+                            if not extraction_api_key and extraction_provider.browser_backend == 'OPENAI_COMPAT' and extraction_endpoint.browser_base_url:
+                                extraction_api_key = 'sk-noauth'
+                            raw_extraction_model = (extraction_endpoint.browser_model or "").strip()
+                            extraction_base_url = extraction_endpoint.browser_base_url or ""
+                            if extraction_provider.key == "openrouter" and not extraction_base_url:
+                                extraction_base_url = DEFAULT_API_BASE
+                            if extraction_api_key and raw_extraction_model:
+                                extraction_payload = {
+                                    'provider_key': extraction_provider.key,
+                                    'endpoint_key': extraction_endpoint.key,
+                                    'browser_model': raw_extraction_model,
+                                    'base_url': extraction_base_url,
+                                    'backend': extraction_provider.browser_backend,
+                                    'supports_vision': bool(getattr(extraction_endpoint, 'supports_vision', False)),
+                                    'max_output_tokens': extraction_endpoint.max_output_tokens,
+                                    'api_key': extraction_api_key,
+                                }
+
                     entries.append({
                         'provider_key': provider.key,
                         'endpoint_key': endpoint.key,
@@ -500,6 +575,7 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
                         'api_key': api_key,
                         'has_key': True,
                         'is_premium': is_premium,
+                        'extraction': extraction_payload,
                     })
                 if entries:
                     tiers.append(entries)
@@ -714,6 +790,13 @@ async def _run_agent(
     supports_vision: bool = True,
     is_eval: bool = False,
     max_steps_override: Optional[int] = None,
+    extraction_llm_api_key: Optional[str] = None,
+    extraction_model: Optional[str] = None,
+    extraction_base_url: Optional[str] = None,
+    extraction_backend: Optional[str] = None,
+    extraction_supports_vision: Optional[bool] = None,
+    extraction_max_output_tokens: Optional[int] = None,
+    extraction_provider_key: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -737,6 +820,7 @@ async def _run_agent(
         browser_session = None
         browser_ctx = None
         llm: Any = None
+        extraction_llm: Any = None
         playwright = None
         temp_profile_dir = tempfile.mkdtemp(prefix="bu_profile_")
 
@@ -951,6 +1035,37 @@ async def _run_agent(
                     llm_params["base_url"] = base_url
                 llm = ChatOpenAI(**llm_params)
 
+            # Optional, cheaper extraction LLM
+            extraction_backend_resolved = extraction_backend or backend
+            extraction_model_name = extraction_model
+            extraction_base = extraction_base_url
+            if extraction_backend_resolved == "OPENAI_COMPAT" and extraction_provider_key == "openrouter" and not extraction_base:
+                extraction_base = DEFAULT_API_BASE
+
+            if extraction_llm_api_key and extraction_model_name:
+                try:
+                    extraction_params = {"api_key": extraction_llm_api_key, "temperature": 0, "model": extraction_model_name}
+                    if extraction_max_output_tokens is not None:
+                        extraction_params["max_output_tokens"] = int(extraction_max_output_tokens)
+                    if extraction_backend_resolved == "GOOGLE":
+                        extraction_llm = ChatGoogle(**extraction_params)
+                    elif extraction_backend_resolved == "ANTHROPIC":
+                        extraction_llm = ChatAnthropic(**extraction_params)
+                    else:
+                        if extraction_provider_key == "openrouter":
+                            headers = get_attribution_headers()
+                            if headers:
+                                extraction_params["default_headers"] = headers
+                        if extraction_base:
+                            extraction_params["base_url"] = extraction_base
+                        extraction_llm = ChatOpenAI(**extraction_params)
+                    agent_span.set_attribute("llm.extraction.model", extraction_model_name)
+                    agent_span.set_attribute("llm.extraction.provider", extraction_provider_key or "")
+                    if extraction_supports_vision is not None:
+                        agent_span.set_attribute("llm.extraction.supports_vision", bool(extraction_supports_vision))
+                except Exception:
+                    logger.warning("Failed to initialize extraction LLM", exc_info=True)
+
             # Get current time with timezone for context
             current_time = timezone.now()
             current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S %Z")
@@ -1008,6 +1123,8 @@ async def _run_agent(
                 "use_vision": bool(supports_vision),
             }
 
+            if extraction_llm:
+                agent_kwargs["page_extraction_llm"] = extraction_llm
             if controller:
                 agent_kwargs["controller"] = controller
             if sensitive_data:
@@ -1255,6 +1372,8 @@ async def _run_agent(
 
             if llm is not None and getattr(llm, "async_client", None):
                 await _safe_aclose(llm.async_client)  # type: ignore[arg-type]
+            if extraction_llm is not None and getattr(extraction_llm, "async_client", None):
+                await _safe_aclose(extraction_llm.async_client)  # type: ignore[arg-type]
             try:
                 _robust_rmtree(temp_profile_dir)
             except Exception as cleanup_exc:  # noqa: BLE001
@@ -1317,25 +1436,13 @@ def _execute_agent_with_failover(
     for tier_idx, tier in enumerate(provider_priority, start=1):
         # Two paths: DB-endpoint dicts or legacy provider strings
         if tier and isinstance(tier[0], dict):
-            entries = [
-                (
-                    e['endpoint_key'],
-                    e['provider_key'],
-                    e['weight'],
-                    e['browser_model'],
-                    e.get('base_url') or '',
-                    e.get('backend'),
-                    e.get('supports_vision'),
-                    e.get('max_output_tokens'),
-                )
-                for e in tier
-            ]  # type: ignore[index]
+            entries = list(tier)  # type: ignore[arg-type]
             if not entries:
                 continue
             remaining = entries.copy()
             order = []
             while remaining:
-                weights = [r[2] for r in remaining]
+                weights = [float(r.get("weight", 1.0)) for r in remaining]
                 idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
                 order.append(remaining.pop(idx))
             attempts = order
@@ -1385,24 +1492,35 @@ def _execute_agent_with_failover(
                 ))
                 remaining_providers = [p for p in remaining_providers if p[0] != selected_provider]
 
-        for (
-            endpoint_key,
-            provider_key,
-            _w,
-            browser_model,
-            base_url,
-            backend,
-            supports_vision,
-            max_output_tokens,
-        ) in attempts:
+        for attempt in attempts:
+            if isinstance(attempt, dict):
+                endpoint_key = attempt.get("endpoint_key")
+                provider_key = attempt.get("provider_key")
+                browser_model = attempt.get("browser_model")
+                base_url = attempt.get("base_url")
+                backend = attempt.get("backend")
+                supports_vision = attempt.get("supports_vision")
+                max_output_tokens = attempt.get("max_output_tokens")
+                extraction_cfg = attempt.get("extraction") or None
+            else:
+                (
+                    endpoint_key,
+                    provider_key,
+                    _w,
+                    browser_model,
+                    base_url,
+                    backend,
+                    supports_vision,
+                    max_output_tokens,
+                    extraction_cfg,
+                ) = (
+                    attempt + (None,) if len(attempt) == 8 else attempt
+                )
             # Resolve API key
             llm_api_key = None
             if isinstance(tier[0], dict):
-                # DB path: retrieve api_key from dict list by matching endpoint_key
-                for entry in tier:
-                    if entry.get('endpoint_key') == endpoint_key:
-                        llm_api_key = entry.get('api_key')
-                        break
+                # DB path: lookup api_key on the selected attempt
+                llm_api_key = attempt.get('api_key') if isinstance(attempt, dict) else None
             else:
                 env_var = PROVIDER_CONFIG.get(provider_key, {}).get("env_var")
                 llm_api_key = os.getenv(env_var) if env_var else None
@@ -1420,6 +1538,21 @@ def _execute_agent_with_failover(
                 if supports_vision is not None
                 else DEFAULT_PROVIDER_VISION_SUPPORT.get(provider_key, False)
             )
+            extraction_api_key = None
+            extraction_model = None
+            extraction_base_url = None
+            extraction_backend = None
+            extraction_supports_vision = None
+            extraction_max_output_tokens = None
+            extraction_provider = None
+            if isinstance(extraction_cfg, dict):
+                extraction_api_key = extraction_cfg.get("api_key")
+                extraction_model = extraction_cfg.get("browser_model")
+                extraction_base_url = extraction_cfg.get("base_url")
+                extraction_backend = extraction_cfg.get("backend")
+                extraction_supports_vision = extraction_cfg.get("supports_vision")
+                extraction_max_output_tokens = extraction_cfg.get("max_output_tokens")
+                extraction_provider = extraction_cfg.get("provider_key")
 
             try:
                 result, token_usage = asyncio.run(
@@ -1441,6 +1574,13 @@ def _execute_agent_with_failover(
                         override_max_output_tokens=max_output_tokens,
                         is_eval=is_eval,
                         max_steps_override=max_steps,
+                        extraction_llm_api_key=extraction_api_key,
+                        extraction_model=extraction_model,
+                        extraction_base_url=extraction_base_url,
+                        extraction_backend=extraction_backend,
+                        extraction_supports_vision=extraction_supports_vision,
+                        extraction_max_output_tokens=extraction_max_output_tokens,
+                        extraction_provider_key=extraction_provider,
                     )
                 )
 

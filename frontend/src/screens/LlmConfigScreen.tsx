@@ -65,6 +65,9 @@ type TierEndpoint = {
   supportsReasoning?: boolean
   reasoningEffortOverride?: string | null
   endpointReasoningEffort?: string | null
+  extractionEndpointId?: string | null
+  extractionEndpointKey?: string | null
+  extractionLabel?: string | null
 }
 
 type Tier = {
@@ -529,6 +532,9 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
         endpointId: endpoint.endpoint_id,
         label: endpoint.label,
         weight: normalized[endpoint.id] ?? 0,
+        extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
+        extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
+        extractionLabel: endpoint.extraction_label ?? null,
       })),
     }
   })
@@ -572,6 +578,9 @@ function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Ti
         endpointId: endpoint.endpoint_id,
         label: endpoint.label,
         weight: normalized[endpoint.id] ?? 0,
+        extractionEndpointId: endpoint.extraction_endpoint_id ?? null,
+        extractionEndpointKey: endpoint.extraction_endpoint_key ?? null,
+        extractionLabel: endpoint.extraction_label ?? null,
       })),
     }
   })
