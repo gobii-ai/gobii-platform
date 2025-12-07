@@ -3,6 +3,7 @@ from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from typing import Optional, Tuple
 
 import ulid
+from django.apps import apps
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
@@ -2621,6 +2622,90 @@ class UserBilling(models.Model):
         verbose_name_plural = "User Billing"
 
 
+class AddonEntitlementQuerySet(models.QuerySet):
+    def for_owner(self, owner):
+        if owner is None:
+            return self.none()
+
+        Organization = apps.get_model("api", "Organization")
+        if isinstance(owner, Organization):
+            return self.filter(organization=owner)
+
+        return self.filter(user=owner)
+
+    def active(self, at_time=None):
+        if at_time is None:
+            at_time = timezone.now()
+
+        return self.filter(
+            models.Q(starts_at__lte=at_time) | models.Q(starts_at__isnull=True),
+            models.Q(expires_at__gt=at_time) | models.Q(expires_at__isnull=True),
+        )
+
+
+class AddonEntitlement(models.Model):
+    """Purchased add-ons that uplift task credits or contact caps."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="addon_entitlements",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        "api.Organization",
+        on_delete=models.CASCADE,
+        related_name="addon_entitlements",
+        null=True,
+        blank=True,
+    )
+    product_id = models.CharField(max_length=255, blank=True, default="")
+    price_id = models.CharField(max_length=255)
+    quantity = models.PositiveIntegerField(default=1)
+    task_credits_delta = models.IntegerField(
+        default=0,
+        help_text="Per-unit additional task credits granted for the billing cycle.",
+    )
+    contact_cap_delta = models.PositiveIntegerField(
+        default=0,
+        help_text="Per-unit increase to max contacts per agent.",
+    )
+    starts_at = models.DateTimeField(default=timezone.now)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    is_recurring = models.BooleanField(default=False)
+    created_via = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    objects = AddonEntitlementQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "Add-on entitlement"
+        verbose_name_plural = "Add-on entitlements"
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    (
+                        (models.Q(user__isnull=False) & models.Q(organization__isnull=True))
+                        | (models.Q(user__isnull=True) & models.Q(organization__isnull=False))
+                    )
+                ),
+                name="addon_entitlement_owner_present",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        target = self.organization or self.user
+        return f"AddonEntitlement<{target}> x{self.quantity}"
+
+    @property
+    def owner(self):
+        return self.organization or self.user
+
+
 class UserAttribution(models.Model):
     """Persist first/last touch attribution details for a user."""
 
@@ -2969,6 +3054,22 @@ class StripeConfig(models.Model):
         self.set_value("startup_additional_task_price_id", value)
 
     @property
+    def startup_contact_cap_product_id(self) -> str:
+        return self.get_value("startup_contact_cap_product_id")
+
+    @startup_contact_cap_product_id.setter
+    def startup_contact_cap_product_id(self, value: str | None) -> None:
+        self.set_value("startup_contact_cap_product_id", value)
+
+    @property
+    def startup_contact_cap_price_id(self) -> str:
+        return self.get_value("startup_contact_cap_price_id")
+
+    @startup_contact_cap_price_id.setter
+    def startup_contact_cap_price_id(self, value: str | None) -> None:
+        self.set_value("startup_contact_cap_price_id", value)
+
+    @property
     def startup_product_id(self) -> str:
         return self.get_value("startup_product_id")
 
@@ -2991,6 +3092,22 @@ class StripeConfig(models.Model):
     @scale_additional_task_price_id.setter
     def scale_additional_task_price_id(self, value: str | None) -> None:
         self.set_value("scale_additional_task_price_id", value)
+
+    @property
+    def scale_contact_cap_product_id(self) -> str:
+        return self.get_value("scale_contact_cap_product_id")
+
+    @scale_contact_cap_product_id.setter
+    def scale_contact_cap_product_id(self, value: str | None) -> None:
+        self.set_value("scale_contact_cap_product_id", value)
+
+    @property
+    def scale_contact_cap_price_id(self) -> str:
+        return self.get_value("scale_contact_cap_price_id")
+
+    @scale_contact_cap_price_id.setter
+    def scale_contact_cap_price_id(self, value: str | None) -> None:
+        self.set_value("scale_contact_cap_price_id", value)
 
     @property
     def scale_product_id(self) -> str:
@@ -3023,6 +3140,22 @@ class StripeConfig(models.Model):
     @org_team_additional_task_price_id.setter
     def org_team_additional_task_price_id(self, value: str | None) -> None:
         self.set_value("org_team_additional_task_price_id", value)
+
+    @property
+    def org_team_contact_cap_product_id(self) -> str:
+        return self.get_value("org_team_contact_cap_product_id")
+
+    @org_team_contact_cap_product_id.setter
+    def org_team_contact_cap_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_contact_cap_product_id", value)
+
+    @property
+    def org_team_contact_cap_price_id(self) -> str:
+        return self.get_value("org_team_contact_cap_price_id")
+
+    @org_team_contact_cap_price_id.setter
+    def org_team_contact_cap_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_contact_cap_price_id", value)
 
     @property
     def startup_dedicated_ip_product_id(self) -> str:

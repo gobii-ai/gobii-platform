@@ -26,13 +26,19 @@ class StripeSettings:
     webhook_secret: Optional[str]
     startup_price_id: str
     startup_additional_task_price_id: str
+    startup_contact_cap_product_id: str
+    startup_contact_cap_price_id: str
     startup_product_id: str
     scale_price_id: str
     scale_additional_task_price_id: str
+    scale_contact_cap_product_id: str
+    scale_contact_cap_price_id: str
     scale_product_id: str
     org_team_product_id: str
     org_team_price_id: str
     org_team_additional_task_price_id: str
+    org_team_contact_cap_product_id: str
+    org_team_contact_cap_price_id: str
     startup_dedicated_ip_product_id: str
     startup_dedicated_ip_price_id: str
     scale_dedicated_ip_product_id: str
@@ -55,9 +61,13 @@ def _env_defaults() -> StripeSettings:
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
+        startup_contact_cap_product_id=env("STRIPE_STARTUP_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_startup_contact_cap"),
+        startup_contact_cap_price_id=env("STRIPE_STARTUP_CONTACT_CAP_PRICE_ID", default="price_dummy_startup_contact_cap"),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
         scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
         scale_additional_task_price_id=env("STRIPE_SCALE_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_scale_additional_task"),
+        scale_contact_cap_product_id=env("STRIPE_SCALE_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_scale_contact_cap"),
+        scale_contact_cap_price_id=env("STRIPE_SCALE_CONTACT_CAP_PRICE_ID", default="price_dummy_scale_contact_cap"),
         scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
         startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
         startup_dedicated_ip_price_id=env("STRIPE_STARTUP_DEDICATED_IP_PRICE_ID", default="price_dummy_startup_dedicated_ip"),
@@ -66,6 +76,8 @@ def _env_defaults() -> StripeSettings:
         org_team_product_id=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team"),
         org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
+        org_team_contact_cap_product_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_org_team_contact_cap"),
+        org_team_contact_cap_price_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRICE_ID", default="price_dummy_org_team_contact_cap"),
         org_team_dedicated_ip_product_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_org_dedicated_ip"),
         org_team_dedicated_ip_price_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRICE_ID", default="price_dummy_org_dedicated_ip"),
         task_meter_id=env("STRIPE_TASK_METER_ID", default="meter_dummy_task"),
@@ -108,6 +120,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_price = config.org_team_additional_task_price_id or ""
     except Exception:
         org_team_additional_price = ""
+    try:
+        org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
+        org_team_contact_cap_price_id = config.org_team_contact_cap_price_id or ""
+    except Exception:
+        org_team_contact_cap_product_id = ""
+        org_team_contact_cap_price_id = ""
 
     return replace(
         env_defaults,
@@ -116,9 +134,13 @@ def _load_from_database() -> Optional[StripeSettings]:
         webhook_secret=webhook_secret,
         startup_price_id=config.startup_price_id or "",
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
+        startup_contact_cap_product_id=config.startup_contact_cap_product_id or "",
+        startup_contact_cap_price_id=config.startup_contact_cap_price_id or "",
         startup_product_id=config.startup_product_id or "",
         scale_price_id=config.scale_price_id or "",
         scale_additional_task_price_id=config.scale_additional_task_price_id or "",
+        scale_contact_cap_product_id=config.scale_contact_cap_product_id or "",
+        scale_contact_cap_price_id=config.scale_contact_cap_price_id or "",
         scale_product_id=config.scale_product_id or "",
         startup_dedicated_ip_product_id=config.startup_dedicated_ip_product_id or "",
         startup_dedicated_ip_price_id=config.startup_dedicated_ip_price_id or "",
@@ -127,6 +149,8 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_product_id=config.org_team_product_id or "",
         org_team_price_id=config.org_team_price_id or "",
         org_team_additional_task_price_id=org_team_additional_price,
+        org_team_contact_cap_product_id=org_team_contact_cap_product_id,
+        org_team_contact_cap_price_id=org_team_contact_cap_price_id,
         org_team_dedicated_ip_product_id=config.org_team_dedicated_ip_product_id or "",
         org_team_dedicated_ip_price_id=config.org_team_dedicated_ip_price_id or "",
         task_meter_id=config.task_meter_id or "",

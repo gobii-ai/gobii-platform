@@ -32,7 +32,7 @@ from .models import (
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
-    StripeConfig, ToolConfig,
+    StripeConfig, ToolConfig, AddonEntitlement,
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
@@ -146,11 +146,15 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_price_id",
                     "startup_additional_task_price_id",
                     "startup_product_id",
+                    "startup_contact_cap_product_id",
+                    "startup_contact_cap_price_id",
                     "startup_dedicated_ip_price_id",
                     "startup_dedicated_ip_product_id",
                     "scale_price_id",
                     "scale_additional_task_price_id",
                     "scale_product_id",
+                    "scale_contact_cap_product_id",
+                    "scale_contact_cap_price_id",
                     "scale_dedicated_ip_product_id",
                     "scale_dedicated_ip_price_id",
                 )
@@ -165,6 +169,8 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "org_team_dedicated_ip_price_id",
                     "org_team_dedicated_ip_product_id",
                     "org_team_additional_task_price_id",
+                    "org_team_contact_cap_product_id",
+                    "org_team_contact_cap_price_id",
                 )
             },
         ),
@@ -195,6 +201,45 @@ class StripeConfigAdmin(admin.ModelAdmin):
         return "Configured" if obj.has_value("webhook_secret") else "Not set"
 
     webhook_secret_status.short_description = "Webhook secret"
+
+
+@admin.register(AddonEntitlement)
+class AddonEntitlementAdmin(admin.ModelAdmin):
+    list_display = (
+        "owner_display",
+        "price_id",
+        "quantity",
+        "task_credits_delta",
+        "contact_cap_delta",
+        "starts_at",
+        "expires_at",
+        "is_recurring",
+        "created_at",
+    )
+    search_fields = ("price_id", "product_id", "user__email", "organization__name")
+    list_filter = ("is_recurring",)
+    readonly_fields = ("created_at", "updated_at")
+    fields = (
+        "user",
+        "organization",
+        "product_id",
+        "price_id",
+        "quantity",
+        "task_credits_delta",
+        "contact_cap_delta",
+        "starts_at",
+        "expires_at",
+        "is_recurring",
+        "created_via",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.display(description="Owner")
+    def owner_display(self, obj):
+        if obj.organization_id:
+            return obj.organization
+        return obj.user
 
 
 @admin.register(AgentColor)

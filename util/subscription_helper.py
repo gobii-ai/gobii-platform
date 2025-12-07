@@ -25,6 +25,7 @@ from util.integrations import stripe_status, IntegrationDisabledError
 from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
+from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 
 try:
@@ -1290,6 +1291,8 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
     """
     default_limit = PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
 
+    addon_uplift = AddonEntitlementService.get_contact_cap_uplift(organization or user)
+
     if organization is not None:
         plan = get_organization_plan(organization)
         if not plan:
@@ -1297,12 +1300,14 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
                 "get_user_max_contacts_per_agent org %s: No plan found, defaulting to free plan",
                 getattr(organization, 'id', 'n/a'),
             )
-            return default_limit
+            return default_limit + addon_uplift
 
         try:
-            return int(plan.get("max_contacts_per_agent", default_limit))
+            base_limit = int(plan.get("max_contacts_per_agent", default_limit))
         except (ValueError, TypeError):
-            return default_limit
+            base_limit = default_limit
+
+        return base_limit + addon_uplift
 
     # Check for per-user override stored on billing
     try:
@@ -1346,9 +1351,11 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             "get_user_max_contacts_per_agent %s: No plan found, defaulting to free plan",
             getattr(user, 'id', 'n/a')
         )
-        return default_limit
+        return default_limit + addon_uplift
 
     try:
-        return int(plan.get("max_contacts_per_agent", default_limit))
+        base_limit = int(plan.get("max_contacts_per_agent", default_limit))
     except (ValueError, TypeError):
-        return default_limit
+        base_limit = default_limit
+
+    return base_limit + addon_uplift
