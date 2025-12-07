@@ -885,34 +885,24 @@ def _build_contacts_block(
     def _get_message_contact_info(
         message: PersistentAgentMessage,
     ) -> tuple[str, str, str] | None:
-        if message.is_outbound:
-            channel = (
-                message.to_endpoint.channel
-                if message.to_endpoint
-                else message.from_endpoint.channel
-                if message.from_endpoint
-                else None
-            )
-            counterpart = message.to_endpoint.address if message.to_endpoint else None
-            direction_label = "outbound to"
-        else:
-            channel = (
-                message.from_endpoint.channel
-                if message.from_endpoint
-                else message.to_endpoint.channel
-                if message.to_endpoint
-                else None
-            )
-            counterpart = message.from_endpoint.address if message.from_endpoint else None
-            direction_label = "inbound from"
+        direction_label = "outbound to" if message.is_outbound else "inbound from"
+        primary_ep = message.to_endpoint if message.is_outbound else message.from_endpoint
+        fallback_ep = message.from_endpoint if message.is_outbound else message.to_endpoint
 
+        channel = (
+            primary_ep.channel
+            if primary_ep
+            else fallback_ep.channel
+            if fallback_ep
+            else None
+        )
         if not channel:
             return None
-        if not counterpart:
-            if channel == CommsChannel.WEB and message.is_outbound:
-                counterpart = getattr(message.conversation, "address", None)
-        if not counterpart:
-            if channel == CommsChannel.WEB and message.is_outbound:
+
+        counterpart = primary_ep.address if primary_ep else None
+        if not counterpart and channel == CommsChannel.WEB and message.is_outbound:
+            counterpart = getattr(message.conversation, "address", None)
+            if not counterpart:
                 counterpart = "unknown web chat user"
         if not counterpart:
             counterpart = "unknown contact"
