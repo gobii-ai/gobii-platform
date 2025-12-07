@@ -210,10 +210,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                               link: str) -> bool:
     """Send a daily credit limit notice back to the inbound sender."""
 
-    message = (
+    message_text = (
         f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
         f"You can increase or remove the limit here: {link}"
     )
+    email_context = {"agent": agent, "link": link}
 
     try:
         if channel == CommsChannel.EMAIL:
@@ -224,11 +225,14 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 return False
 
             subject = f"{agent.name} hit today's task limit"
+            text_body = render_to_string("emails/agent_daily_credit_notice.txt", email_context)
+            html_body = render_to_string("emails/agent_daily_credit_notice.html", email_context)
             send_mail(
                 subject,
-                message,
+                text_body,
                 None,
                 [recipient],
+                html_message=html_body,
                 fail_silently=True,
             )
             return True
@@ -249,7 +253,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 from_endpoint=from_endpoint,
                 to_endpoint=sender_endpoint,
                 is_outbound=True,
-                body=message,
+                body=message_text,
                 raw_payload={"kind": "daily_credit_limit_notice"},
             )
             deliver_agent_sms(outbound)
@@ -287,7 +291,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 from_endpoint=agent_endpoint,
                 conversation=conv,
                 is_outbound=True,
-                body=message,
+                body=message_text,
                 raw_payload={"source": "daily_credit_limit_notice"},
             )
 

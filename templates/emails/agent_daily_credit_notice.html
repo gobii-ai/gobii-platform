@@ -1,0 +1,20 @@
+{% load static %}
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ agent.name }} task limit reached</title>
+</head>
+<body style="font-family: Arial, sans-serif; color: #0f172a; background-color: #ffffff; line-height: 1.6; padding: 24px;">
+  <div style="max-width: 520px; margin: 0 auto;">
+    <h2 style="margin: 0 0 12px; font-size: 20px; color: #111827;">{{ agent.name }} hit today's task limit</h2>
+    <p style="margin: 0 0 12px;">
+      {{ agent.name }} has already used today's task allowance and can't reply right now.
+    </p>
+    <p style="margin: 0 0 20px;">
+      You can increase or remove the limit here:
+      <a href="{{ link }}" style="color: #2563eb; text-decoration: none;">Manage limit</a>
+    </p>
+  </div>
+</body>
+</html>

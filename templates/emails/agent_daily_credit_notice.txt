@@ -1,0 +1,5 @@
+Hi there,
+
+{{ agent.name }} has already used today's task allowance and can't reply right now.
+
+You can increase or remove the limit here: {{ link }}
