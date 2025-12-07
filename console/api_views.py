@@ -1582,6 +1582,10 @@ class BrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
 
         endpoint = get_object_or_404(BrowserModelEndpoint, pk=payload.get("endpoint_id"))
+        extraction_endpoint = None
+        extraction_endpoint_id = payload.get("extraction_endpoint_id")
+        if extraction_endpoint_id:
+            extraction_endpoint = get_object_or_404(BrowserModelEndpoint, pk=extraction_endpoint_id)
         if tier.tier_endpoints.filter(endpoint=endpoint).exists():
             return HttpResponseBadRequest("Endpoint already exists in tier")
         try:
@@ -1590,7 +1594,12 @@ class BrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("weight must be numeric")
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
-        te = BrowserTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        te = BrowserTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            extraction_endpoint=extraction_endpoint,
+            weight=weight,
+        )
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -1611,6 +1620,12 @@ class BrowserTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             tier_endpoint.weight = weight
+        if "extraction_endpoint_id" in payload:
+            extraction_endpoint_id = payload.get("extraction_endpoint_id")
+            extraction_endpoint = None
+            if extraction_endpoint_id:
+                extraction_endpoint = get_object_or_404(BrowserModelEndpoint, pk=extraction_endpoint_id)
+            tier_endpoint.extraction_endpoint = extraction_endpoint
         tier_endpoint.save()
         return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
 
@@ -2257,12 +2272,21 @@ class ProfileBrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
         from api.models import ProfileBrowserTier, ProfileBrowserTierEndpoint
         tier = get_object_or_404(ProfileBrowserTier, pk=tier_id)
-        endpoints = ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related("endpoint__provider")
+        endpoints = ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related(
+            "endpoint__provider",
+            "extraction_endpoint__provider",
+        )
         payload = [{
             "id": str(te.id),
             "endpoint_id": str(te.endpoint_id),
             "label": f"{te.endpoint.provider.display_name} · {te.endpoint.browser_model}",
             "weight": float(te.weight),
+            "extraction_endpoint_id": str(te.extraction_endpoint_id) if te.extraction_endpoint_id else None,
+            "extraction_label": (
+                f"{te.extraction_endpoint.provider.display_name} · {te.extraction_endpoint.browser_model}"
+                if te.extraction_endpoint
+                else None
+            ),
         } for te in endpoints]
         return JsonResponse({"endpoints": payload})
 
@@ -2278,6 +2302,10 @@ class ProfileBrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
         if not endpoint_id:
             return HttpResponseBadRequest("endpoint_id is required")
         endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
+        extraction_endpoint = None
+        extraction_endpoint_id = payload.get("extraction_endpoint_id")
+        if extraction_endpoint_id:
+            extraction_endpoint = get_object_or_404(BrowserModelEndpoint, pk=extraction_endpoint_id)
 
         try:
             weight = float(payload.get("weight", 1.0))
@@ -2286,7 +2314,12 @@ class ProfileBrowserTierEndpointListCreateAPIView(SystemAdminAPIView):
         if weight <= 0:
             return HttpResponseBadRequest("weight must be greater than zero")
 
-        te = ProfileBrowserTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        te = ProfileBrowserTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            extraction_endpoint=extraction_endpoint,
+            weight=weight,
+        )
         return _json_ok(tier_endpoint_id=str(te.id))
 
 
@@ -2310,6 +2343,12 @@ class ProfileBrowserTierEndpointDetailAPIView(SystemAdminAPIView):
             if weight <= 0:
                 return HttpResponseBadRequest("weight must be greater than zero")
             te.weight = weight
+        if "extraction_endpoint_id" in payload:
+            extraction_endpoint_id = payload.get("extraction_endpoint_id")
+            extraction_endpoint = None
+            if extraction_endpoint_id:
+                extraction_endpoint = get_object_or_404(BrowserModelEndpoint, pk=extraction_endpoint_id)
+            te.extraction_endpoint = extraction_endpoint
         te.save()
         return _json_ok(tier_endpoint_id=str(te.id))
 
