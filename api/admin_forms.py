@@ -395,6 +395,14 @@ class StripeConfigForm(ModelForm):
         label="Startup product ID",
         required=False,
     )
+    startup_contact_cap_product_id = forms.CharField(
+        label="Startup contact cap product ID",
+        required=False,
+    )
+    startup_contact_cap_price_id = forms.CharField(
+        label="Startup contact cap price ID",
+        required=False,
+    )
     scale_price_id = forms.CharField(
         label="Scale base price ID",
         required=False,
@@ -405,6 +413,14 @@ class StripeConfigForm(ModelForm):
     )
     scale_product_id = forms.CharField(
         label="Scale product ID",
+        required=False,
+    )
+    scale_contact_cap_product_id = forms.CharField(
+        label="Scale contact cap product ID",
+        required=False,
+    )
+    scale_contact_cap_price_id = forms.CharField(
+        label="Scale contact cap price ID",
         required=False,
     )
     startup_dedicated_ip_product_id = forms.CharField(
@@ -433,6 +449,14 @@ class StripeConfigForm(ModelForm):
     )
     org_team_additional_task_price_id = forms.CharField(
         label="Org/Team additional task price ID",
+        required=False,
+    )
+    org_team_contact_cap_product_id = forms.CharField(
+        label="Org/Team contact cap product ID",
+        required=False,
+    )
+    org_team_contact_cap_price_id = forms.CharField(
+        label="Org/Team contact cap price ID",
         required=False,
     )
     org_team_dedicated_ip_product_id = forms.CharField(
@@ -478,9 +502,13 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_price_id"].initial = instance.startup_price_id
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
             self.fields["startup_product_id"].initial = instance.startup_product_id
+            self.fields["startup_contact_cap_product_id"].initial = instance.startup_contact_cap_product_id
+            self.fields["startup_contact_cap_price_id"].initial = instance.startup_contact_cap_price_id
             self.fields["scale_price_id"].initial = instance.scale_price_id
             self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
             self.fields["scale_product_id"].initial = instance.scale_product_id
+            self.fields["scale_contact_cap_product_id"].initial = instance.scale_contact_cap_product_id
+            self.fields["scale_contact_cap_price_id"].initial = instance.scale_contact_cap_price_id
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
             self.fields["startup_dedicated_ip_price_id"].initial = instance.startup_dedicated_ip_price_id
             self.fields["scale_dedicated_ip_product_id"].initial = instance.scale_dedicated_ip_product_id
@@ -488,6 +516,8 @@ class StripeConfigForm(ModelForm):
             self.fields["org_team_product_id"].initial = instance.org_team_product_id
             self.fields["org_team_price_id"].initial = instance.org_team_price_id
             self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
+            self.fields["org_team_contact_cap_product_id"].initial = instance.org_team_contact_cap_product_id
+            self.fields["org_team_contact_cap_price_id"].initial = instance.org_team_contact_cap_price_id
             self.fields["org_team_dedicated_ip_product_id"].initial = instance.org_team_dedicated_ip_product_id
             self.fields["org_team_dedicated_ip_price_id"].initial = instance.org_team_dedicated_ip_price_id
             self.fields["task_meter_id"].initial = instance.task_meter_id
@@ -522,9 +552,13 @@ class StripeConfigForm(ModelForm):
             "startup_price_id",
             "startup_additional_task_price_id",
             "startup_product_id",
+            "startup_contact_cap_product_id",
+            "startup_contact_cap_price_id",
             "scale_price_id",
             "scale_additional_task_price_id",
             "scale_product_id",
+            "scale_contact_cap_product_id",
+            "scale_contact_cap_price_id",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
             "scale_dedicated_ip_product_id",
@@ -532,6 +566,8 @@ class StripeConfigForm(ModelForm):
             "org_team_product_id",
             "org_team_price_id",
             "org_team_additional_task_price_id",
+            "org_team_contact_cap_product_id",
+            "org_team_contact_cap_price_id",
             "org_team_dedicated_ip_product_id",
             "org_team_dedicated_ip_price_id",
             "task_meter_id",
