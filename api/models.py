@@ -738,7 +738,6 @@ class ToolRateLimit(models.Model):
 
     plan = models.ForeignKey(
         "ToolConfig",
-        to_field="plan_name",
         on_delete=models.CASCADE,
         related_name="rate_limits",
         help_text="Tool configuration the rate limit applies to.",
@@ -6616,6 +6615,7 @@ class PersistentAgentSystemStep(models.Model):
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"
         BURN_RATE_COOLDOWN = "BURN_RATE_COOLDOWN", "Burn Rate Cooldown"
+        RATE_LIMIT = "RATE_LIMIT", "Rate Limit"
         # Add more system-generated step codes here as needed.
 
     step = models.OneToOneField(

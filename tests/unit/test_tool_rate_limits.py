@@ -8,6 +8,7 @@ from api.agent.core.event_processing import _enforce_tool_rate_limit
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -89,3 +90,30 @@ class ToolRateLimitTests(TestCase):
                 notes="tool_hourly_rate_limit",
             ).exists()
         )
+
+    def test_attaches_completion_when_rate_limited(self):
+        self._make_call(minutes_ago=10)
+        self._make_call(minutes_ago=20)
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        prompt_attached = {"called": False}
+
+        def attach_completion(step_kwargs: dict) -> None:
+            step_kwargs["completion"] = completion
+
+        def attach_prompt_archive(step: PersistentAgentStep) -> None:
+            prompt_attached["called"] = True
+
+        allowed = _enforce_tool_rate_limit(
+            self.agent,
+            "http_request",
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+        )
+
+        self.assertFalse(allowed)
+        step = PersistentAgentStep.objects.filter(
+            agent=self.agent, description__icontains="hourly limit"
+        ).first()
+        self.assertIsNotNone(step)
+        self.assertEqual(step.completion_id, completion.id)
+        self.assertTrue(prompt_attached["called"])

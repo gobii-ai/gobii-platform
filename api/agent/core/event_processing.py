@@ -561,7 +561,13 @@ def _resolve_tool_hourly_limit(agent: PersistentAgent, tool_name: str) -> Option
         return None
 
 
-def _enforce_tool_rate_limit(agent: PersistentAgent, tool_name: str, span=None) -> bool:
+def _enforce_tool_rate_limit(
+    agent: PersistentAgent,
+    tool_name: str,
+    span=None,
+    attach_completion=None,
+    attach_prompt_archive=None,
+) -> bool:
     """Enforce per-agent hourly rate limits; returns True if execution may proceed."""
     limit = _resolve_tool_hourly_limit(agent, tool_name)
     if limit is None:
@@ -593,13 +599,33 @@ def _enforce_tool_rate_limit(agent: PersistentAgent, tool_name: str, span=None) 
         f"Skipped tool '{tool_name}' due to hourly limit. "
         f"{recent_count} of {limit_display} calls in the past hour."
     )
-    step = PersistentAgentStep.objects.create(
-        agent=agent,
-        description=msg_desc,
-    )
+    step_kwargs = {
+        "agent": agent,
+        "description": msg_desc,
+    }
+    if attach_completion:
+        try:
+            attach_completion(step_kwargs)
+        except Exception:
+            logger.warning(
+                "Failed to attach completion while recording tool rate limit for agent %s tool %s",
+                getattr(agent, "id", None),
+                tool_name,
+                exc_info=True,
+            )
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    if attach_prompt_archive:
+        try:
+            attach_prompt_archive(step)
+        except Exception:
+            logger.debug(
+                "Failed to attach prompt archive for tool rate limit step %s",
+                getattr(step, "id", None),
+                exc_info=True,
+            )
     PersistentAgentSystemStep.objects.create(
         step=step,
-        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        code=PersistentAgentSystemStep.Code.RATE_LIMIT,
         notes="tool_hourly_rate_limit",
     )
     logger.warning(
@@ -1932,7 +1958,13 @@ def _run_agent_loop(
                         continue
 
                     all_calls_sleep = False
-                    if not _enforce_tool_rate_limit(agent, tool_name, span=tool_span):
+                    if not _enforce_tool_rate_limit(
+                        agent,
+                        tool_name,
+                        span=tool_span,
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    ):
                         followup_required = True
                         continue
 
