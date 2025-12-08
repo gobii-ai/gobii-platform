@@ -1748,11 +1748,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> set[UU
 
     # format messages
     for m in messages:
-        if not m.from_endpoint:
-            # Skip malformed records defensively
+        # Prefer from_endpoint, but fall back to to_endpoint so we don't drop messages with
+        # partial endpoint data (and lose their IDs from the returned set).
+        primary_ep = m.from_endpoint or m.to_endpoint
+        channel = primary_ep.channel if primary_ep else None
+        if not channel:
+            # Skip malformed records defensively when no channel can be inferred
             continue
 
-        channel = m.from_endpoint.channel
         body = m.body or ""
         event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
 
@@ -1772,12 +1775,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> set[UU
                 "content": body if body else "(no content)",
             }
         else:
-            from_addr = m.from_endpoint.address
+            from_addr = m.from_endpoint.address if m.from_endpoint else None
+            to_addr = m.to_endpoint.address if m.to_endpoint else None
             if m.is_outbound:
-                to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you sent a message to {to_addr}:"
+                header = f"[{m.timestamp.isoformat()}] On {channel}, you sent a message to {to_addr or 'N/A'}:"
             else:
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
+                header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr or 'unknown sender'}:"
 
             event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}
