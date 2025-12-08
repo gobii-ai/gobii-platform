@@ -405,7 +405,6 @@ def _resolve_browser_provider_priority_from_db(
     *,
     prefer_premium: bool = False,
     routing_profile: Any = None,
-    requires_vision: bool = False,
 ):
     """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
 
@@ -1821,7 +1820,6 @@ def _process_browser_use_task_core(
                 db_priority = _resolve_browser_provider_priority_from_db(
                     prefer_premium=prefer_premium,
                     routing_profile=eval_routing_profile,
-                    requires_vision=requires_vision,
                 )
                 if not db_priority:
                     # Allow tests that patch _execute_agent_with_failover to proceed
