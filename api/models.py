@@ -3194,6 +3194,22 @@ class StripeConfig(models.Model):
         self.set_value("startup_additional_task_price_id", value)
 
     @property
+    def startup_task_pack_product_id(self) -> str:
+        return self.get_value("startup_task_pack_product_id")
+
+    @startup_task_pack_product_id.setter
+    def startup_task_pack_product_id(self, value: str | None) -> None:
+        self.set_value("startup_task_pack_product_id", value)
+
+    @property
+    def startup_task_pack_price_id(self) -> str:
+        return self.get_value("startup_task_pack_price_id")
+
+    @startup_task_pack_price_id.setter
+    def startup_task_pack_price_id(self, value: str | None) -> None:
+        self.set_value("startup_task_pack_price_id", value)
+
+    @property
     def startup_contact_cap_product_id(self) -> str:
         return self.get_value("startup_contact_cap_product_id")
 
@@ -3232,6 +3248,22 @@ class StripeConfig(models.Model):
     @scale_additional_task_price_id.setter
     def scale_additional_task_price_id(self, value: str | None) -> None:
         self.set_value("scale_additional_task_price_id", value)
+
+    @property
+    def scale_task_pack_product_id(self) -> str:
+        return self.get_value("scale_task_pack_product_id")
+
+    @scale_task_pack_product_id.setter
+    def scale_task_pack_product_id(self, value: str | None) -> None:
+        self.set_value("scale_task_pack_product_id", value)
+
+    @property
+    def scale_task_pack_price_id(self) -> str:
+        return self.get_value("scale_task_pack_price_id")
+
+    @scale_task_pack_price_id.setter
+    def scale_task_pack_price_id(self, value: str | None) -> None:
+        self.set_value("scale_task_pack_price_id", value)
 
     @property
     def scale_contact_cap_product_id(self) -> str:
@@ -3280,6 +3312,14 @@ class StripeConfig(models.Model):
     @org_team_additional_task_price_id.setter
     def org_team_additional_task_price_id(self, value: str | None) -> None:
         self.set_value("org_team_additional_task_price_id", value)
+
+    @property
+    def org_team_additional_task_product_id(self) -> str:
+        return self.get_value("org_team_additional_task_product_id")
+
+    @org_team_additional_task_product_id.setter
+    def org_team_additional_task_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_additional_task_product_id", value)
 
     @property
     def org_team_contact_cap_product_id(self) -> str:
