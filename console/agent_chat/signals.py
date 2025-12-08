@@ -12,10 +12,15 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
+from console.agent_audit.realtime import send_audit_event
+from console.agent_audit.runs import resolve_run_id_for_timestamp
+from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_tool_call
 
 from .timeline import (
     build_processing_snapshot,
@@ -55,6 +60,16 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     _broadcast_processing(step.agent)
 
 
+def _broadcast_audit_event(agent_id: str | None, payload: dict, timestamp=None) -> None:
+    if not agent_id:
+        return
+    run_id = resolve_run_id_for_timestamp(agent_id, timestamp)
+    if not run_id:
+        return
+    payload["run_id"] = run_id
+    send_audit_event(agent_id, payload)
+
+
 def emit_tool_call_realtime(step: PersistentAgentStep) -> None:
     """Public helper to broadcast a tool call cluster for a fully populated step."""
 
@@ -73,6 +88,11 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
         logger.exception("Failed to serialize agent message %s: %s", instance.id, exc)
         return
     _send(_group_name(instance.owner_agent_id), "timeline_event", payload)
+    try:
+        audit_payload = serialize_message(instance)
+        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload, instance.timestamp)
+    except Exception:
+        logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
 
 
 @receiver(post_save, sender=PersistentAgentStep)
@@ -91,6 +111,12 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard
             return
         emit_tool_call_realtime(step)
+        try:
+            if getattr(step, "tool_call", None):
+                audit_payload = serialize_tool_call(step)
+                _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+        except Exception:
+            logger.debug("Failed to broadcast audit tool step %s", getattr(step, "id", None), exc_info=True)
 
     transaction.on_commit(_on_commit)
 
@@ -101,6 +127,43 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
         return
     step = instance.step
     emit_tool_call_realtime(step)
+
+
+@receiver(post_save, sender=PersistentAgentCompletion)
+def broadcast_new_completion(sender, instance: PersistentAgentCompletion, created: bool, **kwargs):
+    if not created:
+        return
+    try:
+        audit_payload = serialize_completion(instance)
+        _broadcast_audit_event(str(instance.agent_id), audit_payload, instance.created_at)
+    except Exception:
+        logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgentSystemStep)
+def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bool, **kwargs):
+    if not created:
+        return
+    if instance.code != PersistentAgentSystemStep.Code.PROCESS_EVENTS:
+        return
+    try:
+        payload = {
+            "run_id": str(instance.step_id),
+            "kind": "run_started",
+            "timestamp": instance.step.created_at.isoformat() if instance.step else None,
+            "sequence": (
+                PersistentAgentSystemStep.objects.filter(
+                    step__agent_id=instance.step.agent_id if instance.step else None,
+                    code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                    step__created_at__lte=getattr(instance.step, "created_at", None),
+                ).count()
+                if instance.step_id
+                else None
+            ),
+        }
+        send_audit_event(str(instance.step.agent_id), payload)
+    except Exception:
+        logger.debug("Failed to broadcast audit run start %s", getattr(instance, "step_id", None), exc_info=True)
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)

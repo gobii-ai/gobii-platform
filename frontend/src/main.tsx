@@ -17,6 +17,7 @@ const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./scr
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsScreen')).EvalsScreen }))
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
+const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -121,6 +122,12 @@ switch (appName) {
     screen = <EvalsDetailScreen suiteRunId={suiteRunId} />
     break
   }
+  case 'agent-audit':
+    if (!agentId) {
+      throw new Error('Agent identifier is required for audit screen')
+    }
+    screen = <AgentAuditScreen agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)
 }

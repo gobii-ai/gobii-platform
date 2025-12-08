@@ -4552,6 +4552,17 @@ class ConsoleEvalsDetailView(SystemAdminRequiredMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/staff_agent_audit.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent_id = kwargs.get("agent_id")
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        context["agent"] = agent
+        return context
+
+
 class MCPServerOwnerMixin:
     """Shared owner resolution logic for MCP server management views."""
 

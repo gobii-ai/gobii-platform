@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, models, transaction
@@ -47,9 +48,13 @@ from api.models import (
     EvalSuiteRun,
     EvalRun,
     EvalRunTask,
+    PersistentAgentPromptArchive,
     build_web_agent_address,
     build_web_user_address,
 )
+from django.core.files.storage import default_storage
+from console.agent_audit.runs import build_run_payload, fetch_run_boundaries
+from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
@@ -628,6 +633,84 @@ class SystemAdminAPIView(LoginRequiredMixin, View):
         if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
+
+
+class StaffAgentAuditAPIView(SystemAdminAPIView):
+    """Return audit runs (PROCESS_EVENTS loops) for any agent."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        cursor = request.GET.get("cursor") or None
+        try:
+            limit = int(request.GET.get("limit", 3))
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+        limit = max(1, min(limit, 10))
+
+        boundaries, has_more = fetch_run_boundaries(agent, cursor=cursor, limit=limit)
+        runs = [build_run_payload(agent, boundary) for boundary in boundaries]
+
+        processing_active = compute_processing_status(agent)
+        if runs:
+            for run in runs:
+                run.setdefault("active", False)
+            runs[0]["active"] = processing_active and runs[0].get("ended_at") is None
+
+        next_cursor = None
+        if has_more and boundaries:
+            last = boundaries[-1]
+            next_cursor = f"{last.started_at.isoformat()}:{last.run_id}"
+
+        return JsonResponse(
+            {
+                "runs": runs,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "processing_active": processing_active,
+                "agent": {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "color": agent.get_display_color(),
+                },
+            }
+        )
+
+
+class StaffPromptArchiveAPIView(SystemAdminAPIView):
+    """Fetch and decompress a prompt archive payload for staff inspection."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, archive_id: str, *args: Any, **kwargs: Any):
+        archive = get_object_or_404(PersistentAgentPromptArchive, pk=archive_id)
+        if not default_storage.exists(archive.storage_key):
+            return JsonResponse({"error": "missing"}, status=404)
+        try:
+            with default_storage.open(archive.storage_key, "rb") as stored:
+                dctx = zstd.ZstdDecompressor()
+                payload_bytes = dctx.decompress(stored.read())
+        except Exception:
+            logger.exception("Failed to read prompt archive %s", archive_id)
+            return JsonResponse({"error": "read_failed"}, status=500)
+
+        try:
+            payload = json.loads(payload_bytes.decode("utf-8"))
+        except Exception:
+            payload = None
+
+        return JsonResponse(
+            {
+                "id": str(archive.id),
+                "agent_id": str(archive.agent_id),
+                "rendered_at": archive.rendered_at.isoformat(),
+                "tokens_before": archive.tokens_before,
+                "tokens_after": archive.tokens_after,
+                "tokens_saved": archive.tokens_saved,
+                "payload": payload,
+            }
+        )
 
 
 def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
