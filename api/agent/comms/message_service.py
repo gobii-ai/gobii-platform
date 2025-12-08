@@ -217,10 +217,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
         if owner:
             plan = get_owner_plan(owner)
-            plan_id = str(plan.get("id") or "")
+            plan_id = str(plan.get("id") or "").strip()
             plan_label = str(plan.get("name") or plan.get("id") or "").strip()
     except Exception:
         plan_label = ""
+        plan_id = ""
 
     message_text = (
         f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
