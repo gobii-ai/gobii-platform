@@ -1089,6 +1089,10 @@ class BrowserUseAgentTask(models.Model):
     )
     # prompt can be a simple string or a JSON structure. Using JSONField is more flexible.
     prompt = models.TextField(blank=True, null=True)
+    requires_vision = models.BooleanField(
+        default=False,
+        help_text="When true, restricts browser tasks to vision-capable LLM endpoints only.",
+    )
     # Optional JSON schema to define structured output from the agent
     output_schema = models.JSONField(
         null=True,

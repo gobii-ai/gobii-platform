@@ -24,6 +24,20 @@ from api.models import (
 from constants.plans import PlanNames
 
 
+def _provider_entry(provider_key: str, supports_vision: bool) -> dict[str, object]:
+    return {
+        "endpoint_key": f"{provider_key}-endpoint",
+        "provider_key": provider_key,
+        "weight": 1.0,
+        "browser_model": None,
+        "base_url": "",
+        "backend": None,
+        "supports_vision": supports_vision,
+        "max_output_tokens": None,
+        "api_key": "sk-test",
+    }
+
+
 @tag("batch_browser_task_db")
 class BrowserTaskDbConnectionTests(TestCase):
     def setUp(self):
@@ -266,3 +280,88 @@ class BrowserTaskPremiumTierTests(TestCase):
         first_tier_keys = {entry["endpoint_key"] for entry in priority[0]}
         self.assertEqual(first_tier_keys, {"openai_browser_standard"})
         self.assertTrue(all(not entry.get("is_premium") for entry in priority[0]))
+
+
+@tag("batch_browser_task_db")
+class BrowserTaskVisionRoutingTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="vision@example.com",
+            email="vision@example.com",
+            password="password123",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Vision Agent")
+        self.persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Persistent Vision Agent",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def test_requires_vision_filters_out_non_vision_endpoints(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="vision required",
+            requires_vision=True,
+        )
+
+        provider_priority = [[
+            _provider_entry("vision", True),
+            _provider_entry("text-only", False),
+        ]]
+
+        with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
+             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
+             patch("api.tasks.browser_agent_tasks._resolve_browser_provider_priority_from_db", return_value=provider_priority), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)) as mock_execute, \
+             patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close:
+
+            from api.tasks.browser_agent_tasks import _process_browser_use_task_core
+
+            _process_browser_use_task_core(
+                str(task.id),
+                persistent_agent_id=str(self.persistent_agent.id),
+            )
+
+            mock_execute.assert_called_once()
+            filtered_priority = mock_execute.call_args.kwargs.get("provider_priority")
+            self.assertEqual(len(filtered_priority), 1)
+            self.assertEqual(len(filtered_priority[0]), 1)
+            self.assertTrue(filtered_priority[0][0]["supports_vision"])
+            self.assertGreaterEqual(mock_close.call_count, 1)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.COMPLETED)
+
+    def test_requires_vision_without_matching_endpoints_fails_task(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.browser_agent,
+            user=self.user,
+            prompt="vision required",
+            requires_vision=True,
+        )
+
+        provider_priority = [[_provider_entry("text-only", False)]]
+
+        with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
+             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
+             patch("api.tasks.browser_agent_tasks._resolve_browser_provider_priority_from_db", return_value=provider_priority), \
+             patch("api.tasks.browser_agent_tasks._execute_agent_with_failover") as mock_execute, \
+             patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close:
+
+            from api.tasks.browser_agent_tasks import _process_browser_use_task_core
+
+            _process_browser_use_task_core(
+                str(task.id),
+                persistent_agent_id=str(self.persistent_agent.id),
+            )
+
+            mock_execute.assert_not_called()
+            self.assertGreaterEqual(mock_close.call_count, 1)
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.FAILED)
+        self.assertIn("No vision-capable", task.error_message or "")

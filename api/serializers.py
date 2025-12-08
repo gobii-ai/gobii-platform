@@ -161,6 +161,7 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
             'agent_id',
             'organization_id',
             'prompt',
+            'requires_vision',
             'output_schema',
             'status',
             'created_at',
@@ -295,7 +296,7 @@ class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost', 'webhook']
+        fields = ['id', 'agent_id', 'prompt', 'requires_vision', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost', 'webhook']
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming
 

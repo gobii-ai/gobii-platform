@@ -405,6 +405,7 @@ def _resolve_browser_provider_priority_from_db(
     *,
     prefer_premium: bool = False,
     routing_profile: Any = None,
+    requires_vision: bool = False,
 ):
     """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
 
@@ -432,10 +433,13 @@ def _resolve_browser_provider_priority_from_db(
         routing_profile=routing_profile,
     )
     if result:
-        return result
+        return _filter_provider_priority_for_vision(result) if requires_vision else result
 
     # Fall back to legacy BrowserLLMPolicy
-    return _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
+    legacy_result = _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
+    if requires_vision and legacy_result:
+        return _filter_provider_priority_for_vision(legacy_result) or None
+    return legacy_result
 
 
 def _resolve_browser_from_profile(
@@ -757,6 +761,28 @@ def _profile_storage_key(agent_uuid: str) -> str:
 
     clean_uuid = agent_uuid.replace("-", "")  # strip hyphens for even sharding
     return f"browser_profiles/{clean_uuid[:2]}/{clean_uuid[2:4]}/{agent_uuid}.tar.zst"
+
+
+def _filter_provider_priority_for_vision(
+    provider_priority: list[list[dict[str, Any]]],
+) -> list[list[dict[str, Any]]]:
+    """Return only tiers with vision-capable endpoints; drop empty tiers."""
+    filtered: list[list[dict[str, Any]]] = []
+    for tier in provider_priority:
+        vision_entries: list[dict[str, Any]] = []
+        for entry in tier:
+            supports_vision = entry.get("supports_vision")
+            provider_key = entry.get("provider_key")
+            effective_support = (
+                bool(supports_vision)
+                if supports_vision is not None
+                else DEFAULT_PROVIDER_VISION_SUPPORT.get(provider_key, False)
+            )
+            if effective_support:
+                vision_entries.append(entry)
+        if vision_entries:
+            filtered.append(vision_entries)
+    return filtered
 
 # --------------------------------------------------------------------------- #
 #  Secure tar extraction helper
@@ -1781,6 +1807,8 @@ def _process_browser_use_task_core(
                 owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
                 plan_settings = get_browser_settings_for_owner(owner)
                 agent_span.set_attribute("browser_use.max_steps_limit", int(plan_settings.max_browser_steps))
+                requires_vision = bool(getattr(task_obj, "requires_vision", False))
+                agent_span.set_attribute("browser_use.requires_vision", requires_vision)
 
                 # Look up routing profile from eval_run if this is an eval task
                 eval_routing_profile = None
@@ -1798,6 +1826,7 @@ def _process_browser_use_task_core(
                 db_priority = _resolve_browser_provider_priority_from_db(
                     prefer_premium=prefer_premium,
                     routing_profile=eval_routing_profile,
+                    requires_vision=requires_vision,
                 )
                 if not db_priority:
                     # Allow tests that patch _execute_agent_with_failover to proceed
@@ -1825,6 +1854,13 @@ def _process_browser_use_task_core(
                     if execution_env == "eval":
                         is_eval = True
                         agent_span.set_attribute("execution_environment", "eval")
+
+                if requires_vision:
+                    filtered_priority = _filter_provider_priority_for_vision(provider_priority or [])
+                    if not filtered_priority:
+                        raise RuntimeError("No vision-capable browser endpoints are available for this task.")
+
+                    provider_priority = filtered_priority
 
                 raw_result, token_usage = _execute_agent_with_failover(
                     task_input=task_obj.prompt,
