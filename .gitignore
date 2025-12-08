@@ -41,3 +41,4 @@ mediafiles/
 .ra-aid/
 *.swp
 /.gemini-clipboard
+/tmp/
