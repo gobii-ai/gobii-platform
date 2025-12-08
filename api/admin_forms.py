@@ -418,11 +418,15 @@ class StripeConfigForm(ModelForm):
         label="Scale base price ID",
         required=False,
     )
-    scale_additional_task_product_id = forms.CharField(
+    scale_additional_task_price_id = forms.CharField(
+        label="Scale ad-hoc task price ID",
+        required=False,
+    )
+    scale_task_pack_product_id = forms.CharField(
         label="Scale task pack product ID",
         required=False,
     )
-    scale_additional_task_price_id = forms.CharField(
+    scale_task_pack_price_id = forms.CharField(
         label="Scale task pack price ID",
         required=False,
     )
@@ -527,9 +531,8 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_price_id"].initial = instance.startup_price_id
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
 
-
             self.fields["startup_task_pack_product_id"].initial = instance.startup_task_pack_product_id
-            self.fields["startup_task_pack_product_id"].initial = instance.startup_task_pack_price_id
+            self.fields["startup_task_pack_price_id"].initial = instance.startup_task_pack_price_id
 
 
             self.fields["startup_contact_cap_product_id"].initial = instance.startup_contact_cap_product_id

@@ -3322,6 +3322,22 @@ class StripeConfig(models.Model):
         self.set_value("org_team_additional_task_product_id", value)
 
     @property
+    def org_team_task_pack_product_id(self) -> str:
+        return self.get_value("org_team_task_pack_product_id")
+
+    @org_team_task_pack_product_id.setter
+    def org_team_task_pack_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_task_pack_product_id", value)
+
+    @property
+    def org_team_task_pack_price_id(self) -> str:
+        return self.get_value("org_team_task_pack_price_id")
+
+    @org_team_task_pack_price_id.setter
+    def org_team_task_pack_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_task_pack_price_id", value)
+
+    @property
     def org_team_contact_cap_product_id(self) -> str:
         return self.get_value("org_team_contact_cap_product_id")
 
