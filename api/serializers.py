@@ -161,6 +161,7 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
             'agent_id',
             'organization_id',
             'prompt',
+            'requires_vision',
             'output_schema',
             'status',
             'created_at',
@@ -266,8 +267,9 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         # If this serializer is used for updates, check task status
         if self.instance and self.instance.status != BrowserUseAgentTask.StatusChoices.PENDING:
-             # Only allow updates to prompt if the task is PENDING
-            if 'prompt' in attrs or 'output_schema' in attrs:
+            # Only allow updates to selected fields while the task is PENDING
+            guarded_fields = {'prompt', 'output_schema', 'requires_vision'}
+            if guarded_fields.intersection(attrs):
                 error_msg = 'Task can be modified only while it is PENDING.'
                 raise serializers.ValidationError(
                     {'status': error_msg, 'detail': error_msg}
@@ -286,6 +288,7 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated organization.'})
                 elif agent_obj.user != request.user:
                     raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated user.'})
+
         return attrs
 
 class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
@@ -295,7 +298,7 @@ class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = BrowserUseAgentTask
-        fields = ['id', 'agent_id', 'prompt', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost', 'webhook']
+        fields = ['id', 'agent_id', 'prompt', 'requires_vision', 'output_schema', 'status', 'created_at', 'updated_at', 'credits_cost', 'webhook']
         read_only_fields = fields
         ref_name = "TaskList" # Optional: for explicit component naming
 

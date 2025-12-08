@@ -758,6 +758,26 @@ def _profile_storage_key(agent_uuid: str) -> str:
     clean_uuid = agent_uuid.replace("-", "")  # strip hyphens for even sharding
     return f"browser_profiles/{clean_uuid[:2]}/{clean_uuid[2:4]}/{agent_uuid}.tar.zst"
 
+
+def _filter_provider_priority_for_vision(
+    provider_priority: list[list[dict[str, Any]]],
+) -> list[list[dict[str, Any]]]:
+    """Return only tiers with vision-capable endpoints; drop empty tiers."""
+    filtered_tiers: list[list[dict[str, Any]]] = []
+    for tier in provider_priority:
+        vision_entries = [
+            entry
+            for entry in tier
+            if (
+                bool(entry.get("supports_vision"))
+                if entry.get("supports_vision") is not None
+                else DEFAULT_PROVIDER_VISION_SUPPORT.get(entry.get("provider_key"), False)
+            )
+        ]
+        if vision_entries:
+            filtered_tiers.append(vision_entries)
+    return filtered_tiers
+
 # --------------------------------------------------------------------------- #
 #  Secure tar extraction helper
 # --------------------------------------------------------------------------- #
@@ -1781,6 +1801,8 @@ def _process_browser_use_task_core(
                 owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
                 plan_settings = get_browser_settings_for_owner(owner)
                 agent_span.set_attribute("browser_use.max_steps_limit", int(plan_settings.max_browser_steps))
+                requires_vision = bool(getattr(task_obj, "requires_vision", False))
+                agent_span.set_attribute("browser_use.requires_vision", requires_vision)
 
                 # Look up routing profile from eval_run if this is an eval task
                 eval_routing_profile = None
@@ -1825,6 +1847,13 @@ def _process_browser_use_task_core(
                     if execution_env == "eval":
                         is_eval = True
                         agent_span.set_attribute("execution_environment", "eval")
+
+                if requires_vision:
+                    filtered_priority = _filter_provider_priority_for_vision(provider_priority or [])
+                    if not filtered_priority:
+                        raise RuntimeError("No vision-capable browser endpoints are available for this task.")
+
+                    provider_priority = filtered_priority
 
                 raw_result, token_usage = _execute_agent_with_failover(
                     task_input=task_obj.prompt,

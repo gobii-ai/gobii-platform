@@ -74,6 +74,13 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                 "type": "object",
                 "properties": {
                     "prompt": {"type": "string", "description": "Task prompt."},
+                    "requires_vision": {
+                        "type": "boolean",
+                        "description": (
+                            "Set this to true if and only if this web task is likely to require vision capabilities (seeing UI elements, images, etc.) "
+                            "Otherwise, set it to false to save tokens."
+                        ),
+                    },
                     "secrets": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -94,6 +101,8 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     prompt = params.get("prompt")
     if not prompt:
         return {"status": "error", "message": "Missing required parameter: prompt"}
+
+    requires_vision = bool(params.get("requires_vision", False))
 
     # Get optional secrets parameter
     requested_secrets = params.get("secrets", [])
@@ -186,6 +195,7 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
             agent=browser_use_agent,
             user=agent.user,
             prompt=prompt,
+            requires_vision=requires_vision,
             eval_run_id=getattr(budget_ctx, "eval_run_id", None),
         )
 

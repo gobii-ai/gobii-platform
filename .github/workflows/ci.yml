@@ -210,6 +210,8 @@ jobs:
             tag: batch_api_org_keys
           - batch: console_api_keys
             tag: batch_console_api_keys
+          - batch: console_api
+            tag: batch_console_api
           - batch: console_mcp_oauth
             tag: batch_console_mcp_oauth
           - batch: console_mcp_servers
