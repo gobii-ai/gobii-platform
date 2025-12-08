@@ -433,13 +433,10 @@ def _resolve_browser_provider_priority_from_db(
         routing_profile=routing_profile,
     )
     if result:
-        return _filter_provider_priority_for_vision(result) if requires_vision else result
+        return result
 
     # Fall back to legacy BrowserLLMPolicy
-    legacy_result = _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
-    if requires_vision and legacy_result:
-        return _filter_provider_priority_for_vision(legacy_result) or None
-    return legacy_result
+    return _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
 
 
 def _resolve_browser_from_profile(
@@ -767,22 +764,20 @@ def _filter_provider_priority_for_vision(
     provider_priority: list[list[dict[str, Any]]],
 ) -> list[list[dict[str, Any]]]:
     """Return only tiers with vision-capable endpoints; drop empty tiers."""
-    filtered: list[list[dict[str, Any]]] = []
+    filtered_tiers: list[list[dict[str, Any]]] = []
     for tier in provider_priority:
-        vision_entries: list[dict[str, Any]] = []
-        for entry in tier:
-            supports_vision = entry.get("supports_vision")
-            provider_key = entry.get("provider_key")
-            effective_support = (
-                bool(supports_vision)
-                if supports_vision is not None
-                else DEFAULT_PROVIDER_VISION_SUPPORT.get(provider_key, False)
+        vision_entries = [
+            entry
+            for entry in tier
+            if (
+                bool(entry.get("supports_vision"))
+                if entry.get("supports_vision") is not None
+                else DEFAULT_PROVIDER_VISION_SUPPORT.get(entry.get("provider_key"), False)
             )
-            if effective_support:
-                vision_entries.append(entry)
+        ]
         if vision_entries:
-            filtered.append(vision_entries)
-    return filtered
+            filtered_tiers.append(vision_entries)
+    return filtered_tiers
 
 # --------------------------------------------------------------------------- #
 #  Secure tar extraction helper
