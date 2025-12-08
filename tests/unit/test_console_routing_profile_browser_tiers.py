@@ -45,3 +45,25 @@ class ConsoleRoutingProfileBrowserTierTests(TestCase):
         tiers = list(ProfileBrowserTier.objects.filter(profile=profile, is_premium=False).order_by("order"))
         self.assertEqual(len(tiers), 2)
         self.assertEqual(tiers[-1].order, 2)
+
+    def test_move_browser_tier_swaps_order(self):
+        profile = LLMRoutingProfile.objects.create(name="browser-move", display_name="Browser Move")
+        tier1 = ProfileBrowserTier.objects.create(profile=profile, order=1, is_premium=False, description="Tier 1")
+        tier2 = ProfileBrowserTier.objects.create(profile=profile, order=2, is_premium=False, description="Tier 2")
+
+        move_url = reverse("console_llm_profile_browser_tier_detail", args=[tier2.id])
+        resp = self.client.patch(move_url, data='{"move": "up"}', content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        tier1.refresh_from_db()
+        tier2.refresh_from_db()
+        self.assertEqual(tier1.order, 2)
+        self.assertEqual(tier2.order, 1)
+
+        resp = self.client.patch(move_url, data='{"move": "down"}', content_type="application/json")
+        self.assertEqual(resp.status_code, 200, resp.content)
+
+        tier1.refresh_from_db()
+        tier2.refresh_from_db()
+        self.assertEqual(tier1.order, 1)
+        self.assertEqual(tier2.order, 2)

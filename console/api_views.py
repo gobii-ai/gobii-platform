@@ -578,8 +578,8 @@ def _swap_orders(queryset, item, direction: str) -> bool:
     target_index = index - 1 if direction == "up" else index + 1
     other = siblings[target_index]
     model = queryset.model
-    min_order = queryset.aggregate(min_order=Min("order")).get("min_order")
-    sentinel = (min_order if min_order is not None else 0) - 1
+    max_order = queryset.aggregate(max_order=Max("order")).get("max_order")
+    sentinel = (max_order if max_order is not None else 0) + 1  # keep within PositiveIntegerField constraint
     original_item_order = item.order
     original_other_order = other.order
     new_item_order = original_other_order
@@ -2086,6 +2086,19 @@ class ProfilePersistentTierDetailAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            siblings = ProfilePersistentTier.objects.filter(
+                token_range=tier.token_range,
+                is_premium=tier.is_premium,
+                is_max=tier.is_max,
+            )
+            changed = _swap_orders(siblings, tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+
         if "order" in payload:
             tier.order = payload.get("order", 0)
         if "description" in payload:
@@ -2273,6 +2286,18 @@ class ProfileBrowserTierDetailAPIView(SystemAdminAPIView):
             payload = _parse_json_body(request)
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
+
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            siblings = ProfileBrowserTier.objects.filter(
+                profile=tier.profile,
+                is_premium=tier.is_premium,
+            )
+            changed = _swap_orders(siblings, tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
 
         if "order" in payload:
             tier.order = payload.get("order", 0)
