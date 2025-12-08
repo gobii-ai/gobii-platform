@@ -3,3 +3,13 @@ Hi there,
 {{ agent.name }} has already used today's task allowance and can't reply right now.
 
 You can increase or remove the limit here: {{ link }}
+
+{% if plan_id == "free" %}
+Need more task credits? Upgrade to our Pro or Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free
+{% elif plan_id == "pro" or plan_id == "startup" %}
+Need more task credits? Upgrade to our Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro
+{% endif %}
+
+Thanks,
+
+Gobii

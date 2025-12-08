@@ -15,6 +15,17 @@
       You can increase or remove the limit here:
       <a href="{{ link }}" style="color: #2563eb; text-decoration: none;">Manage limit</a>
     </p>
+    {% if plan_id == "free" %}
+    <p>
+      If you need more tasks, you may upgrade to our <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free">Pro or Scale Plans</a>
+    </p>
+    {% elif plan_id == "pro" or plan_id == "startup" %}
+      <p>
+        If you need more tasks, you may upgrade to our <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free">Scale Plan</a>
+      </p>
+    {% endif %}
+
+    <p style="margin: 0;">Thanks,<br>The Gobii Team</p>
   </div>
 </body>
 </html>

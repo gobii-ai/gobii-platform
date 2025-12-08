@@ -43,6 +43,7 @@ from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
+from util.subscription_helper import get_owner_plan
 
 tracer = trace.get_tracer("gobii.utils")
 
@@ -210,11 +211,22 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                               link: str) -> bool:
     """Send a daily credit limit notice back to the inbound sender."""
 
+    plan_label = ""
+    plan_id = ""
+    try:
+        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+        if owner:
+            plan = get_owner_plan(owner)
+            plan_id = str(plan.get("id") or "")
+            plan_label = str(plan.get("name") or plan.get("id") or "").strip()
+    except Exception:
+        plan_label = ""
+
     message_text = (
         f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
         f"You can increase or remove the limit here: {link}"
     )
-    email_context = {"agent": agent, "link": link}
+    email_context = {"agent": agent, "link": link, "plan_label": plan_label, "plan_id": plan_id}
 
     try:
         if channel == CommsChannel.EMAIL:
