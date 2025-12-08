@@ -8,7 +8,7 @@ from requests import RequestException
 
 from api.agent.tools.webhook_sender import USER_AGENT as DEFAULT_WEBHOOK_USER_AGENT
 from api.models import BrowserUseAgentTask, BrowserUseAgentTaskStep
-from api.proxy_selection import select_proxy_for_browser_task
+from api.proxy_selection import select_proxy_for_browser_task, select_proxies_for_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -47,29 +47,6 @@ def _build_payload(task: BrowserUseAgentTask) -> Dict[str, Any]:
     return payload
 
 
-def _select_proxy_for_webhook(task: BrowserUseAgentTask) -> tuple[dict[str, str] | None, Optional[str]]:
-    """Pick a proxy for webhook delivery, preferring the task's agent proxy."""
-    try:
-        proxy_server = select_proxy_for_browser_task(task, allow_no_proxy_in_debug=False)
-    except RuntimeError as exc:
-        logger.error("Task %s webhook proxy selection failed: %s", task.id, exc)
-        return None, str(exc)
-
-    if not proxy_server:
-        message = "No proxy server available for webhook delivery"
-        logger.warning("Webhook proxy unavailable for task %s", task.id)
-        return None, message
-
-    proxy_url = proxy_server.proxy_url
-    logger.info(
-        "Using proxy %s:%s for webhook delivery on task %s",
-        proxy_server.host,
-        proxy_server.port,
-        task.id,
-    )
-    return {"http": proxy_url, "https": proxy_url}, None
-
-
 def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
     """
     Deliver the webhook notification for the given task if a webhook URL is configured.
@@ -91,7 +68,11 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
     delivered_at = timezone.now()
     status_code: Optional[int] = None
     error_message: Optional[str] = None
-    proxies, proxy_error = _select_proxy_for_webhook(task)
+    proxies, proxy_error = select_proxies_for_webhook(
+        task,
+        select_proxy_for_browser_task,
+        log_context=f"task {task.id}",
+    )
     if proxy_error:
         error_message = proxy_error
         logger.warning("Skipping webhook delivery for task %s: %s", task.id, proxy_error)
@@ -116,10 +97,14 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
                 )
             else:
                 logger.info("Webhook for task %s delivered successfully", task.id)
-        except RequestException:
-            logger.warning("Failed to deliver webhook for task %s", task.id, exc_info=True)
-        except Exception:
-            logger.exception("Unexpected error delivering webhook for task %s", task.id)
+        except RequestException as exc:
+            error_message = str(exc)
+            logger.warning(
+                "Failed to deliver webhook for task %s: %s", task.id, error_message, exc_info=True
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            logger.exception("Unexpected error delivering webhook for task %s: %s", task.id, error_message)
 
     # Persist delivery metadata without mutating other fields like status/updated_at.
     with transaction.atomic():

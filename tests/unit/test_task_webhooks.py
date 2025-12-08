@@ -98,7 +98,7 @@ class TaskWebhookServiceTests(TestCase):
         task.refresh_from_db()
         self.assertIsNotNone(task.webhook_last_called_at)
         self.assertIsNone(task.webhook_last_status_code)
-        self.assertIsNone(task.webhook_last_error)
+        self.assertIn("boom", task.webhook_last_error or "")
 
     def test_trigger_task_webhook_requires_proxy(self):
         task = self._create_completed_task()

@@ -8,7 +8,7 @@ and fallback strategies.
 
 import logging
 from datetime import timedelta
-from typing import Optional
+from typing import Any, Callable, Optional
 
 from django.conf import settings
 from django.utils import timezone
@@ -171,4 +171,36 @@ def select_proxy_for_browser_task(task_obj, override_proxy: Optional = None, **k
         override_proxy=override_proxy,
         context_id=f"task_{task_obj.id}",
         **kwargs
-    ) 
+    )
+
+
+def select_proxies_for_webhook(
+    context_obj: Any,
+    selector: Callable[[Any], Any],
+    *,
+    log_context: str,
+) -> tuple[dict[str, str] | None, str | None]:
+    """
+    Shared helper for selecting proxies for webhook delivery.
+
+    Returns a Requests-style proxies mapping or an error message if selection failed.
+    """
+    try:
+        proxy_server = selector(context_obj, allow_no_proxy_in_debug=False)
+    except RuntimeError as exc:
+        logger.error("Webhook proxy selection failed for %s: %s", log_context, exc)
+        return None, str(exc)
+
+    if not proxy_server:
+        message = "No proxy server available for webhook delivery"
+        logger.warning("Webhook proxy unavailable for %s", log_context)
+        return None, message
+
+    proxy_url = proxy_server.proxy_url
+    logger.info(
+        "Using proxy %s:%s for webhook delivery on %s",
+        proxy_server.host,
+        proxy_server.port,
+        log_context,
+    )
+    return {"http": proxy_url, "https": proxy_url}, None
