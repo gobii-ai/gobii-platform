@@ -35,7 +35,7 @@ PLAN_CONFIG = {
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Pro",
         "description": "Pro plan with enhanced features and support.",
-        "price": 40,
+        "price": 45,
         "currency": "USD",
         "max_contacts_per_agent": 20,
         "org": False
@@ -70,8 +70,8 @@ PLAN_CONFIG = {
         "agent_limit": AGENTS_UNLIMITED,
         "name": "Team",
         "description": "Team plan with collaboration features and priority support.",
-        "price": 40,
-        "price_per_seat": 40,
+        "price": 45,
+        "price_per_seat": 45,
         "currency": "USD",
         "max_contacts_per_agent": 50,
         "org": True
