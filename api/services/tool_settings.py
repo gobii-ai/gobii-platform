@@ -4,6 +4,7 @@ from typing import Dict, Optional
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import DatabaseError
 
 from constants.plans import PlanNames, PlanNamesChoices
 from util.subscription_helper import get_owner_plan
@@ -42,7 +43,8 @@ def _serialise(configs) -> dict:
                 rate.tool_name: rate.max_calls_per_hour
                 for rate in list(getattr(config, "rate_limits").all())
             }
-        except Exception:
+        except (AttributeError, DatabaseError):
+            logger.error("Failed to serialize rate limits for plan %s", config.plan_name, exc_info=True)
             rate_limits = {}
         payload[config.plan_name] = {
             "min_cron_schedule_minutes": config.min_cron_schedule_minutes,

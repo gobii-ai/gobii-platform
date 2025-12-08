@@ -6388,7 +6388,7 @@ class PersistentAgentStep(models.Model):
             # Fast lookup of recent steps for an agent
             models.Index(fields=["agent", "-created_at"], name="pa_step_recent_idx"),
             # Ascending order index to support compaction filter/order queries
-            models.Index(fields=["agent", "created_at"], name="pa_step_agent_ts_idx"),
+            models.Index(fields=["agent", "created_at", "id"], name="pa_step_agent_ts_idx"),
         ]
 
     def __str__(self):
@@ -6472,7 +6472,6 @@ class PersistentAgentToolCall(models.Model):
         ordering = ["-step__created_at"]  # newest first via step timestamp
         indexes = [
             models.Index(fields=["tool_name"], name="pa_tool_name_idx"),
-            models.Index(fields=["tool_name", "step"], name="pa_tool_step_idx"),
         ]
 
     def __str__(self):

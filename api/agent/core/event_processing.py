@@ -18,7 +18,7 @@ import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from django.apps import apps
-from django.db import transaction, close_old_connections
+from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from tenacity import (
@@ -551,8 +551,8 @@ def _resolve_tool_hourly_limit(agent: PersistentAgent, tool_name: str) -> Option
     try:
         settings = get_tool_settings_for_owner(owner)
         return settings.hourly_limit_for_tool(tool_name) if settings else None
-    except Exception:
-        logger.warning(
+    except DatabaseError:
+        logger.error(
             "Failed to resolve tool rate limit for agent %s tool %s",
             getattr(agent, "id", None),
             tool_name,
@@ -582,8 +582,8 @@ def _enforce_tool_rate_limit(
                 step__created_at__gte=cutoff,
             ).count()
         )
-    except Exception:
-        logger.warning(
+    except DatabaseError:
+        logger.error(
             "Failed to evaluate rate limit for agent %s tool %s",
             getattr(agent, "id", None),
             tool_name,
@@ -641,7 +641,7 @@ def _enforce_tool_rate_limit(
             span.set_attribute("tool_rate_limit.limit", int(limit_display))
             span.set_attribute("tool_rate_limit.recent_count", int(recent_count))
         except Exception:
-            pass
+            logger.debug("Failed to add attributes to span for tool rate limit", exc_info=True)
     return False
 
 
