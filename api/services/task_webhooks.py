@@ -8,6 +8,7 @@ from requests import RequestException
 
 from api.agent.tools.webhook_sender import USER_AGENT as DEFAULT_WEBHOOK_USER_AGENT
 from api.models import BrowserUseAgentTask, BrowserUseAgentTaskStep
+from api.proxy_selection import select_proxy_for_browser_task, select_proxies_for_webhook
 
 logger = logging.getLogger(__name__)
 
@@ -67,30 +68,43 @@ def trigger_task_webhook(task: BrowserUseAgentTask) -> None:
     delivered_at = timezone.now()
     status_code: Optional[int] = None
     error_message: Optional[str] = None
-
-    try:
-        response = requests.post(
-            task.webhook_url,
-            json=payload,
-            timeout=WEBHOOK_TIMEOUT_SECONDS,
-            headers=WEBHOOK_HEADERS,
-        )
-        status_code = response.status_code
-        if not 200 <= status_code < 300:
-            response_preview = (response.text or "")[:500]
-            error_message = f"Received status {status_code}: {response_preview}".strip()
-            logger.warning(
-                "Webhook for task %s returned non-success status %s (%s)",
-                task.id,
-                status_code,
-                response_preview,
+    proxies, proxy_error = select_proxies_for_webhook(
+        task,
+        select_proxy_for_browser_task,
+        log_context=f"task {task.id}",
+    )
+    if proxy_error:
+        error_message = proxy_error
+        logger.warning("Skipping webhook delivery for task %s: %s", task.id, proxy_error)
+    else:
+        try:
+            response = requests.post(
+                task.webhook_url,
+                json=payload,
+                timeout=WEBHOOK_TIMEOUT_SECONDS,
+                headers=WEBHOOK_HEADERS,
+                proxies=proxies,
             )
-        else:
-            logger.info("Webhook for task %s delivered successfully", task.id)
-    except RequestException:
-        logger.warning("Failed to deliver webhook for task %s", task.id, exc_info=True)
-    except Exception:
-        logger.exception("Unexpected error delivering webhook for task %s", task.id)
+            status_code = response.status_code
+            if not 200 <= status_code < 300:
+                response_preview = (response.text or "")[:500]
+                error_message = f"Received status {status_code}: {response_preview}".strip()
+                logger.warning(
+                    "Webhook for task %s returned non-success status %s (%s)",
+                    task.id,
+                    status_code,
+                    response_preview,
+                )
+            else:
+                logger.info("Webhook for task %s delivered successfully", task.id)
+        except RequestException as exc:
+            error_message = str(exc)
+            logger.warning(
+                "Failed to deliver webhook for task %s: %s", task.id, error_message, exc_info=True
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            logger.exception("Unexpected error delivering webhook for task %s: %s", task.id, error_message)
 
     # Persist delivery metadata without mutating other fields like status/updated_at.
     with transaction.atomic():

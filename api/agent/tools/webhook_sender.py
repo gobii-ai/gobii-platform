@@ -13,6 +13,7 @@ from requests import RequestException
 from django.core.exceptions import ValidationError
 
 from ...models import PersistentAgent, PersistentAgentWebhook
+from ...proxy_selection import select_proxy_for_persistent_agent, select_proxies_for_webhook
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -115,6 +116,51 @@ def _track_webhook_attempt(
     )
 
 
+def _record_delivery_attempt(
+    agent: PersistentAgent,
+    webhook: PersistentAgentWebhook,
+    *,
+    result: str,
+    status_code: int | None,
+    error_message: str | None,
+    payload_keys: Iterable[str],
+    custom_header_count: int,
+) -> None:
+    """Persist delivery attempt metadata and track analytics."""
+    webhook.record_delivery(status_code=status_code, error_message=error_message or "")
+    _track_webhook_attempt(
+        agent,
+        webhook,
+        result=result,
+        status_code=status_code,
+        error_message=error_message,
+        payload_keys=payload_keys,
+        custom_header_count=custom_header_count,
+    )
+
+
+def _build_webhook_response(
+    *,
+    status: str,
+    webhook: PersistentAgentWebhook,
+    message: str,
+    status_code: int | None = None,
+    response_preview: str | None = None,
+) -> Dict[str, Any]:
+    """Standardized response structure for webhook attempts."""
+    response: Dict[str, Any] = {
+        "status": status,
+        "message": message,
+        "webhook_id": str(webhook.id),
+        "webhook_name": webhook.name,
+    }
+    if status_code is not None:
+        response["response_status"] = status_code
+    if response_preview is not None:
+        response["response_preview"] = response_preview
+    return response
+
+
 def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_webhook_event tool."""
     webhook_id = params.get("webhook_id")
@@ -157,12 +203,34 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         payload_keys,
     )
 
+    proxies, proxy_error = select_proxies_for_webhook(
+        agent,
+        select_proxy_for_persistent_agent,
+        log_context=f"agent {agent.id}",
+    )
+    if proxy_error:
+        _record_delivery_attempt(
+            agent,
+            webhook,
+            result="proxy_unavailable",
+            status_code=None,
+            error_message=proxy_error,
+            payload_keys=payload_keys,
+            custom_header_count=custom_header_count,
+        )
+        return _build_webhook_response(
+            status="error",
+            webhook=webhook,
+            message=f"Webhook request failed: {proxy_error}",
+        )
+
     try:
         response = requests.post(
             webhook.url,
             json=body,
             headers=request_headers,
             timeout=DEFAULT_TIMEOUT_SECONDS,
+            proxies=proxies,
         )
         status_code = response.status_code
         response_preview = (response.text or "")[:500]
@@ -175,8 +243,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             webhook.id,
             error_message,
         )
-        webhook.record_delivery(status_code=None, error_message=error_message)
-        _track_webhook_attempt(
+        _record_delivery_attempt(
             agent,
             webhook,
             result="request_error",
@@ -185,16 +252,14 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             payload_keys=payload_keys,
             custom_header_count=custom_header_count,
         )
-        return {
-            "status": "error",
-            "message": f"Webhook request failed: {error_message}",
-            "webhook_id": str(webhook.id),
-            "webhook_name": webhook.name,
-        }
+        return _build_webhook_response(
+            status="error",
+            webhook=webhook,
+            message=f"Webhook request failed: {error_message}",
+        )
 
     if 200 <= status_code < 300:
-        webhook.record_delivery(status_code=status_code, error_message="")
-        _track_webhook_attempt(
+        _record_delivery_attempt(
             agent,
             webhook,
             result="success",
@@ -203,17 +268,15 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             payload_keys=payload_keys,
             custom_header_count=custom_header_count,
         )
-        return {
-            "status": "success",
-            "message": f"Delivered payload to webhook '{webhook.name}' (status {status_code}).",
-            "webhook_id": str(webhook.id),
-            "webhook_name": webhook.name,
-            "response_status": status_code,
-            "response_preview": response_preview,
-        }
+        return _build_webhook_response(
+            status="success",
+            webhook=webhook,
+            message=f"Delivered payload to webhook '{webhook.name}' (status {status_code}).",
+            status_code=status_code,
+            response_preview=response_preview,
+        )
 
-    webhook.record_delivery(status_code=status_code, error_message=response_preview)
-    _track_webhook_attempt(
+    _record_delivery_attempt(
         agent,
         webhook,
         result="http_error",
@@ -222,11 +285,10 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         payload_keys=payload_keys,
         custom_header_count=custom_header_count,
     )
-    return {
-        "status": "error",
-        "message": f"Webhook responded with status {status_code}.",
-        "webhook_id": str(webhook.id),
-        "webhook_name": webhook.name,
-        "response_status": status_code,
-        "response_preview": response_preview,
-    }
+    return _build_webhook_response(
+        status="error",
+        webhook=webhook,
+        message=f"Webhook responded with status {status_code}.",
+        status_code=status_code,
+        response_preview=response_preview,
+    )
