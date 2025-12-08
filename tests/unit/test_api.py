@@ -517,7 +517,6 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
         if response.status_code != status.HTTP_404_NOT_FOUND:
             print(f"test_create_task_for_agent_not_owned_by_user response data (status {response.status_code}): {response.data}")
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
-        
     def test_wait_parameter_validation(self):
         """Test validation of wait parameter."""
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})

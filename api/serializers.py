@@ -287,6 +287,7 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
                         raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated organization.'})
                 elif agent_obj.user != request.user:
                     raise serializers.ValidationError({'agent': 'Specified agent does not belong to the authenticated user.'})
+
         return attrs
 
 class BrowserUseAgentTaskListSerializer(serializers.ModelSerializer):

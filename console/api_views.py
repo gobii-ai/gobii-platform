@@ -12,7 +12,7 @@ import httpx
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, models, transaction
-from django.db.models import Min
+from django.db.models import Min, Max
 from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -2228,11 +2228,36 @@ class ProfileBrowserTierListCreateAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
+        raw_order = payload.get("order")
+        try:
+            order = int(raw_order) if raw_order is not None else None
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("order must be an integer")
+
+        is_premium = _coerce_bool(payload.get("is_premium", False))
+        if order is None or order <= 0:
+            max_order = (
+                ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium)
+                .aggregate(max_order=Max("order"))
+                .get("max_order")
+                or 0
+            )
+            order = max_order + 1
+        elif ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium, order=order).exists():
+            # Append to the end if the requested order is already taken to avoid unique constraint errors
+            max_order = (
+                ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium)
+                .aggregate(max_order=Max("order"))
+                .get("max_order")
+                or 0
+            )
+            order = max_order + 1
+
         tier = ProfileBrowserTier.objects.create(
             profile=profile,
-            order=payload.get("order", 0),
+            order=order,
             description=(payload.get("description") or "").strip(),
-            is_premium=_coerce_bool(payload.get("is_premium", False)),
+            is_premium=is_premium,
         )
         return _json_ok(tier_id=str(tier.id))
 
