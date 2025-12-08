@@ -808,6 +808,27 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
             any(error_msg in str(err) for err in response.data.values() if isinstance(err, list))
         )
 
+    def test_requires_vision_cannot_change_once_not_pending(self):
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent1_user1,
+            user=self.user1,
+            status=BrowserUseAgentTask.StatusChoices.IN_PROGRESS,
+            prompt={'url': 'http://example.com/vision'},
+            requires_vision=True,
+        )
+        url = reverse('api:agent-tasks-detail', kwargs={'agentId': self.agent1_user1.id, 'id': task.id})
+        response = self.client.patch(url, {'requires_vision': False}, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        error_msg = 'Task can be modified only while it is PENDING.'
+        self.assertTrue(
+            (error_msg in response.data.get('status', '')) or
+            (error_msg in response.data.get('detail', '')) or
+            any(error_msg in str(err) for err in response.data.values() if isinstance(err, list))
+        )
+        task.refresh_from_db()
+        self.assertTrue(task.requires_vision)
+
     def test_update_task_input_data_cancelled_fail(self):
         task_cancelled = BrowserUseAgentTask.objects.create(
             agent=self.agent1_user1, user=self.user1,

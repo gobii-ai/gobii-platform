@@ -267,8 +267,9 @@ class BrowserUseAgentTaskSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         # If this serializer is used for updates, check task status
         if self.instance and self.instance.status != BrowserUseAgentTask.StatusChoices.PENDING:
-             # Only allow updates to prompt if the task is PENDING
-            if 'prompt' in attrs or 'output_schema' in attrs:
+            # Only allow updates to selected fields while the task is PENDING
+            guarded_fields = {'prompt', 'output_schema', 'requires_vision'}
+            if guarded_fields.intersection(attrs):
                 error_msg = 'Task can be modified only while it is PENDING.'
                 raise serializers.ValidationError(
                     {'status': error_msg, 'detail': error_msg}
