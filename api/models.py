@@ -733,6 +733,54 @@ class ToolConfig(models.Model):
         return f"{self.plan_name} tool configuration"
 
 
+class ToolRateLimit(models.Model):
+    """Per-plan hourly rate limits for specific tools."""
+
+    plan = models.ForeignKey(
+        "ToolConfig",
+        to_field="plan_name",
+        on_delete=models.CASCADE,
+        related_name="rate_limits",
+        help_text="Tool configuration the rate limit applies to.",
+    )
+    tool_name = models.CharField(
+        max_length=128,
+        help_text="Tool eligible for rate limiting. Use the tool name exactly as invoked by the agent.",
+    )
+    max_calls_per_hour = models.PositiveIntegerField(
+        default=0,
+        help_text="Maximum calls per agent in a sliding hour; set to 0 to disable enforcement.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan", "tool_name"]
+        constraints = [
+            UniqueConstraint(fields=["plan", "tool_name"], name="unique_tool_rate_limit_per_plan_tool"),
+        ]
+        verbose_name = "Tool rate limit"
+        verbose_name_plural = "Tool rate limits"
+
+    def save(self, *args, **kwargs):  # pragma: no cover - exercised via services
+        self.tool_name = (self.tool_name or "").strip().lower()
+        result = super().save(*args, **kwargs)
+        from api.services.tool_settings import invalidate_tool_settings_cache
+
+        invalidate_tool_settings_cache()
+        return result
+
+    def delete(self, *args, **kwargs):  # pragma: no cover - exercised via services
+        result = super().delete(*args, **kwargs)
+        from api.services.tool_settings import invalidate_tool_settings_cache
+
+        invalidate_tool_settings_cache()
+        return result
+
+    def __str__(self):
+        return f"{self.plan_id}:{self.tool_name} ({self.max_calls_per_hour}/hr)"
+
+
 class PromptConfig(models.Model):
     """Singleton configuration controlling prompt and history limits."""
 
@@ -6425,6 +6473,7 @@ class PersistentAgentToolCall(models.Model):
         ordering = ["-step__created_at"]  # newest first via step timestamp
         indexes = [
             models.Index(fields=["tool_name"], name="pa_tool_name_idx"),
+            models.Index(fields=["tool_name", "step"], name="pa_tool_step_idx"),
         ]
 
     def __str__(self):

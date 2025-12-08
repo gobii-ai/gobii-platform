@@ -103,6 +103,7 @@ from ...models import (
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
 )
+from api.services.tool_settings import get_tool_settings_for_owner
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -536,6 +537,86 @@ def _completion_with_backoff(**kwargs):
     NOTE: As of 9/9/2025, this seems unused. If use is reinstated, ensure safety_identifier is an argument
     """
     return litellm.completion(**kwargs)
+
+
+# --------------------------------------------------------------------------- #
+#  Tool rate limit utilities
+# --------------------------------------------------------------------------- #
+def _resolve_tool_hourly_limit(agent: PersistentAgent, tool_name: str) -> Optional[int]:
+    """Return the hourly limit for the tool based on the agent's plan."""
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return None
+
+    try:
+        settings = get_tool_settings_for_owner(owner)
+        return settings.hourly_limit_for_tool(tool_name) if settings else None
+    except Exception:
+        logger.warning(
+            "Failed to resolve tool rate limit for agent %s tool %s",
+            getattr(agent, "id", None),
+            tool_name,
+            exc_info=True,
+        )
+        return None
+
+
+def _enforce_tool_rate_limit(agent: PersistentAgent, tool_name: str, span=None) -> bool:
+    """Enforce per-agent hourly rate limits; returns True if execution may proceed."""
+    limit = _resolve_tool_hourly_limit(agent, tool_name)
+    if limit is None:
+        return True
+
+    cutoff = dj_timezone.now() - timedelta(hours=1)
+    try:
+        recent_count = (
+            PersistentAgentToolCall.objects.filter(
+                step__agent=agent,
+                tool_name=tool_name,
+                step__created_at__gte=cutoff,
+            ).count()
+        )
+    except Exception:
+        logger.warning(
+            "Failed to evaluate rate limit for agent %s tool %s",
+            getattr(agent, "id", None),
+            tool_name,
+            exc_info=True,
+        )
+        return True
+
+    if recent_count < limit:
+        return True
+
+    limit_display = limit
+    msg_desc = (
+        f"Skipped tool '{tool_name}' due to hourly limit. "
+        f"{recent_count} of {limit_display} calls in the past hour."
+    )
+    step = PersistentAgentStep.objects.create(
+        agent=agent,
+        description=msg_desc,
+    )
+    PersistentAgentSystemStep.objects.create(
+        step=step,
+        code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        notes="tool_hourly_rate_limit",
+    )
+    logger.warning(
+        "Agent %s skipped tool %s due to hourly rate limit (recent=%s limit=%s)",
+        agent.id,
+        tool_name,
+        recent_count,
+        limit_display,
+    )
+    if span is not None:
+        try:
+            span.add_event("Tool skipped - hourly rate limit reached")
+            span.set_attribute("tool_rate_limit.limit", int(limit_display))
+            span.set_attribute("tool_rate_limit.recent_count", int(recent_count))
+        except Exception:
+            pass
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -1851,6 +1932,10 @@ def _run_agent_loop(
                         continue
 
                     all_calls_sleep = False
+                    if not _enforce_tool_rate_limit(agent, tool_name, span=tool_span):
+                        followup_required = True
+                        continue
+
                     # Ensure credit is available and consume just-in-time for actionable tools
                     credits_consumed = _ensure_credit_for_tool(
                         agent,
