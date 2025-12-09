@@ -1,7 +1,7 @@
 import {type ReactElement, useEffect, useMemo, useState} from 'react'
 import { createPortal } from 'react-dom'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Copy, Mail, MessageCircle, MessageSquare, Phone, Plus, Search, Settings, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Copy, Mail, MessageCircle, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -25,6 +25,7 @@ type AgentSummary = {
   primarySms: string | null
   detailUrl: string
   chatUrl: string
+  auditUrl: string | null
   cardGradientStyle: string
   iconBackgroundHex: string
   iconBorderHex: string
@@ -49,6 +50,7 @@ type AgentListPayload = {
   createFirstAgentEvent: string | null
   agentsAvailable: number
   agentsUnlimited: boolean
+  isStaff: boolean
 }
 
 export type PersistentAgentsScreenProps = {
@@ -236,7 +238,7 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
 
   return (
-    <div className="gobii-card-hoverable group flex h-full flex-col">
+    <div className="gobii-card-hoverable group relative flex h-full flex-col">
       <div className="relative flex h-52 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
         <div
           className="absolute inset-0 opacity-20"
@@ -280,6 +282,17 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
             <span>Transfer Pending</span>
           </div>
         )}
+
+        {agent.auditUrl ? (
+          <a
+            href={agent.auditUrl}
+            className="absolute right-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-amber-200/80 bg-amber-50/90 px-3 py-1.5 text-xs font-semibold text-amber-800 shadow-sm backdrop-blur transition hover:bg-amber-100 hover:border-amber-200"
+            title="View agent audit"
+          >
+            <Stethoscope className="h-4 w-4" aria-hidden="true" />
+            Audit
+          </a>
+        ) : null}
       </div>
 
       <div className="flex flex-1 flex-col p-4 md:p-5">

@@ -1,0 +1,110 @@
+from datetime import datetime, timezone as dt_timezone
+
+from django.utils import timezone
+
+from api.models import PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentPromptArchive
+
+
+def _dt_to_iso(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    if timezone.is_naive(dt):
+        dt = timezone.make_aware(dt, timezone.get_current_timezone())
+    dt = dt.astimezone(dt_timezone.utc)
+    return dt.isoformat().replace("+00:00", "Z")
+
+
+def serialize_message(message: PersistentAgentMessage) -> dict:
+    timestamp = _dt_to_iso(message.timestamp)
+    channel = "web"
+    conversation = getattr(message, "conversation", None)
+    if conversation:
+        channel = conversation.channel
+    elif message.from_endpoint_id:
+        channel = message.from_endpoint.channel
+    attachments = []
+    for att in message.attachments.all():
+        size_label = None
+        try:
+            from django.template.defaultfilters import filesizeformat
+
+            size_label = filesizeformat(att.file_size)
+        except (TypeError, ValueError):
+            size_label = None
+        attachments.append(
+            {
+                "id": str(att.id),
+                "filename": att.filename,
+                "url": att.file.url if att.file else "",
+                "file_size_label": size_label,
+            }
+        )
+    peer_payload = None
+    if message.peer_agent_id:
+        peer_agent = getattr(message, "peer_agent", None)
+        peer_payload = {
+            "id": str(message.peer_agent_id),
+            "name": getattr(peer_agent, "name", None),
+        }
+    self_agent = getattr(message, "owner_agent", None)
+    self_agent_name = getattr(self_agent, "name", None)
+    peer_link_id = getattr(conversation, "peer_link_id", None) if conversation else None
+    return {
+        "kind": "message",
+        "id": str(message.id),
+        "timestamp": timestamp,
+        "is_outbound": bool(message.is_outbound),
+        "channel": channel,
+        "body_html": None,
+        "body_text": message.body or "",
+        "attachments": attachments,
+        "peer_agent": peer_payload,
+        "peer_link_id": str(peer_link_id) if peer_link_id else None,
+        "self_agent_name": self_agent_name,
+    }
+
+
+def serialize_prompt_meta(archive: PersistentAgentPromptArchive | None) -> dict | None:
+    if archive is None:
+        return None
+    return {
+        "id": str(archive.id),
+        "rendered_at": _dt_to_iso(archive.rendered_at),
+        "tokens_before": archive.tokens_before,
+        "tokens_after": archive.tokens_after,
+        "tokens_saved": archive.tokens_saved,
+    }
+
+
+def serialize_tool_call(step: PersistentAgentStep) -> dict:
+    tool_call = getattr(step, "tool_call", None)
+    if tool_call is None:
+        raise ValueError("Step is missing tool_call relation")
+    return {
+        "kind": "tool_call",
+        "id": str(step.id),
+        "timestamp": _dt_to_iso(step.created_at),
+        "completion_id": str(step.completion_id) if step.completion_id else None,
+        "tool_name": tool_call.tool_name,
+        "parameters": tool_call.tool_params,
+        "result": tool_call.result,
+        "prompt_archive": serialize_prompt_meta(getattr(step, "llm_prompt_archive", None)),
+    }
+
+
+def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: PersistentAgentPromptArchive | None = None, tool_calls: list[dict] | None = None) -> dict:
+    return {
+        "kind": "completion",
+        "id": str(completion.id),
+        "timestamp": _dt_to_iso(completion.created_at),
+        "completion_type": completion.completion_type,
+        "prompt_tokens": completion.prompt_tokens,
+        "completion_tokens": completion.completion_tokens,
+        "total_tokens": completion.total_tokens,
+        "cached_tokens": completion.cached_tokens,
+        "llm_model": completion.llm_model,
+        "llm_provider": completion.llm_provider,
+        "thinking": completion.thinking_content,
+        "prompt_archive": serialize_prompt_meta(prompt_archive),
+        "tool_calls": tool_calls or [],
+    }

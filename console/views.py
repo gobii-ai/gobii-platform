@@ -1853,7 +1853,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'can_spawn_agents': bool(can_spawn_agents),
         }
 
-    def _serialize_agent_for_frontend(self, agent: PersistentAgent) -> dict[str, Any]:
+    def _serialize_agent_for_frontend(self, agent: PersistentAgent, *, is_staff: bool = False) -> dict[str, Any]:
         display_tags = agent.display_tags if isinstance(agent.display_tags, list) else []
         primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
         primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
@@ -1886,6 +1886,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'dailyCreditRemaining': remaining,
             'dailyCreditLow': bool(getattr(agent, 'daily_credit_low', False)),
             'last24hCreditBurn': recent_burn,
+            'auditUrl': reverse('console-agent-audit', kwargs={'agent_id': agent.id}) if is_staff else None,
         }
 
     def _build_agent_list_props(self, context: dict[str, Any], agents: list[PersistentAgent]) -> dict[str, Any]:
@@ -1903,9 +1904,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         owner, owner_type, organization = self._resolve_context_owner(context)
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
+        is_staff = bool(self.request.user and (self.request.user.is_staff or self.request.user.is_superuser))
 
         return {
-            'agents': [self._serialize_agent_for_frontend(agent) for agent in agents],
+            'agents': [self._serialize_agent_for_frontend(agent, is_staff=is_staff) for agent in agents],
             'hasAgents': bool(agents),
             'spawnAgentUrl': spawn_url,
             'upgradeUrl': upgrade_url,
@@ -1915,6 +1917,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'agentsAvailable': capacity['agents_available'],
             'agentsUnlimited': capacity['agents_unlimited'],
             'llmIntelligence': llm_intelligence,
+            'isStaff': is_staff,
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -4550,6 +4553,17 @@ class ConsoleEvalsDetailView(SystemAdminRequiredMixin, TemplateView):
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
         return HttpResponseNotAllowed(['GET'])
+
+
+class StaffAgentAuditView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/staff_agent_audit.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent_id = kwargs.get("agent_id")
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        context["agent"] = agent
+        return context
 
 
 class MCPServerOwnerMixin:

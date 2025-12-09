@@ -4,11 +4,12 @@ import os
 import secrets
 import time
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
+import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, models, transaction
@@ -47,9 +48,14 @@ from api.models import (
     EvalSuiteRun,
     EvalRun,
     EvalRunTask,
+    PersistentAgentPromptArchive,
     build_web_agent_address,
     build_web_user_address,
 )
+from django.core.files.storage import default_storage
+from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
+from console.agent_audit.timeline import build_audit_timeline
+from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
@@ -628,6 +634,170 @@ class SystemAdminAPIView(LoginRequiredMixin, View):
         if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
+
+
+class StaffAgentAuditAPIView(SystemAdminAPIView):
+    """Return audit runs (PROCESS_EVENTS loops) for any agent."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        cursor = request.GET.get("cursor") or None
+        at_raw = request.GET.get("at")
+        day_raw = request.GET.get("day")
+        tz_offset_raw = request.GET.get("tz_offset_minutes")
+        tz_offset = 0
+        try:
+            if tz_offset_raw is not None:
+                tz_offset = int(tz_offset_raw)
+        except ValueError:
+            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
+        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
+        at_dt = None
+        if at_raw:
+            try:
+                at_dt = datetime.fromisoformat(at_raw.replace("Z", "+00:00"))
+                if timezone.is_naive(at_dt):
+                    at_dt = timezone.make_aware(at_dt, timezone.get_current_timezone())
+            except ValueError:
+                return HttpResponseBadRequest("at must be an ISO8601 datetime")
+        elif day_raw:
+            try:
+                day_dt = datetime.fromisoformat(day_raw).date()
+            except ValueError:
+                return HttpResponseBadRequest("day must be YYYY-MM-DD")
+            at_dt = datetime.combine(day_dt + timedelta(days=1), datetime.min.time(), tzinfo=tzinfo)
+
+        try:
+            limit = int(request.GET.get("limit", 3))
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+        limit = max(1, min(limit, 50))
+
+        events, has_more, next_cursor = fetch_audit_events(agent, cursor=cursor, limit=limit, at=at_dt)
+
+        processing_active = compute_processing_status(agent)
+
+        return JsonResponse(
+            {
+                "events": events,
+                "has_more": has_more,
+                "next_cursor": next_cursor,
+                "processing_active": processing_active,
+                "agent": {
+                    "id": str(agent.id),
+                    "name": agent.name,
+                    "color": agent.get_display_color(),
+                },
+            }
+        )
+
+
+class StaffAgentAuditTimelineAPIView(SystemAdminAPIView):
+    """Return coarse activity buckets to drive audit timeline UI."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        days_raw = request.GET.get("days")
+        days = None
+        if days_raw:
+            try:
+                days = int(days_raw)
+            except ValueError:
+                return HttpResponseBadRequest("days must be an integer")
+            days = max(1, min(days, 365))
+        tz_offset_raw = request.GET.get("tz_offset_minutes")
+        tz_offset = 0
+        try:
+            if tz_offset_raw is not None:
+                tz_offset = int(tz_offset_raw)
+        except ValueError:
+            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
+        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
+
+        timeline = build_audit_timeline(agent, days=days, tzinfo=tzinfo)
+        payload = {
+            "buckets": [
+                {
+                    "day": bucket.day.isoformat(),
+                    "count": bucket.count,
+                }
+                for bucket in timeline.buckets
+            ],
+            "latest": timeline.latest_day.isoformat() if timeline.latest_day else None,
+            "days": timeline.span_days,
+        }
+        return JsonResponse(payload)
+
+
+class StaffAgentAuditDayDebugAPIView(SystemAdminAPIView):
+    """Temporary debug: return all audit events for a specific day."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        day_str = request.GET.get("day")
+        if not day_str:
+            return HttpResponseBadRequest("day is required (YYYY-MM-DD)")
+        try:
+            target_date = datetime.fromisoformat(day_str).date()
+        except ValueError:
+            return HttpResponseBadRequest("day must be YYYY-MM-DD")
+
+        tz_offset_raw = request.GET.get("tz_offset_minutes")
+        tz_offset = 0
+        try:
+            if tz_offset_raw is not None:
+                tz_offset = int(tz_offset_raw)
+        except ValueError:
+            return HttpResponseBadRequest("tz_offset_minutes must be an integer")
+        tzinfo = dt_timezone(timedelta(minutes=tz_offset))
+
+        start = datetime.combine(target_date, datetime.min.time(), tzinfo=tzinfo)
+        end = datetime.combine(target_date + timedelta(days=1), datetime.min.time(), tzinfo=tzinfo)
+
+        events = fetch_audit_events_between(agent, start=start, end=end)
+        return JsonResponse({"count": len(events), "events": events}, safe=False)
+
+
+class StaffPromptArchiveAPIView(SystemAdminAPIView):
+    """Fetch and decompress a prompt archive payload for staff inspection."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, archive_id: str, *args: Any, **kwargs: Any):
+        archive = get_object_or_404(PersistentAgentPromptArchive, pk=archive_id)
+        if not default_storage.exists(archive.storage_key):
+            return JsonResponse({"error": "missing"}, status=404)
+        try:
+            with default_storage.open(archive.storage_key, "rb") as stored:
+                dctx = zstd.ZstdDecompressor()
+                payload_bytes = dctx.decompress(stored.read())
+        except Exception:
+            logger.exception("Failed to read prompt archive %s", archive_id)
+            return JsonResponse({"error": "read_failed"}, status=500)
+
+        try:
+            payload = json.loads(payload_bytes.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("Failed to decode prompt archive payload for %s", archive_id, exc_info=True)
+            payload = None
+
+        return JsonResponse(
+            {
+                "id": str(archive.id),
+                "agent_id": str(archive.agent_id),
+                "rendered_at": archive.rendered_at.isoformat(),
+                "tokens_before": archive.tokens_before,
+                "tokens_after": archive.tokens_after,
+                "tokens_saved": archive.tokens_saved,
+                "payload": payload,
+            }
+        )
 
 
 def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:

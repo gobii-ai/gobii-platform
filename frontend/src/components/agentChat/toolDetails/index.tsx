@@ -144,7 +144,7 @@ function createNormalizeContext(maxDepth = 6): NormalizeContext {
   }
 }
 
-function normalizeStructuredValue(value: unknown, context: NormalizeContext): unknown {
+export function normalizeStructuredValue(value: unknown, context: NormalizeContext): unknown {
   if (value === null || value === undefined) {
     return value
   }
