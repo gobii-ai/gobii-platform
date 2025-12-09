@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Cpu, MessageCircle, Stethoscope, StepForward, Wrench } from 'lucide-react'
+import { Copy, Cpu, MessageCircle, Stethoscope, StepForward, Wrench } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive } from '../types/agentAudit'
@@ -468,7 +468,21 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               <span>{agentName || 'Agent'}</span>
             </div>
           </div>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">{agentId}</div>
+          <div className="flex items-center gap-2">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">{agentId}</div>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+              onClick={() => {
+                if (!agentId) return
+                navigator.clipboard?.writeText(agentId).catch(() => {})
+              }}
+              aria-label="Copy agent id"
+            >
+              <Copy className="h-4 w-4" aria-hidden />
+              Copy
+            </button>
+          </div>
         </div>
 
         {error ? <div className="mt-4 text-sm text-rose-600">{error}</div> : null}
