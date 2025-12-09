@@ -459,7 +459,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
       <div className="mx-auto max-w-6xl px-4 py-8">
         <div
           ref={bannerRef}
-          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+          className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
         >
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-600">Staff Audit</div>
