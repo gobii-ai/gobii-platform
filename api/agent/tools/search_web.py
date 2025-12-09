@@ -94,7 +94,7 @@ def execute_search_web(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             search_result = exa.search_and_contents(
                 query=query,
                 type="auto",
-                num_results=10,
+                num_results=5,
                 context=True,
                 text={
                     "max_characters": 10000
