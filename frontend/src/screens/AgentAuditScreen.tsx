@@ -7,6 +7,7 @@ import { fetchPromptArchive } from '../api/agentAudit'
 import { StructuredDataTable } from '../components/common/StructuredDataTable'
 import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
+import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 
 type AgentAuditScreenProps = {
   agentId: string
@@ -69,6 +70,14 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
   const renderValue = (value: unknown) => {
     if (value === null || value === undefined) return null
     if (typeof value === 'string') {
+      if (looksLikeHtml(value)) {
+        return (
+          <div
+            className="prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60"
+            dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }}
+          />
+        )
+      }
       return <div className="rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800">{value}</div>
     }
     return <StructuredDataTable value={value} />
@@ -117,6 +126,20 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
 }
 
 function MessageRow({ message }: { message: AuditMessageEvent }) {
+  const renderBody = () => {
+    const body = message.body_text
+    if (!body) return null
+    if (looksLikeHtml(body)) {
+      return (
+        <div
+          className="prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60"
+          dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
+        />
+      )
+    }
+    return <div className="whitespace-pre-wrap break-words text-sm text-slate-800">{body}</div>
+  }
+
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
@@ -134,9 +157,7 @@ function MessageRow({ message }: { message: AuditMessageEvent }) {
         </div>
         <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">Message</span>
       </div>
-      {message.body_text ? (
-        <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{message.body_text}</div>
-      ) : null}
+      <div className="mt-2">{renderBody()}</div>
     </div>
   )
 }
