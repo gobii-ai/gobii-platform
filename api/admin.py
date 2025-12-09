@@ -43,7 +43,7 @@ from .models import (
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
-from django.urls import reverse, path
+from django.urls import NoReverseMatch, reverse, path
 from django.utils.html import format_html
 from django.http import HttpResponseRedirect, FileResponse, StreamingHttpResponse
 from django.template.response import TemplateResponse
@@ -2073,7 +2073,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             return "-"
         try:
             url = reverse("console-agent-audit", args=[obj.pk])
-        except Exception:
+        except NoReverseMatch:
             return "-"
         return format_html('<a href="{}" target="_blank">Open audit timeline</a>', url)
 

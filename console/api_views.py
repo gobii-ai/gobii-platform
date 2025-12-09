@@ -651,7 +651,7 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
         try:
             if tz_offset_raw is not None:
                 tz_offset = int(tz_offset_raw)
-        except Exception:
+        except ValueError:
             return HttpResponseBadRequest("tz_offset_minutes must be an integer")
         tzinfo = dt_timezone(timedelta(minutes=tz_offset))
         at_dt = None
@@ -660,12 +660,12 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
                 at_dt = datetime.fromisoformat(at_raw.replace("Z", "+00:00"))
                 if timezone.is_naive(at_dt):
                     at_dt = timezone.make_aware(at_dt, timezone.get_current_timezone())
-            except Exception:
+            except ValueError:
                 return HttpResponseBadRequest("at must be an ISO8601 datetime")
         elif day_raw:
             try:
                 day_dt = datetime.fromisoformat(day_raw).date()
-            except Exception:
+            except ValueError:
                 return HttpResponseBadRequest("day must be YYYY-MM-DD")
             at_dt = datetime.combine(day_dt + timedelta(days=1), datetime.min.time(), tzinfo=tzinfo)
 
@@ -714,7 +714,7 @@ class StaffAgentAuditTimelineAPIView(SystemAdminAPIView):
         try:
             if tz_offset_raw is not None:
                 tz_offset = int(tz_offset_raw)
-        except Exception:
+        except ValueError:
             return HttpResponseBadRequest("tz_offset_minutes must be an integer")
         tzinfo = dt_timezone(timedelta(minutes=tz_offset))
 
@@ -745,7 +745,7 @@ class StaffAgentAuditDayDebugAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("day is required (YYYY-MM-DD)")
         try:
             target_date = datetime.fromisoformat(day_str).date()
-        except Exception:
+        except ValueError:
             return HttpResponseBadRequest("day must be YYYY-MM-DD")
 
         tz_offset_raw = request.GET.get("tz_offset_minutes")
@@ -753,7 +753,7 @@ class StaffAgentAuditDayDebugAPIView(SystemAdminAPIView):
         try:
             if tz_offset_raw is not None:
                 tz_offset = int(tz_offset_raw)
-        except Exception:
+        except ValueError:
             return HttpResponseBadRequest("tz_offset_minutes must be an integer")
         tzinfo = dt_timezone(timedelta(minutes=tz_offset))
 
@@ -783,7 +783,8 @@ class StaffPromptArchiveAPIView(SystemAdminAPIView):
 
         try:
             payload = json.loads(payload_bytes.decode("utf-8"))
-        except Exception:
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            logger.warning("Failed to decode prompt archive payload for %s", archive_id, exc_info=True)
             payload = None
 
         return JsonResponse(

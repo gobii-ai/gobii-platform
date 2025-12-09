@@ -29,7 +29,7 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
             from django.template.defaultfilters import filesizeformat
 
             size_label = filesizeformat(att.file_size)
-        except Exception:
+        except (TypeError, ValueError):
             size_label = None
         attachments.append(
             {
