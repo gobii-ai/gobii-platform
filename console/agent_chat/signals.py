@@ -17,7 +17,7 @@ from api.models import (
     PersistentAgentToolCall,
 )
 from console.agent_audit.realtime import send_audit_event
-from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_tool_call
+from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_step, serialize_tool_call
 
 from .timeline import (
     build_processing_snapshot,
@@ -98,13 +98,16 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
     def _on_commit():
         try:
             step = (
-                PersistentAgentStep.objects.select_related("agent", "tool_call")
+                PersistentAgentStep.objects.select_related("agent", "tool_call", "system_step")
                 .get(id=instance.id)
             )
         except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard
             return
         emit_tool_call_realtime(step)
         try:
+            if not (step.description or "").startswith("Tool call"):
+                step_payload = serialize_step(step)
+                _broadcast_audit_event(str(step.agent_id), step_payload, step.created_at)
             if getattr(step, "tool_call", None):
                 audit_payload = serialize_tool_call(step)
                 _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
@@ -120,6 +123,11 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
         return
     step = instance.step
     emit_tool_call_realtime(step)
+    try:
+        audit_payload = serialize_tool_call(step)
+        _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+    except Exception:
+        logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
 
 
 @receiver(post_save, sender=PersistentAgentCompletion)

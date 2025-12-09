@@ -2,7 +2,7 @@ from datetime import datetime, timezone as dt_timezone
 
 from django.utils import timezone
 
-from api.models import PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentPromptArchive
+from api.models import PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentPromptArchive, PersistentAgentSystemStep
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:
@@ -107,4 +107,18 @@ def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: 
         "thinking": completion.thinking_content,
         "prompt_archive": serialize_prompt_meta(prompt_archive),
         "tool_calls": tool_calls or [],
+    }
+
+
+def serialize_step(step: PersistentAgentStep) -> dict:
+    system_step: PersistentAgentSystemStep | None = getattr(step, "system_step", None)
+    return {
+        "kind": "step",
+        "id": str(step.id),
+        "timestamp": _dt_to_iso(step.created_at),
+        "description": step.description or "",
+        "completion_id": str(step.completion_id) if step.completion_id else None,
+        "is_system": bool(system_step),
+        "system_code": system_step.code if system_step else None,
+        "system_notes": system_step.notes if system_step else None,
     }

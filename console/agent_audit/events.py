@@ -205,6 +205,8 @@ def _step_events(agent: PersistentAgent, cursor: Cursor | None, limit: int, *, s
         ts = _normalize_dt(step.created_at)
         sort_value = _microsecond_epoch(ts) if ts else 0
         system_step: PersistentAgentSystemStep | None = getattr(step, "system_step", None)
+        if (step.description or "").startswith("Tool call"):
+            continue
         events.append(
             {
                 "kind": "step",
