@@ -650,7 +650,7 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
         limit = max(1, min(limit, 10))
 
         boundaries, has_more = fetch_run_boundaries(agent, cursor=cursor, limit=limit)
-        runs = [build_run_payload(agent, boundary) for boundary in boundaries]
+        runs = [payload for boundary in boundaries if (payload := build_run_payload(agent, boundary))]
 
         processing_active = compute_processing_status(agent)
         if runs:

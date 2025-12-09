@@ -205,6 +205,9 @@ def build_run_payload(
 
     events.sort(key=lambda e: (e.get("timestamp") or "", e.get("id", "")))
 
+    if not events:
+        return {}
+
     return {
         "run_id": boundary.run_id,
         "sequence": boundary.sequence,

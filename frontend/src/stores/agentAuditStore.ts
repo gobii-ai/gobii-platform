@@ -83,7 +83,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ loading: true, agentId, error: null })
     try {
       const payload = await fetchAuditRuns(agentId, { limit: 4 })
-      const runs = payload.runs || []
+      const runs = (payload.runs || []).filter((run) => (run.events || []).length > 0)
       set({
         runs,
         nextCursor: payload.next_cursor,
@@ -107,7 +107,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ loading: true })
     try {
       const payload = await fetchAuditRuns(state.agentId, { cursor: state.nextCursor, limit: 4 })
-      const incoming = payload.runs || []
+      const incoming = (payload.runs || []).filter((run) => (run.events || []).length > 0)
       set((current) => ({
         runs: [...current.runs, ...incoming],
         nextCursor: payload.next_cursor,
