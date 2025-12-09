@@ -432,7 +432,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             <div ref={loadMoreRef} className="h-6 w-full" aria-hidden="true" />
           </div>
 
-          <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:min-h-[520px]">
+          <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:max-h-[calc(100vh-120px)] lg:min-h-[520px]">
             <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
           </div>
         </div>

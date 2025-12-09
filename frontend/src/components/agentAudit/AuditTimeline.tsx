@@ -16,10 +16,18 @@ function formatLabel(date: Date): string {
 }
 
 export function AuditTimeline({ buckets, loading, error, selectedDay, onSelect, processingActive }: AuditTimelineProps) {
+  const orderedBuckets = useMemo(
+    () =>
+      [...buckets].sort(
+        (a, b) => new Date(b.day).getTime() - new Date(a.day).getTime(),
+      ),
+    [buckets],
+  )
+
   const maxCount = useMemo(() => {
-    const max = buckets.reduce((maxVal, bucket) => Math.max(maxVal, bucket.count || 0), 0)
+    const max = orderedBuckets.reduce((maxVal, bucket) => Math.max(maxVal, bucket.count || 0), 0)
     return max > 0 ? max : 1
-  }, [buckets])
+  }, [orderedBuckets])
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
@@ -41,7 +49,7 @@ export function AuditTimeline({ buckets, loading, error, selectedDay, onSelect, 
 
         {!loading && !error ? (
           <div className="custom-scrollbar flex-1 space-y-2 overflow-y-auto pr-1">
-            {buckets.map((bucket) => {
+            {orderedBuckets.map((bucket) => {
               const bucketDate = new Date(`${bucket.day}T00:00:00`)
               const label = formatLabel(bucketDate)
               const isSelected = selectedDay === bucket.day
