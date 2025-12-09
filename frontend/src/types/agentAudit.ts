@@ -80,3 +80,8 @@ export type PromptArchive = {
     [key: string]: unknown
   } | null
 }
+
+export type AuditTimelineBucket = {
+  day: string // YYYY-MM-DD in local timezone
+  count: number
+}

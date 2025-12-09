@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, PromptArchive } from '../types/agentAudit'
 import { fetchPromptArchive } from '../api/agentAudit'
 import { StructuredDataTable } from '../components/common/StructuredDataTable'
 import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
+import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 
 type AgentAuditScreenProps = {
   agentId: string
@@ -276,13 +277,30 @@ function CompletionCard({
 }
 
 export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {
-  const { initialize, events, loading, error, loadMore, hasMore } = useAgentAuditStore((state) => state)
+  const {
+    initialize,
+    events,
+    loading,
+    error,
+    loadMore,
+    hasMore,
+    loadTimeline,
+    timeline,
+    timelineLoading,
+    timelineError,
+    jumpToTime,
+    selectedTimestamp: selectedDay,
+    processingActive,
+    setSelectedDay,
+  } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
+  const eventsRef = useRef<HTMLDivElement | null>(null)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
     initialize(agentId)
-  }, [agentId, initialize])
+    loadTimeline(agentId)
+  }, [agentId, initialize, loadTimeline])
 
   const handleLoadPrompt = async (archiveId: string) => {
     setPromptState((current) => ({ ...current, [archiveId]: { loading: true } }))
@@ -296,6 +314,46 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
       }))
     }
   }
+
+  const handleJumpToTimestamp = useCallback(
+    async (day: string) => {
+      await jumpToTime(day)
+      if (eventsRef.current) {
+        eventsRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      } else {
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+      }
+    },
+    [jumpToTime],
+  )
+
+  useEffect(() => {
+    const container = eventsRef.current
+    if (!container) return
+    const nodes = Array.from(container.querySelectorAll('[data-day-marker="true"]')) as HTMLElement[]
+    if (!nodes.length) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting)
+        if (!visible.length) return
+        visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        const top = visible[0]?.target as HTMLElement | undefined
+        const day = top?.dataset.day
+        if (day) {
+          setSelectedDay(day)
+        }
+      },
+      {
+        root: null,
+        threshold: 0.3,
+        rootMargin: '-10% 0px -65% 0px',
+      },
+    )
+
+    nodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [events, setSelectedDay])
 
   return (
     <div className="min-h-screen bg-white">
@@ -311,41 +369,63 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
         {error ? <div className="mt-4 text-sm text-rose-600">{error}</div> : null}
         {loading && !events.length ? <div className="mt-6 text-sm text-slate-700">Loading audit data…</div> : null}
 
-        <div className="mt-6 space-y-4">
-          {events.map((event) => {
-            if (event.kind === 'completion') {
-              return (
-                <CompletionCard
-                  key={event.id}
-                  completion={event}
-                  promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
-                  onLoadPrompt={handleLoadPrompt}
-                />
-              )
-            }
-            if (event.kind === 'tool_call') {
-              return <ToolCallRow key={event.id} tool={event as AuditToolCallEvent} />
-            }
-            if (event.kind === 'message') {
-              return <MessageRow key={event.id} message={event as AuditMessageEvent} />
-            }
-            return null
-          })}
-          {!events.length ? <div className="text-sm text-slate-600">No events yet.</div> : null}
-        </div>
+        <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
+          <div ref={eventsRef} className="space-y-4">
+            {events.map((event) => {
+              const timestamp = (event as any).timestamp as string | null | undefined
+              const day =
+                timestamp && !Number.isNaN(new Date(timestamp).getTime())
+                  ? `${new Date(timestamp).getFullYear()}-${String(new Date(timestamp).getMonth() + 1).padStart(2, '0')}-${String(new Date(timestamp).getDate()).padStart(2, '0')}`
+                  : null
+              const wrapperProps = day ? { 'data-day-marker': 'true', 'data-day': day } : {}
 
-        {hasMore ? (
-          <div className="mt-6 flex justify-center">
-            <button
-              type="button"
-              onClick={() => loadMore()}
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.2)] transition hover:-translate-y-[1px] hover:bg-slate-800"
-              disabled={loading}
-            >
-              {loading ? 'Loading…' : 'Load older events'}
-            </button>
+              if (event.kind === 'completion') {
+                return (
+                  <div key={event.id} {...wrapperProps}>
+                    <CompletionCard
+                      completion={event}
+                      promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
+                      onLoadPrompt={handleLoadPrompt}
+                    />
+                  </div>
+                )
+              }
+              if (event.kind === 'tool_call') {
+                return (
+                  <div key={event.id} {...wrapperProps}>
+                    <ToolCallRow tool={event as AuditToolCallEvent} />
+                  </div>
+                )
+              }
+              if (event.kind === 'message') {
+                return (
+                  <div key={event.id} {...wrapperProps}>
+                    <MessageRow message={event as AuditMessageEvent} />
+                  </div>
+                )
+              }
+              return null
+            })}
+            {!events.length ? <div className="text-sm text-slate-600">No events yet.</div> : null}
+
+            {hasMore ? (
+              <div className="flex justify-center pb-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => loadMore()}
+                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.2)] transition hover:-translate-y-[1px] hover:bg-slate-800"
+                  disabled={loading}
+                >
+                  {loading ? 'Loading…' : 'Load older events'}
+                </button>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+
+          <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:min-h-[520px]">
+            <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
+          </div>
+        </div>
       </div>
     </div>
   )

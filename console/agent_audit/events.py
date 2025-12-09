@@ -16,7 +16,7 @@ from console.agent_audit.serializers import serialize_completion, serialize_mess
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
 
-AuditKind = Literal["completion", "tool_call", "message"]
+AuditKind = Literal["completion", "tool_call", "message", "pivot"]
 
 
 def _normalize_dt(dt: datetime | None) -> datetime | None:
@@ -94,9 +94,12 @@ def _steps_with_prompt(agent: PersistentAgent, cursor: Cursor | None, limit: int
     )
     if cursor:
         dt = datetime.fromtimestamp(cursor.value / 1_000_000, tz=dt_timezone.utc)
-        qs = qs.filter(
-            Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-        )
+        if cursor.kind == "pivot":
+            qs = qs.filter(created_at__lt=dt)
+        else:
+            qs = qs.filter(
+                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
+            )
     steps = list(qs[: limit * 3])
     return {
         step.completion_id: serialize_prompt_meta(step.llm_prompt_archive)
@@ -112,9 +115,12 @@ def _completion_events(agent: PersistentAgent, cursor: Cursor | None, limit: int
     )
     if cursor:
         dt = datetime.fromtimestamp(cursor.value / 1_000_000, tz=dt_timezone.utc)
-        qs = qs.filter(
-            Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-        )
+        if cursor.kind == "pivot":
+            qs = qs.filter(created_at__lt=dt)
+        else:
+            qs = qs.filter(
+                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
+            )
     completions = list(qs.select_related(None)[: limit * 3])
     events: list[dict] = []
     for completion in completions:
@@ -141,9 +147,12 @@ def _tool_call_events(agent: PersistentAgent, cursor: Cursor | None, limit: int)
     )
     if cursor:
         dt = datetime.fromtimestamp(cursor.value / 1_000_000, tz=dt_timezone.utc)
-        qs = qs.filter(
-            Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-        )
+        if cursor.kind == "pivot":
+            qs = qs.filter(created_at__lt=dt)
+        else:
+            qs = qs.filter(
+                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
+            )
     steps = list(qs[: limit * 3])
     events: list[dict] = []
     for step in steps:
@@ -167,9 +176,12 @@ def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -
     )
     if cursor:
         dt = datetime.fromtimestamp(cursor.value / 1_000_000, tz=dt_timezone.utc)
-        qs = qs.filter(
-            Q(timestamp__lt=dt) | Q(timestamp=dt, seq__lt=cursor.identifier)
-        )
+        if cursor.kind == "pivot":
+            qs = qs.filter(timestamp__lt=dt)
+        else:
+            qs = qs.filter(
+                Q(timestamp__lt=dt) | Q(timestamp=dt, seq__lt=cursor.identifier)
+            )
     messages = list(qs[: limit * 3])
     events: list[dict] = []
     for message in messages:
@@ -181,9 +193,24 @@ def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -
     return events
 
 
-def fetch_audit_events(agent: PersistentAgent, *, cursor: str | None = None, limit: int = DEFAULT_LIMIT) -> tuple[list[dict], bool, str | None]:
+def _cursor_from_datetime(dt: datetime | None) -> Cursor | None:
+    if dt is None:
+        return None
+    normalized = _normalize_dt(dt)
+    if normalized is None:
+        return None
+    return Cursor(value=_microsecond_epoch(normalized), kind="pivot", identifier="0")
+
+
+def fetch_audit_events(
+    agent: PersistentAgent,
+    *,
+    cursor: str | None = None,
+    limit: int = DEFAULT_LIMIT,
+    at: datetime | None = None,
+) -> tuple[list[dict], bool, str | None]:
     limit = max(1, min(limit, MAX_LIMIT))
-    cursor_obj = Cursor.decode(cursor)
+    cursor_obj = Cursor.decode(cursor) or _cursor_from_datetime(at)
 
     prompt_map = _steps_with_prompt(agent, cursor_obj, limit)
     events: list[dict] = []
