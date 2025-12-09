@@ -1803,6 +1803,9 @@ def _run_agent_loop(
                     )
                 return completion
 
+            # Persist completion immediately so token usage isn't lost if execution exits early
+            _ensure_completion()
+
             def _attach_completion(step_kwargs: dict) -> None:
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
@@ -1825,24 +1828,13 @@ def _run_agent_loop(
 
             reasoning_text = (msg.content or "").strip()
             if reasoning_text:
-                response_description = f"Internal reasoning: {reasoning_text[:500]}"
-            else:
-                try:
-                    tool_count = len(tool_calls)
-                except TypeError:
-                    tool_count = 0
-                response_description = (
-                    f"LLM response issued {tool_count} tool call(s)."
-                    if tool_count
-                    else "LLM response issued tool calls."
-                )
-            response_step_kwargs = {
-                "agent": agent,
-                "description": response_description,
-            }
-            _attach_completion(response_step_kwargs)
-            response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
-            _attach_prompt_archive(response_step)
+                response_step_kwargs = {
+                    "agent": agent,
+                    "description": f"Internal reasoning: {reasoning_text[:500]}",
+                }
+                _attach_completion(response_step_kwargs)
+                response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
+                _attach_prompt_archive(response_step)
 
             # Log high-level summary of tool calls
             try:
