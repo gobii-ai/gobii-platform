@@ -88,6 +88,7 @@ from util.subscription_helper import (
     has_unlimited_agents,
     is_community_unlimited_mode,
     get_user_max_contacts_per_agent,
+    get_subscription_base_price,
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
@@ -1350,8 +1351,19 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         # Personal billing fallback
         subscription_plan = get_user_plan(self.request.user)
-        context['subscription_plan'] = subscription_plan
         sub = get_active_subscription(self.request.user)
+        actual_price, actual_currency = get_subscription_base_price(sub)
+
+        if subscription_plan is None:
+            subscription_plan = {}
+        if actual_price is not None:
+            subscription_plan = subscription_plan.copy()
+            subscription_plan["price"] = float(actual_price)
+        if actual_currency:
+            subscription_plan = subscription_plan.copy()
+            subscription_plan["currency"] = actual_currency
+
+        context['subscription_plan'] = subscription_plan
         paid_subscriber = sub is not None
 
         if paid_subscriber:

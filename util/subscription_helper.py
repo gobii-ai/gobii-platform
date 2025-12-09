@@ -11,6 +11,7 @@ from config.plans import PLAN_CONFIG, get_plan_by_product_id, AGENTS_UNLIMITED
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNames
 from datetime import datetime, timedelta, date, time
+from decimal import Decimal
 from django.utils import timezone
 import logging
 import os
@@ -429,6 +430,65 @@ def get_active_subscription(owner) -> Subscription | None:
         )
 
         return subs[0] if subs else None
+
+
+def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | None]:
+    """Return (unit_amount, currency) for the first non-metered item on a subscription."""
+    if subscription is None:
+        return None, None
+
+    try:
+        items_qs = getattr(subscription, "items", None)
+        items = list(items_qs.all()) if hasattr(items_qs, "all") else []
+    except Exception:
+        logger.debug("Failed to load subscription items for %s", getattr(subscription, "id", None), exc_info=True)
+        return None, None
+
+    for item in items:
+        price_obj = getattr(item, "price", None)
+        item_data = getattr(item, "stripe_data", {}) or {}
+        price_data = (item_data.get("price") if isinstance(item_data.get("price"), dict) else None) or {}
+
+        # Pull usage type and currency from price object first, then stripe_data fallback.
+        usage_type = None
+        try:
+            recurring = getattr(price_obj, "recurring", None)
+            if recurring and hasattr(recurring, "get"):
+                candidate = recurring.get("usage_type")
+                if isinstance(candidate, str):
+                    usage_type = candidate
+        except Exception:
+            pass
+        if not usage_type:
+            usage_type = price_data.get("recurring", {}).get("usage_type") or price_data.get("usage_type")
+
+        # Skip metered items; we want the licensed/base item price.
+        if (usage_type or "").lower() == "metered":
+            continue
+
+        currency = getattr(price_obj, "currency", None) or price_data.get("currency")
+
+        unit_amount = getattr(price_obj, "unit_amount", None)
+        if unit_amount is None:
+            unit_amount = price_data.get("unit_amount")
+        if unit_amount is None and "unit_amount_decimal" in price_data:
+            try:
+                unit_amount = Decimal(price_data["unit_amount_decimal"])
+            except Exception:
+                pass
+
+        if unit_amount is None:
+            continue
+
+        try:
+            amount_decimal = Decimal(unit_amount) / Decimal("100")
+            return amount_decimal, currency
+        except Exception:
+            logger.debug(
+                "Failed to coerce unit_amount=%s for subscription %s", unit_amount, getattr(subscription, "id", None)
+            )
+
+    return None, None
 
 def user_has_active_subscription(user) -> bool:
     """

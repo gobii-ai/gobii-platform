@@ -16,6 +16,8 @@ from util.subscription_helper import (
     get_organization_extra_task_limit,
     get_organization_plan,
     get_organization_task_credit_limit,
+    get_active_subscription,
+    get_subscription_base_price,
 )
 
 
@@ -44,6 +46,8 @@ def build_org_billing_overview(organization) -> dict[str, Any]:
     """Return a serialisable dictionary describing the organization's billing state."""
     billing = getattr(organization, "billing", None)
     plan = get_organization_plan(organization)
+    subscription = get_active_subscription(organization)
+    actual_price, actual_currency = get_subscription_base_price(subscription)
 
     credits_qs = TaskCreditService.get_current_task_credit_for_owner(organization)
     total_granted = TaskCreditService.get_owner_task_credits_granted(
@@ -94,14 +98,17 @@ def build_org_billing_overview(organization) -> dict[str, Any]:
     if billing is not None:
         max_extra_tasks = getattr(billing, "max_extra_tasks", 0) or 0
 
+    plan_price = actual_price if actual_price is not None else plan.get("price", 0)
+    plan_currency = actual_currency or plan.get("currency", "usd")
+
     now = timezone.now()
 
     return {
         "plan": {
             "id": plan.get("id"),
             "name": plan.get("name"),
-            "currency": plan.get("currency", "usd"),
-            "monthly_price": plan.get("price", 0),
+            "currency": plan_currency,
+            "monthly_price": _serialize_decimal(plan_price),
             "dedicated_ip_price": plan.get("dedicated_ip_price"),
             "credits_per_seat": plan.get("credits_per_seat"),
         },
