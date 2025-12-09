@@ -229,10 +229,12 @@ function RunCard({
   run,
   promptState,
   onLoadPrompt,
+  onToggle,
 }: {
   run: AuditRun
   promptState: Record<string, PromptState>
   onLoadPrompt: (archiveId: string) => void
+  onToggle: (runId: string) => void
 }) {
   const startedLabel = useMemo(() => new Date(run.started_at).toLocaleString(), [run.started_at])
   const endedLabel = run.ended_at ? new Date(run.ended_at).toLocaleString() : null
@@ -246,11 +248,20 @@ function RunCard({
           </div>
           <div className="text-xs text-slate-600">{endedLabel ? `Ended ${endedLabel}` : 'In progress'}</div>
         </div>
-        {run.active ? (
-          <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-            <span className="size-2 rounded-full bg-emerald-500"></span> Live
-          </span>
-        ) : null}
+        <div className="flex items-center gap-2">
+          {run.active ? (
+            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
+              <span className="size-2 rounded-full bg-emerald-500"></span> Live
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => onToggle(run.run_id)}
+            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+          >
+            {run.collapsed ? 'Expand' : 'Collapse'}
+          </button>
+        </div>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-2">
@@ -260,34 +271,36 @@ function RunCard({
         <TokenPill label="Cached" value={run.token_totals.cached_tokens} />
       </div>
 
-      <div className="mt-4 space-y-3">
-        {run.events.map((event) => {
-          if (event.kind === 'completion') {
-            return (
-              <CompletionCard
-                key={event.id}
-                completion={event}
-                promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
-                onLoadPrompt={onLoadPrompt}
-              />
-            )
-          }
-          if (event.kind === 'tool_call') {
-            return <ToolCallRow key={event.id} tool={event} />
-          }
-          if (event.kind === 'message') {
-            return <MessageRow key={event.id} message={event as AuditMessageEvent} />
-          }
-          return null
-        })}
-        {!run.events.length ? <div className="text-sm text-slate-600">No events recorded in this loop yet.</div> : null}
-      </div>
+      {!run.collapsed ? (
+        <div className="mt-4 space-y-3">
+          {run.events.map((event) => {
+            if (event.kind === 'completion') {
+              return (
+                <CompletionCard
+                  key={event.id}
+                  completion={event}
+                  promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
+                  onLoadPrompt={onLoadPrompt}
+                />
+              )
+            }
+            if (event.kind === 'tool_call') {
+              return <ToolCallRow key={event.id} tool={event} />
+            }
+            if (event.kind === 'message') {
+              return <MessageRow key={event.id} message={event as AuditMessageEvent} />
+            }
+            return null
+          })}
+          {!run.events.length ? <div className="text-sm text-slate-600">No events recorded in this loop yet.</div> : null}
+        </div>
+      ) : null}
     </div>
   )
 }
 
 export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {
-  const { initialize, runs, loading, error, loadMore, hasMore } = useAgentAuditStore((state) => state)
+  const { initialize, runs, loading, error, loadMore, hasMore, toggleRun } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   useAgentAuditSocket(agentId)
 
@@ -324,7 +337,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
 
         <div className="mt-6 space-y-4">
           {runs.map((run) => (
-            <RunCard key={run.run_id} run={run} promptState={promptState} onLoadPrompt={handleLoadPrompt} />
+            <RunCard key={run.run_id} run={run} promptState={promptState} onLoadPrompt={handleLoadPrompt} onToggle={toggleRun} />
           ))}
         </div>
 

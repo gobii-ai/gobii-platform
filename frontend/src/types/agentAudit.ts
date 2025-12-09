@@ -76,6 +76,7 @@ export type AuditRun = {
   events: AuditEvent[]
   token_totals: TokenTotals
   active?: boolean
+  collapsed?: boolean
 }
 
 export type PromptArchive = {

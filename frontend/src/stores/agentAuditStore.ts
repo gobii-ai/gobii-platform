@@ -13,6 +13,7 @@ type AuditState = {
   initialize: (agentId: string) => Promise<void>
   loadMore: () => Promise<void>
   receiveRealtimeEvent: (payload: any) => void
+  toggleRun: (runId: string) => void
 }
 
 function ensureRunSkeleton(runId: string, startedAt?: string | null, sequence?: number | null): AuditRun {
@@ -83,7 +84,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ loading: true, agentId, error: null })
     try {
       const payload = await fetchAuditRuns(agentId, { limit: 4 })
-      const runs = (payload.runs || []).filter((run) => (run.events || []).length > 0)
+      const runs = (payload.runs || []).filter((run) => (run.events || []).length > 0).map((run) => ({ ...run, collapsed: true }))
       set({
         runs,
         nextCursor: payload.next_cursor,
@@ -107,7 +108,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ loading: true })
     try {
       const payload = await fetchAuditRuns(state.agentId, { cursor: state.nextCursor, limit: 4 })
-      const incoming = (payload.runs || []).filter((run) => (run.events || []).length > 0)
+      const incoming = (payload.runs || []).filter((run) => (run.events || []).length > 0).map((run) => ({ ...run, collapsed: true }))
       set((current) => ({
         runs: [...current.runs, ...incoming],
         nextCursor: payload.next_cursor,
@@ -152,5 +153,11 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
       runs[targetIndex] = appendEvent(runs[targetIndex], event)
       return { runs }
     })
+  },
+
+  toggleRun(runId: string) {
+    set((current) => ({
+      runs: current.runs.map((run) => (run.run_id === runId ? { ...run, collapsed: !run.collapsed } : run)),
+    }))
   },
 }))
