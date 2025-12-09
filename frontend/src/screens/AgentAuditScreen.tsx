@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Cpu, MessageCircle, Stethoscope, StepForward, Wrench } from 'lucide-react'
+import { Copy, Cpu, Filter, MessageCircle, Stethoscope, StepForward, Wrench } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive } from '../types/agentAudit'
@@ -365,6 +365,15 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const loadingRef = useRef(loading)
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const [filters, setFilters] = useState({
+    hideTagGeneration: false,
+    hideMiniDescription: false,
+    hideShortDescription: false,
+    hideSystemSteps: false,
+    hideAgentSteps: false,
+    hideToolCalls: false,
+  })
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
@@ -380,6 +389,28 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
+
+  const filteredEvents = useMemo(() => {
+    return events.filter((event) => {
+      if (event.kind === 'tool_call') {
+        if (filters.hideToolCalls) return false
+        return true
+      }
+      if (event.kind === 'step') {
+        if (event.is_system && filters.hideSystemSteps) return false
+        if (!event.is_system && filters.hideAgentSteps) return false
+        return true
+      }
+      if (event.kind === 'completion') {
+        const key = (event.completion_type || '').toLowerCase()
+        if (filters.hideTagGeneration && key === 'tag') return false
+        if (filters.hideMiniDescription && key === 'mini_description') return false
+        if (filters.hideShortDescription && key === 'short_description') return false
+        return true
+      }
+      return true
+    })
+  }, [events, filters])
 
   const handleLoadPrompt = async (archiveId: string) => {
     setPromptState((current) => ({ ...current, [archiveId]: { loading: true } }))
@@ -409,7 +440,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   useEffect(() => {
     const container = eventsRef.current
     if (!container) return
-    const nodes = Array.from(container.querySelectorAll('[data-day-marker="true"]')) as HTMLElement[]
+    const nodes = Array.from(container.querySelectorAll('[data-day-marker=\"true\"]')) as HTMLElement[]
     if (!nodes.length) return
 
     const observer = new IntersectionObserver(
@@ -432,7 +463,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
 
     nodes.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
-  }, [events, setSelectedDay])
+  }, [filteredEvents, setSelectedDay])
 
   useEffect(() => {
     loadingRef.current = loading
@@ -468,7 +499,79 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               <span>{agentName || 'Agent'}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <button
+                type="button"
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                onClick={() => setFiltersOpen((open) => !open)}
+                aria-expanded={filtersOpen}
+              >
+                <Filter className="h-4 w-4" aria-hidden />
+                Filters
+              </button>
+              {filtersOpen ? (
+                <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Hide events</div>
+                  <div className="space-y-2 text-slate-800">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideTagGeneration}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideTagGeneration: e.target.checked }))}
+                      />
+                      <span>Tag generation</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideMiniDescription}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideMiniDescription: e.target.checked }))}
+                      />
+                      <span>Mini description</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideShortDescription}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideShortDescription: e.target.checked }))}
+                      />
+                      <span>Short description</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideSystemSteps}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideSystemSteps: e.target.checked }))}
+                      />
+                      <span>System steps</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideAgentSteps}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideAgentSteps: e.target.checked }))}
+                      />
+                      <span>Persistent agent steps</span>
+                    </label>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                        checked={filters.hideToolCalls}
+                        onChange={(e) => setFilters((f) => ({ ...f, hideToolCalls: e.target.checked }))}
+                      />
+                      <span>Tool calls</span>
+                    </label>
+                  </div>
+                </div>
+              ) : null}
+            </div>
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">{agentId}</div>
             <button
               type="button"
@@ -490,7 +593,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
 
         <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_260px] lg:items-start">
           <div ref={eventsRef} className="space-y-4">
-            {events.map((event) => {
+            {filteredEvents.map((event) => {
               const timestamp = (event as any).timestamp as string | null | undefined
               const parsedTimestamp = timestamp ? new Date(timestamp) : null
               const day =
@@ -533,7 +636,11 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               }
               return null
             })}
-            {!events.length ? <div className="text-sm text-slate-600">No events yet.</div> : null}
+            {!filteredEvents.length ? (
+              <div className="text-sm text-slate-600">
+                {events.length ? 'No events match the current filters.' : 'No events yet.'}
+              </div>
+            ) : null}
             <div ref={loadMoreRef} className="h-6 w-full" aria-hidden="true" />
           </div>
 
