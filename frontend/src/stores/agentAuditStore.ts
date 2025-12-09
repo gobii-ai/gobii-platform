@@ -131,9 +131,6 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
       set({ error: 'Invalid timestamp' })
       return
     }
-    const endOfDay = new Date(`${timestamp}T00:00:00`)
-    endOfDay.setHours(23, 59, 59, 999)
-    const pivot = endOfDay.toISOString()
     set({ loading: true, error: null, selectedTimestamp: timestamp })
     try {
       const payload = await fetchAuditEvents(state.agentId, {

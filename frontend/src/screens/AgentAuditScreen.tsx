@@ -297,11 +297,22 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const eventsRef = useRef<HTMLDivElement | null>(null)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const loadingRef = useRef(loading)
+  const bannerRef = useRef<HTMLDivElement | null>(null)
+  const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
     initialize(agentId)
     loadTimeline(agentId)
+    const measure = () => {
+      const bannerHeight = bannerRef.current?.offsetHeight ?? 0
+      const padding = 48 // account for top/bottom page padding
+      const available = window.innerHeight - bannerHeight - padding
+      setTimelineMaxHeight(Math.max(420, available))
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
 
   const handleLoadPrompt = async (archiveId: string) => {
@@ -380,7 +391,10 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-6xl px-4 py-8">
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
+        <div
+          ref={bannerRef}
+          className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+        >
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-600">Staff Audit</div>
             <div className="text-2xl font-bold leading-tight text-slate-900">{agentName || 'Agent'}</div>
@@ -432,7 +446,10 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             <div ref={loadMoreRef} className="h-6 w-full" aria-hidden="true" />
           </div>
 
-          <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:max-h-[calc(100vh-120px)] lg:min-h-[520px]">
+          <div
+            className="lg:sticky lg:top-6 lg:min-h-[520px]"
+            style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
+          >
             <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
           </div>
         </div>
