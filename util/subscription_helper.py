@@ -475,7 +475,7 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
             try:
                 unit_amount = Decimal(price_data["unit_amount_decimal"])
             except Exception:
-                pass
+                logger.debug("Failed to parse unit_amount_decimal for subscription %s", getattr(subscription, "id", None), exc_info=True)
 
         if unit_amount is None:
             continue
