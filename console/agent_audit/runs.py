@@ -109,7 +109,10 @@ def fetch_run_boundaries(
     cursor_id: str | None = None
     if cursor:
         try:
-            ts_str, step_id = cursor.split(":", 1)
+            if "|" in cursor:
+                ts_str, step_id = cursor.split("|", 1)
+            else:
+                ts_str, step_id = cursor.rsplit(":", 1)
             cursor_dt = datetime.fromisoformat(ts_str)
             if timezone.is_naive(cursor_dt):
                 cursor_dt = timezone.make_aware(cursor_dt, timezone.get_current_timezone())

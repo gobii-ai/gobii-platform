@@ -661,7 +661,8 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
         next_cursor = None
         if has_more and boundaries:
             last = boundaries[-1]
-            next_cursor = f"{last.started_at.isoformat()}:{last.run_id}"
+            ts_str = last.started_at.isoformat()
+            next_cursor = f"{ts_str}|{last.run_id}"
 
         return JsonResponse(
             {
