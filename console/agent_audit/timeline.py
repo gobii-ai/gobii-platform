@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
-from typing import Dict, List
+from datetime import date, datetime, time, timedelta, timezone as dt_timezone
+from typing import Dict, List, Optional
 
 from django.db.models import Count, Min
 from django.db.models.functions import TruncDay
@@ -27,13 +27,13 @@ class AuditTimeline:
     span_days: int
 
 
-def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime) -> Dict[date, int]:
+def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime, tzinfo: dt_timezone) -> Dict[date, int]:
     """Count audit-relevant events per day (inclusive of start, exclusive of end)."""
 
     def _bucket_counts(qs, dt_field: str) -> Dict[date, int]:
         rows = (
             qs.filter(**{f"{dt_field}__gte": start, f"{dt_field}__lt": end})
-            .annotate(bucket=TruncDay(dt_field))
+            .annotate(bucket=TruncDay(dt_field, tzinfo=tzinfo))
             .values("bucket")
             .annotate(count=Count("id"))
         )
@@ -42,7 +42,7 @@ def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime)
             bucket = row.get("bucket")
             if not bucket:
                 continue
-            bucket_local = timezone.localtime(bucket)
+            bucket_local = bucket.astimezone(tzinfo)
             bucket_date = bucket_local.date()
             bucket_map[bucket_date] = bucket_map.get(bucket_date, 0) + int(row.get("count") or 0)
         return bucket_map
@@ -67,12 +67,12 @@ def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime)
     return combined
 
 
-def _earliest_activity_date(agent: PersistentAgent) -> date | None:
+def _earliest_activity_date(agent: PersistentAgent, tzinfo: dt_timezone) -> date | None:
     candidates: List[date] = []
 
     def _maybe_add(value):
         if value:
-            candidates.append(timezone.localtime(value).date())
+            candidates.append(value.astimezone(tzinfo).date())
 
     completion_min = (
         PersistentAgentCompletion.objects.filter(agent=agent)
@@ -100,14 +100,14 @@ def _earliest_activity_date(agent: PersistentAgent) -> date | None:
     return min(candidates)
 
 
-def _start_of_day(dt_date: date) -> datetime:
-    naive = datetime.combine(dt_date, time.min)
-    return timezone.make_aware(naive, timezone.get_current_timezone())
+def _start_of_day(dt_date: date, tzinfo: dt_timezone) -> datetime:
+    return datetime.combine(dt_date, time.min, tzinfo=tzinfo)
 
 
-def build_audit_timeline(agent: PersistentAgent, *, days: int | None = None) -> AuditTimeline:
-    today = timezone.localdate()
-    earliest_date = _earliest_activity_date(agent) or today
+def build_audit_timeline(agent: PersistentAgent, *, days: int | None = None, tzinfo: Optional[dt_timezone] = None) -> AuditTimeline:
+    tz = tzinfo or dt_timezone.utc
+    today = datetime.now(tz).date()
+    earliest_date = _earliest_activity_date(agent, tz) or today
 
     if days is not None:
         days = max(1, min(days, 365))
@@ -116,10 +116,10 @@ def build_audit_timeline(agent: PersistentAgent, *, days: int | None = None) -> 
         start_date = earliest_date
 
     end_date = today
-    start = timezone.make_aware(datetime.combine(start_date, time.min), timezone.get_current_timezone())
-    end = timezone.make_aware(datetime.combine(end_date + timedelta(days=1), time.min), timezone.get_current_timezone())
+    start = datetime.combine(start_date, time.min, tzinfo=tz)
+    end = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=tz)
 
-    bucket_counts = _aggregate_counts(agent, start=start, end=end)
+    bucket_counts = _aggregate_counts(agent, start=start, end=end, tzinfo=tz)
     buckets: List[TimelineBucket] = []
 
     current = start_date

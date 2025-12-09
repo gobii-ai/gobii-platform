@@ -21,12 +21,14 @@ type TimelineResponse = {
 
 export async function fetchAuditEvents(
   agentId: string,
-  params: { cursor?: string | null; limit?: number; at?: string | null } = {},
+  params: { cursor?: string | null; limit?: number; at?: string | null; day?: string | null; tzOffsetMinutes?: number | null } = {},
 ): Promise<EventsResponse> {
   const query = new URLSearchParams()
   if (params.cursor) query.set('cursor', params.cursor)
   if (params.limit) query.set('limit', params.limit.toString())
   if (params.at) query.set('at', params.at)
+  if (params.day) query.set('day', params.day)
+  if (typeof params.tzOffsetMinutes === 'number') query.set('tz_offset_minutes', params.tzOffsetMinutes.toString())
   const url = `/console/api/staff/agents/${agentId}/audit/${query.toString() ? `?${query.toString()}` : ''}`
   return jsonFetch<EventsResponse>(url)
 }
@@ -39,6 +41,8 @@ export async function fetchPromptArchive(archiveId: string): Promise<PromptArchi
 export async function fetchAuditTimeline(agentId: string, params: { days?: number } = {}): Promise<TimelineResponse> {
   const query = new URLSearchParams()
   if (params.days) query.set('days', params.days.toString())
+  const tzOffset = -new Date().getTimezoneOffset()
+  query.set('tz_offset_minutes', tzOffset.toString())
   const url = `/console/api/staff/agents/${agentId}/audit/timeline/${query.toString() ? `?${query.toString()}` : ''}`
   return jsonFetch<TimelineResponse>(url)
 }

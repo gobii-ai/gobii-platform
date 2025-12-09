@@ -68,17 +68,8 @@ class Cursor:
 
 
 def _filter_events_by_cursor(events: list[dict], cursor: Cursor | None) -> list[dict]:
-    if cursor is None:
-        return events
-    pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[dict] = []
-    for event in events:
-        key = event.get("_sort_key")
-        if not key:
-            continue
-        if key < pivot:
-            filtered.append(event)
-    return filtered
+    # Cursor filtering is applied at the query layer; keep full list here.
+    return events
 
 
 def _truncate_events(events: list[dict], limit: int) -> tuple[list[dict], bool]:
@@ -87,6 +78,7 @@ def _truncate_events(events: list[dict], limit: int) -> tuple[list[dict], bool]:
 
 
 def _steps_with_prompt(agent: PersistentAgent, cursor: Cursor | None, limit: int) -> dict:
+    multiplier = 20
     qs = (
         PersistentAgentStep.objects.filter(agent=agent, llm_prompt_archive__isnull=False)
         .select_related("llm_prompt_archive", "completion")
@@ -97,10 +89,8 @@ def _steps_with_prompt(agent: PersistentAgent, cursor: Cursor | None, limit: int
         if cursor.kind == "pivot":
             qs = qs.filter(created_at__lt=dt)
         else:
-            qs = qs.filter(
-                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-            )
-    steps = list(qs[: limit * 3])
+            qs = qs.filter(Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier))
+    steps = list(qs[: limit * multiplier])
     return {
         step.completion_id: serialize_prompt_meta(step.llm_prompt_archive)
         for step in steps
@@ -108,7 +98,26 @@ def _steps_with_prompt(agent: PersistentAgent, cursor: Cursor | None, limit: int
     }
 
 
+def _steps_with_prompt_between(agent: PersistentAgent, start: datetime, end: datetime) -> dict:
+    qs = (
+        PersistentAgentStep.objects.filter(
+            agent=agent,
+            llm_prompt_archive__isnull=False,
+            created_at__gte=start,
+            created_at__lt=end,
+        )
+        .select_related("llm_prompt_archive", "completion")
+        .order_by("-created_at", "-id")
+    )
+    return {
+        step.completion_id: serialize_prompt_meta(step.llm_prompt_archive)
+        for step in qs
+        if step.completion_id
+    }
+
+
 def _completion_events(agent: PersistentAgent, cursor: Cursor | None, limit: int, prompt_map: dict) -> list[dict]:
+    multiplier = 20
     qs = (
         PersistentAgentCompletion.objects.filter(agent=agent)
         .order_by("-created_at", "-id")
@@ -118,10 +127,8 @@ def _completion_events(agent: PersistentAgent, cursor: Cursor | None, limit: int
         if cursor.kind == "pivot":
             qs = qs.filter(created_at__lt=dt)
         else:
-            qs = qs.filter(
-                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-            )
-    completions = list(qs.select_related(None)[: limit * 3])
+            qs = qs.filter(Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier))
+    completions = list(qs.select_related(None)[: limit * multiplier])
     events: list[dict] = []
     for completion in completions:
         ts = _normalize_dt(completion.created_at)
@@ -140,6 +147,7 @@ def _completion_events(agent: PersistentAgent, cursor: Cursor | None, limit: int
 
 
 def _tool_call_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -> list[dict]:
+    multiplier = 20
     qs = (
         PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False)
         .select_related("tool_call", "completion")
@@ -150,10 +158,8 @@ def _tool_call_events(agent: PersistentAgent, cursor: Cursor | None, limit: int)
         if cursor.kind == "pivot":
             qs = qs.filter(created_at__lt=dt)
         else:
-            qs = qs.filter(
-                Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier)
-            )
-    steps = list(qs[: limit * 3])
+            qs = qs.filter(Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier))
+    steps = list(qs[: limit * multiplier])
     events: list[dict] = []
     for step in steps:
         ts = _normalize_dt(step.created_at)
@@ -168,6 +174,7 @@ def _tool_call_events(agent: PersistentAgent, cursor: Cursor | None, limit: int)
 
 
 def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -> list[dict]:
+    multiplier = 20
     qs = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
@@ -179,10 +186,8 @@ def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -
         if cursor.kind == "pivot":
             qs = qs.filter(timestamp__lt=dt)
         else:
-            qs = qs.filter(
-                Q(timestamp__lt=dt) | Q(timestamp=dt, seq__lt=cursor.identifier)
-            )
-    messages = list(qs[: limit * 3])
+            qs = qs.filter(Q(timestamp__lt=dt) | Q(timestamp=dt, seq__lt=cursor.identifier))
+    messages = list(qs[: limit * multiplier])
     events: list[dict] = []
     for message in messages:
         ts = _normalize_dt(message.timestamp)
@@ -239,3 +244,60 @@ def fetch_audit_events(
                 next_cursor = None
 
     return truncated, has_more, next_cursor
+
+
+def fetch_audit_events_between(agent: PersistentAgent, *, start: datetime, end: datetime) -> list[dict]:
+    """Debug helper: return all events between [start, end)."""
+    prompt_map = _steps_with_prompt_between(agent, start, end)
+
+    events: list[dict] = []
+    # Completions
+    for completion in (
+        PersistentAgentCompletion.objects.filter(agent=agent, created_at__gte=start, created_at__lt=end)
+        .order_by("-created_at", "-id")
+    ):
+        ts = _normalize_dt(completion.created_at)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        prompt_data = prompt_map.get(completion.id)
+        if prompt_data and not isinstance(prompt_data, dict):
+            prompt_data = serialize_prompt_meta(prompt_data)
+        events.append(
+            {
+                **serialize_completion(completion, prompt_archive=None, tool_calls=[]),
+                "prompt_archive": prompt_data,
+                "_sort_key": (sort_value, "completion", str(completion.id)),
+            }
+        )
+
+    # Tool calls
+    for step in (
+        PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False, created_at__gte=start, created_at__lt=end)
+        .select_related("tool_call", "completion")
+        .order_by("-created_at", "-id")
+    ):
+        ts = _normalize_dt(step.created_at)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        try:
+            payload = serialize_tool_call(step)
+        except Exception:
+            continue
+        payload["_sort_key"] = (sort_value, "tool_call", str(step.id))
+        events.append(payload)
+
+    # Messages
+    for message in (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, timestamp__gte=start, timestamp__lt=end)
+        .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
+        .prefetch_related("attachments")
+        .order_by("-timestamp", "-seq")
+    ):
+        ts = _normalize_dt(message.timestamp)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        payload = serialize_message(message)
+        payload["_sort_key"] = (sort_value, "message", message.seq)
+        events.append(payload)
+
+    events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
+    for ev in events:
+        ev.pop("_sort_key", None)
+    return events

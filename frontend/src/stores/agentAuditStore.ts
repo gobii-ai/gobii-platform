@@ -59,7 +59,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
   async initialize(agentId: string) {
     set({ loading: true, agentId, error: null, selectedTimestamp: null })
     try {
-      const payload = await fetchAuditEvents(agentId, { limit: 40 })
+      const payload = await fetchAuditEvents(agentId, { limit: 40, tzOffsetMinutes: -new Date().getTimezoneOffset() })
       const events = payload.events || []
       set({
         events,
@@ -83,7 +83,11 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     }
     set({ loading: true })
     try {
-      const payload = await fetchAuditEvents(state.agentId, { cursor: state.nextCursor, limit: 40 })
+      const payload = await fetchAuditEvents(state.agentId, {
+        cursor: state.nextCursor,
+        limit: 40,
+        tzOffsetMinutes: -new Date().getTimezoneOffset(),
+      })
       const incoming = payload.events || []
       set((current) => ({
         events: mergeEvents(current.events, incoming),
@@ -132,7 +136,11 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     const pivot = endOfDay.toISOString()
     set({ loading: true, error: null, selectedTimestamp: timestamp })
     try {
-      const payload = await fetchAuditEvents(state.agentId, { limit: 40, at: pivot })
+      const payload = await fetchAuditEvents(state.agentId, {
+        limit: 40,
+        day: timestamp,
+        tzOffsetMinutes: -new Date().getTimezoneOffset(),
+      })
       const events = payload.events || []
       set({
         events,

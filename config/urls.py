@@ -66,6 +66,7 @@ from console.api_views import (
     MCPOAuthStatusView,
     StaffAgentAuditAPIView,
     StaffAgentAuditTimelineAPIView,
+    StaffAgentAuditDayDebugAPIView,
     StaffPromptArchiveAPIView,
     EvalSuiteListAPIView,
     EvalSuiteRunCreateAPIView,
@@ -195,6 +196,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditAPIView.as_view(), name="console_agent_audit"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/timeline/", StaffAgentAuditTimelineAPIView.as_view(), name="console_agent_audit_timeline"),
+    path("console/api/staff/agents/<uuid:agent_id>/audit/day/", StaffAgentAuditDayDebugAPIView.as_view(), name="console_agent_audit_day_debug"),
     path("console/api/staff/prompt-archives/<uuid:archive_id>/", StaffPromptArchiveAPIView.as_view(), name="console_prompt_archive_fetch"),
     path(
         "console/api/agents/<uuid:id>/",
