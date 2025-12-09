@@ -295,6 +295,8 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  const loadingRef = useRef(loading)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
@@ -355,6 +357,26 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     return () => observer.disconnect()
   }, [events, setSelectedDay])
 
+  useEffect(() => {
+    loadingRef.current = loading
+  }, [loading])
+
+  useEffect(() => {
+    const sentinel = loadMoreRef.current
+    if (!sentinel || !hasMore) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0]
+        if (entry.isIntersecting && !loadingRef.current) {
+          loadMore()
+        }
+      },
+      { rootMargin: '240px 0px 240px 0px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasMore, loadMore])
+
   return (
     <div className="min-h-screen bg-white">
       <div className="mx-auto max-w-6xl px-4 py-8">
@@ -407,19 +429,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               return null
             })}
             {!events.length ? <div className="text-sm text-slate-600">No events yet.</div> : null}
-
-            {hasMore ? (
-              <div className="flex justify-center pb-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => loadMore()}
-                  className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.2)] transition hover:-translate-y-[1px] hover:bg-slate-800"
-                  disabled={loading}
-                >
-                  {loading ? 'Loading…' : 'Load older events'}
-                </button>
-              </div>
-            ) : null}
+            <div ref={loadMoreRef} className="h-6 w-full" aria-hidden="true" />
           </div>
 
           <div className="lg:sticky lg:top-6 lg:h-[calc(100vh-120px)] lg:min-h-[520px]">
