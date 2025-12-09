@@ -1356,12 +1356,12 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         if subscription_plan is None:
             subscription_plan = {}
-        if actual_price is not None:
+        if actual_price is not None or actual_currency:
             subscription_plan = subscription_plan.copy()
-            subscription_plan["price"] = float(actual_price)
-        if actual_currency:
-            subscription_plan = subscription_plan.copy()
-            subscription_plan["currency"] = actual_currency
+            if actual_price is not None:
+                subscription_plan["price"] = float(actual_price)
+            if actual_currency:
+                subscription_plan["currency"] = actual_currency
 
         context['subscription_plan'] = subscription_plan
         paid_subscriber = sub is not None
