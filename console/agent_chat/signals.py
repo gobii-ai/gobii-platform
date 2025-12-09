@@ -19,7 +19,6 @@ from api.models import (
     PersistentAgentToolCall,
 )
 from console.agent_audit.realtime import send_audit_event
-from console.agent_audit.runs import resolve_run_id_for_timestamp
 from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_tool_call
 
 from .timeline import (
@@ -63,10 +62,6 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
 def _broadcast_audit_event(agent_id: str | None, payload: dict, timestamp=None) -> None:
     if not agent_id:
         return
-    run_id = resolve_run_id_for_timestamp(agent_id, timestamp)
-    if not run_id:
-        return
-    payload["run_id"] = run_id
     send_audit_event(agent_id, payload)
 
 
