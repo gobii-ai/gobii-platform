@@ -1810,11 +1810,18 @@ def _run_agent_loop(
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
-            reasoning_text = (msg.content or "").strip()
+            reasoning_source = thinking_content
+            if not reasoning_source:
+                msg_content = getattr(msg, "content", None)
+                if msg_content is None and isinstance(msg, dict):
+                    msg_content = msg.get("content")
+                reasoning_source = msg_content
+
+            reasoning_text = (reasoning_source or "").strip()
             if reasoning_text:
                 response_step_kwargs = {
                     "agent": agent,
-                    "description": f"Internal reasoning: {reasoning_text[:500]}",
+                    "description": f"Internal reasoning: {reasoning_text}",
                 }
                 _attach_completion(response_step_kwargs)
                 response_step = PersistentAgentStep.objects.create(**response_step_kwargs)

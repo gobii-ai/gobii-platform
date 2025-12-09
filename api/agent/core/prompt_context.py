@@ -1689,10 +1689,16 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
+            description_text = s.description or "No description"
             components = {
-                "description": f"[{s.created_at.isoformat()}] {s.description or 'No description'}"
+                "description": f"[{s.created_at.isoformat()}] {description_text}"
             }
-            structured_events.append((s.created_at, "step_description", components))
+            event_type = (
+                "step_description_internal_reasoning"
+                if description_text.startswith("Internal reasoning:")
+                else "step_description"
+            )
+            structured_events.append((s.created_at, event_type, components))
 
     # format messages
     for m in messages:
@@ -1795,6 +1801,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "message_inbound": 4,
             "message_outbound": 2,
             "step_description": 2,
+            "step_description_internal_reasoning": 1,
         }
 
         # Component weights within each event
@@ -1830,6 +1837,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     component_name in ("params", "result", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
+                    shrinker = "hmt"
+                if (
+                    event_type == "step_description_internal_reasoning"
+                    and component_name == "description"
+                ):
+                    component_weight = 1
                     shrinker = "hmt"
 
                 event_group.section_text(
