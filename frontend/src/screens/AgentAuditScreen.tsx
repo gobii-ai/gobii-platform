@@ -109,12 +109,34 @@ function CompletionCard({
     }
   }
 
+  const completionLabel = useMemo(() => {
+    const key = (completion.completion_type || '').toLowerCase()
+    switch (key) {
+      case 'orchestrator':
+        return 'Orchestrator'
+      case 'compaction':
+        return 'Comms Compaction'
+      case 'step_compaction':
+        return 'Step Compaction'
+      case 'tag':
+        return 'Tag Generation'
+      case 'short_description':
+        return 'Short Description Generation'
+      case 'mini_description':
+        return 'Mini Description Generation'
+      case 'tool_search':
+        return 'Tool Search'
+      default:
+        return 'Other'
+    }
+  }, [completion.completion_type])
+
   return (
     <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.1)]">
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="text-sm font-semibold text-slate-900">
-            Completion · {completion.llm_model || 'Unknown model'}{' '}
+            {completionLabel} · {completion.llm_model || 'Unknown model'}{' '}
             <span className="text-xs font-normal text-slate-500">({completion.llm_provider || 'provider'})</span>
           </div>
           <div className="text-xs text-slate-600">{completion.timestamp ? new Date(completion.timestamp).toLocaleString() : '—'}</div>

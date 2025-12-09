@@ -1919,7 +1919,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
-        'browser_use_agent_link', 'agent_actions', 'messages_summary_link',
+        'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
         'last_expired_at', 'sleep_email_sent_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
     )
@@ -1957,7 +1957,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             'fields': ('agent_actions',)
         }),
         ('Data Links', {
-            'fields': ('messages_summary_link',)
+            'fields': ('messages_summary_link', 'audit_link')
         }),
     )
     
@@ -2066,6 +2066,16 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         return format_html(
             '<a href="{}">View all {} messages</a>', url, count
         )
+
+    @admin.display(description="Staff Audit")
+    def audit_link(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+        try:
+            url = reverse("console-agent-audit", args=[obj.pk])
+        except Exception:
+            return "-"
+        return format_html('<a href="{}" target="_blank">Open audit timeline</a>', url)
 
     @admin.display(description='Agent Actions')
     def agent_actions(self, obj):
