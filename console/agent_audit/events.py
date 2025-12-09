@@ -9,6 +9,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
 from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_prompt_meta, serialize_tool_call
@@ -16,7 +17,7 @@ from console.agent_audit.serializers import serialize_completion, serialize_mess
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
 
-AuditKind = Literal["completion", "tool_call", "message", "pivot"]
+AuditKind = Literal["completion", "tool_call", "message", "step", "pivot"]
 
 
 def _normalize_dt(dt: datetime | None) -> datetime | None:
@@ -198,6 +199,42 @@ def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -
     return events
 
 
+def _step_events(agent: PersistentAgent, cursor: Cursor | None, limit: int) -> list[dict]:
+    multiplier = 20
+    qs = (
+        PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=True)
+        .select_related("completion", "system_step")
+        .order_by("-created_at", "-id")
+    )
+    if cursor:
+        dt = datetime.fromtimestamp(cursor.value / 1_000_000, tz=dt_timezone.utc)
+        if cursor.kind == "pivot":
+            qs = qs.filter(created_at__lt=dt)
+        else:
+            qs = qs.filter(Q(created_at__lt=dt) | Q(created_at=dt, id__lt=cursor.identifier))
+
+    steps = list(qs[: limit * multiplier])
+    events: list[dict] = []
+    for step in steps:
+        ts = _normalize_dt(step.created_at)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        system_step: PersistentAgentSystemStep | None = getattr(step, "system_step", None)
+        events.append(
+            {
+                "kind": "step",
+                "id": str(step.id),
+                "timestamp": _dt_to_iso(step.created_at),
+                "description": step.description or "",
+                "completion_id": str(step.completion_id) if step.completion_id else None,
+                "is_system": bool(system_step),
+                "system_code": system_step.code if system_step else None,
+                "system_notes": system_step.notes if system_step else None,
+                "_sort_key": (sort_value, "step", str(step.id)),
+            }
+        )
+    return events
+
+
 def _cursor_from_datetime(dt: datetime | None) -> Cursor | None:
     if dt is None:
         return None
@@ -222,6 +259,7 @@ def fetch_audit_events(
     events.extend(_completion_events(agent, cursor_obj, limit, prompt_map))
     events.extend(_tool_call_events(agent, cursor_obj, limit))
     events.extend(_message_events(agent, cursor_obj, limit))
+    events.extend(_step_events(agent, cursor_obj, limit))
 
     events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
     filtered = _filter_events_by_cursor(events, cursor_obj)
@@ -296,6 +334,29 @@ def fetch_audit_events_between(agent: PersistentAgent, *, start: datetime, end: 
         payload = serialize_message(message)
         payload["_sort_key"] = (sort_value, "message", message.seq)
         events.append(payload)
+
+    # Steps (non-tool)
+    for step in (
+        PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=True, created_at__gte=start, created_at__lt=end)
+        .select_related("system_step", "completion")
+        .order_by("-created_at", "-id")
+    ):
+        ts = _normalize_dt(step.created_at)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        system_step: PersistentAgentSystemStep | None = getattr(step, "system_step", None)
+        events.append(
+            {
+                "kind": "step",
+                "id": str(step.id),
+                "timestamp": _dt_to_iso(step.created_at),
+                "description": step.description or "",
+                "completion_id": str(step.completion_id) if step.completion_id else None,
+                "is_system": bool(system_step),
+                "system_code": system_step.code if system_step else None,
+                "system_notes": system_step.notes if system_step else None,
+                "_sort_key": (sort_value, "step", str(step.id)),
+            }
+        )
 
     events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
     for ev in events:

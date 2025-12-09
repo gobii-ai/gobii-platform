@@ -55,13 +55,17 @@ def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime,
         PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=False),
         "created_at",
     )
+    plain_step_counts = _bucket_counts(
+        PersistentAgentStep.objects.filter(agent=agent, tool_call__isnull=True),
+        "created_at",
+    )
     message_counts = _bucket_counts(
         PersistentAgentMessage.objects.filter(owner_agent=agent),
         "timestamp",
     )
 
     combined: Dict[date, int] = {}
-    for bucket_map in (completion_counts, tool_call_counts, message_counts):
+    for bucket_map in (completion_counts, tool_call_counts, plain_step_counts, message_counts):
         for bucket, count in bucket_map.items():
             combined[bucket] = combined.get(bucket, 0) + count
     return combined

@@ -59,7 +59,18 @@ export type AuditMessageEvent = {
   self_agent_name?: string | null
 }
 
-export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditRunStartedEvent
+export type AuditStepEvent = {
+  kind: 'step'
+  id: string
+  timestamp: string | null
+  description: string
+  completion_id: string | null
+  is_system: boolean
+  system_code?: string | null
+  system_notes?: string | null
+}
+
+export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent
 export type AuditRunStartedEvent = {
   kind: 'run_started'
   run_id: string
