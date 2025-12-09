@@ -458,7 +458,7 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
                 if isinstance(candidate, str):
                     usage_type = candidate
         except Exception:
-            pass
+            logger.debug("Failed to extract usage_type from price_obj for subscription %s", getattr(subscription, "id", None), exc_info=True)
         if not usage_type:
             usage_type = price_data.get("recurring", {}).get("usage_type") or price_data.get("usage_type")
 
