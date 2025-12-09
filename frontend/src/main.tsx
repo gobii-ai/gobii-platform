@@ -32,6 +32,7 @@ if (!mountNode) {
 }
 
 const appName = mountNode.dataset.app ?? 'agent-chat'
+const isStaff = mountNode.dataset.isStaff === 'true'
 
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
@@ -119,7 +120,7 @@ switch (appName) {
     if (!suiteRunId) {
       throw new Error('Suite run identifier is required for evals detail screen')
     }
-    screen = <EvalsDetailScreen suiteRunId={suiteRunId} />
+    screen = <EvalsDetailScreen suiteRunId={suiteRunId} isStaff={isStaff} />
     break
   }
   case 'agent-audit':

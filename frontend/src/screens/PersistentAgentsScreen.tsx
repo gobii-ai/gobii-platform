@@ -25,6 +25,7 @@ type AgentSummary = {
   primarySms: string | null
   detailUrl: string
   chatUrl: string
+  auditUrl: string | null
   cardGradientStyle: string
   iconBackgroundHex: string
   iconBorderHex: string
@@ -49,6 +50,7 @@ type AgentListPayload = {
   createFirstAgentEvent: string | null
   agentsAvailable: number
   agentsUnlimited: boolean
+  isStaff: boolean
 }
 
 export type PersistentAgentsScreenProps = {
@@ -327,6 +329,15 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
               <Settings className="h-4 w-4" aria-hidden="true" />
               Configure
             </a>
+            {agent.auditUrl ? (
+              <a
+                href={agent.auditUrl}
+                className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm hover:bg-amber-100"
+              >
+                <Zap className="h-4 w-4" aria-hidden="true" />
+                Audit
+              </a>
+            ) : null}
             <button
               type="button"
               onClick={onTalkToAgent}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3 } from 'lucide-react'
+import { AlertTriangle, Beaker, Loader2, RefreshCcw, ArrowLeft, Clock, HelpCircle, ChevronDown, ChevronRight, Cpu, BarChart3, Stethoscope } from 'lucide-react'
 
 import { fetchSuiteRunDetail, updateSuiteRunType, fetchRunComparison, fetchSuiteRunComparison, type EvalRun, type EvalSuiteRun, type EvalTask, type LLMRoutingProfileSnapshot, type LLMProfileTokenRange, type LLMProfileTier, type ComparisonResponse, type SuiteComparisonResponse, type ComparisonGroupBy } from '../api/evals'
 import { StatusBadge } from '../components/common/StatusBadge'
@@ -39,7 +39,9 @@ const formatDuration = (start: string | null, end: string | null) => {
 
 type PassStats = { passRate: number | null; completed: number; total: number }
 
-export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
+export type EvalsDetailScreenProps = { suiteRunId: string; isStaff?: boolean }
+
+export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailScreenProps) {
   const [suite, setSuite] = useState<EvalSuiteRun | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -583,6 +585,7 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
                   run={runs[viewRunIndex]}
                   index={viewRunIndex}
                   onCompare={openScenarioCompareModal}
+                  isStaff={isStaff}
                 />
               ))}
               {!hasRuns && (
@@ -658,7 +661,19 @@ export function EvalsDetailScreen({ suiteRunId }: { suiteRunId: string }) {
   )
 }
 
-function ScenarioGroup({ scenarioSlug, run, index, onCompare }: { scenarioSlug: string; run?: EvalRun; index: number; onCompare: (runId: string) => void }) {
+function ScenarioGroup({
+  scenarioSlug,
+  run,
+  index,
+  onCompare,
+  isStaff,
+}: {
+  scenarioSlug: string
+  run?: EvalRun
+  index: number
+  onCompare: (runId: string) => void
+  isStaff: boolean
+}) {
   const [expanded, setExpanded] = useState(true)
 
   const isCompleted = run?.status === 'completed'
@@ -684,10 +699,14 @@ function ScenarioGroup({ scenarioSlug, run, index, onCompare }: { scenarioSlug: 
                   Run #{index + 1}
                 </span>
                 {run && (
-                   <span className="flex items-center gap-1">
-                     Agent:
-                     <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id || 'ephemeral'}</span>
-                   </span>
+                  <span className="flex items-center gap-2">
+                    Agent:
+                    {run.agent_id ? (
+                      <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">{run.agent_id}</span>
+                    ) : (
+                      <span className="font-mono text-slate-600 bg-slate-100 px-1.5 rounded ring-1 ring-slate-200">ephemeral</span>
+                    )}
+                  </span>
                 )}
               </div>
            </div>
@@ -711,20 +730,33 @@ function ScenarioGroup({ scenarioSlug, run, index, onCompare }: { scenarioSlug: 
                </div>
              </div>
            )}
-           {isCompleted && (
-             <button
-               type="button"
-               onClick={(e) => {
-                 e.stopPropagation()
-                 onCompare(run!.id)
-               }}
-               className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors"
-               title="Compare this scenario"
-             >
-               <BarChart3 className="w-3 h-3" />
-               Compare
-             </button>
-           )}
+          <div className="flex items-center gap-2">
+            {run && run.agent_id && isStaff ? (
+              <a
+                href={`/console/staff/agents/${run.agent_id}/audit/`}
+                onClick={(e) => e.stopPropagation()}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded hover:bg-amber-100 transition-colors"
+                title="View agent audit"
+              >
+                <Stethoscope className="w-3.5 h-3.5" />
+                Audit
+              </a>
+            ) : null}
+            {isCompleted && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCompare(run!.id)
+                }}
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 rounded hover:bg-indigo-100 transition-colors"
+                title="Compare this scenario"
+              >
+                <BarChart3 className="w-3 h-3" />
+                Compare
+              </button>
+            )}
+          </div>
            {run ? <StatusBadge status={run.status || 'pending'} /> : <span className="text-xs text-slate-400 italic px-2">Not run</span>}
         </div>
       </div>

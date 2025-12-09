@@ -5,7 +5,8 @@
 <div id="gobii-frontend-root"
      class="min-h-[50vh]"
      data-app="evals-detail"
-     data-suite-run-id="{{ suite_run_id }}">
+     data-suite-run-id="{{ suite_run_id }}"
+     data-is-staff="{{ request.user.is_staff|yesno:'true,false' }}">
 </div>
 {% endblock %}
 
