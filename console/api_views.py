@@ -53,7 +53,7 @@ from api.models import (
     build_web_user_address,
 )
 from django.core.files.storage import default_storage
-from console.agent_audit.runs import build_run_payload, fetch_run_boundaries
+from console.agent_audit.events import fetch_audit_events
 from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
 from api.services.web_sessions import (
@@ -647,26 +647,15 @@ class StaffAgentAuditAPIView(SystemAdminAPIView):
             limit = int(request.GET.get("limit", 3))
         except ValueError:
             return HttpResponseBadRequest("limit must be an integer")
-        limit = max(1, min(limit, 10))
+        limit = max(1, min(limit, 50))
 
-        boundaries, has_more = fetch_run_boundaries(agent, cursor=cursor, limit=limit)
-        runs = [payload for boundary in boundaries if (payload := build_run_payload(agent, boundary))]
+        events, has_more, next_cursor = fetch_audit_events(agent, cursor=cursor, limit=limit)
 
         processing_active = compute_processing_status(agent)
-        if runs:
-            for run in runs:
-                run.setdefault("active", False)
-            runs[0]["active"] = processing_active and runs[0].get("ended_at") is None
-
-        next_cursor = None
-        if has_more and boundaries:
-            last = boundaries[-1]
-            ts_str = last.started_at.isoformat()
-            next_cursor = f"{ts_str}|{last.run_id}"
 
         return JsonResponse(
             {
-                "runs": runs,
+                "events": events,
                 "has_more": has_more,
                 "next_cursor": next_cursor,
                 "processing_active": processing_active,

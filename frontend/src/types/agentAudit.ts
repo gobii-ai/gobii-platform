@@ -60,23 +60,11 @@ export type AuditMessageEvent = {
 }
 
 export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditRunStartedEvent
-
 export type AuditRunStartedEvent = {
   kind: 'run_started'
   run_id: string
   timestamp: string | null
   sequence: number | null
-}
-
-export type AuditRun = {
-  run_id: string
-  sequence: number
-  started_at: string
-  ended_at: string | null
-  events: AuditEvent[]
-  token_totals: TokenTotals
-  active?: boolean
-  collapsed?: boolean
 }
 
 export type PromptArchive = {

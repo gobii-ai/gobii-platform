@@ -60,7 +60,7 @@ def _process_events_qs(agent: PersistentAgent):
     )
 
 
-def _paginate_boundaries(agent: PersistentAgent, cursor_dt: datetime | None, cursor_id: str | None, limit: int) -> tuple[list[RunBoundary], bool]:
+def _paginate_boundaries(agent: PersistentAgent, cursor_dt: datetime | None, cursor_id: str | None, limit: int, shown_offset: int = 0) -> tuple[list[RunBoundary], bool]:
     qs = _process_events_qs(agent)
     if cursor_dt:
         qs = qs.filter(
@@ -74,13 +74,7 @@ def _paginate_boundaries(agent: PersistentAgent, cursor_dt: datetime | None, cur
 
     boundaries: list[RunBoundary] = []
     for idx, sys_step in enumerate(steps):
-        sequence = (
-            PersistentAgentSystemStep.objects.filter(
-                step__agent=agent,
-                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-                step__created_at__lte=sys_step.step.created_at,
-            ).count()
-        )
+        sequence = shown_offset + idx + 1
         boundaries.append(
             RunBoundary(
                 run_id=str(sys_step.step_id),
@@ -104,26 +98,33 @@ def fetch_run_boundaries(
     *,
     cursor: str | None,
     limit: int,
-) -> tuple[list[RunBoundary], bool]:
+) -> tuple[list[RunBoundary], bool, int, int]:
     cursor_dt: datetime | None = None
     cursor_id: str | None = None
+    shown_count = 0
+    total_runs = _process_events_qs(agent).count()
     if cursor:
         try:
-            if "|" in cursor:
-                ts_str, step_id = cursor.split("|", 1)
-            else:
-                ts_str, step_id = cursor.rsplit(":", 1)
+            parts = cursor.split("|")
+            ts_str = parts[0]
             cursor_dt = datetime.fromisoformat(ts_str)
             if timezone.is_naive(cursor_dt):
                 cursor_dt = timezone.make_aware(cursor_dt, timezone.get_current_timezone())
-            cursor_id = step_id
+            if len(parts) >= 2:
+                cursor_id = parts[1]
+            if len(parts) >= 3:
+                try:
+                    shown_count = int(parts[2])
+                except Exception:
+                    shown_count = 0
         except Exception:
             cursor_dt = None
             cursor_id = None
+            shown_count = 0
 
-    boundaries, has_more = _paginate_boundaries(agent, cursor_dt, cursor_id, limit)
+    boundaries, has_more = _paginate_boundaries(agent, cursor_dt, cursor_id, limit, shown_offset=shown_count)
     _attach_end_times(boundaries)
-    return boundaries, has_more
+    return boundaries, has_more, shown_count, total_runs
 
 
 def _serialize_token_totals(completions: Iterable[PersistentAgentCompletion]) -> dict:

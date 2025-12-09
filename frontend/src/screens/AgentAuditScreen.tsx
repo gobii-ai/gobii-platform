@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditCompletionEvent, AuditRun, AuditToolCallEvent, AuditMessageEvent, PromptArchive } from '../types/agentAudit'
+import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, PromptArchive } from '../types/agentAudit'
 import { fetchPromptArchive } from '../api/agentAudit'
 
 type AgentAuditScreenProps = {
@@ -225,82 +225,8 @@ function CompletionCard({
   )
 }
 
-function RunCard({
-  run,
-  promptState,
-  onLoadPrompt,
-  onToggle,
-}: {
-  run: AuditRun
-  promptState: Record<string, PromptState>
-  onLoadPrompt: (archiveId: string) => void
-  onToggle: (runId: string) => void
-}) {
-  const startedLabel = useMemo(() => new Date(run.started_at).toLocaleString(), [run.started_at])
-  const endedLabel = run.ended_at ? new Date(run.ended_at).toLocaleString() : null
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200/60 pb-3">
-        <div>
-          <div className="text-sm font-semibold text-slate-900">
-            Run #{run.sequence} · {startedLabel}
-          </div>
-          <div className="text-xs text-slate-600">{endedLabel ? `Ended ${endedLabel}` : 'In progress'}</div>
-        </div>
-        <div className="flex items-center gap-2">
-          {run.active ? (
-            <span className="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">
-              <span className="size-2 rounded-full bg-emerald-500"></span> Live
-            </span>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => onToggle(run.run_id)}
-            className="rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-          >
-            {run.collapsed ? 'Expand' : 'Collapse'}
-          </button>
-        </div>
-      </div>
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <TokenPill label="Prompt" value={run.token_totals.prompt_tokens} />
-        <TokenPill label="Output" value={run.token_totals.completion_tokens} />
-        <TokenPill label="Total" value={run.token_totals.total_tokens} />
-        <TokenPill label="Cached" value={run.token_totals.cached_tokens} />
-      </div>
-
-      {!run.collapsed ? (
-        <div className="mt-4 space-y-3">
-          {run.events.map((event) => {
-            if (event.kind === 'completion') {
-              return (
-                <CompletionCard
-                  key={event.id}
-                  completion={event}
-                  promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
-                  onLoadPrompt={onLoadPrompt}
-                />
-              )
-            }
-            if (event.kind === 'tool_call') {
-              return <ToolCallRow key={event.id} tool={event} />
-            }
-            if (event.kind === 'message') {
-              return <MessageRow key={event.id} message={event as AuditMessageEvent} />
-            }
-            return null
-          })}
-          {!run.events.length ? <div className="text-sm text-slate-600">No events recorded in this loop yet.</div> : null}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
 export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {
-  const { initialize, runs, loading, error, loadMore, hasMore, toggleRun } = useAgentAuditStore((state) => state)
+  const { initialize, events, loading, error, loadMore, hasMore } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   useAgentAuditSocket(agentId)
 
@@ -333,12 +259,29 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
         </div>
 
         {error ? <div className="mt-4 text-sm text-rose-600">{error}</div> : null}
-        {loading && !runs.length ? <div className="mt-6 text-sm text-slate-700">Loading audit data…</div> : null}
+        {loading && !events.length ? <div className="mt-6 text-sm text-slate-700">Loading audit data…</div> : null}
 
         <div className="mt-6 space-y-4">
-          {runs.map((run) => (
-            <RunCard key={run.run_id} run={run} promptState={promptState} onLoadPrompt={handleLoadPrompt} onToggle={toggleRun} />
-          ))}
+          {events.map((event) => {
+            if (event.kind === 'completion') {
+              return (
+                <CompletionCard
+                  key={event.id}
+                  completion={event}
+                  promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
+                  onLoadPrompt={handleLoadPrompt}
+                />
+              )
+            }
+            if (event.kind === 'tool_call') {
+              return <ToolCallRow key={event.id} tool={event as AuditToolCallEvent} />
+            }
+            if (event.kind === 'message') {
+              return <MessageRow key={event.id} message={event as AuditMessageEvent} />
+            }
+            return null
+          })}
+          {!events.length ? <div className="text-sm text-slate-600">No events yet.</div> : null}
         </div>
 
         {hasMore ? (
@@ -349,7 +292,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-[0_10px_24px_rgba(15,23,42,0.2)] transition hover:-translate-y-[1px] hover:bg-slate-800"
               disabled={loading}
             >
-              {loading ? 'Loading…' : 'Load older runs'}
+              {loading ? 'Loading…' : 'Load older events'}
             </button>
           </div>
         ) : null}
