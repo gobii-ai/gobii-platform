@@ -1030,6 +1030,35 @@ class SearchWebCreditConsumptionTests(TestCase):
         self.assertIn("<title>Test Result</title>", result["result"])
         self.assertIn("<search_results>", result["result"])
 
+    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('exa_py.Exa')
+    def test_search_web_uses_tool_settings_result_count(self, mock_exa):
+        """Ensure search_web respects per-plan configured result count."""
+        config, _ = ToolConfig.objects.get_or_create(
+            plan_name=PlanNamesChoices.FREE,
+            defaults={"min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES},
+        )
+        config.search_web_result_count = 7
+        config.save()
+
+        mock_search_result = type('SearchResult', (), {
+            'results': [
+                type('Result', (), {
+                    'title': 'Test Result',
+                    'url': 'https://example.com',
+                    'published_date': '2024-01-01',
+                    'text': 'Test content'
+                })()
+            ]
+        })()
+
+        mock_exa.return_value.search_and_contents.return_value = mock_search_result
+
+        _execute_search_web(self.agent, {"query": "test search"})
+
+        _, kwargs = mock_exa.return_value.search_and_contents.call_args
+        self.assertEqual(kwargs.get("num_results"), 7)
+
     def test_search_web_fails_without_query(self):
         """Test that search_web fails when no query is provided."""
         result = _execute_search_web(self.agent, {})
