@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Cpu, Filter, MessageCircle, Stethoscope, StepForward, Wrench } from 'lucide-react'
+import { Copy, Cpu, Filter, MessageCircle, Stethoscope, StepForward, Wrench, type LucideIcon } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive } from '../types/agentAudit'
@@ -19,6 +19,27 @@ type PromptState = {
   loading: boolean
   data?: PromptArchive
   error?: string
+}
+
+function renderHtmlOrText(
+  value: string,
+  {
+    htmlClassName = 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
+    textClassName = 'whitespace-pre-wrap break-words text-sm text-slate-800',
+  }: { htmlClassName?: string; textClassName?: string } = {},
+) {
+  if (looksLikeHtml(value)) {
+    return <div className={htmlClassName} dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }} />
+  }
+  return <div className={textClassName}>{value}</div>
+}
+
+function IconCircle({ icon: Icon, bgClass, textClass }: { icon: LucideIcon; bgClass: string; textClass: string }) {
+  return (
+    <div className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-full ${bgClass} ${textClass}`}>
+      <Icon className="h-4 w-4" aria-hidden />
+    </div>
+  )
 }
 
 function TokenPill({ label, value }: { label: string; value: number | null | undefined }) {
@@ -70,15 +91,10 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
   const renderValue = (value: unknown) => {
     if (value === null || value === undefined) return null
     if (typeof value === 'string') {
-      if (looksLikeHtml(value)) {
-        return (
-          <div
-            className="prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60"
-            dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }}
-          />
-        )
-      }
-      return <div className="rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800">{value}</div>
+      return renderHtmlOrText(value, {
+        htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
+        textClassName: 'rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800',
+      })
     }
     return <StructuredDataTable value={value} />
   }
@@ -87,9 +103,7 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-indigo-50 text-indigo-700">
-            <Wrench className="h-4 w-4" aria-hidden />
-          </div>
+          <IconCircle icon={Wrench} bgClass="bg-indigo-50" textClass="text-indigo-700" />
           <div>
             <div className="text-sm font-semibold text-slate-900">{tool.tool_name || 'Tool call'}</div>
             <div className="text-xs text-slate-600">{tool.timestamp ? new Date(tool.timestamp).toLocaleString() : '—'}</div>
@@ -129,24 +143,14 @@ function MessageRow({ message }: { message: AuditMessageEvent }) {
   const renderBody = () => {
     const body = message.body_text
     if (!body) return null
-    if (looksLikeHtml(body)) {
-      return (
-        <div
-          className="prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60"
-          dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
-        />
-      )
-    }
-    return <div className="whitespace-pre-wrap break-words text-sm text-slate-800">{body}</div>
+    return renderHtmlOrText(body)
   }
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
-            <MessageCircle className="h-4 w-4" aria-hidden />
-          </div>
+          <IconCircle icon={MessageCircle} bgClass="bg-emerald-50" textClass="text-emerald-700" />
           <div>
             <div className="text-sm font-semibold text-slate-900">
               {message.is_outbound ? 'Agent → User' : 'User → Agent'}{' '}
@@ -167,9 +171,7 @@ function StepRow({ step }: { step: AuditStepEvent }) {
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-slate-700">
-            <StepForward className="h-4 w-4" aria-hidden />
-          </div>
+          <IconCircle icon={StepForward} bgClass="bg-slate-100" textClass="text-slate-700" />
           <div>
             <div className="text-sm font-semibold text-slate-900">Step</div>
             <div className="text-xs text-slate-600">{step.timestamp ? new Date(step.timestamp).toLocaleString() : '—'}</div>
@@ -241,9 +243,7 @@ function CompletionCard({
     <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.1)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
-          <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-sky-50 text-sky-700">
-            <Cpu className="h-4 w-4" aria-hidden />
-          </div>
+          <IconCircle icon={Cpu} bgClass="bg-sky-50" textClass="text-sky-700" />
           <div>
             <div className="text-sm font-semibold text-slate-900">
               {completionLabel} · {completion.llm_model || 'Unknown model'}{' '}
