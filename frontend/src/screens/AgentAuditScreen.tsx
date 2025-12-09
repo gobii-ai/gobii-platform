@@ -459,7 +459,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
       <div className="mx-auto max-w-6xl px-4 py-8">
         <div
           ref={bannerRef}
-          className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)]"
+          className="sticky top-3 z-20 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white/75 px-5 py-4 shadow-[0_10px_24px_rgba(15,23,42,0.08)] backdrop-blur-md"
         >
           <div>
             <div className="text-xs uppercase tracking-[0.18em] text-slate-600">Staff Audit</div>
@@ -524,7 +524,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           </div>
 
           <div
-            className="lg:sticky lg:top-6 lg:min-h-[520px]"
+            className="lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
             style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
           >
             <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
