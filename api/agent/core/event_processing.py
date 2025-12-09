@@ -1810,22 +1810,6 @@ def _run_agent_loop(
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
-            tool_calls = getattr(msg, "tool_calls", None)
-            if not tool_calls:
-                if msg.content:
-                    logger.info("Agent %s reasoning: %s", agent.id, msg.content)
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": f"Internal reasoning: {msg.content[:500]}",
-                    }
-                    _attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    _attach_prompt_archive(step)
-                reasoning_only_streak += 1
-                continue
-
-            reasoning_only_streak = 0
-
             reasoning_text = (msg.content or "").strip()
             if reasoning_text:
                 response_step_kwargs = {
@@ -1835,6 +1819,13 @@ def _run_agent_loop(
                 _attach_completion(response_step_kwargs)
                 response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
                 _attach_prompt_archive(response_step)
+
+            tool_calls = getattr(msg, "tool_calls", None)
+            if not tool_calls:
+                reasoning_only_streak += 1
+                continue
+
+            reasoning_only_streak = 0
 
             # Log high-level summary of tool calls
             try:
