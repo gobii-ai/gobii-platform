@@ -99,6 +99,7 @@ function CompletionCard({
   const promptPayload = archiveId ? promptState?.data?.payload : null
   const systemPrompt = promptPayload?.system_prompt
   const userPrompt = promptPayload?.user_prompt
+  const [expanded, setExpanded] = useState(false)
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -165,14 +166,20 @@ function CompletionCard({
             <button
               type="button"
               className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800"
-              onClick={() => onLoadPrompt(archiveId)}
-              disabled={promptState?.loading}
+              onClick={() => {
+                const next = !expanded
+                setExpanded(next)
+                if (next && !promptPayload && !promptState?.loading) {
+                  onLoadPrompt(archiveId)
+                }
+              }}
+              disabled={promptState?.loading && !expanded}
             >
-              {promptState?.loading ? 'Loading…' : 'Load'}
+              {expanded ? 'Collapse' : promptState?.loading ? 'Loading…' : 'Expand'}
             </button>
           </div>
           {promptState?.error ? <div className="mt-2 text-xs text-rose-600">{promptState.error}</div> : null}
-          {promptPayload ? (
+          {expanded && promptPayload ? (
             <div className="mt-2 space-y-2">
               {systemPrompt ? (
                 <div>
