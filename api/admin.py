@@ -32,7 +32,7 @@ from .models import (
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
-    StripeConfig, ToolConfig,
+    StripeConfig, ToolConfig, ToolRateLimit,
     MeteringBatch,
     UsageThresholdSent,
     PersistentAgentWebhook,
@@ -701,6 +701,14 @@ class BrowserConfigAdmin(admin.ModelAdmin):
         return False
 
 
+class ToolRateLimitInline(admin.TabularInline):
+    model = ToolRateLimit
+    extra = 0
+    fields = ("tool_name", "max_calls_per_hour", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
+    ordering = ("tool_name",)
+
+
 @admin.register(ToolConfig)
 class ToolConfigAdmin(admin.ModelAdmin):
     list_display = (
@@ -710,6 +718,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
     )
     list_filter = ("plan_name",)
     readonly_fields = ("created_at", "updated_at")
+    inlines = (ToolRateLimitInline,)
     fieldsets = (
         (None, {"fields": ("plan_name",)}),
         (
