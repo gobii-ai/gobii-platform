@@ -3,6 +3,8 @@ import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, PromptArchive } from '../types/agentAudit'
 import { fetchPromptArchive } from '../api/agentAudit'
+import { StructuredDataTable } from '../components/common/StructuredDataTable'
+import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 
 type AgentAuditScreenProps = {
   agentId: string
@@ -35,6 +37,41 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
     return trimmed
   }, [tool.result])
 
+  const parsedParameters = useMemo(() => {
+    if (tool.parameters === null || tool.parameters === undefined) return null
+    try {
+      return normalizeStructuredValue(tool.parameters, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
+    } catch {
+      return tool.parameters
+    }
+  }, [tool.parameters])
+
+  const parsedResult = useMemo(() => {
+    if (tool.result === null || tool.result === undefined) return null
+    let value: unknown = tool.result
+    if (typeof value === 'string') {
+      try {
+        const maybeJson = JSON.parse(value)
+        value = maybeJson
+      } catch {
+        // leave as string
+      }
+    }
+    try {
+      return normalizeStructuredValue(value, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
+    } catch {
+      return value
+    }
+  }, [tool.result])
+
+  const renderValue = (value: unknown) => {
+    if (value === null || value === undefined) return null
+    if (typeof value === 'string') {
+      return <div className="rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800">{value}</div>
+    }
+    return <StructuredDataTable value={value} />
+  }
+
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
       <div className="flex items-start justify-between gap-3">
@@ -56,11 +93,17 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
       {!expanded && resultPreview ? (
         <div className="mt-2 text-sm text-slate-700">{resultPreview}</div>
       ) : null}
-      {expanded && tool.parameters ? (
-        <pre className="mt-2 whitespace-pre-wrap break-all rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800">{JSON.stringify(tool.parameters, null, 2)}</pre>
+      {expanded && parsedParameters ? (
+        <div className="mt-2 space-y-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Parameters</div>
+          {renderValue(parsedParameters)}
+        </div>
       ) : null}
-      {expanded && tool.result ? (
-        <pre className="mt-2 whitespace-pre-wrap break-all rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800">{tool.result}</pre>
+      {expanded && parsedResult ? (
+        <div className="mt-2 space-y-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Result</div>
+          {renderValue(parsedResult)}
+        </div>
       ) : null}
     </div>
   )
