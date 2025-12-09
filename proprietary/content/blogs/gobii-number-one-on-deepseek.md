@@ -1,6 +1,6 @@
 ---
 title: "Gobii Becomes the #1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release"
-date: 2025-10-16
+date: 2025-12-05
 description: "Gobii's AI agent platform becomes the #1 application on OpenRouter for DeepSeek V3.2 within 72 hours of model release."
 author: "The Gobii Team"
 seo_title: "Gobii Becomes the #1 Application on OpenRouter for DeepSeek V3.2 Within 72 Hours of Model Release"
