@@ -71,6 +71,13 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                     "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
                 )
             },
+            "mcp_brightdata_search_engine": {
+                "status": "ok",
+                "result": (
+                    "Found free Bitcoin price API: "
+                    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+                )
+            },
             "http_request": {
                 "status": "ok",
                 "content": '{"bitcoin":{"usd":68500.50}}',
