@@ -1,4 +1,5 @@
 from datetime import datetime, timezone as datetime_timezone
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -22,6 +23,7 @@ from util.subscription_helper import (
     get_users_due_for_monthly_grant,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
+    get_subscription_base_price,
 )
 
 
@@ -476,3 +478,47 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("id"), "sub_match")
+
+
+@tag("batch_subscription")
+class SubscriptionPriceExtractionTests(TestCase):
+    def _mock_subscription(self, items):
+        subscription = MagicMock()
+        items_qs = MagicMock()
+        items_qs.all.return_value = items
+        subscription.items = items_qs
+        subscription.id = "sub_test"
+        return subscription
+
+    def test_uses_first_non_metered_item(self):
+        metered_price = MagicMock()
+        metered_price.unit_amount = 150
+        metered_price.currency = "usd"
+        metered_item = MagicMock(price=metered_price, stripe_data={"price": {"recurring": {"usage_type": "metered"}}})
+
+        licensed_price = MagicMock()
+        licensed_price.unit_amount = 2999
+        licensed_price.currency = "usd"
+        licensed_item = MagicMock(price=licensed_price, stripe_data={"price": {"recurring": {"usage_type": "licensed"}}})
+
+        subscription = self._mock_subscription([metered_item, licensed_item])
+
+        amount, currency = get_subscription_base_price(subscription)
+        self.assertEqual(amount, Decimal("29.99"))
+        self.assertEqual(currency, "usd")
+
+    def test_handles_decimal_string_amount(self):
+        item = MagicMock()
+        item.price = None
+        item.stripe_data = {
+            "price": {
+                "unit_amount_decimal": "1234.5",
+                "currency": "eur",
+                "recurring": {"usage_type": "licensed"},
+            }
+        }
+        subscription = self._mock_subscription([item])
+
+        amount, currency = get_subscription_base_price(subscription)
+        self.assertEqual(amount, Decimal("12.345"))
+        self.assertEqual(currency, "eur")
