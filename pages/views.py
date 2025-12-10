@@ -600,6 +600,12 @@ class AboutView(TemplateView):
     template_name = "about.html"
 
 
+class TeamView(TemplateView):
+    """Team page showcasing the people behind Gobii."""
+
+    template_name = "team.html"
+
+
 class CareersView(TemplateView):
     """Simple static Careers page."""
 
@@ -934,9 +940,10 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(2, 'proprietary:tos')
                 items.insert(3, 'proprietary:privacy')
                 items.insert(4, 'proprietary:about')
-                items.insert(5, 'proprietary:careers')
-                items.insert(5, 'proprietary:startup_checkout')
-                items.insert(6, 'proprietary:blog_index')
+                items.insert(5, 'proprietary:team')
+                items.insert(6, 'proprietary:careers')
+                items.insert(7, 'proprietary:startup_checkout')
+                items.insert(8, 'proprietary:blog_index')
         except Exception:
             pass
         return items
