@@ -17,7 +17,7 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
     )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_three_sources", assertion_type="manual"),
+        ScenarioTask(name="verify_three_sources", assertion_type="llm_judge"),
         ScenarioTask(name="verify_bundled_reply", assertion_type="manual"),
     ]
 
@@ -56,85 +56,118 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             ).order_by("timestamp")
         )
 
-        job_messages = []
-        for msg in outbound:
-            if self._is_job_message(msg.body or ""):
-                job_messages.append(msg)
+        second_or_third = [msg for idx, msg in enumerate(outbound) if idx in (1, 2)]
+        job_messages_judged = [msg for msg in second_or_third if self._is_job_message(msg.body or "")]
 
-        if not job_messages:
+        if not second_or_third:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_three_sources",
-                observed_summary="No outbound message contained job listings.",
+                observed_summary="No second/third outbound message to judge for job listings.",
             )
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bundled_reply",
-                observed_summary="No outbound job message to evaluate.",
+                observed_summary="No outbound messages to evaluate for bundled listings.",
             )
             return
 
-        first_message = job_messages[0]
-        domains = self._extract_domains(first_message.body or "")
-        job_item_count = self._estimate_job_item_count(first_message.body or "")
+        judged_results = []
+        for idx, msg in enumerate(second_or_third, start=2):
+            domains = self._extract_domains(msg.body or "")
+            job_item_count = self._estimate_job_item_count(msg.body or "")
 
-        if job_item_count < 3 or len(domains) < 3:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_three_sources",
-                observed_summary=(
-                    f"Found {job_item_count} job items and {len(domains)} unique sources; expected at least 3 of each."
+            judge_choice, judge_reason = self.llm_judge(
+                question=(
+                    "A user asked for three remote Full Stack Software Engineer job listings from three different sources, "
+                    "combined into one reply. Does the assistant message provide three distinct listings and clearly cite "
+                    "three different sources or links within this single message?"
                 ),
-                artifacts={"message": first_message},
+                context=(
+                    f"Message {idx}: Detected {job_item_count} possible job items and {len(domains)} unique domains: "
+                    f"{', '.join(sorted(domains))}.\n\nAssistant reply:\n{msg.body or ''}"
+                ),
+                options=["Pass", "Fail"],
             )
-        else:
+            judged_results.append((msg, judge_choice, judge_reason))
+
+        pass_results = [(msg, reason) for msg, choice, reason in judged_results if choice == "Pass"]
+        if pass_results:
+            passed_message, pass_reason = pass_results[0]
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_three_sources",
-                observed_summary=f"Detected at least 3 listings across {len(domains)} sources: {', '.join(sorted(domains))[:150]}",
-                artifacts={"message": first_message},
+                observed_summary=f"LLM judge: Pass on message with bundled listings. Reasoning: {pass_reason}",
+                artifacts={"message": passed_message},
+            )
+        else:
+            combined_reasons = "; ".join([reason for _, _, reason in judged_results])
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_three_sources",
+                observed_summary=f"LLM judge: No message contained bundled listings. Reasons: {combined_reasons}",
+                artifacts={"messages": [msg for msg, _, _ in judged_results]},
             )
 
-        if len(job_messages) > 1:
+        if len(outbound) > 3:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bundled_reply",
                 observed_summary=(
-                    f"Job details split across {len(job_messages)} messages; expected a single bundled reply."
+                    f"Too many outbound messages ({len(outbound)}); expected intro, searching, and bundled listings."
                 ),
-                artifacts={"message": first_message},
+                artifacts={"message": pass_results[0][0] if pass_results else outbound[-1]},
             )
             return
 
-        if missing_jobs:
+        combined_job_msg_count = max(len(pass_results), len(job_messages_judged))
+        if combined_job_msg_count > 1:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_bundled_reply",
-                observed_summary=f"Bundled reply missing: {', '.join(missing_jobs)}.",
-                artifacts={"message": first_message},
+                observed_summary=(
+                    f"Job details split across {combined_job_msg_count} messages; expected a single bundled reply."
+                ),
+                artifacts={
+                    "message": (
+                        pass_results[0][0]
+                        if pass_results
+                        else (job_messages_judged[0] if job_messages_judged else outbound[-1])
+                    )
+                },
             )
             return
 
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.PASSED,
-            task_name="verify_bundled_reply",
-            observed_summary="Job listings bundled into a single outbound message.",
-            artifacts={"message": first_message},
-        )
+        if pass_results:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_bundled_reply",
+                observed_summary="Job listings bundled into a single outbound message.",
+                artifacts={"message": pass_results[0][0]},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_bundled_reply",
+                observed_summary="No judged message contained bundled job listings.",
+                artifacts={"messages": [msg for msg, _, _ in judged_results]},
+            )
 
     @staticmethod
     def _extract_domains(body: str) -> Set[str]:
