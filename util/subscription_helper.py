@@ -268,10 +268,9 @@ def ensure_single_individual_subscription(
             if not target_price:
                 logger.warning("Metered subscription item %s has no price; skipping", item.get("id"))
                 continue
+            # Stripe ignores quantity for metered per-unit prices; omit to avoid InvalidRequestError.
             payload.update({"price": target_price})
             meter_found = meter_found or (metered_price_id == target_price)
-            if item.get("quantity") is not None:
-                payload["quantity"] = item.get("quantity")
         elif is_plan_product or is_plan_price:
             payload.update({"price": licensed_price_id, "quantity": item.get("quantity") or 1})
             base_found = True
