@@ -262,13 +262,6 @@ function CompletionCard({
         <TokenPill label="Cached" value={completion.cached_tokens} />
       </div>
 
-      {completion.thinking ? (
-        <div className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-600">Thinking</div>
-          <div className="whitespace-pre-wrap">{completion.thinking}</div>
-        </div>
-      ) : null}
-
       {archiveId ? (
         <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
