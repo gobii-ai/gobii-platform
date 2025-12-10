@@ -1,6 +1,9 @@
 
 from urllib.parse import parse_qs, urlparse
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -258,3 +261,89 @@ class MarketingMetaTests(TestCase):
             response,
             "<meta name=\"description\" content=\"Join Gobii to build AI coworkers that browse, research, and automate the web for organizations worldwide.\">",
         )
+
+
+@tag("batch_pages")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
+class ScaleCheckoutViewTests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(email="scale@test.com", password="pw", username="scale_user")
+        self.client.force_login(self.user)
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_switching_from_startup_uses_checkout_flow(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        _mock_prepare,
+    ):
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+
+        mock_existing_subs.return_value = [
+            {
+                "id": "sub_startup",
+                "items": {"data": [{"price": {"id": "price_startup", "usage_type": "licensed"}}]},
+            }
+        ]
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+        mock_session_create.assert_called_once()
+        line_items = mock_session_create.call_args.kwargs.get("line_items") or []
+        self.assertEqual(line_items[0].get("price"), "price_scale")
+        self.assertEqual(line_items[0].get("quantity"), 1)
+        self.assertEqual(line_items[1].get("price"), "price_scale_meter")
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_existing_scale_subscription_short_circuits_checkout(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        _mock_prepare,
+    ):
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id=None,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+
+        mock_existing_subs.return_value = [
+            {
+                "id": "sub_scale",
+                "items": {"data": [{"price": {"id": "price_scale", "usage_type": "licensed"}}]},
+            }
+        ]
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertNotIn("checkout-scale", resp["Location"])
+        mock_session_create.assert_not_called()
