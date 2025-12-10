@@ -1,6 +1,7 @@
 import time
 import uuid
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
@@ -78,10 +79,10 @@ class Command(BaseCommand):
         run_type_option = options["run_type"]
         run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
         requested_runs = max(1, min(10, int(options.get("n_runs") or 1)))
+        base_site_url = (getattr(settings, "PUBLIC_SITE_URL", "http://localhost:8000") or "http://localhost:8000").rstrip("/")
+        printed_audit_agents: set[str] = set()
 
         if sync_mode:
-            from django.conf import settings
-
             settings.CELERY_TASK_ALWAYS_EAGER = True
             settings.CELERY_TASK_EAGER_PROPAGATES = True
             self.stdout.write("Running in SYNCHRONOUS mode.")
@@ -136,6 +137,13 @@ class Command(BaseCommand):
             )
             return agent
 
+        def _print_audit_link(agent: PersistentAgent) -> None:
+            agent_id = str(agent.id)
+            if agent_id in printed_audit_agents:
+                return
+            self.stdout.write(f"  Audit agent timeline: {base_site_url}/console/staff/agents/{agent_id}/audit/")
+            printed_audit_agents.add(agent_id)
+
         shared_agent: PersistentAgent | None = None
         if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT:
             if not agent_id:
@@ -145,6 +153,7 @@ class Command(BaseCommand):
             except PersistentAgent.DoesNotExist:
                 raise CommandError(f"Agent {agent_id} not found.")
             self.stdout.write(f"Using provided agent for reuse: {shared_agent.name} ({shared_agent.id})")
+            _print_audit_link(shared_agent)
 
         suite_runs = []
         run_ids = []
@@ -176,6 +185,7 @@ class Command(BaseCommand):
                     if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
                         run_agent = _create_ephemeral_agent(label_suffix=f"{scenario.slug[:8]}-{iteration + 1}")
                         self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
+                        _print_audit_link(run_agent)
 
                     run = EvalRun.objects.create(
                         suite_run=suite_run,
