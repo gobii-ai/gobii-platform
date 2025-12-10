@@ -639,8 +639,11 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
             browser_use_agent=self.browser_agent,
             schedule="@daily",  # Start with a valid schedule
         )
-        get_tool_settings_for_plan(PlanNamesChoices.FREE)
-        self.tool_config = ToolConfig.objects.get(plan_name=PlanNamesChoices.FREE)
+        invalidate_tool_settings_cache()
+        self.tool_config, _ = ToolConfig.objects.get_or_create(
+            plan_name=PlanNamesChoices.FREE,
+            defaults={"min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES},
+        )
         self.original_min_interval = self.tool_config.min_cron_schedule_minutes
         self.tool_config.min_cron_schedule_minutes = DEFAULT_MIN_CRON_SCHEDULE_MINUTES
         self.tool_config.save()
@@ -650,7 +653,10 @@ class UpdateScheduleMinimumIntervalTests(TestCase):
         self.addCleanup(self._restore_tool_config)
 
     def _restore_tool_config(self):
-        cfg = ToolConfig.objects.get(plan_name=PlanNamesChoices.FREE)
+        cfg, _ = ToolConfig.objects.get_or_create(
+            plan_name=PlanNamesChoices.FREE,
+            defaults={"min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES},
+        )
         cfg.min_cron_schedule_minutes = self.original_min_interval
         cfg.save()
         invalidate_tool_settings_cache()
@@ -893,7 +899,7 @@ class SearchWebCreditConsumptionTests(TestCase):
             grant_type=GrantTypeChoices.PROMO
         )
 
-    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('api.agent.tools.search_web.settings.EXA_SEARCH_API_KEY', 'test_key')
     @patch('exa_py.Exa')
     def test_search_web_consumes_credit_when_available(self, mock_exa):
         """Test that search_web consumes a task credit when credits are available."""
@@ -928,7 +934,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         credit.refresh_from_db()
         self.assertEqual(credit.credits_used, 2)
 
-    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('api.agent.tools.search_web.settings.EXA_SEARCH_API_KEY', 'test_key')
     @patch('exa_py.Exa')
     @patch('util.subscription_helper.get_active_subscription')
     @patch('util.subscription_helper.allow_and_has_extra_tasks')
@@ -969,7 +975,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         additional_credits = TaskCredit.objects.filter(user=self.user, additional_task=True)
         self.assertEqual(additional_credits.count(), 0)
 
-    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('api.agent.tools.search_web.settings.EXA_SEARCH_API_KEY', 'test_key')
     @patch('exa_py.Exa')
     @patch('util.subscription_helper.get_active_subscription')
     def test_search_web_fails_without_credits_or_subscription(self, mock_subscription, mock_exa):
@@ -997,7 +1003,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         self.assertIn("<title>Test Result</title>", result["result"])
         self.assertIn("<query>test search</query>", result["result"])
 
-    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('api.agent.tools.search_web.settings.EXA_SEARCH_API_KEY', 'test_key')
     @patch('exa_py.Exa')
     @patch('util.subscription_helper.get_active_subscription')
     @patch('util.subscription_helper.allow_and_has_extra_tasks')
@@ -1030,7 +1036,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         self.assertIn("<title>Test Result</title>", result["result"])
         self.assertIn("<search_results>", result["result"])
 
-    @patch('api.agent.core.event_processing.settings.EXA_SEARCH_API_KEY', 'test_key')
+    @patch('api.agent.tools.search_web.settings.EXA_SEARCH_API_KEY', 'test_key')
     @patch('exa_py.Exa')
     def test_search_web_uses_tool_settings_result_count(self, mock_exa):
         """Ensure search_web respects per-plan configured result count."""
@@ -1040,6 +1046,7 @@ class SearchWebCreditConsumptionTests(TestCase):
         )
         config.search_web_result_count = 7
         config.save()
+        invalidate_tool_settings_cache()
 
         mock_search_result = type('SearchResult', (), {
             'results': [

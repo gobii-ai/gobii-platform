@@ -87,6 +87,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
+INTERNAL_REASONING_PREFIX = "Internal reasoning:"
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -95,6 +96,7 @@ __all__ = [
     "build_prompt_context",
     "add_budget_awareness_sections",
     "get_agent_tools",
+    "INTERNAL_REASONING_PREFIX",
 ]
 
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
@@ -1695,7 +1697,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             }
             event_type = (
                 "step_description_internal_reasoning"
-                if description_text.startswith("Internal reasoning:")
+                if description_text.startswith(INTERNAL_REASONING_PREFIX)
                 else "step_description"
             )
             structured_events.append((s.created_at, event_type, components))

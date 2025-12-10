@@ -74,6 +74,7 @@ from .llm_config import (
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.execution import get_current_eval_routing_profile
 from .prompt_context import (
+    INTERNAL_REASONING_PREFIX,
     build_prompt_context,
     get_agent_daily_credit_state,
     get_agent_tools,
@@ -1821,7 +1822,7 @@ def _run_agent_loop(
             if reasoning_text:
                 response_step_kwargs = {
                     "agent": agent,
-                    "description": f"Internal reasoning: {reasoning_text}",
+                    "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
                 }
                 _attach_completion(response_step_kwargs)
                 response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
