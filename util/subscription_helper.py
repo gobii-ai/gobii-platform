@@ -261,9 +261,18 @@ def ensure_single_individual_subscription(
 
         is_plan_product = product in plan_products
         is_plan_price = price.get("id") == licensed_price_id
-        is_metered = usage_type == "metered"
+        is_metered = (usage_type or "").lower() == "metered"
 
-        if is_plan_product or is_plan_price:
+        if is_metered:
+            target_price = metered_price_id or price.get("id")
+            if not target_price:
+                logger.warning("Metered subscription item %s has no price; skipping", item.get("id"))
+                continue
+            payload.update({"price": target_price})
+            meter_found = meter_found or (metered_price_id == target_price)
+            if item.get("quantity") is not None:
+                payload["quantity"] = item.get("quantity")
+        elif is_plan_product or is_plan_price:
             payload.update({"price": licensed_price_id, "quantity": item.get("quantity") or 1})
             base_found = True
         elif metered_price_id and price.get("id") == metered_price_id:
