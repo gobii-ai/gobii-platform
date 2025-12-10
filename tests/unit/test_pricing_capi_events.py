@@ -22,7 +22,7 @@ class PricingCheckoutCapiEventTests(SimpleTestCase):
                 user=user,
                 plan_code=PlanNames.STARTUP,
                 plan_label="Pro",
-                value=45,
+                value=50,
                 currency="usd",
                 event_id="evt-123",
             )
@@ -34,7 +34,7 @@ class PricingCheckoutCapiEventTests(SimpleTestCase):
                 "plan": PlanNames.STARTUP,
                 "plan_label": "Pro",
                 "event_id": "evt-123",
-                "value": 45,
+                "value": 50,
                 "currency": "USD",
             },
             request=request,
