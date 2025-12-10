@@ -7,88 +7,157 @@
 {% endblock %}
 
 {% block content %}
-<section class="py-20 bg-white text-slate-900">
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <h1 class="text-4xl font-semibold mb-6">Our Team</h1>
-    <p class="text-lg leading-relaxed">
-      The people behind Gobii's pretrained workers.
-    </p>
-  </div>
-</section>
+<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
 
-<section class="py-16 bg-white text-slate-900">
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex flex-col md:flex-row items-start md:space-x-8">
-      <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
+  {# Page Header #}
+  <div class="mb-12">
+    <div class="flex items-center gap-4 mb-4">
+      <div class="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg text-white">
+        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
+        </svg>
+      </div>
       <div>
-        <h2 class="text-3xl font-semibold mb-2">Andrew&nbsp;I.&nbsp;Christianson</h2>
-        <p class="text-lg font-medium mb-4">Founder &amp; Chief Technology Officer</p>
-        <p class="leading-relaxed mb-4">
-          Andrew pairs a decade of mission-critical engineering with a passion for open-source AI. His track record
-          spans national-security big-data systems, category-defining open-core companies, and the breakout success of
-          RA.Aid—an autonomous coding agent that grew its community nine-fold in just three months.
-        </p>
-        <ul class="list-disc pl-6 space-y-2 text-base leading-relaxed">
-          <li>
-            Creator of <a href="https://github.com/ai-christianson/RA.Aid" class="text-blue-600 hover:underline">RA.Aid</a>, the open-source AI coding agent. Selected as the inaugural project for <a href="https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth" class="text-blue-600 hover:underline">Open&nbsp;Core&nbsp;Ventures' Catalyst&nbsp;program</a> and scaled to 9× community growth in 90&nbsp;days.
-          </li>
-          <li>
-            Nearly a decade contracting for the U.S. National Security Agency, architecting self-healing distributed computing and big-data pipelines that directly contributed to saving lives and keeping Americans safe.
-          </li>
-          <li>
-            Core contributor to <a href="https://nifi.apache.org/" class="text-blue-600 hover:underline">Apache NiFi</a> &amp; MiNiFi edge-computing—technology originally open-sourced through the <a href="https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/" class="text-blue-600 hover:underline">NSA Technology&nbsp;Transfer&nbsp;Program</a>. Worked alongside the project's original creators on domain-specific languages; NiFi became the open core behind Onyara (acquired by Hortonworks) and Datavolo (acquired by Snowflake).
-          </li>
-          <li>
-            Staff Software Engineer at open-core leaders Hortonworks, Cloudera, and FOSSA.
-          </li>
-          <li>
-            Contributor to browser-use
-          </li>
-        </ul>
-        <p class="leading-relaxed mt-4">
-          Andrew is a thought leader, publishing AI and technical content under his initials "AI" Christianson. He grew his <a href="https://www.tiktok.com/@ai.christianson" class="text-blue-600 hover:underline">TikTok</a> and <a href="https://www.instagram.com/ai.christianson/" class="text-blue-600 hover:underline">Instagram</a> audiences to&nbsp;30k+ followers combined in under 30&nbsp;days.
-        </p>
+        <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 tracking-tight">Our Team</h1>
+        <p class="text-slate-600 mt-1">The people behind Gobii's pretrained workers.</p>
       </div>
     </div>
   </div>
-</section>
 
-<section class="py-16 bg-white text-slate-900">
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex flex-col md:flex-row items-start md:space-x-8">
-      <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
-      <div>
-        <h2 class="text-3xl font-semibold mb-2">Will Bonde</h2>
-        <p class="text-lg font-medium mb-4">Senior Software Engineer</p>
-        <p class="leading-relaxed mb-4">
-          Will fuses nearly twenty years of secure‑systems expertise with a knack for turning cutting‑edge AI into products people actually use. A cancer survivor, he channels that resilience into building software with real‑world impact to make lives better—now charting the technical course for Gobii's platform that distills signal from the deluge of information on the internet.
-        </p>
-        <ul class="list-disc pl-6 space-y-2 text-base leading-relaxed">
-          <li>
-            Integration mastermind for high‑security workflows. Led architecture and hands‑on code at Yakabod (acquired by EverFox), wiring ServiceNow, Microsoft Teams, Slack, and classified DoD systems into a self‑healing platform used across multiple secure enclaves.
-          </li>
-          <li>
-            Creator of self‑documenting REST APIs. Designed OpenAPI‑driven services whose endpoints automatically expand and adjust to object configurations on the server, eliminating manual spec drift and accelerating client adoption.
-          </li>
-          <li>
-            Architect and implementer of large‑scale data synchronization. Built a system that syncs millions of legacy‑formatted records across agencies to a modern web stack multiple times per hour, ensuring fresh data without downtime.
-          </li>
-          <li>
-            Co‑creator of Therality, a self‑guided exposure‑therapy app that leverages immersive video to help users tame anxiety. Therality was one of the first applications available on the visionOS store.
-          </li>
-          <li>
-            Maintainer of RA.Aid, the AI coding agent created by Andrew; streamlined Homebrew packaging to slash installation complexity for macOS users
-          </li>
-          <li>
-            Contributor to browser-use
-          </li>
-        </ul>
-        <p class="leading-relaxed mt-4">
-          Off the command line, Will supports fellow survivors through the Testicular Cancer Foundation, facilitating patient and survivor conversation through Discord.
-        </p>
+  {# Team Members #}
+  <div class="space-y-8">
+
+    {# Andrew #}
+    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200/60 overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Founder</span>
+      </div>
+      <div class="p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
+          <div class="shrink-0 flex flex-col items-center sm:items-start">
+            <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-md ring-4 ring-white" />
+            <div class="mt-4 flex gap-2">
+              <a href="https://www.tiktok.com/@ai.christianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="TikTok">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/></svg>
+              </a>
+              <a href="https://www.instagram.com/ai.christianson/" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="Instagram">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+              </a>
+              <a href="https://github.com/ai-christianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="GitHub">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Andrew&nbsp;I.&nbsp;Christianson</h2>
+            <p class="text-indigo-600 font-semibold mt-1">Founder</p>
+            <p class="text-slate-600 leading-relaxed mt-4">
+              Startup founder and growth hacker with the engineering chops to back it up. Andrew has a gift for building audiences and communities fast—and the technical depth to ship the products they're waiting for. He's grown open-source projects 9× in 90 days, built viral social followings from scratch, and brings a decade of battle-tested systems engineering to make sure the infrastructure can keep up.
+            </p>
+            <div class="mt-6 space-y-3">
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Creator of <a href="https://github.com/ai-christianson/RA.Aid" class="text-blue-600 font-medium hover:underline">RA.Aid</a>, the open-source AI coding agent. Selected as the inaugural project for <a href="https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth" class="text-blue-600 font-medium hover:underline">Open&nbsp;Core&nbsp;Ventures' Catalyst&nbsp;program</a> and drove 9× community growth in 90&nbsp;days through hands-on developer marketing and community engagement.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Built a 30k+ combined following on TikTok and Instagram in under 30&nbsp;days, publishing AI and technical content under his initials "AI" Christianson.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Nearly a decade contracting for the U.S. National Security Agency, architecting self-healing distributed computing and big-data pipelines that directly contributed to saving lives and keeping Americans safe.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Core contributor to <a href="https://nifi.apache.org/" class="text-blue-600 font-medium hover:underline">Apache NiFi</a> &amp; MiNiFi edge-computing—technology originally open-sourced through the <a href="https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/" class="text-blue-600 font-medium hover:underline">NSA Technology&nbsp;Transfer&nbsp;Program</a>. NiFi became the open core behind Onyara (acquired by Hortonworks) and Datavolo (acquired by Snowflake).
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Staff Software Engineer at open-core leaders Hortonworks, Cloudera, and FOSSA.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
-  </div>
-</section>
 
+    {# Will #}
+    <div class="bg-white rounded-2xl shadow-sm ring-1 ring-slate-200/60 overflow-hidden">
+      <div class="bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-b border-emerald-100 px-6 py-4">
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Engineering</span>
+      </div>
+      <div class="p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
+          <div class="shrink-0 flex flex-col items-center sm:items-start">
+            <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-md ring-4 ring-white" />
+            <div class="mt-4 flex gap-2">
+              <a href="https://github.com/wbonde" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="GitHub">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-2xl font-bold text-slate-900 tracking-tight">Will Bonde</h2>
+            <p class="text-emerald-600 font-semibold mt-1">Growth &amp; Engineering</p>
+            <p class="text-slate-600 leading-relaxed mt-4">
+              Will fuses nearly twenty years of secure‑systems expertise with a knack for turning cutting‑edge AI into products people actually use. A cancer survivor, he channels that resilience into building software with real‑world impact to make lives better—now charting the technical course for Gobii's platform that distills signal from the deluge of information on the internet.
+            </p>
+            <div class="mt-6 space-y-3">
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Integration mastermind for high‑security workflows. Led architecture and hands‑on code at Yakabod (acquired by EverFox), wiring ServiceNow, Microsoft Teams, Slack, and classified DoD systems into a self‑healing platform used across multiple secure enclaves.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Creator of self‑documenting REST APIs. Designed OpenAPI‑driven services whose endpoints automatically expand and adjust to object configurations on the server, eliminating manual spec drift and accelerating client adoption.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Architect and implementer of large‑scale data synchronization. Built a system that syncs millions of legacy‑formatted records across agencies to a modern web stack multiple times per hour, ensuring fresh data without downtime.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Co‑creator of Therality, a self‑guided exposure‑therapy app that leverages immersive video to help users tame anxiety. Therality was one of the first applications available on the visionOS store.
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Maintainer of RA.Aid, the AI coding agent created by Andrew; streamlined Homebrew packaging to slash installation complexity for macOS users
+                </p>
+              </div>
+              <div class="flex items-start gap-3">
+                <div class="mt-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></div>
+                <p class="text-slate-600 text-sm leading-relaxed">
+                  Contributor to browser-use
+                </p>
+              </div>
+            </div>
+            <p class="text-slate-600 leading-relaxed mt-6 pt-4 border-t border-slate-100">
+              Off the command line, Will supports fellow survivors through the Testicular Cancer Foundation, facilitating patient and survivor conversation through Discord.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
 {% endblock %}
