@@ -714,6 +714,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
     list_display = (
         "plan_name",
         "min_cron_schedule_minutes",
+        "search_web_result_count",
         "updated_at",
     )
     list_filter = ("plan_name",)
@@ -724,6 +725,10 @@ class ToolConfigAdmin(admin.ModelAdmin):
         (
             "Schedules",
             {"fields": ("min_cron_schedule_minutes",)},
+        ),
+        (
+            "Search web",
+            {"fields": ("search_web_result_count",)},
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )

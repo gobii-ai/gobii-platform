@@ -87,6 +87,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
+INTERNAL_REASONING_PREFIX = "Internal reasoning:"
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -95,6 +96,7 @@ __all__ = [
     "build_prompt_context",
     "add_budget_awareness_sections",
     "get_agent_tools",
+    "INTERNAL_REASONING_PREFIX",
 ]
 
 _AGENT_MODEL, _AGENT_MODEL_PARAMS = REFERENCE_TOKENIZER_MODEL, {"temperature": 0.1}
@@ -1431,7 +1433,7 @@ def _get_system_instruction(
         "Use your tools to perform the next logical step. "
         "CORE RESPONSIBILITY: Maintain an accurate charter. If your charter is unknown, unclear, generic (e.g., 'test agent'), or needs to change based on new user input/intent, call 'update_charter' IMMEDIATELY. Do this right away when a user gives you a specific request—ideally in the same tool batch as your greeting. This is your primary memory of your purpose. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
-        "Use the 'update_schedule' tool to update your cron schedule any time it needs to change. "
+        "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
         "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply). Do not sleep right after only a charter/schedule update; set 'will_continue_work': true on your next message or keep batching tools so you finish the ask before pausing. "
         "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
@@ -1443,7 +1445,8 @@ def _get_system_instruction(
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
-        "You may not even need to send a message at all if there is nothing new."
+        "You may not even need to send a message at all if there is nothing new. "
+        "Do not feel the need to send messages just to show activity or artificially continue the conversation. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
@@ -1688,10 +1691,16 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
+            description_text = s.description or "No description"
             components = {
-                "description": f"[{s.created_at.isoformat()}] {s.description or 'No description'}"
+                "description": f"[{s.created_at.isoformat()}] {description_text}"
             }
-            structured_events.append((s.created_at, "step_description", components))
+            event_type = (
+                "step_description_internal_reasoning"
+                if description_text.startswith(INTERNAL_REASONING_PREFIX)
+                else "step_description"
+            )
+            structured_events.append((s.created_at, event_type, components))
 
     # format messages
     for m in messages:
@@ -1794,6 +1803,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "message_inbound": 4,
             "message_outbound": 2,
             "step_description": 2,
+            "step_description_internal_reasoning": 1,
         }
 
         # Component weights within each event
@@ -1829,6 +1839,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                     component_name in ("params", "result", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
+                    shrinker = "hmt"
+                if (
+                    event_type == "step_description_internal_reasoning"
+                    and component_name == "description"
+                ):
+                    component_weight = 1
                     shrinker = "hmt"
 
                 event_group.section_text(

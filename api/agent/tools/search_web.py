@@ -14,6 +14,10 @@ from django.db import transaction
 from tasks.services import TaskCreditService
 from ...models import PersistentAgent
 from config import settings
+from api.services.tool_settings import (
+    DEFAULT_SEARCH_WEB_RESULT_COUNT,
+    get_tool_settings_for_owner,
+)
 from ..core.web_search_formatter import format_search_results, format_search_error
 
 logger = logging.getLogger(__name__)
@@ -84,17 +88,28 @@ def execute_search_web(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         # For agents without users (e.g., system agents), skip credit check
         logger.info("Performing web search for agent without user - skipping credit check")
 
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    try:
+        tool_settings = get_tool_settings_for_owner(owner)
+        result_count = getattr(tool_settings, "search_web_result_count", None) or DEFAULT_SEARCH_WEB_RESULT_COUNT
+    except Exception:
+        logger.warning("Failed to resolve tool settings for search_web; using default result count", exc_info=True)
+        result_count = DEFAULT_SEARCH_WEB_RESULT_COUNT
+
+    span.set_attribute("search.requested_results", result_count)
+
     with tracer.start_as_current_span("EXA Search") as exa_span:
         from exa_py import Exa
         exa_span.set_attribute("persistent_agent.id", str(agent.id))
         exa_span.set_attribute("search.query", query)
+        exa_span.set_attribute("search.requested_results", result_count)
 
         exa = Exa(api_key=settings.EXA_SEARCH_API_KEY)
         try:
             search_result = exa.search_and_contents(
                 query=query,
                 type="auto",
-                num_results=10,
+                num_results=result_count,
                 context=True,
                 text={
                     "max_characters": 10000

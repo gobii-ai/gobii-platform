@@ -74,6 +74,7 @@ from .llm_config import (
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.execution import get_current_eval_routing_profile
 from .prompt_context import (
+    INTERNAL_REASONING_PREFIX,
     build_prompt_context,
     get_agent_daily_credit_state,
     get_agent_tools,
@@ -1803,46 +1804,36 @@ def _run_agent_loop(
                     )
                 return completion
 
+            # Persist completion immediately so token usage isn't lost if execution exits early
+            _ensure_completion()
+
             def _attach_completion(step_kwargs: dict) -> None:
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
+            reasoning_source = thinking_content
+            if not reasoning_source:
+                msg_content = getattr(msg, "content", None)
+                if msg_content is None and isinstance(msg, dict):
+                    msg_content = msg.get("content")
+                reasoning_source = msg_content
+
+            reasoning_text = (reasoning_source or "").strip()
+            if reasoning_text:
+                response_step_kwargs = {
+                    "agent": agent,
+                    "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
+                }
+                _attach_completion(response_step_kwargs)
+                response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
+                _attach_prompt_archive(response_step)
+
             tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
-                if msg.content:
-                    logger.info("Agent %s reasoning: %s", agent.id, msg.content)
-                    step_kwargs = {
-                        "agent": agent,
-                        "description": f"Internal reasoning: {msg.content[:500]}",
-                    }
-                    _attach_completion(step_kwargs)
-                    step = PersistentAgentStep.objects.create(**step_kwargs)
-                    _attach_prompt_archive(step)
                 reasoning_only_streak += 1
                 continue
 
             reasoning_only_streak = 0
-
-            reasoning_text = (msg.content or "").strip()
-            if reasoning_text:
-                response_description = f"Internal reasoning: {reasoning_text[:500]}"
-            else:
-                try:
-                    tool_count = len(tool_calls)
-                except TypeError:
-                    tool_count = 0
-                response_description = (
-                    f"LLM response issued {tool_count} tool call(s)."
-                    if tool_count
-                    else "LLM response issued tool calls."
-                )
-            response_step_kwargs = {
-                "agent": agent,
-                "description": response_description,
-            }
-            _attach_completion(response_step_kwargs)
-            response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
-            _attach_prompt_archive(response_step)
 
             # Log high-level summary of tool calls
             try:

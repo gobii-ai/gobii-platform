@@ -52,7 +52,10 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_STEPS,
     DEFAULT_MAX_BROWSER_TASKS,
 )
-from api.services.tool_settings import DEFAULT_MIN_CRON_SCHEDULE_MINUTES
+from api.services.tool_settings import (
+    DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+    DEFAULT_SEARCH_WEB_RESULT_COUNT,
+)
 from constants.regex import E164_PHONE_REGEX
 from observability import traced
 from email.utils import parseaddr
@@ -709,6 +712,10 @@ class ToolConfig(models.Model):
     min_cron_schedule_minutes = models.PositiveIntegerField(
         default=DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
         help_text="Minimum allowed cron/interval frequency in minutes; set to 0 to disable enforcement.",
+    )
+    search_web_result_count = models.PositiveIntegerField(
+        default=DEFAULT_SEARCH_WEB_RESULT_COUNT,
+        help_text="Preferred number of results to return from search_web (Exa).",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

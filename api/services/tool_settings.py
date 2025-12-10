@@ -11,8 +11,9 @@ from util.subscription_helper import get_owner_plan
 
 
 DEFAULT_MIN_CRON_SCHEDULE_MINUTES = getattr(settings, "PERSISTENT_AGENT_MIN_SCHEDULE_MINUTES", 30)
+DEFAULT_SEARCH_WEB_RESULT_COUNT = 5
 
-_CACHE_KEY = "tool_settings:v2"
+_CACHE_KEY = "tool_settings:v3"
 _CACHE_TTL_SECONDS = 300
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 class ToolPlanSettings:
     min_cron_schedule_minutes: Optional[int]
     rate_limits: Dict[str, Optional[int]] = field(default_factory=dict)
+    search_web_result_count: int = DEFAULT_SEARCH_WEB_RESULT_COUNT
 
     def hourly_limit_for_tool(self, tool_name: str) -> Optional[int]:
         """Return the hourly limit for the given tool or None if unlimited."""
@@ -49,6 +51,7 @@ def _serialise(configs) -> dict:
         payload[config.plan_name] = {
             "min_cron_schedule_minutes": config.min_cron_schedule_minutes,
             "rate_limits": rate_limits,
+            "search_web_result_count": getattr(config, "search_web_result_count", DEFAULT_SEARCH_WEB_RESULT_COUNT),
         }
     return payload
 
@@ -58,7 +61,10 @@ def _ensure_defaults_exist() -> None:
     for plan_name in PlanNamesChoices.values:
         ToolConfig.objects.get_or_create(
             plan_name=plan_name,
-            defaults={"min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES},
+            defaults={
+                "min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+                "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
+            },
         )
 
 
@@ -107,6 +113,16 @@ def _normalize_rate_limits(rate_limits: Optional[dict]) -> Dict[str, Optional[in
     return normalized
 
 
+def _normalize_search_web_result_count(value: Optional[int]) -> int:
+    try:
+        int_value = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_SEARCH_WEB_RESULT_COUNT
+    if int_value <= 0:
+        return DEFAULT_SEARCH_WEB_RESULT_COUNT
+    return int_value
+
+
 def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
     settings_map = _load_settings()
     normalized_plan = (plan_name or PlanNames.FREE).lower()
@@ -117,6 +133,9 @@ def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
             config.get("min_cron_schedule_minutes") if config else None
         ),
         rate_limits=_normalize_rate_limits(config.get("rate_limits") if config else {}),
+        search_web_result_count=_normalize_search_web_result_count(
+            config.get("search_web_result_count") if config else None
+        ),
     )
 
 
