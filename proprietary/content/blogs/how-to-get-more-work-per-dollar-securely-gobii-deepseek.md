@@ -2,7 +2,7 @@
 title: "How to Get 20–60x More Work Per Dollar — Securely — With Gobii and DeepSeek V3.2"
 date: 2025-12-09
 description: "What changes when intelligence becomes a commodity—and how to build on it without betting the company"
-author: "Andrew I. Christianson"
+author: "Andrew I. Christianson, Founder of Gobii"
 seo_title: "How to Get 20–60x More Work Per Dollar — Securely — With Gobii and DeepSeek V3.2"
 seo_description: "How Gobii turns DeepSeek V3.2 into real work at 20-60x lower cost, while keeping your data secure and your workflows portable."
 tags:
@@ -164,7 +164,7 @@ The core stack is open-core and inspectable. If you need to harden, fork, or ext
 
 When DeepSeek V3.2 went live on OpenRouter, Gobii integrated it immediately.
 
-Within days, OpenRouter's own stats showed **Gobii as the #1 application by usage for DeepSeek V3.2**, by tokens, across apps that opted into tracking.
+Within days, OpenRouter's own stats showed **Gobii as the #1 application by usage for DeepSeek V3.2**, by tokens, across apps that opted into tracking. (See [our earlier announcement](/blog/gobii-number-one-on-deepseek) for the full story.)
 
 You could treat that as a vanity metric. We treat it as revealed preference:
 
@@ -211,7 +211,7 @@ You decide where the brains live (DeepSeek cloud, OpenRouter, self-hosted) and w
 
 ## 5. The China Question, Treated Like an Engineering Constraint
 
-There's a real-world constraint you can't ignore:
+There's a real-world constraint you can't ignore (for a full treatment of the security landscape, see [Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface](/blog/turning-deepseek-into-real-work)):
 
 - DeepSeek is headquartered in China
 - Its hosted API stores data on servers in China

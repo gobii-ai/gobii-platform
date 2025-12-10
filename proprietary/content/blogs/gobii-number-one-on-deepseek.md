@@ -16,7 +16,7 @@ tags:
 
 San Francisco, CA — December 5, 2025 — Gobii, the open-core AI agent platform backed by Open Core Ventures, is now the \#1 application on OpenRouter for DeepSeek V3.2, the frontier model released on Monday, December 1. After integrating the new model into its system — enabling teams to run DeepSeek V3.2 through Gobii's always-on, self-hosted agents — usage climbed steadily over the first 72 hours.
 
-DeepSeek V3.2 sits in the same class as OpenAI's GPT-5.1 and Google's Gemini Pro 3, surpassing them on several public benchmarks **while offering a 20–40× cost advantage (approximately $0.42 vs. $10–$20 for comparable models).** Its strong on-premise viability aligns with Gobii's architecture, which is designed for organizations requiring control, auditability, and data locality.
+DeepSeek V3.2 sits in the same class as OpenAI's GPT-5.1 and Google's Gemini Pro 3, surpassing them on several public benchmarks **while offering a 20–40× cost advantage (approximately $0.42 vs. $10–$20 for comparable models).** Its strong on-premise viability aligns with Gobii's architecture, which is designed for organizations requiring control, auditability, and data locality. For practical guidance on turning that cost advantage into production workloads, see [How to Get 20–60x More Work Per Dollar](/blog/how-to-get-more-work-per-dollar-securely-gobii-deepseek).
 
 Gobii is a pre-seed startup launched in June 2025, backed by Open Core Ventures, the firm led by Sid Sijbrandij, the founder of GitLab. Despite its early stage, Gobii is seeing usage patterns more commonly associated with mature AI infrastructure platforms.
 
@@ -32,7 +32,7 @@ Gobii also became the **\#1 application for Mistral Large 3** in December. These
 
 * **Always-on agents:** Continuous, stateful agents with durable memory instead of single-use prompt chains.
 
-* **High-assurance architecture:** Kubernetes-native, encrypted at rest, with strict access controls and human-in-the-loop oversight.
+* **High-assurance architecture:** Kubernetes-native, encrypted at rest, with strict access controls and human-in-the-loop oversight. For guidance on using DeepSeek securely in production, see [Turning DeepSeek 3.2 into Real Work, Not a New Attack Surface](/blog/turning-deepseek-into-real-work).
 
 ### **How Gobii Began**
 
