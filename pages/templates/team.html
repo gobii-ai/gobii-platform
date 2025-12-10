@@ -7,22 +7,22 @@
 {% endblock %}
 
 {% block content %}
-<section class="py-24 bg-gray-50 text-slate-900">
+<section class="py-20 bg-white text-slate-900">
   <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <h1 class="text-5xl font-extrabold text-gray-900 mb-8">Our Team</h1>
-    <p class="text-xl text-gray-700 leading-relaxed max-w-2xl mx-auto">
-      The dedicated individuals building Gobii's cutting-edge pretrained workers.
+    <h1 class="text-4xl font-semibold mb-6">Our Team</h1>
+    <p class="text-lg leading-relaxed">
+      The people behind Gobii's pretrained workers.
     </p>
   </div>
 </section>
 
-<section class="py-16 bg-white text-slate-900 shadow-lg rounded-lg mb-12 last:mb-0">
-  <div class="max-w-5xl mx-auto px-6 lg:px-8 py-8">
-    <div class="flex flex-col md:flex-row items-center md:items-start md:space-x-8">
-      <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-40 h-40 rounded-full object-cover mb-8 md:mb-0 shrink-0 border-4 border-blue-500" />
-      <div class="text-center md:text-left">
-        <h2 class="text-4xl font-bold text-gray-800 mb-2">Andrew&nbsp;I.&nbsp;Christianson</h2>
-        <p class="text-xl font-medium text-blue-600 mb-4">Founder &amp; Chief Technology Officer</p>
+<section class="py-16 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row items-start md:space-x-8">
+      <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
+      <div>
+        <h2 class="text-3xl font-semibold mb-2">Andrew&nbsp;I.&nbsp;Christianson</h2>
+        <p class="text-lg font-medium mb-4">Founder &amp; Chief Technology Officer</p>
         <p class="leading-relaxed mb-4">
           Andrew pairs a decade of mission-critical engineering with a passion for open-source AI. His track record
           spans national-security big-data systems, category-defining open-core companies, and the breakout success of
@@ -48,18 +48,18 @@
         <p class="leading-relaxed mt-4">
           Andrew is a thought leader, publishing AI and technical content under his initials "AI" Christianson. He grew his <a href="https://www.tiktok.com/@ai.christianson" class="text-blue-600 hover:underline">TikTok</a> and <a href="https://www.instagram.com/ai.christianson/" class="text-blue-600 hover:underline">Instagram</a> audiences to&nbsp;30k+ followers combined in under 30&nbsp;days.
         </p>
-        </div>
+      </div>
     </div>
   </div>
 </section>
 
-<section class="py-16 bg-white text-slate-900 shadow-lg rounded-lg mb-12 last:mb-0">
-  <div class="max-w-5xl mx-auto px-6 lg:px-8 py-8">
-    <div class="flex flex-col md:flex-row items-center md:items-start md:space-x-8">
-      <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-40 h-40 rounded-full object-cover mb-8 md:mb-0 shrink-0 border-4 border-blue-500" />
-      <div class="text-center md:text-left">
-        <h2 class="text-4xl font-bold text-gray-800 mb-2">Will Bonde</h2>
-        <p class="text-xl font-medium text-blue-600 mb-4">Senior Software Engineer</p>
+<section class="py-16 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="flex flex-col md:flex-row items-start md:space-x-8">
+      <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-32 h-32 rounded-full object-cover mb-6 md:mb-0 shrink-0" />
+      <div>
+        <h2 class="text-3xl font-semibold mb-2">Will Bonde</h2>
+        <p class="text-lg font-medium mb-4">Senior Software Engineer</p>
         <p class="leading-relaxed mb-4">
           Will fuses nearly twenty years of secure‑systems expertise with a knack for turning cutting‑edge AI into products people actually use. A cancer survivor, he channels that resilience into building software with real‑world impact to make lives better—now charting the technical course for Gobii's platform that distills signal from the deluge of information on the internet.
         </p>
@@ -83,7 +83,10 @@
             Contributor to browser-use
           </li>
         </ul>
-        </div>
+        <p class="leading-relaxed mt-4">
+          Off the command line, Will supports fellow survivors through the Testicular Cancer Foundation, facilitating patient and survivor conversation through Discord.
+        </p>
+      </div>
     </div>
   </div>
 </section>
