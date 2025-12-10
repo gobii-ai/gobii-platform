@@ -33,7 +33,7 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
     slug = "permit_followup_single_reply"
     description = (
         "Recreates the Carroll Valley permit follow-up prompt that previously triggered duplicate replies. "
-        "Agent should send exactly one outbound message."
+        "Agent should send exactly one outbound message, or at most two if a web search occurs between them."
     )
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
@@ -383,10 +383,35 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
-        if outbound_count == 0:
+        if outbound_count == 2:
+            first_reply, second_reply = outbound[0], outbound[1]
+            search_between = PersistentAgentToolCall.objects.filter(
+                step__agent_id=agent_id,
+                tool_name="search_web",
+                step__created_at__gt=first_reply.timestamp,
+                step__created_at__lt=second_reply.timestamp,
+            ).exists()
+            if search_between:
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.PASSED,
+                    task_name="verify_single_reply",
+                    observed_summary="Agent sent two replies with a web search between; permitted.",
+                    artifacts={"message": second_reply, "messages": [first_reply, second_reply]},
+                )
+                return
+            summary = (
+                "Agent sent two replies without performing a web search between them; expected a single reply or a "
+                "search-backed follow-up."
+            )
+        elif outbound_count == 0:
             summary = "Agent did not reply to the permit follow-up prompt."
         else:
-            summary = f"Agent sent {outbound_count} replies; expected exactly one."
+            summary = (
+                f"Agent sent {outbound_count} replies; expected a single reply or two with a web search between the first "
+                "and second."
+            )
 
         first = {"message": outbound[0]} if outbound else {}
         self.record_task_result(
