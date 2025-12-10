@@ -1184,14 +1184,12 @@ def add_budget_awareness_sections(
 
     if daily_credit_state:
         try:
+            default_task_cost = get_default_task_credit_cost()
             hard_limit = daily_credit_state.get("hard_limit")
             hard_limit_remaining = daily_credit_state.get("hard_limit_remaining")
             soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
             next_reset = daily_credit_state.get("next_reset")
-            burn_rate = daily_credit_state.get("burn_rate_per_hour")
-            burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
-            burn_window = daily_credit_state.get("burn_rate_window_minutes")
 
             if soft_target is not None:
                 reset_text = (
@@ -1204,10 +1202,12 @@ def add_budget_awareness_sections(
                     )
                 else:
                     soft_target_warning = ""
+                remaining_soft = max(Decimal("0"), soft_target - used)
                 soft_text = (
                     "This is your daily task usage target. Every tool call consumes credits. "
                     "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
-                    f"Soft target progress: {used}/{soft_target} credits consumed today. "
+                    f"Soft target progress: {used}/{soft_target} "
+                    f"Remaining tasks: {remaining_soft} "
                     f"{soft_target_warning}"
                     f"{reset_text} "
                 )
@@ -1224,7 +1224,7 @@ def add_budget_awareness_sections(
                     ratio = used / hard_limit
                 except Exception:
                     ratio = None
-                if hard_limit_remaining is not None and hard_limit_remaining <= get_default_task_credit_cost():
+                if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
                     hard_limit_warning = (
                         "WARNING: Hard limit is nearly depleted; only enough credit remains for a single default-cost tool call."
                     )
@@ -1234,12 +1234,14 @@ def add_budget_awareness_sections(
                     )
                 else:
                     hard_limit_warning = ""
+                remaining_hard = max(Decimal("0"), hard_limit - used)
 
                 hard_text = (
                     f"This is your task usage hard limit for today. Once you reach this limit, "
                     "you will be blocked from making further tool calls until the limit resets. "
                     "Every tool call you make consumes credits against this limit. "
-                    f"Hard limit progress: {used}/{hard_limit} credits consumed today. "
+                    f"Hard limit progress: {used}/{hard_limit} "
+                    f"Remaining tasks: {remaining_hard} "
                     f"{hard_limit_warning}"
                 )
                 sections.append((
@@ -1447,6 +1449,7 @@ def _get_system_instruction(
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
         "You may not even need to send a message at all if there is nothing new. "
         "Do not feel the need to send messages just to show activity or artificially continue the conversation. "
+        "Do not feel the need to send messages for every little update; wait until you have something worth sending and batch things together when possible. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
@@ -1577,8 +1580,34 @@ def _get_sms_prompt_addendum(agent: PersistentAgent) -> str:
            - Ensure messages are compliant with 10DLC policy requirement, especially Tier 0 / Severe profanity & hate,
              “SHAFT” content, and High-risk / regulated offers
            - BUT DO NOT CHANGE THE URLS. URLS MUST BE COMPLETE, ACCURATE, AND NOT HALLUCINATED!!!  
-           """)
+             """)
     return ""
+
+def _format_recent_minutes_suffix(timestamp: datetime) -> str:
+    """Return a short 'Xs/m/h ago,' suffix for recent timestamps."""
+    if timestamp is None:
+        return ""
+
+    ts = timestamp
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+
+    now = dj_timezone.now()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+
+    delta = now - ts
+    if delta.total_seconds() < 0:
+        return ""
+
+    seconds = int(delta.total_seconds())
+    if seconds >= 12 * 3600:
+        return ""
+    if seconds < 60:
+        return f" {seconds}s ago,"
+    if seconds < 3600:
+        return f" {seconds // 60}m ago,"
+    return f" {seconds // 3600}h ago,"
 
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
@@ -1707,6 +1736,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         if not m.from_endpoint:
             # Skip malformed records defensively
             continue
+        recent_minutes_suffix = _format_recent_minutes_suffix(m.timestamp)
 
         channel = m.from_endpoint.channel
         body = m.body or ""
@@ -1716,11 +1746,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             peer_name = getattr(m.peer_agent, "name", "linked agent")
             if m.is_outbound:
                 header = (
-                    f"[{m.timestamp.isoformat()}] Peer DM sent to {peer_name}:"
+                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM sent to {peer_name}:"
                 )
             else:
                 header = (
-                    f"[{m.timestamp.isoformat()}] Peer DM received from {peer_name}:"
+                    f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} Peer DM received from {peer_name}:"
                 )
             event_type = f"{event_prefix}_peer_dm"
             components = {
@@ -1731,9 +1761,9 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             from_addr = m.from_endpoint.address
             if m.is_outbound:
                 to_addr = m.to_endpoint.address if m.to_endpoint else "N/A"
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you sent a message to {to_addr}:"
+                header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you sent a message to {to_addr}:"
             else:
-                header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
+                header = f"[{m.timestamp.isoformat()}]{recent_minutes_suffix} On {channel}, you received a message from {from_addr}:"
 
             event_type = f"{event_prefix}_{channel.lower()}"
             components = {"header": header}
