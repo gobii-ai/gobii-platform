@@ -7,25 +7,18 @@
 {% endblock %}
 
 {% block content %}
-<div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-
-  {# Page Header #}
-  <div class="mb-12">
-    <div class="flex items-center gap-4 mb-4">
-      <div class="p-3 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl shadow-lg text-white">
-        <svg class="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" />
-        </svg>
-      </div>
-      <div>
-        <h1 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Our Team</h1>
-        <p class="text-slate-600 mt-1">The people behind Gobii's pretrained workers.</p>
-      </div>
+<section class="py-20 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-light text-slate-900 leading-tight tracking-tight">
+        <span class="font-light">The</span>
+        <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent font-semibold">humans</span>
+        <span class="font-light">behind the&nbsp;AI.</span>
+      </h1>
     </div>
-  </div>
 
   {# Team Members #}
-  <div class="space-y-8">
+  <div class="space-y-10">
 
     {# Andrew #}
     <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
@@ -126,5 +119,6 @@
     </div>
 
   </div>
-</div>
+  </div>
+</section>
 {% endblock %}
