@@ -1207,7 +1207,7 @@ def add_budget_awareness_sections(
                     "This is your daily task usage target. Every tool call consumes credits. "
                     "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
                     f"Soft target progress: {used}/{soft_target} "
-                    f"Remaining tasks: {remaining_soft} "
+                    f"Remaining credits: {remaining_soft} "
                     f"{soft_target_warning}"
                     f"{reset_text} "
                 )
@@ -1241,7 +1241,7 @@ def add_budget_awareness_sections(
                     "you will be blocked from making further tool calls until the limit resets. "
                     "Every tool call you make consumes credits against this limit. "
                     f"Hard limit progress: {used}/{hard_limit} "
-                    f"Remaining tasks: {remaining_hard} "
+                    f"Remaining credits: {remaining_hard} "
                     f"{hard_limit_warning}"
                 )
                 sections.append((
