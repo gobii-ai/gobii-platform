@@ -160,6 +160,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     message = PersistentAgentMessage.objects.create(
         owner_agent=agent,
         from_endpoint=agent_endpoint,
+        to_endpoint=user_endpoint,
         conversation=conversation,
         is_outbound=True,
         body=body,
