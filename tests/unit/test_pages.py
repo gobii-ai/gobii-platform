@@ -284,7 +284,7 @@ class ScaleCheckoutViewTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_existing_subs,
-        _mock_prepare,
+        _,
     ):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
@@ -325,7 +325,7 @@ class ScaleCheckoutViewTests(TestCase):
         mock_price_get,
         mock_session_create,
         mock_existing_subs,
-        _mock_prepare,
+        _,
     ):
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",

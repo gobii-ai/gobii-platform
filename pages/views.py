@@ -63,15 +63,53 @@ def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
     return False
 
 
+def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
+    """Return True when a subscription dict includes the target metered price."""
+    items = (sub.get("items") or {}).get("data") or []
+    for item in items:
+        price_data = item.get("price")
+        if isinstance(price_data, dict):
+            price_id = price_data.get("id")
+            usage_type = price_data.get("usage_type") or (price_data.get("recurring") or {}).get("usage_type")
+        else:
+            price_id = price_data if isinstance(price_data, str) else None
+            usage_type = None
+
+        if price_id == target_price_id and (usage_type or "").lower() == "metered":
+            return True
+    return False
+
+
 def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
     """Check if the customer already has an active individual subscription for the price."""
+    return _customer_has_price_subscription_with_cache(customer_id, target_price_id)[0]
+
+
+def _customer_has_price_subscription_with_cache(customer_id: str, target_price_id: str):
+    """Return (has_price, subscriptions) with cached subscription list."""
     try:
         existing = get_existing_individual_subscriptions(customer_id)
     except Exception:
         logger.warning("Failed to load existing subscriptions for %s", customer_id, exc_info=True)
+        return False, []
+
+    return any(_subscription_contains_price(sub, target_price_id) for sub in existing), existing
+
+
+def _customer_has_metered_subscription(customer_id: str, target_price_id: str, existing_subs: list[dict] | None = None) -> bool:
+    if not target_price_id:
         return False
 
-    return any(_subscription_contains_price(sub, target_price_id) for sub in existing)
+    subs = existing_subs
+    if subs is None:
+        try:
+            subs = get_existing_individual_subscriptions(customer_id)
+        except Exception:
+            logger.warning("Failed to load existing subscriptions for %s", customer_id, exc_info=True)
+            return False
+
+    return any(_subscription_contains_meter_price(sub, target_price_id) for sub in subs)
+
 
 
 def _login_url_with_utms(request) -> str:
@@ -886,8 +924,50 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             event_id=event_id,
         )
 
-        if _customer_has_price_subscription(str(customer.id), price_id):
-            return redirect(success_url)
+        has_base_price, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
+        has_meter_price = _customer_has_metered_subscription(
+            str(customer.id),
+            additional_price_id or "",
+            existing_subs,
+        )
+
+        if has_base_price:
+            if additional_price_id and not has_meter_price:
+                try:
+                    subscription, action = ensure_single_individual_subscription(
+                        customer_id=customer.id,
+                        licensed_price_id=price_id,
+                        metered_price_id=additional_price_id,
+                        metadata=metadata,
+                        idempotency_key=f"scale-individual-meter-{customer.id}-{event_id}",
+                        create_if_missing=False,
+                    )
+
+                    if action != "absent" and subscription is not None:
+                        try:
+                            Subscription.sync_from_stripe_data(subscription)
+                        except Exception:
+                            logger.warning(
+                                "Failed to sync Stripe subscription %s after %s",
+                                getattr(subscription, "id", None)
+                                or (subscription.get("id") if isinstance(subscription, dict) else ""),
+                                action,
+                                exc_info=True,
+                            )
+
+                        return redirect(success_url)
+                except stripe.error.InvalidRequestError as ensure_exc:
+                    logger.info(
+                        "Meter attachment fell back to checkout for customer %s: %s",
+                        customer.id,
+                        ensure_exc,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to attach metered item for customer %s", customer.id,
+                    )
+            else:
+                return redirect(success_url)
 
         session = stripe.checkout.Session.create(
             customer=customer.id,
