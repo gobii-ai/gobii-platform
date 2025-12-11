@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 
@@ -313,6 +314,45 @@ class MarketingMetaTests(TestCase):
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
         mock_session_create.assert_not_called()
+
+
+@tag("batch_pages")
+class SubscriptionPriceParsingTests(TestCase):
+    def test_get_price_info_from_item_handles_dict(self):
+        item = {"price": {"id": "price_123", "usage_type": "licensed"}}
+        price_id, usage = page_views._get_price_info_from_item(item)
+        self.assertEqual(price_id, "price_123")
+        self.assertEqual(usage, "licensed")
+
+    def test_get_price_info_from_item_handles_string(self):
+        item = {"price": "price_string"}
+        price_id, usage = page_views._get_price_info_from_item(item)
+        self.assertEqual(price_id, "price_string")
+        self.assertEqual(usage, "")
+
+    def test_subscription_contains_price_ignores_metered(self):
+        sub = {
+            "items": {
+                "data": [
+                    {"price": {"id": "price_meter", "usage_type": "metered"}},
+                    {"price": {"id": "price_target", "usage_type": "licensed"}},
+                ]
+            }
+        }
+        self.assertTrue(page_views._subscription_contains_price(sub, "price_target"))
+        self.assertFalse(page_views._subscription_contains_price(sub, "price_meter"))
+
+    def test_subscription_contains_meter_price_only_metered(self):
+        sub = {
+            "items": {
+                "data": [
+                    {"price": {"id": "price_meter", "usage_type": "metered"}},
+                    {"price": {"id": "price_meter", "usage_type": "licensed"}},
+                ]
+            }
+        }
+        self.assertTrue(page_views._subscription_contains_meter_price(sub, "price_meter"))
+        self.assertFalse(page_views._subscription_contains_meter_price(sub, "price_missing"))
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")

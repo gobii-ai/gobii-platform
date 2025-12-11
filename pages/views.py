@@ -45,20 +45,43 @@ import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
+def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
+    """
+    Extract price ID and usage type (lowercased) from a subscription item.
+
+    Supports Stripe objects, dicts, or string price IDs.
+    """
+    price_data = item.get("price")
+    price_id = None
+    usage_type = ""
+
+    if isinstance(price_data, dict):
+        price_id = price_data.get("id")
+        usage_type = price_data.get("usage_type") or (price_data.get("recurring") or {}).get("usage_type") or ""
+    elif isinstance(price_data, str):
+        price_id = price_data
+
+    return price_id, usage_type.lower()
+
+
 def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
     """Return True when a subscription dict includes the target licensed price."""
     items = (sub.get("items") or {}).get("data") or []
     for item in items:
-        price_data = item.get("price")
-        if isinstance(price_data, dict):
-            price_id = price_data.get("id")
-            usage_type = price_data.get("usage_type") or (price_data.get("recurring") or {}).get("usage_type")
-        else:
-            price_id = price_data if isinstance(price_data, str) else None
-            usage_type = None
+        price_id, usage_type = _get_price_info_from_item(item)
 
         # Only treat licensed/base items as a match; metered add-ons share the product.
-        if price_id == target_price_id and (usage_type or "").lower() != "metered":
+        if price_id == target_price_id and usage_type != "metered":
+            return True
+    return False
+
+
+def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
+    """Return True when a subscription dict includes the target metered price."""
+    items = (sub.get("items") or {}).get("data") or []
+    for item in items:
+        price_id, usage_type = _get_price_info_from_item(item)
+        if price_id == target_price_id and usage_type == "metered":
             return True
     return False
 
@@ -97,8 +120,7 @@ def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings)
     for sub in existing_subs or []:
         items = (sub.get("items") or {}).get("data") or []
         for item in items:
-            price_data = item.get("price") or {}
-            price_id = price_data.get("id") if isinstance(price_data, dict) else None
+            price_id, _ = _get_price_info_from_item(item)
             if price_id and price_id in dedicated_price_ids:
                 qty = item.get("quantity") or 0
                 if qty > 0:
