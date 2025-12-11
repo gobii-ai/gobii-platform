@@ -585,6 +585,36 @@ def _reattach_overage_from_session(request, org_id: str) -> bool:
     price_id = info.get("price_id")
     return _reattach_org_overage_subscription(subscription_id, price_id)
 
+
+def _apply_subscribe_success_context(request, context: dict, plan_id: str | None = None) -> None:
+    """Populate context for subscription success notifications based on query params."""
+    if request.GET.get("subscribe_success") == "1":
+        context["subscribe_notification"] = True
+        price_str = request.GET.get("p", "0.0")
+        try:
+            context["sub_price"] = float(price_str)
+        except ValueError:
+            context["sub_price"] = 0.0
+
+        event_id = (request.GET.get("eid") or "").strip()
+        if event_id and len(event_id) <= 64:
+            context["subscribe_event_id"] = event_id
+        else:
+            context["subscribe_event_id"] = ""
+
+        resolved_plan = plan_id
+        if resolved_plan is None:
+            plan_config = context.get("subscription_plan") or {}
+            resolved_plan = plan_config.get("id") if isinstance(plan_config, dict) else None
+
+        context["subscribe_plan"] = resolved_plan if isinstance(resolved_plan, str) else ""
+        return
+
+    context["subscribe_notification"] = False
+    context["subscribe_event_id"] = ""
+    context["subscribe_plan"] = ""
+
+
 class ConsoleHome(ConsoleViewMixin, TemplateView):
     """Dashboard homepage for the console."""
     template_name = "index.html"
@@ -753,32 +783,7 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
         else:
             context['addl_tasks_percent'] = 0
 
-        # If they have query parameter subscribe_success=1, put `subscribe_notification` as true in context for tpl use
-        if self.request.GET.get('subscribe_success') == '1':
-            context['subscribe_notification'] = True
-            price_str = self.request.GET.get('p', '0.0')
-            try:
-                # Ensure sub_price is a valid number to prevent XSS and ensure correct tracking.
-                context['sub_price'] = float(price_str)
-            except ValueError:
-                context['sub_price'] = 0.0
-
-            event_id = (self.request.GET.get('eid') or '').strip()
-            if event_id and len(event_id) <= 64:
-                context['subscribe_event_id'] = event_id
-            else:
-                context['subscribe_event_id'] = ""
-
-            plan_config = context.get('subscription_plan') or {}
-            plan_value = plan_config.get('id') if isinstance(plan_config, dict) else None
-            if isinstance(plan_value, str):
-                context['subscribe_plan'] = plan_value
-            else:
-                context['subscribe_plan'] = ''
-        else:
-            context['subscribe_notification'] = False
-            context['subscribe_event_id'] = ""
-            context['subscribe_plan'] = ''
+        _apply_subscribe_success_context(self.request, context)
 
 
         # Get the user's active subscription
@@ -1347,6 +1352,11 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     source=AnalyticsSource.WEB,
                     properties=billing_view_props.copy(),
                 )
+                _apply_subscribe_success_context(
+                    request,
+                    context,
+                    plan_id=(overview.get('plan') or {}).get('id'),
+                )
                 return render(request, self.template_name, context)
 
         # Personal billing fallback
@@ -1399,6 +1409,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             'dedicated_ip_currency': price_currency,
         })
 
+        _apply_subscribe_success_context(request, context)
         return render(request, self.template_name, context)
 
     @tracer.start_as_current_span("CONSOLE Billing Post (not allowed)")

@@ -263,23 +263,15 @@ class MarketingMetaTests(TestCase):
         )
 
 
-@tag("batch_pages")
-@override_settings(GOBII_PROPRIETARY_MODE=True)
-class ScaleCheckoutViewTests(TestCase):
-    def setUp(self):
-        self.user = get_user_model().objects.create_user(email="scale@test.com", password="pw", username="scale_user")
-        self.client.force_login(self.user)
-
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.stripe.billing_portal.Session.create")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.checkout.Session.create")
     @patch("pages.views.Price.objects.get")
     @patch("pages.views.get_or_create_stripe_customer")
     @patch("pages.views.get_stripe_settings")
-    def test_switching_from_startup_uses_checkout_flow(
+    def test_switching_from_startup_redirects_to_billing(
         self,
         mock_stripe_settings,
         mock_customer,
@@ -287,9 +279,11 @@ class ScaleCheckoutViewTests(TestCase):
         mock_session_create,
         mock_existing_subs,
         mock_ensure,
-        mock_portal_create,
         _,
     ):
+        user = get_user_model().objects.create_user(email="scale@test.com", password="pw", username="scale_user")
+        self.client.force_login(user)
+
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id="price_scale_meter",
@@ -297,7 +291,6 @@ class ScaleCheckoutViewTests(TestCase):
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
-        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal")
         mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
 
         mock_existing_subs.return_value = [
@@ -310,14 +303,19 @@ class ScaleCheckoutViewTests(TestCase):
         resp = self.client.get("/subscribe/scale/")
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], "https://stripe.test/portal")
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(params.get("subscribe_success"), ["1"])
+        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertTrue(params.get("eid"))
+        self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
-        mock_portal_create.assert_called_once()
         mock_session_create.assert_not_called()
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
-    @patch("pages.views.stripe.billing_portal.Session.create")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.checkout.Session.create")
@@ -332,9 +330,11 @@ class ScaleCheckoutViewTests(TestCase):
         mock_session_create,
         mock_existing_subs,
         mock_ensure,
-        mock_portal_create,
         _,
     ):
+        user = get_user_model().objects.create_user(email="scale2@test.com", password="pw", username="scale_user_2")
+        self.client.force_login(user)
+
         mock_stripe_settings.return_value = SimpleNamespace(
             scale_price_id="price_scale",
             scale_additional_task_price_id=None,
@@ -342,7 +342,6 @@ class ScaleCheckoutViewTests(TestCase):
         mock_customer.return_value = SimpleNamespace(id="cus_scale")
         mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
-        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal")
         mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
 
         mock_existing_subs.return_value = [
@@ -355,7 +354,13 @@ class ScaleCheckoutViewTests(TestCase):
         resp = self.client.get("/subscribe/scale/")
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp["Location"], "https://stripe.test/portal")
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(params.get("subscribe_success"), ["1"])
+        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertTrue(params.get("eid"))
+        self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
-        mock_portal_create.assert_called_once()
         mock_session_create.assert_not_called()

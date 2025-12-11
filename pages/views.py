@@ -63,23 +63,6 @@ def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
     return False
 
 
-def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
-    """Return True when a subscription dict includes the target metered price."""
-    items = (sub.get("items") or {}).get("data") or []
-    for item in items:
-        price_data = item.get("price")
-        if isinstance(price_data, dict):
-            price_id = price_data.get("id")
-            usage_type = price_data.get("usage_type") or (price_data.get("recurring") or {}).get("usage_type")
-        else:
-            price_id = price_data if isinstance(price_data, str) else None
-            usage_type = None
-
-        if price_id == target_price_id and (usage_type or "").lower() == "metered":
-            return True
-    return False
-
-
 def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
     """Check if the customer already has an active individual subscription for the price."""
     return _customer_has_price_subscription_with_cache(customer_id, target_price_id)[0]
@@ -94,21 +77,6 @@ def _customer_has_price_subscription_with_cache(customer_id: str, target_price_i
         return False, []
 
     return any(_subscription_contains_price(sub, target_price_id) for sub in existing), existing
-
-
-def _customer_has_metered_subscription(customer_id: str, target_price_id: str, existing_subs: list[dict] | None = None) -> bool:
-    if not target_price_id:
-        return False
-
-    subs = existing_subs
-    if subs is None:
-        try:
-            subs = get_existing_individual_subscriptions(customer_id)
-        except Exception:
-            logger.warning("Failed to load existing subscriptions for %s", customer_id, exc_info=True)
-            return False
-
-    return any(_subscription_contains_meter_price(sub, target_price_id) for sub in subs)
 
 
 def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings) -> list[dict]:
@@ -794,7 +762,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "p": f"{price:.2f}",
             "eid": event_id,
         }
-        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
 
         line_items = [
             {
@@ -925,7 +893,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "p": f"{price:.2f}",
             "eid": event_id,
         }
-        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
 
         line_items = [
             {
@@ -952,12 +920,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             event_id=event_id,
         )
 
-        has_base_price, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
-        has_meter_price = _customer_has_metered_subscription(
-            str(customer.id),
-            additional_price_id or "",
-            existing_subs,
-        )
+        _, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
 
         if existing_subs:
             try:
@@ -982,16 +945,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                             exc_info=True,
                         )
 
-                    try:
-                        portal_session = stripe.billing_portal.Session.create(
-                            customer=customer.id,
-                            return_url=success_url,
-                            api_key=stripe.api_key,
-                        )
-                        return redirect(portal_session.url)
-                    except Exception:
-                        logger.warning("Failed to open billing portal after upgrade for %s", customer.id, exc_info=True)
-                        return redirect(success_url)
+                    return redirect(success_url)
             except stripe.error.InvalidRequestError as ensure_exc:
                 logger.info(
                     "Upgrade via ensure failed; falling back to checkout for customer %s: %s",
