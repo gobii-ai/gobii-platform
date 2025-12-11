@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% load static %}
+{% block title %}Team • {{ settings.PUBLIC_BRAND_NAME }}{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Meet the team building Gobii's pretrained workers.">
+{% endblock %}
+
+{% block content %}
+<section class="py-20 bg-white text-slate-900">
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="text-center mb-10">
+      <h1 class="text-3xl sm:text-4xl lg:text-5xl font-light text-slate-900 leading-tight tracking-tight">
+        <span class="font-light">The</span>
+        <span class="bg-gradient-to-r from-blue-600 to-indigo-600 bg-clip-text text-transparent font-semibold">humans</span>
+        <span class="font-light">behind the&nbsp;AI.</span>
+      </h1>
+    </div>
+
+  {# Team Members #}
+  <div class="space-y-10">
+
+    {# Andrew #}
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="bg-gradient-to-r from-blue-50/80 to-indigo-50/80 border-b border-blue-100 px-6 py-4">
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Founder</span>
+      </div>
+      <div class="p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
+          <div class="shrink-0 flex flex-col items-center sm:items-start">
+            <img src="{% static 'images/andrew.jpg' %}" alt="Andrew I. Christianson" class="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-md ring-4 ring-white" />
+            <div class="mt-4 flex flex-wrap gap-2 justify-center sm:justify-start w-28 sm:w-32">
+              <a href="https://www.tiktok.com/@ai.christianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="TikTok">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64 2.93 2.93 0 01.88.13V9.4a6.84 6.84 0 00-1-.05A6.33 6.33 0 005 20.1a6.34 6.34 0 0010.86-4.43v-7a8.16 8.16 0 004.77 1.52v-3.4a4.85 4.85 0 01-1-.1z"/></svg>
+              </a>
+              <a href="https://www.instagram.com/ai.christianson/" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="Instagram">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+              </a>
+              <a href="https://x.com/ai_christianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="X (Twitter)">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.25 3.5h3.25l-7.1 7.8L22 20.5h-5.8l-4.25-5.6-4.86 5.6H3.86l7.48-8.62L2.75 3.5h5.9l3.86 5.1z"/></svg>
+              </a>
+              <a href="https://www.linkedin.com/in/ai-christianson/" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="LinkedIn">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1 4.98 2.12 4.98 3.5zM.52 21.48h3.96V7.5H.52zM8.31 7.5h3.79v1.91h.05c.53-.97 1.83-1.99 3.76-1.99 4.02 0 4.76 2.65 4.76 6.1v7.96h-3.96v-7.05c0-1.68-.03-3.86-2.35-3.86-2.35 0-2.71 1.84-2.71 3.74v7.17H8.31z"/></svg>
+              </a>
+              <a href="https://github.com/ai-christianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="GitHub">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </a>
+              <a href="https://www.youtube.com/@AndrewIChristianson" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="YouTube">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-2xl font-light text-slate-900 tracking-tight">Andrew&nbsp;I.&nbsp;Christianson</h2>
+            <p class="text-indigo-600 font-semibold mt-1">Founder</p>
+            <p class="text-slate-600 leading-relaxed mt-4">
+              Andrew is an internet-native founder obsessed with compounding: products that keep getting better, audiences that keep growing, and ventures that turn into real, durable businesses. He splits his time between distribution, product, and making sure Gobii is investing in the right things in the right order. Before Gobii, he bootstrapped and shipped multiple SaaS products, grew open-source projects 9× in 90&nbsp;days, and spent a decade building dataflow and mission-critical infrastructure for the U.S. National Security Agency, where failure wasn't an option.
+            </p>
+            <ul class="mt-6 space-y-3 list-disc pl-5 marker:text-indigo-500 text-slate-600 text-sm leading-relaxed">
+              <li class="pl-1">
+                Founder of <a href="https://www.gobii.ai" class="text-blue-600 font-medium hover:underline">Gobii&nbsp;AI</a>, a platform for browser-native AI agents that take over the repetitive online work so human teams can focus on strategy and relationships.
+              </li>
+              <li class="pl-1">
+                Creator of <a href="https://github.com/ai-christianson/RA.Aid" class="text-blue-600 font-medium hover:underline">RA.Aid</a>, the open-source coding agent selected as the inaugural project for <a href="https://www.opencoreventures.com/blog/ra-aid-catalyst-programs-inaugural-project-sees-9x-growth" class="text-blue-600 font-medium hover:underline">Open&nbsp;Core&nbsp;Ventures' Catalyst&nbsp;program</a>.
+              </li>
+              <li class="pl-1">
+                Multi-time founder, from bootstrapped SaaS to AI-native consumer products, with a bias toward compounding over one-off wins.
+              </li>
+              <li class="pl-1">
+                Former NSA contractor and long-time contributor to <a href="https://nifi.apache.org/" class="text-blue-600 font-medium hover:underline">Apache NiFi</a>/MiNiFi, the open-source dataflow project originally released by the <a href="https://www.nsa.gov/Research/Technology-Transfer-Program/Success-Stories/Article/3306190/nsa-releases-niagarafiles-to-open-source-software/" class="text-blue-600 font-medium hover:underline">U.S. National Security Agency</a>; that work underpinned Onyara (acquired by Hortonworks) and Datavolo (acquired by Snowflake).
+              </li>
+              <li class="pl-1">
+                Public presence as "AI&nbsp;Christianson", where 60k+ people follow his work on AI, infrastructure, and company-building as a live feedback loop with the market.
+              </li>
+            </ul>
+            {# Open Source Contributions #}
+            <div class="mt-6 pt-5 border-t border-slate-100">
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Open Source Contributor</p>
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <a href="https://github.com/ai-christianson/RA.Aid" class="group block p-3 bg-gradient-to-br from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 rounded-xl border border-indigo-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <img src="https://raw.githubusercontent.com/ai-christianson/RA.Aid/master/assets/logo-black-transparent.png" alt="RA.Aid" class="w-5 h-5 object-contain" />
+                    <span class="font-semibold text-slate-800 text-sm">RA.Aid</span>
+                  </div>
+                  <p class="text-xs text-slate-500">AI coding agent</p>
+                </a>
+                <a href="https://github.com/apache/nifi" class="group block p-3 bg-gradient-to-br from-orange-50 to-amber-50 hover:from-orange-100 hover:to-amber-100 rounded-xl border border-orange-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <img src="https://nifi.apache.org/images/apache-nifi-drop-logo.svg" alt="Apache NiFi" class="w-5 h-5 object-contain" />
+                    <span class="font-semibold text-slate-800 text-sm">Apache NiFi</span>
+                  </div>
+                  <p class="text-xs text-slate-500">Data flow automation</p>
+                </a>
+                <a href="https://github.com/browser-use/browser-use" class="group block p-3 bg-gradient-to-br from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 rounded-xl border border-emerald-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-lg leading-none">🌐</span>
+                    <span class="font-semibold text-slate-800 text-sm">browser-use</span>
+                  </div>
+                  <p class="text-xs text-slate-500">Browser automation</p>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Will #}
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="bg-gradient-to-r from-emerald-50/80 to-teal-50/80 border-b border-emerald-100 px-6 py-4">
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Growth & Engineering</span>
+      </div>
+      <div class="p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
+          <div class="shrink-0 flex flex-col items-center sm:items-start">
+            <img src="{% static 'images/will.png' %}" alt="Will Bonde" class="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-md ring-4 ring-white" />
+            <div class="mt-4 flex flex-wrap gap-2 justify-center sm:justify-start w-28 sm:w-32">
+              <a href="https://www.linkedin.com/in/willbonde/" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="LinkedIn">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1 4.98 2.12 4.98 3.5zM.52 21.48h3.96V7.5H.52zM8.31 7.5h3.79v1.91h.05c.53-.97 1.83-1.99 3.76-1.99 4.02 0 4.76 2.65 4.76 6.1v7.96h-3.96v-7.05c0-1.68-.03-3.86-2.35-3.86-2.35 0-2.71 1.84-2.71 3.74v7.17H8.31z"/></svg>
+              </a>
+              <a href="https://github.com/wbonde" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="GitHub">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-2xl font-light text-slate-900 tracking-tight">Will Bonde</h2>
+            <p class="text-emerald-600 font-semibold mt-1">Growth &amp; Engineering</p>
+            <p class="text-slate-600 leading-relaxed mt-4">
+              Nearly twenty years building secure enterprise software meets a track record of turning cutting‑edge AI into shipped, revenue-generating product. Now charting the technical course for Gobii's platform and how our browser-native agents show up for customers day to day. A cancer survivor, Will channels that resilience into building software with real‑world impact.
+            </p>
+            <ul class="mt-6 space-y-3 list-disc pl-5 marker:text-emerald-500 text-slate-600 text-sm leading-relaxed">
+              <li class="pl-1">
+                Led architecture at Yakabod (acquired by Everfox), integrating ServiceNow, Microsoft Teams, Slack, and classified DoD infrastructure into a self‑healing platform used across multiple secure enclaves.
+              </li>
+              <li class="pl-1">
+                Built large‑scale data synchronization that syncs millions of legacy records across agencies to modern web stacks multiple times per hour, ensuring fresh data without downtime.
+              </li>
+              <li class="pl-1">
+                Co‑creator of <a href="https://apps.apple.com/us/app/therality/id6504492308" class="text-blue-600 font-medium hover:underline">Therality</a>, a self‑guided exposure‑therapy app leveraging immersive video—one of the first applications on the Apple Vision&nbsp;Pro.
+              </li>
+            </ul>
+            {# Open Source Contributions #}
+            <div class="mt-6 pt-5 border-t border-slate-100">
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Open Source Contributor</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <a href="https://github.com/ai-christianson/RA.Aid" class="group block p-3 bg-gradient-to-br from-indigo-50 to-blue-50 hover:from-indigo-100 hover:to-blue-100 rounded-xl border border-indigo-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <img src="https://raw.githubusercontent.com/ai-christianson/RA.Aid/master/assets/logo-black-transparent.png" alt="RA.Aid" class="w-5 h-5 object-contain" />
+                    <span class="font-semibold text-slate-800 text-sm">RA.Aid</span>
+                  </div>
+                  <p class="text-xs text-slate-500">AI coding agent</p>
+                </a>
+                <a href="https://github.com/browser-use/browser-use" class="group block p-3 bg-gradient-to-br from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 rounded-xl border border-emerald-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-lg leading-none">🌐</span>
+                    <span class="font-semibold text-slate-800 text-sm">browser-use</span>
+                  </div>
+                  <p class="text-xs text-slate-500">Browser automation</p>
+                </a>
+              </div>
+            </div>
+            <p class="text-slate-600 leading-relaxed mt-6 pt-4 border-t border-slate-100">
+              Off the clock, Will supports fellow survivors through the <a href="https://testicularcancer.org/" class="text-blue-600 font-medium hover:underline">Testicular Cancer Foundation</a>, facilitating patient and survivor conversation.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    {# Matt #}
+    <div class="bg-white rounded-2xl shadow-xl overflow-hidden">
+      <div class="bg-gradient-to-r from-violet-50/80 to-purple-50/80 border-b border-violet-100 px-6 py-4">
+        <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Engineering</span>
+      </div>
+      <div class="p-6 sm:p-8">
+        <div class="flex flex-col sm:flex-row gap-6 sm:gap-8">
+          <div class="shrink-0 flex flex-col items-center sm:items-start">
+            <img src="{% static 'images/matt.jpg' %}" alt="Matt Greathouse" class="w-28 h-28 sm:w-32 sm:h-32 rounded-2xl object-cover shadow-md ring-4 ring-white" />
+            <div class="mt-4 flex flex-wrap gap-2 justify-center sm:justify-start w-28 sm:w-32">
+              <a href="https://www.linkedin.com/in/matt-greathouse/" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="LinkedIn">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M4.98 3.5C4.98 4.88 3.87 6 2.5 6S0 4.88 0 3.5 1.12 1 2.5 1 4.98 2.12 4.98 3.5zM.52 21.48h3.96V7.5H.52zM8.31 7.5h3.79v1.91h.05c.53-.97 1.83-1.99 3.76-1.99 4.02 0 4.76 2.65 4.76 6.1v7.96h-3.96v-7.05c0-1.68-.03-3.86-2.35-3.86-2.35 0-2.71 1.84-2.71 3.74v7.17H8.31z"/></svg>
+              </a>
+              <a href="https://github.com/matt-greathouse" class="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors" title="GitHub">
+                <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+              </a>
+            </div>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h2 class="text-2xl font-light text-slate-900 tracking-tight">Matt Greathouse</h2>
+            <p class="text-violet-600 font-semibold mt-1">Engineering</p>
+            <p class="text-slate-600 leading-relaxed mt-4">
+              Full-stack engineer with deep experience building secure, high-reliability enterprise software. Matt brings over six years of hands-on development at Yakabod (acquired by Everfox), where he helped build mission-critical applications for government and enterprise clients. At Gobii, he focuses on the core infrastructure that keeps our browser-native agents fast, stable, and secure for customers.
+            </p>
+            <ul class="mt-6 space-y-3 list-disc pl-5 marker:text-violet-500 text-slate-600 text-sm leading-relaxed">
+              <li class="pl-1">
+                Six years at Yakabod building secure workflow automation software serving government and enterprise clients, continuing through the Everfox acquisition.
+              </li>
+              <li class="pl-1">
+                Over a decade of server administration and web development experience, from database management to full-stack application development.
+              </li>
+              <li class="pl-1">
+                Computer Information Systems degree from Grove City College, grounding strong CS fundamentals in practical business software.
+              </li>
+            </ul>
+            {# Open Source Contributions #}
+            <div class="mt-6 pt-5 border-t border-slate-100">
+              <p class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">Open Source Contributor</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <a href="https://github.com/browser-use/browser-use" class="group block p-3 bg-gradient-to-br from-emerald-50 to-teal-50 hover:from-emerald-100 hover:to-teal-100 rounded-xl border border-emerald-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-lg leading-none">🌐</span>
+                    <span class="font-semibold text-slate-800 text-sm">browser-use</span>
+                  </div>
+                  <p class="text-xs text-slate-500">Browser automation</p>
+                </a>
+                <a href="https://github.com/BerriAI/litellm" class="group block p-3 bg-gradient-to-br from-violet-50 to-purple-50 hover:from-violet-100 hover:to-purple-100 rounded-xl border border-violet-100 transition-all">
+                  <div class="flex items-center gap-2 mb-1">
+                    <span class="text-lg leading-none">🚅</span>
+                    <span class="font-semibold text-slate-800 text-sm">LiteLLM</span>
+                  </div>
+                  <p class="text-xs text-slate-500">LLM proxy gateway</p>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </div>
+</section>
+{% endblock %}

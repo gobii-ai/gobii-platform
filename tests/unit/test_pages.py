@@ -249,13 +249,7 @@ class MarketingMetaTests(TestCase):
             "<meta name=\"description\" content=\"Understand how Gobii collects, uses, and safeguards data across our pretrained worker platform.\">",
         )
 
-    @tag("batch_pages")
-    def test_about_meta_description(self):
-        response = self.client.get("/about/")
-        self.assertContains(
-            response,
-            "<meta name=\"description\" content=\"Meet the team building Gobii's pretrained workers and learn how we automate web workflows for modern teams.\">",
-        )
+
 
     @tag("batch_pages")
     def test_careers_meta_description(self):

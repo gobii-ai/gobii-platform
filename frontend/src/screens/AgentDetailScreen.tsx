@@ -1899,7 +1899,7 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
   const colorClass = labelColor ?? 'text-gray-500'
 
   return (
-    <div className="flex gap-3 mt-1 ml-6">
+    <div className="flex flex-wrap gap-3 mt-1 ml-6">
       <div className={`flex items-center gap-1 text-xs ${colorClass}`}>
         <ArrowDownToLine className={`w-4 h-4 ${allowInbound ? 'text-green-600' : 'text-gray-400'}`} aria-hidden="true" />
         <span className={`text-xs ${inboundClass}`}>Receives from contact</span>
