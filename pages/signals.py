@@ -19,7 +19,7 @@ from djstripe.models import Subscription, Customer, Invoice
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
-from config.plans import get_plan_by_product_id
+from config.plans import PLAN_CONFIG, get_plan_by_product_id
 from config.stripe_config import get_stripe_settings
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
@@ -1021,15 +1021,43 @@ def handle_subscription_event(event, **kwargs):
                     exc,
                 )
 
-        # Locate the licensed (base plan) item among subscription items
+        # Locate the licensed (base plan) item among subscription items (prefer price.usage_type)
+        def _item_usage_type(item: dict) -> str:
+            price = item.get("price") or {}
+            recurring = price.get("recurring") or {}
+            return (
+                price.get("usage_type")
+                or recurring.get("usage_type")
+                or (item.get("plan") or {}).get("usage_type")
+                or ""
+            )
+
+        plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+
         licensed_item = None
+        fallback_item = None
         try:
             for item in source_data.get("items", {}).get("data", []) or []:
-                if item.get("plan", {}).get("usage_type") == "licensed":
+                usage_type = _item_usage_type(item).lower()
+                if usage_type == "metered":
+                    continue
+
+                price = item.get("price") or {}
+                product = price.get("product")
+                if isinstance(product, Mapping):
+                    product = product.get("id")
+
+                if product and product in plan_products:
                     licensed_item = item
                     break
+
+                if fallback_item is None:
+                    fallback_item = item
         except Exception as e:
             logger.warning("Webhook: failed to inspect subscription items for %s: %s", sub.id, e)
+
+        if licensed_item is None and fallback_item is not None:
+            licensed_item = fallback_item
 
         # Proceed only when the subscription is active and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))

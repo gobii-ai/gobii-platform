@@ -441,10 +441,46 @@ def get_active_subscription(owner) -> Subscription | None:
 
 
 def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | None]:
-    """Return (unit_amount, currency) for the first non-metered item on a subscription."""
+    """Return (unit_amount, currency) for the base (non-metered, non-add-on) item on a subscription."""
     if subscription is None:
         return None, None
 
+    def _normalize_product_id(value: Any) -> str | None:
+        """Return prod_* ID when present; ignore display names or non-IDs."""
+        try:
+            if hasattr(value, "id"):
+                value = getattr(value, "id", None)
+        except Exception:
+            pass
+
+        if isinstance(value, dict):
+            value = value.get("id")
+
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate.startswith("prod_"):
+                return candidate
+        return None
+
+    plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+    excluded_products: set[str] = set()
+    try:
+        stripe_settings = get_stripe_settings()
+        for attr in (
+            "startup_dedicated_ip_product_id",
+            "scale_dedicated_ip_product_id",
+            "org_team_dedicated_ip_product_id",
+        ):
+            pid = _normalize_product_id(getattr(stripe_settings, attr, None))
+            if pid:
+                excluded_products.add(pid)
+    except Exception:
+        logger.debug("Failed to load stripe settings for base price detection", exc_info=True)
+
+    preferred_amount = None
+    preferred_currency = None
+    fallback_amount = None
+    fallback_currency = None
     try:
         items_qs = getattr(subscription, "items", None)
         items = list(items_qs.all()) if hasattr(items_qs, "all") else []
@@ -457,7 +493,6 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
         item_data = getattr(item, "stripe_data", {}) or {}
         price_data = (item_data.get("price") if isinstance(item_data.get("price"), dict) else None) or {}
 
-        # Pull usage type and currency from price object first, then stripe_data fallback.
         usage_type = None
         try:
             recurring = getattr(price_obj, "recurring", None)
@@ -470,8 +505,15 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
         if not usage_type:
             usage_type = price_data.get("recurring", {}).get("usage_type") or price_data.get("usage_type")
 
-        # Skip metered items; we want the licensed/base item price.
         if (usage_type or "").lower() == "metered":
+            continue
+
+        product_candidate = price_data.get("product")
+        if product_candidate is None and hasattr(price_obj, "product"):
+            product_candidate = getattr(price_obj, "product", None)
+        product_id = _normalize_product_id(product_candidate)
+
+        if product_id and product_id in excluded_products:
             continue
 
         currency = getattr(price_obj, "currency", None) or price_data.get("currency")
@@ -488,13 +530,25 @@ def get_subscription_base_price(subscription) -> tuple[Decimal | None, str | Non
         if unit_amount is None:
             continue
 
-        try:
-            amount_decimal = Decimal(unit_amount) / Decimal("100")
-            return amount_decimal, currency
-        except Exception:
-            logger.debug(
-                "Failed to coerce unit_amount=%s for subscription %s", unit_amount, getattr(subscription, "id", None)
-            )
+        if product_id and product_id in plan_products:
+            preferred_amount, preferred_currency = unit_amount, currency
+            break
+        elif fallback_amount is None:
+            fallback_amount, fallback_currency = unit_amount, currency
+
+    target_amount = preferred_amount if preferred_amount is not None else fallback_amount
+    target_currency = preferred_currency if preferred_currency is not None else fallback_currency
+
+    if target_amount is None:
+        return None, None
+
+    try:
+        amount_decimal = Decimal(target_amount) / Decimal("100")
+        return amount_decimal, target_currency
+    except Exception:
+        logger.debug(
+            "Failed to coerce unit_amount=%s for subscription %s", target_amount, getattr(subscription, "id", None)
+        )
 
     return None, None
 

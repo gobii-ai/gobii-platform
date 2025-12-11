@@ -111,6 +111,34 @@ def _customer_has_metered_subscription(customer_id: str, target_price_id: str, e
     return any(_subscription_contains_meter_price(sub, target_price_id) for sub in subs)
 
 
+def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings) -> list[dict]:
+    """
+    Preserve dedicated IP quantities when creating a new subscription via Checkout.
+    Returns a list of {"price": price_id, "quantity": qty} for any matching items.
+    """
+    dedicated_price_ids = {
+        pid for pid in (
+            getattr(stripe_settings, "startup_dedicated_ip_price_id", None),
+            getattr(stripe_settings, "scale_dedicated_ip_price_id", None),
+        ) if pid
+    }
+    if not dedicated_price_ids:
+        return []
+
+    collected: dict[str, int] = {}
+    for sub in existing_subs or []:
+        items = (sub.get("items") or {}).get("data") or []
+        for item in items:
+            price_data = item.get("price") or {}
+            price_id = price_data.get("id") if isinstance(price_data, dict) else None
+            if price_id and price_id in dedicated_price_ids:
+                qty = item.get("quantity") or 0
+                if qty > 0:
+                    collected[price_id] = collected.get(price_id, 0) + qty
+
+    return [{"price": pid, "quantity": qty} for pid, qty in collected.items()]
+
+
 
 def _login_url_with_utms(request) -> str:
     """Append stored UTM query params to the login URL when available."""
@@ -931,43 +959,49 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             existing_subs,
         )
 
-        if has_base_price:
-            if additional_price_id and not has_meter_price:
-                try:
-                    subscription, action = ensure_single_individual_subscription(
-                        customer_id=customer.id,
-                        licensed_price_id=price_id,
-                        metered_price_id=additional_price_id,
-                        metadata=metadata,
-                        idempotency_key=f"scale-individual-meter-{customer.id}-{event_id}",
-                        create_if_missing=False,
-                    )
+        if existing_subs:
+            try:
+                subscription, action = ensure_single_individual_subscription(
+                    customer_id=customer.id,
+                    licensed_price_id=price_id,
+                    metered_price_id=additional_price_id,
+                    metadata=metadata,
+                    idempotency_key=f"scale-individual-upgrade-{customer.id}-{event_id}",
+                    create_if_missing=False,
+                )
 
-                    if action != "absent" and subscription is not None:
-                        try:
-                            Subscription.sync_from_stripe_data(subscription)
-                        except Exception:
-                            logger.warning(
-                                "Failed to sync Stripe subscription %s after %s",
-                                getattr(subscription, "id", None)
-                                or (subscription.get("id") if isinstance(subscription, dict) else ""),
-                                action,
-                                exc_info=True,
-                            )
+                if action != "absent" and subscription is not None:
+                    try:
+                        Subscription.sync_from_stripe_data(subscription)
+                    except Exception:
+                        logger.warning(
+                            "Failed to sync Stripe subscription %s after %s",
+                            getattr(subscription, "id", None)
+                            or (subscription.get("id") if isinstance(subscription, dict) else ""),
+                            action,
+                            exc_info=True,
+                        )
 
+                    try:
+                        portal_session = stripe.billing_portal.Session.create(
+                            customer=customer.id,
+                            return_url=success_url,
+                            api_key=stripe.api_key,
+                        )
+                        return redirect(portal_session.url)
+                    except Exception:
+                        logger.warning("Failed to open billing portal after upgrade for %s", customer.id, exc_info=True)
                         return redirect(success_url)
-                except stripe.error.InvalidRequestError as ensure_exc:
-                    logger.info(
-                        "Meter attachment fell back to checkout for customer %s: %s",
-                        customer.id,
-                        ensure_exc,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to attach metered item for customer %s", customer.id,
-                    )
-            else:
-                return redirect(success_url)
+            except stripe.error.InvalidRequestError as ensure_exc:
+                logger.info(
+                    "Upgrade via ensure failed; falling back to checkout for customer %s: %s",
+                    customer.id,
+                    ensure_exc,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to upgrade subscription for customer %s; falling back to checkout", customer.id,
+                )
 
         session = stripe.checkout.Session.create(
             customer=customer.id,
