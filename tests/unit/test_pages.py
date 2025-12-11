@@ -1,7 +1,11 @@
 
 from urllib.parse import parse_qs, urlparse
+from types import SimpleNamespace
+from unittest.mock import patch, MagicMock
 
+from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 
@@ -258,3 +262,145 @@ class MarketingMetaTests(TestCase):
             response,
             "<meta name=\"description\" content=\"Join Gobii to build AI coworkers that browse, research, and automate the web for organizations worldwide.\">",
         )
+
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_switching_from_startup_redirects_to_billing(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        mock_ensure,
+        _,
+    ):
+        user = get_user_model().objects.create_user(email="scale@test.com", password="pw", username="scale_user")
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
+
+        mock_existing_subs.return_value = [
+            {
+                "id": "sub_startup",
+                "items": {"data": [{"price": {"id": "price_startup", "usage_type": "licensed"}}]},
+            }
+        ]
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(params.get("subscribe_success"), ["1"])
+        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertTrue(params.get("eid"))
+        self.assertTrue(params["eid"][0].startswith("scale-sub-"))
+        mock_ensure.assert_called_once()
+        mock_session_create.assert_not_called()
+
+
+@tag("batch_pages")
+class SubscriptionPriceParsingTests(TestCase):
+    def test_get_price_info_from_item_handles_dict(self):
+        item = {"price": {"id": "price_123", "usage_type": "licensed"}}
+        price_id, usage = page_views._get_price_info_from_item(item)
+        self.assertEqual(price_id, "price_123")
+        self.assertEqual(usage, "licensed")
+
+    def test_get_price_info_from_item_handles_string(self):
+        item = {"price": "price_string"}
+        price_id, usage = page_views._get_price_info_from_item(item)
+        self.assertEqual(price_id, "price_string")
+        self.assertEqual(usage, "")
+
+    def test_subscription_contains_price_ignores_metered(self):
+        sub = {
+            "items": {
+                "data": [
+                    {"price": {"id": "price_meter", "usage_type": "metered"}},
+                    {"price": {"id": "price_target", "usage_type": "licensed"}},
+                ]
+            }
+        }
+        self.assertTrue(page_views._subscription_contains_price(sub, "price_target"))
+        self.assertFalse(page_views._subscription_contains_price(sub, "price_meter"))
+
+    def test_subscription_contains_meter_price_only_metered(self):
+        sub = {
+            "items": {
+                "data": [
+                    {"price": {"id": "price_meter", "usage_type": "metered"}},
+                    {"price": {"id": "price_meter", "usage_type": "licensed"}},
+                ]
+            }
+        }
+        self.assertTrue(page_views._subscription_contains_meter_price(sub, "price_meter"))
+        self.assertFalse(page_views._subscription_contains_meter_price(sub, "price_missing"))
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_existing_scale_subscription_short_circuits_checkout(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        mock_ensure,
+        _,
+    ):
+        user = get_user_model().objects.create_user(email="scale2@test.com", password="pw", username="scale_user_2")
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id=None,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
+
+        mock_existing_subs.return_value = [
+            {
+                "id": "sub_scale",
+                "items": {"data": [{"price": {"id": "price_scale", "usage_type": "licensed"}}]},
+            }
+        ]
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        params = parse_qs(parsed.query)
+
+        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(params.get("subscribe_success"), ["1"])
+        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertTrue(params.get("eid"))
+        self.assertTrue(params["eid"][0].startswith("scale-sub-"))
+        mock_ensure.assert_called_once()
+        mock_session_create.assert_not_called()

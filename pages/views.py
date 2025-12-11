@@ -24,8 +24,8 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import (
     ensure_single_individual_subscription,
+    get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
-
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
@@ -44,6 +44,90 @@ from marketing_events.api import capi
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
+    """
+    Extract price ID and usage type (lowercased) from a subscription item.
+
+    Supports Stripe objects, dicts, or string price IDs.
+    """
+    price_data = item.get("price")
+    price_id = None
+    usage_type = ""
+
+    if isinstance(price_data, dict):
+        price_id = price_data.get("id")
+        usage_type = price_data.get("usage_type") or (price_data.get("recurring") or {}).get("usage_type") or ""
+    elif isinstance(price_data, str):
+        price_id = price_data
+
+    return price_id, usage_type.lower()
+
+
+def _subscription_contains_price(sub: dict, target_price_id: str) -> bool:
+    """Return True when a subscription dict includes the target licensed price."""
+    items = (sub.get("items") or {}).get("data") or []
+    for item in items:
+        price_id, usage_type = _get_price_info_from_item(item)
+
+        # Only treat licensed/base items as a match; metered add-ons share the product.
+        if price_id == target_price_id and usage_type != "metered":
+            return True
+    return False
+
+
+def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
+    """Return True when a subscription dict includes the target metered price."""
+    items = (sub.get("items") or {}).get("data") or []
+    for item in items:
+        price_id, usage_type = _get_price_info_from_item(item)
+        if price_id == target_price_id and usage_type == "metered":
+            return True
+    return False
+
+
+def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
+    """Check if the customer already has an active individual subscription for the price."""
+    return _customer_has_price_subscription_with_cache(customer_id, target_price_id)[0]
+
+
+def _customer_has_price_subscription_with_cache(customer_id: str, target_price_id: str):
+    """Return (has_price, subscriptions) with cached subscription list."""
+    try:
+        existing = get_existing_individual_subscriptions(customer_id)
+    except Exception:
+        logger.warning("Failed to load existing subscriptions for %s", customer_id, exc_info=True)
+        return False, []
+
+    return any(_subscription_contains_price(sub, target_price_id) for sub in existing), existing
+
+
+def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings) -> list[dict]:
+    """
+    Preserve dedicated IP quantities when creating a new subscription via Checkout.
+    Returns a list of {"price": price_id, "quantity": qty} for any matching items.
+    """
+    dedicated_price_ids = {
+        pid for pid in (
+            getattr(stripe_settings, "startup_dedicated_ip_price_id", None),
+            getattr(stripe_settings, "scale_dedicated_ip_price_id", None),
+        ) if pid
+    }
+    if not dedicated_price_ids:
+        return []
+
+    collected: dict[str, int] = {}
+    for sub in existing_subs or []:
+        items = (sub.get("items") or {}).get("data") or []
+        for item in items:
+            price_id, _ = _get_price_info_from_item(item)
+            if price_id and price_id in dedicated_price_ids:
+                qty = item.get("quantity") or 0
+                if qty > 0:
+                    collected[price_id] = collected.get(price_id, 0) + qty
+
+    return [{"price": pid, "quantity": qty} for pid, qty in collected.items()]
+
 
 
 def _login_url_with_utms(request) -> str:
@@ -700,7 +784,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "p": f"{price:.2f}",
             "eid": event_id,
         }
-        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
 
         line_items = [
             {
@@ -831,7 +915,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "p": f"{price:.2f}",
             "eid": event_id,
         }
-        success_url = f'{request.build_absolute_uri(reverse("console-home"))}?{urlencode(success_params)}'
+        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
 
         line_items = [
             {
@@ -858,40 +942,42 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             event_id=event_id,
         )
 
-        try:
-            subscription, action = ensure_single_individual_subscription(
-                customer_id=customer.id,
-                licensed_price_id=price_id,
-                metered_price_id=additional_price_id,
-                metadata=metadata,
-                idempotency_key=f"scale-individual-{customer.id}-{event_id}",
-                create_if_missing=False,
-            )
+        _, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
 
-            if action != "absent" and subscription is not None:
-                try:
-                    Subscription.sync_from_stripe_data(subscription)
-                except Exception:
-                    logger.warning(
-                        "Failed to sync Stripe subscription %s after %s",
-                        getattr(subscription, "id", None)
-                        or (subscription.get("id") if isinstance(subscription, dict) else ""),
-                        action,
-                        exc_info=True,
-                    )
+        if existing_subs:
+            try:
+                subscription, action = ensure_single_individual_subscription(
+                    customer_id=customer.id,
+                    licensed_price_id=price_id,
+                    metered_price_id=additional_price_id,
+                    metadata=metadata,
+                    idempotency_key=f"scale-individual-upgrade-{customer.id}-{event_id}",
+                    create_if_missing=False,
+                )
 
-                return redirect(success_url)
-        except stripe.error.InvalidRequestError as ensure_exc:
-            logger.info(
-                "Subscription ensure fell back to checkout for customer %s: %s",
-                customer.id,
-                ensure_exc,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to ensure single subscription for customer %s", customer.id,
-            )
-            raise
+                if action != "absent" and subscription is not None:
+                    try:
+                        Subscription.sync_from_stripe_data(subscription)
+                    except Exception:
+                        logger.warning(
+                            "Failed to sync Stripe subscription %s after %s",
+                            getattr(subscription, "id", None)
+                            or (subscription.get("id") if isinstance(subscription, dict) else ""),
+                            action,
+                            exc_info=True,
+                        )
+
+                    return redirect(success_url)
+            except stripe.error.InvalidRequestError as ensure_exc:
+                logger.info(
+                    "Upgrade via ensure failed; falling back to checkout for customer %s: %s",
+                    customer.id,
+                    ensure_exc,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to upgrade subscription for customer %s; falling back to checkout", customer.id,
+                )
 
         session = stripe.checkout.Session.create(
             customer=customer.id,

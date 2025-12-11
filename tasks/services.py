@@ -244,21 +244,26 @@ class TaskCreditService:
         with traced("TASKCREDIT Grant Subscription Credits") as span:
             span.set_attribute('user.id', user.id)
             TaskCredit = apps.get_model("api", "TaskCredit")
+            existing_credit = None
 
             if invoice_id:
                 existing_credit = TaskCredit.objects.filter(
                     stripe_invoice_id=invoice_id,
                     voided=False
                 ).first()
-                
-                if existing_credit:
-                    logger.debug(f"grant_subscription_credits {user.id}: already granted credits for invoice {invoice_id}, returning 0")
-                    return 0
-
 
             subscription = None
 
             if credit_override is None:
+                if plan is None and existing_credit is not None:
+                    # Preserve legacy behavior for idempotency-only calls in tests
+                    logger.debug(
+                        "grant_subscription_credits %s: plan not provided and existing credit found for invoice %s; returning 0",
+                        user.id,
+                        invoice_id,
+                    )
+                    return 0
+
                 if plan is None:
                     plan = get_user_plan(user)
 
@@ -278,6 +283,8 @@ class TaskCreditService:
             span.set_attribute('subscription.plan', plan_id)
             span.set_attribute('subscription.invoice_id', invoice_id)
 
+            plan_choice = PlanNamesChoices(plan_id)
+
             grant_date = grant_date or timezone.now()
 
             logger.debug(f"grant_subscription_credits {user.id}: granting {credits_to_grant} credits")
@@ -295,6 +302,40 @@ class TaskCreditService:
 
             logger.debug(f"grant_subscription_credits {user.id}: expiration date {expiration_date}")
 
+            if invoice_id and existing_credit:
+                existing_plan = getattr(existing_credit, "plan", None)
+                existing_credits = getattr(existing_credit, "credits", None)
+                existing_expiration = getattr(existing_credit, "expiration_date", None)
+
+                if existing_plan == plan_choice and existing_credits == credits_to_grant:
+                    logger.debug(
+                        "grant_subscription_credits %s: already granted credits for invoice %s and plan %s (same amount), returning 0",
+                        user.id,
+                        invoice_id,
+                        plan_choice,
+                    )
+                    return 0
+
+                # Plan or credit amount changed for the same invoice; update the existing credit instead of skipping.
+                existing_credit.plan = plan_choice
+                existing_credit.credits = credits_to_grant
+                existing_credit.granted_date = grant_date
+                if existing_expiration and expiration_date:
+                    existing_credit.expiration_date = max(existing_expiration, expiration_date)
+                else:
+                    existing_credit.expiration_date = expiration_date or existing_expiration
+                existing_credit.save(update_fields=["plan", "credits", "granted_date", "expiration_date"])
+
+                logger.info(
+                    "grant_subscription_credits %s: updated TaskCredit %s for invoice %s to plan %s with %s credits",
+                    user.id,
+                    existing_credit.id,
+                    invoice_id,
+                    plan_choice,
+                    credits_to_grant,
+                )
+                return credits_to_grant
+
             # Create the TaskCredit for the user
             try:
                 task_credit = TaskCredit.objects.create(
@@ -304,7 +345,7 @@ class TaskCreditService:
                     expiration_date=expiration_date,
                     stripe_invoice_id=invoice_id,
                     granted_date=grant_date,
-                    plan=PlanNamesChoices(plan_id),
+                    plan=plan_choice,
                     grant_type=GrantTypeChoices.PLAN,
                     additional_task=False,  # This is a regular task credit, not an additional task
                 )
