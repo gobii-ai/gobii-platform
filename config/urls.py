@@ -137,6 +137,8 @@ from console.views import (
     OrganizationSeatScheduleView,
     OrganizationSeatScheduleCancelView,
     OrganizationSeatPortalView,
+    update_task_pack_quantity,
+    update_contact_pack_quantity,
     add_dedicated_ip_quantity,
     remove_dedicated_ip,
     remove_all_dedicated_ip,
@@ -330,6 +332,8 @@ urlpatterns = [
 
     path('billing/settings/update/', update_billing_settings, name='update_billing_settings'),
     path('billing/settings/cancel-subscription/', cancel_subscription, name='cancel_subscription'),
+    path('billing/addons/task-packs/', update_task_pack_quantity, name='update_task_pack_quantity'),
+    path('billing/addons/contact-packs/', update_contact_pack_quantity, name='update_contact_pack_quantity'),
     path('billing/dedicated-ip/add/', add_dedicated_ip_quantity, name='add_dedicated_ip_quantity'),
     path('billing/dedicated-ip/remove/', remove_dedicated_ip, name='remove_dedicated_ip'),
     path('billing/dedicated-ip/remove-all/', remove_all_dedicated_ip, name='remove_all_dedicated_ip'),
