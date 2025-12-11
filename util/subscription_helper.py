@@ -1414,6 +1414,12 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
     default_limit = PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
 
     addon_uplift = AddonEntitlementService.get_contact_cap_uplift(organization or user)
+    def _with_addon(value: int | None) -> int:
+        try:
+            base = int(value or 0)
+        except (TypeError, ValueError):
+            base = 0
+        return base + addon_uplift
 
     if organization is not None:
         plan = get_organization_plan(organization)
@@ -1422,14 +1428,14 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
                 "get_user_max_contacts_per_agent org %s: No plan found, defaulting to free plan",
                 getattr(organization, 'id', 'n/a'),
             )
-            return default_limit + addon_uplift
+            return _with_addon(default_limit)
 
         try:
             base_limit = int(plan.get("max_contacts_per_agent", default_limit))
         except (ValueError, TypeError):
             base_limit = default_limit
 
-        return base_limit + addon_uplift
+        return _with_addon(base_limit)
 
     # Check for per-user override stored on billing
     try:
@@ -1445,7 +1451,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             and billing_record.max_contacts_per_agent is not None
             and billing_record.max_contacts_per_agent > 0
         ):
-            return int(billing_record.max_contacts_per_agent)
+            return _with_addon(billing_record.max_contacts_per_agent)
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: billing lookup failed for user %s: %s",
@@ -1458,7 +1464,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
         from api.models import UserQuota
         quota = UserQuota.objects.filter(user=user).first()
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
-            return int(quota.max_agent_contacts)
+            return _with_addon(quota.max_agent_contacts)
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: quota lookup failed for user %s: %s",
@@ -1473,11 +1479,11 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             "get_user_max_contacts_per_agent %s: No plan found, defaulting to free plan",
             getattr(user, 'id', 'n/a')
         )
-        return default_limit + addon_uplift
+        return _with_addon(default_limit)
 
     try:
         base_limit = int(plan.get("max_contacts_per_agent", default_limit))
     except (ValueError, TypeError):
         base_limit = default_limit
 
-    return base_limit + addon_uplift
+    return _with_addon(base_limit)

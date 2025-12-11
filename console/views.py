@@ -73,6 +73,7 @@ from pages.mixins import PhoneNumberMixin
 from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
+from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
@@ -282,6 +283,53 @@ def _resolve_dedicated_ip_pricing(plan):
     normalized_currency = (currency or "USD").upper()
     return price_decimal, normalized_currency
 
+
+def _resolve_addon_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+    stripe_settings = get_stripe_settings()
+    if owner_type == "organization":
+        return {
+            "task_pack": getattr(stripe_settings, "org_team_task_pack_price_id", ""),
+            "contact_pack": getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
+        }
+
+    if plan_id == PlanNames.STARTUP:
+        return {
+            "task_pack": getattr(stripe_settings, "startup_task_pack_price_id", ""),
+            "contact_pack": getattr(stripe_settings, "startup_contact_cap_price_id", ""),
+        }
+
+    if plan_id == PlanNames.SCALE:
+        return {
+            "task_pack": getattr(stripe_settings, "scale_task_pack_price_id", ""),
+            "contact_pack": getattr(stripe_settings, "scale_contact_cap_price_id", ""),
+        }
+
+    return {}
+
+
+def _build_addon_context(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
+    price_ids = _resolve_addon_price_ids(owner_type, plan_id)
+    addon_context: dict[str, dict[str, Any]] = {}
+
+    for kind, price_id in price_ids.items():
+        if not price_id:
+            continue
+
+        cfg = AddonEntitlementService.get_price_config(price_id)
+        entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
+        expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
+
+        addon_context[kind] = {
+            "price_id": price_id,
+            "product_id": cfg.product_id if cfg else "",
+            "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
+            "task_delta": cfg.task_credits_delta if cfg else 0,
+            "contact_delta": cfg.contact_cap_delta if cfg else 0,
+            "expires_at": expires_at,
+        }
+
+    return addon_context
+
 from .forms import (
     ApiKeyForm,
     PersistentAgentForm,
@@ -296,6 +344,7 @@ from .forms import (
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
     DedicatedIpAddForm,
+    AddonQuantityForm,
 )
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
@@ -304,7 +353,7 @@ from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import ORGANIZATIONS
 from constants.grant_types import GrantTypeChoices
-from constants.plans import PlanNamesChoices
+from constants.plans import PlanNames, PlanNamesChoices
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
@@ -1326,6 +1375,12 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 if granted > 0:
                     usage_pct = min(100, float((used / granted) * 100))
 
+                addon_context = _build_addon_context(
+                    organization,
+                    "organization",
+                    overview.get("plan", {}).get("id"),
+                )
+
                 context.update({
                     'organization': organization,
                     'org_billing_overview': overview,
@@ -1338,6 +1393,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     'seat_purchase_required': seat_purchase_required,
                     'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
                     'org_pending_seat_change': overview.get('pending_seats', {}),
+                    'addon_context': addon_context,
                 })
                 billing_view_props = Analytics.with_org_properties(
                     {
@@ -1408,6 +1464,9 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
             'dedicated_ip_currency': price_currency,
         })
+
+        addon_context = _build_addon_context(request.user, "user", subscription_plan.get("id"))
+        context["addon_context"] = addon_context
 
         _apply_subscribe_success_context(request, context)
         return render(request, self.template_name, context)
@@ -8187,6 +8246,44 @@ def with_billing_owner(view_func):
     return wrapper
 
 
+def _get_owner_plan_id(owner, owner_type: str) -> str | None:
+    if owner_type == "organization":
+        plan = get_organization_plan(owner)
+    else:
+        plan = get_user_plan(owner)
+    return (plan or {}).get("id")
+
+
+def _update_subscription_item_quantity_generic(subscription_id: str, price_id: str, quantity: int) -> None:
+    """Create, update, or remove a subscription item for the given price."""
+    subscription_data = stripe.Subscription.retrieve(
+        subscription_id,
+        expand=["items.data.price"],
+    )
+
+    existing_item = None
+    for item in subscription_data.get("items", {}).get("data", []) or []:
+        price = item.get("price") or {}
+        if price.get("id") == price_id:
+            existing_item = item
+            break
+
+    if quantity > 0:
+        if existing_item is None:
+            stripe.SubscriptionItem.create(
+                subscription=subscription_id,
+                price=price_id,
+                quantity=quantity,
+            )
+        else:
+            stripe.SubscriptionItem.modify(
+                existing_item.get("id"),
+                quantity=quantity,
+            )
+    elif existing_item is not None:
+        stripe.SubscriptionItem.delete(existing_item.get("id"))
+
+
 def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
     """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
     desired_qty = int(desired_qty)
@@ -8229,6 +8326,86 @@ def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: in
             )
     elif dedicated_item is not None:
         stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Update Task Pack Quantity")
+def update_task_pack_quantity(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    form = AddonQuantityForm(request.POST, label="Task packs")
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
+        return redirect(_billing_redirect(owner, owner_type))
+
+    plan_id = _get_owner_plan_id(owner, owner_type)
+    price_id = _resolve_addon_price_ids(owner_type, plan_id).get("task_pack")
+    if not price_id:
+        messages.error(request, "Task pack price is not configured for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    subscription = get_active_subscription(owner)
+    if not subscription:
+        messages.error(request, "No active subscription found.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        desired_qty = int(form.cleaned_data["quantity"])
+        _update_subscription_item_quantity_generic(subscription.id, price_id, desired_qty)
+        messages.success(request, "Task pack quantity updated.")
+    except Exception as exc:
+        logger.exception("Failed to update task pack quantity for %s", getattr(owner, "id", None) or owner)
+        messages.error(request, f"Failed to update task packs: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
+@tracer.start_as_current_span("BILLING Update Contact Pack Quantity")
+def update_contact_pack_quantity(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect('billing')
+
+    form = AddonQuantityForm(request.POST, label="Contact packs")
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
+        return redirect(_billing_redirect(owner, owner_type))
+
+    plan_id = _get_owner_plan_id(owner, owner_type)
+    price_id = _resolve_addon_price_ids(owner_type, plan_id).get("contact_pack")
+    if not price_id:
+        messages.error(request, "Contact pack price is not configured for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    subscription = get_active_subscription(owner)
+    if not subscription:
+        messages.error(request, "No active subscription found.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        desired_qty = int(form.cleaned_data["quantity"])
+        _update_subscription_item_quantity_generic(subscription.id, price_id, desired_qty)
+        messages.success(request, "Contact pack quantity updated.")
+    except Exception as exc:
+        logger.exception("Failed to update contact pack quantity for %s", getattr(owner, "id", None) or owner)
+        messages.error(request, f"Failed to update contact packs: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
 
 
 @login_required
