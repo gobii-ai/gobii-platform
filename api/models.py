@@ -572,12 +572,13 @@ class TaskCreditConfig(models.Model):
 
 
 class DailyCreditConfig(models.Model):
-    """Singleton configuration controlling soft target UI + pacing."""
+    """Per-plan configuration controlling soft target UI + pacing."""
 
-    singleton_id = models.PositiveSmallIntegerField(
+    plan_name = models.CharField(
         primary_key=True,
-        default=1,
-        editable=False,
+        max_length=32,
+        choices=PlanNamesChoices.choices,
+        help_text="Plan identifier the daily credit pacing settings apply to.",
     )
     slider_min = models.DecimalField(
         max_digits=12,
@@ -623,6 +624,7 @@ class DailyCreditConfig(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        ordering = ["plan_name"]
         verbose_name = "Daily credit pacing configuration"
         verbose_name_plural = "Daily credit pacing configuration"
 
@@ -642,7 +644,7 @@ class DailyCreditConfig(models.Model):
                 raise ValidationError({field_name: "Value must be a whole number."})
 
     def save(self, *args, **kwargs):
-        self.singleton_id = 1
+        self.plan_name = (self.plan_name or "").lower()
         result = super().save(*args, **kwargs)
         from api.services.daily_credit_settings import invalidate_daily_credit_settings_cache
 
@@ -653,7 +655,7 @@ class DailyCreditConfig(models.Model):
         raise ValidationError("DailyCreditConfig cannot be deleted.")
 
     def __str__(self):
-        return "Daily credit pacing configuration"
+        return f"{self.plan_name} daily credit pacing configuration"
 
 
 class BrowserConfig(models.Model):
@@ -3780,12 +3782,13 @@ class PersistentAgent(models.Model):
 
     def get_daily_credit_hard_limit(self) -> Decimal | None:
         """Return the derived hard limit (2× soft target) or None for unlimited agents."""
-        from api.services.daily_credit_settings import get_daily_credit_settings
+        from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
         soft_target = self.get_daily_credit_soft_target()
         if soft_target is None:
             return None
-        credit_settings = get_daily_credit_settings()
+        owner = self.organization or self.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
         multiplier = credit_settings.hard_limit_multiplier
         try:
             multiplier = Decimal(multiplier)

@@ -646,6 +646,7 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
 @admin.register(DailyCreditConfig)
 class DailyCreditConfigAdmin(admin.ModelAdmin):
     list_display = (
+        "plan_name",
         "slider_min",
         "slider_max",
         "slider_step",
@@ -654,9 +655,10 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         "hard_limit_multiplier",
         "updated_at",
     )
-    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    list_filter = ("plan_name",)
+    readonly_fields = ("created_at", "updated_at")
     fieldsets = (
-        (None, {"fields": ("slider_min", "slider_max", "slider_step")}),
+        (None, {"fields": ("plan_name", "slider_min", "slider_max", "slider_step")}),
         (
             "Burn rate guidance",
             {"fields": ("burn_rate_threshold_per_hour", "burn_rate_window_minutes")},
@@ -665,13 +667,8 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
             "Hard limit",
             {"fields": ("hard_limit_multiplier",)},
         ),
-        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
     )
-
-    def has_add_permission(self, request):
-        if DailyCreditConfig.objects.exists():
-            return False
-        return super().has_add_permission(request)
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
