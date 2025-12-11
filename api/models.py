@@ -432,6 +432,66 @@ class UserQuota(models.Model):
     def __str__(self):
         return f"Quota for {self.user.email}"
 
+
+class UserFlags(models.Model):
+    """Optional per-user feature flags/switches."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="flags",
+    )
+    is_vip = models.BooleanField(default=False, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "User flags"
+        verbose_name_plural = "User flags"
+
+    @classmethod
+    def get_for_user(cls, user):
+        if not user or not getattr(user, "pk", None):
+            return None
+
+        if "flags" in getattr(user, "__dict__", {}):
+            return user.__dict__["flags"]
+
+        prefetched = getattr(user, "_prefetched_objects_cache", None)
+        if prefetched and "flags" in prefetched:
+            return prefetched.get("flags")
+
+        return cls.objects.filter(user=user).first()
+
+    @classmethod
+    def ensure_for_user(cls, user):
+        if not user or not getattr(user, "pk", None):
+            raise ValueError("User must be saved before ensuring flags.")
+
+        return cls.objects.get_or_create(user=user)[0]
+
+
+def _user_is_vip(self):
+    """Safe VIP accessor that tolerates missing flags rows."""
+    if not getattr(self, "pk", None):
+        return False
+
+    flags = None
+    if "flags" in getattr(self, "__dict__", {}):
+        flags = self.__dict__["flags"]
+    elif getattr(self, "_prefetched_objects_cache", None) and "flags" in self._prefetched_objects_cache:
+        flags = self._prefetched_objects_cache.get("flags")
+
+    if flags is None:
+        flags = UserFlags.objects.filter(user=self).only("is_vip").first()
+
+    return bool(flags and getattr(flags, "is_vip", False))
+
+
+UserModel = get_user_model()
+if not hasattr(UserModel, "is_vip"):
+    UserModel.add_to_class("is_vip", property(_user_is_vip))
+
 class TaskCredit(models.Model):
     """Discrete block of task credits granted to a user."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

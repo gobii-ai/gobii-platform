@@ -34,13 +34,19 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
     Check if the sqlite tool should be available for this agent.
 
-    SQLite is only available for paid accounts with max intelligence.
-    Free accounts never have access, regardless of premium grace period.
+    SQLite is available for:
+    - VIP users (overrides plan/tier checks)
+    - Paid accounts with max intelligence.
+    Free accounts never have access unless the user is VIP.
     """
     if agent is None:
         return False
 
-    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    user = getattr(agent, "user", None)
+    if getattr(user, "is_vip", False):
+        return True
+
+    owner = getattr(agent, "organization", None) or user
     if owner is None:
         return False
 

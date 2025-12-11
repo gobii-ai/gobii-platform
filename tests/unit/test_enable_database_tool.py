@@ -2,7 +2,7 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentEnabledTool, UserBilling
+from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentEnabledTool, UserBilling, UserFlags
 from api.agent.core import event_processing as ep
 from api.agent.core.llm_config import AgentLLMTier
 from api.agent.tools.database_enabler import execute_enable_database
@@ -114,9 +114,21 @@ class SqliteToolRestrictionTests(TestCase):
         billing.subscription = PlanNames.STARTUP
         billing.save(update_fields=["subscription"])
 
+        # Create VIP user (remains on free plan to validate override)
+        cls.vip_user = User.objects.create_user(
+            username="vip-user@example.com",
+            email="vip-user@example.com",
+            password="secret",
+        )
+        UserFlags.objects.create(user=cls.vip_user, is_vip=True)
+        billing, _ = UserBilling.objects.get_or_create(user=cls.vip_user)
+        billing.subscription = PlanNames.FREE
+        billing.save(update_fields=["subscription"])
+
         # Browser agents
         cls.free_browser = BrowserUseAgent.objects.create(user=cls.free_user, name="FreeBrowser")
         cls.paid_browser = BrowserUseAgent.objects.create(user=cls.paid_user, name="PaidBrowser")
+        cls.vip_browser = BrowserUseAgent.objects.create(user=cls.vip_user, name="VipBrowser")
 
     def _create_agent(self, user, browser, name, tier):
         return PersistentAgent.objects.create(
@@ -158,6 +170,13 @@ class SqliteToolRestrictionTests(TestCase):
         )
         self.assertTrue(is_sqlite_enabled_for_agent(agent))
 
+    def test_vip_user_is_always_eligible(self):
+        """VIP users are eligible regardless of plan/tier."""
+        agent = self._create_agent(
+            self.vip_user, self.vip_browser, "VipStandard", AgentLLMTier.STANDARD.value
+        )
+        self.assertTrue(is_sqlite_enabled_for_agent(agent))
+
     def test_none_agent_not_eligible(self):
         """None agent should not be eligible."""
         self.assertFalse(is_sqlite_enabled_for_agent(None))
@@ -188,6 +207,16 @@ class SqliteToolRestrictionTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("not available", result["message"])
+
+    def test_enable_database_allowed_for_vip_on_free_standard(self):
+        """enable_database should allow VIP users even on free + standard tier."""
+        agent = self._create_agent(
+            self.vip_user, self.vip_browser, "VipFreeStandard", AgentLLMTier.STANDARD.value
+        )
+        result = execute_enable_database(agent, {})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn(SQLITE_TOOL_NAME, result["tool_manager"]["enabled"])
 
     # --- get_agent_tools visibility tests ---
 
