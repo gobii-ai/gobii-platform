@@ -1,10 +1,11 @@
 
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
+from django.urls import reverse
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -95,6 +96,22 @@ class HomePageTests(TestCase):
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
         self.assertEqual(session["agent_charter_source"], "user")
         self.assertEqual(session["agent_charter"], "Custom charter")
+
+    @tag("batch_pages")
+    def test_home_spawn_redirects_to_signup(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=newsletter"
+        session.save()
+
+        response = self.client.post(reverse("pages:home_agent_spawn"), {"charter": "Custom charter"})
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
@@ -234,6 +251,44 @@ class PretrainedWorkerDirectoryTests(TestCase):
         self.assertIn("foo=bar", location)
         self.assertTrue(location.endswith("#pretrained-workers"))
 
+
+@tag("batch_pages")
+class PretrainedWorkerHireRedirectTests(TestCase):
+    @tag("batch_pages")
+    def test_hire_redirects_to_signup(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        response = self.client.post(f"/pretrained-workers/{template.code}/hire/")
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_signup"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+
+@tag("batch_pages")
+class AuthLinkTests(TestCase):
+    @tag("batch_pages")
+    def test_signup_page_signin_link_keeps_next_and_utms(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_source=newsletter"
+        session.save()
+
+        next_url = reverse("agent_create_contact")
+        response = self.client.get(reverse("account_signup"), {"next": next_url})
+        self.assertEqual(response.status_code, 200)
+
+        self.assertIn(
+            f'{reverse("account_login")}?next={next_url}&utm_source=newsletter',
+            response.content.decode(),
+        )
 
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):

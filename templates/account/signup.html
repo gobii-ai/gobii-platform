@@ -11,7 +11,7 @@
       <p class="mt-2 text-sm text-slate-600">
         {% trans "Already have an account?" %}
         {% with request.session.utm_querystring as utm_qs %}
-        <a href="{{ account_login_url }}{% if utm_qs %}?{{ utm_qs }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        <a href="{% url 'account_login' %}{% if redirect_field_value or utm_qs %}?{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% if utm_qs %}&{% endif %}{% endif %}{% if utm_qs %}{{ utm_qs }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
         {% endwith %}
       </p>
     </div>
