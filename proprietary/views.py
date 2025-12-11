@@ -44,11 +44,14 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         startup_current = False
         scale_current = False
 
+        current_plan_id = ""
+        plan_id = ""
         if authenticated:
             # Check if the user has an active subscription
             try:
                 plan = get_user_plan(self.request.user)
                 plan_id = str(plan.get("id", "")).lower() if plan else ""
+                current_plan_id = plan_id
 
                 if plan_id == PlanNames.FREE:
                     startup_cta_text = "Upgrade to Pro"
@@ -67,6 +70,10 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 logger.exception("Error checking user plan; defaulting to standard Startup CTA")
                 pass
 
+        context["current_plan_id"] = current_plan_id
+        context["current_plan_is_paid"] = current_plan_id in (PlanNames.STARTUP, PlanNames.SCALE)
+        context["PlanNames"] = PlanNames
+
         def format_contacts(plan_name: str) -> str:
             """Return display-friendly per-plan contact cap."""
             limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
@@ -75,6 +82,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         # Pricing cards data - new 3-tier structure
         context["pricing_plans"] = [
             {
+                "code": PlanNames.FREE,
                 "name": "Free Tier",
                 "price": 0,
                 "price_label": "$0",
@@ -96,6 +104,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_url": "/accounts/login/",
             },
             {
+                "code": PlanNames.STARTUP,
                 "name": "Pro",
                 "price": 50,
                 "price_label": "$50",
@@ -119,6 +128,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
             },
             {
+                "code": PlanNames.SCALE,
                 "name": "Scale",
                 "price": 250,
                 "price_label": "$250",

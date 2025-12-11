@@ -61,7 +61,7 @@
   {% endif %}
 {% endblock %}
 {% block content %}
-<div class="relative">
+<div class="relative" id="pricing-page" data-current-plan="{{ current_plan_id|default:'' }}" data-current-plan-paid="{{ current_plan_is_paid|yesno:'true,false' }}">
   <!-- Grid pattern overlay -->
   <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
   
@@ -117,7 +117,9 @@
             <span class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-slate-200 text-slate-500 cursor-not-allowed select-none">{{ plan.cta }}</span>
           {% else %}
             <a href="{{ plan.cta_url }}" 
-              class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
+              data-plan-code="{{ plan.code }}"
+              data-plan-name="{{ plan.name }}"
+              class="plan-cta inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg
               {% if plan.highlight or plan.name == 'Pro' %}
               bg-blue-600 text-white hover:bg-blue-700 shadow-md
               {% else %}
@@ -251,4 +253,81 @@
     </div>
   </div>
 </div>
+
+<!-- Plan change confirmation modal -->
+<div id="plan-change-modal" class="hs-overlay hidden fixed inset-0 z-[90] flex items-center justify-center">
+  <div class="absolute inset-0 bg-slate-900/60"></div>
+  <div class="relative max-w-lg w-[92%] sm:w-full bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 animate-[fadeIn_120ms_ease-out]">
+    <div class="flex items-start justify-between gap-4">
+      <div>
+        <p class="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">Confirm change</p>
+        <h3 id="plan-change-title" class="mt-1 text-xl font-semibold text-slate-900"></h3>
+      </div>
+      <button type="button" class="text-slate-500 hover:text-slate-800" data-close-plan-modal>
+        <svg class="w-5 h-5" fill="none" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18 6 6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <p id="plan-change-body" class="mt-3 text-sm text-slate-600"></p>
+    <div class="mt-6 flex flex-col sm:flex-row sm:justify-end gap-3">
+      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50" data-close-plan-modal>Keep current plan</button>
+      <button type="button" class="w-full sm:w-auto inline-flex justify-center items-center px-4 py-2 rounded-lg bg-blue-600 text-white font-semibold hover:bg-blue-700 shadow" id="plan-change-confirm">Change plan</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  (() => {
+    const page = document.getElementById("pricing-page");
+    if (!page) return;
+
+    const currentPlan = (page.dataset.currentPlan || "").toLowerCase();
+    const currentPaid = page.dataset.currentPlanPaid === "true";
+    const paidPlans = new Set(["{{ PlanNames.STARTUP }}", "{{ PlanNames.SCALE }}"]);
+    const modal = document.getElementById("plan-change-modal");
+    const titleEl = document.getElementById("plan-change-title");
+    const bodyEl = document.getElementById("plan-change-body");
+    const confirmBtn = document.getElementById("plan-change-confirm");
+    let pendingHref = null;
+
+    const closeModal = () => {
+      modal.classList.add("hidden");
+      pendingHref = null;
+    };
+
+    modal?.querySelectorAll("[data-close-plan-modal]").forEach(btn => {
+      btn.addEventListener("click", closeModal);
+    });
+
+    confirmBtn?.addEventListener("click", () => {
+      if (pendingHref) {
+        window.location.href = pendingHref;
+      }
+    });
+
+    const shouldConfirm = (targetPlan) => {
+      if (!currentPaid) return false;
+      if (!targetPlan) return false;
+      if (targetPlan === currentPlan) return false;
+      // Only confirm when switching between paid plans.
+      return paidPlans.has(targetPlan);
+    };
+
+    document.querySelectorAll(".plan-cta").forEach(link => {
+      link.addEventListener("click", (e) => {
+        const targetPlan = (link.dataset.planCode || "").toLowerCase();
+        const targetName = link.dataset.planName || "this plan";
+        if (!shouldConfirm(targetPlan)) return;
+
+        e.preventDefault();
+        pendingHref = link.getAttribute("href");
+
+        if (titleEl) titleEl.textContent = `Switch to ${targetName}`;
+        if (bodyEl) {
+          bodyEl.textContent = "You’re switching plans. We’ll update your billing and keep your payment method on file.";
+        }
+        modal.classList.remove("hidden");
+      });
+    });
+  })();
+</script>
 {% endblock %} 
