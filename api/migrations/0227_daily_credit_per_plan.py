@@ -18,19 +18,6 @@ def seed_daily_credit_configs(apps, schema_editor):
     }
 
     existing_configs = {cfg.plan_name: cfg for cfg in DailyCreditConfig.objects.all()}
-    base_config = existing_configs.get("free") or next(iter(existing_configs.values()), None)
-
-    if base_config:
-        defaults.update(
-            {
-                "slider_min": base_config.slider_min,
-                "slider_max": base_config.slider_max,
-                "slider_step": base_config.slider_step,
-                "burn_rate_threshold_per_hour": base_config.burn_rate_threshold_per_hour,
-                "burn_rate_window_minutes": base_config.burn_rate_window_minutes,
-                "hard_limit_multiplier": base_config.hard_limit_multiplier,
-            }
-        )
 
     max_id = DailyCreditConfig.objects.aggregate(max_id=Max("singleton_id")).get("max_id") or 0
     next_id = int(max_id) + 1
