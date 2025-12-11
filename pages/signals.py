@@ -34,6 +34,7 @@ from marketing_events.context import extract_click_context
 import logging
 import stripe
 
+from billing.addons import AddonEntitlementService
 from api.models import UserBilling, OrganizationBilling, UserAttribution
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
@@ -984,12 +985,18 @@ def handle_subscription_event(event, **kwargs):
             subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
+        current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
         cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
 
         span.set_attribute('subscription.current_period_start', str(current_period_start_dt))
+        span.set_attribute('subscription.current_period_end', str(current_period_end_dt))
         span.set_attribute('subscription.cancel_at', str(cancel_at_dt))
         span.set_attribute('subscription.cancel_at_period_end', str(cancel_at_period_end_flag))
+
+        if current_period_end_dt is None:
+            current_period_end_dt = _coerce_datetime(getattr(sub, "current_period_end", None))
+            span.set_attribute('subscription.current_period_end_fallback', str(current_period_end_dt))
 
         if cancel_at_dt is None:
             cancel_at_dt = _coerce_datetime(getattr(sub, "cancel_at", None))
@@ -1076,6 +1083,28 @@ def handle_subscription_event(event, **kwargs):
                 plan_value = plan_choice.value
             except Exception:
                 plan_value = PlanNamesChoices.FREE.value
+
+            items_data: list[Mapping[str, Any]] = []
+            try:
+                items_data = ((source_data.get("items") or {}).get("data") or []) if isinstance(source_data, Mapping) else []
+            except Exception:
+                items_data = []
+
+            try:
+                AddonEntitlementService.sync_subscription_entitlements(
+                    owner=owner,
+                    owner_type=owner_type,
+                    plan_id=plan_value,
+                    subscription_items=items_data,
+                    period_start=current_period_start_dt or timezone.now(),
+                    period_end=current_period_end_dt,
+                    created_via="subscription_webhook",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to sync add-on entitlements for owner %s during subscription webhook",
+                    getattr(owner, "id", None) or owner,
+                )
 
             stripe_settings = get_stripe_settings()
 
