@@ -10,7 +10,8 @@ from django.contrib.auth import get_user_model
 from django.urls import reverse
 from unittest.mock import patch
 from bs4 import BeautifulSoup
-from api.services.daily_credit_settings import get_daily_credit_settings
+from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
+from constants.plans import PlanNames
 
 
 @tag("batch_console_agents")
@@ -363,7 +364,7 @@ class ConsoleViewsTest(TestCase):
 
         response = self.client.get(url)
         self.assertTrue(response.context['daily_credit_unlimited'])
-        credit_settings = get_daily_credit_settings()
+        credit_settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
         self.assertEqual(response.context['daily_credit_slider_value'], credit_settings.slider_min)
 
     @tag("agent_credit_soft_target_batch")
@@ -380,7 +381,7 @@ class ConsoleViewsTest(TestCase):
 
         url = reverse('agent_detail', kwargs={'pk': agent.id})
 
-        credit_settings = get_daily_credit_settings()
+        credit_settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
 
         response = self.client.post(url, {
             'name': agent.name,

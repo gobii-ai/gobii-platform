@@ -22,7 +22,7 @@ from django.utils import timezone as dj_timezone
 from config import settings
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 from api.services import mcp_servers as mcp_server_service
-from api.services.daily_credit_settings import get_daily_credit_settings
+from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
@@ -228,7 +228,8 @@ def _archive_rendered_prompt(
 def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     """Return daily credit usage/limit information for the agent."""
     today = dj_timezone.localdate()
-    credit_settings = get_daily_credit_settings()
+    owner = agent.organization or agent.user
+    credit_settings = get_daily_credit_settings_for_owner(owner)
 
     try:
         soft_target = agent.get_daily_credit_soft_target()

@@ -7,9 +7,10 @@ from api.models import DailyCreditConfig, PersistentAgent, BrowserUseAgent
 from django.contrib.auth import get_user_model
 import uuid
 from api.services.daily_credit_settings import (
-    get_daily_credit_settings,
+    get_daily_credit_settings_for_plan,
     invalidate_daily_credit_settings_cache,
 )
+from constants.plans import PlanNames
 
 
 @tag("agent_credit_soft_target_batch")
@@ -28,20 +29,24 @@ class DailyCreditSettingsTests(TestCase):
         )
 
     def test_zero_burn_rate_threshold_is_preserved(self):
-        DailyCreditConfig.objects.create(
-            slider_min=Decimal("0"),
-            slider_max=Decimal("50"),
-            slider_step=Decimal("1"),
-            burn_rate_threshold_per_hour=Decimal("0"),
-            burn_rate_window_minutes=60,
-            hard_limit_multiplier=Decimal("2"),
+        DailyCreditConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={
+                "slider_min": Decimal("0"),
+                "slider_max": Decimal("50"),
+                "slider_step": Decimal("1"),
+                "burn_rate_threshold_per_hour": Decimal("0"),
+                "burn_rate_window_minutes": 60,
+                "hard_limit_multiplier": Decimal("2"),
+            },
         )
 
-        settings = get_daily_credit_settings()
+        settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
         self.assertEqual(settings.burn_rate_threshold_per_hour, Decimal("0"))
 
     def test_slider_values_must_be_whole_numbers(self):
         config = DailyCreditConfig(
+            plan_name=PlanNames.FREE,
             slider_min=Decimal("0.5"),
             slider_max=Decimal("50"),
             slider_step=Decimal("1"),
@@ -64,16 +69,19 @@ class DailyCreditSettingsTests(TestCase):
             config.full_clean()
 
     def test_hard_limit_multiplier_can_be_configured(self):
-        DailyCreditConfig.objects.create(
-            slider_min=Decimal("0"),
-            slider_max=Decimal("50"),
-            slider_step=Decimal("1"),
-            burn_rate_threshold_per_hour=Decimal("3"),
-            burn_rate_window_minutes=60,
-            hard_limit_multiplier=Decimal("1.5"),
+        DailyCreditConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={
+                "slider_min": Decimal("0"),
+                "slider_max": Decimal("50"),
+                "slider_step": Decimal("1"),
+                "burn_rate_threshold_per_hour": Decimal("3"),
+                "burn_rate_window_minutes": 60,
+                "hard_limit_multiplier": Decimal("1.5"),
+            },
         )
 
-        settings = get_daily_credit_settings()
+        settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
         self.assertEqual(settings.hard_limit_multiplier, Decimal("1.5"))
 
         agent = PersistentAgent.objects.create(

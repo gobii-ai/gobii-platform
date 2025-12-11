@@ -40,7 +40,7 @@ from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_llm_tier_mul
 from api.agent.short_description import build_listing_description, build_mini_description, \
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.services.daily_credit_settings import get_daily_credit_settings
+from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 from api.models import (
     ApiKey,
@@ -2857,7 +2857,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['personal_mcp_servers'] = personal_servers
         context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
 
-        credit_settings = get_daily_credit_settings()
+        credit_settings = get_daily_credit_settings_for_owner(owner)
         context["daily_credit_slider_min"] = credit_settings.slider_min
         context["daily_credit_slider_max"] = credit_settings.slider_max
         context["daily_credit_slider_step"] = credit_settings.slider_step
@@ -3445,7 +3445,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         """Handle agent configuration updates and allowlist management."""
         agent = self.get_object()
         self.object = agent
-        credit_settings = get_daily_credit_settings()
+        owner = agent.organization or agent.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
         max_contacts_per_agent = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
