@@ -24,7 +24,7 @@ from .admin_forms import (
     MCPServerConfigAdminForm,
 )
 from .models import (
-    ApiKey, UserQuota, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
+    ApiKey, UserQuota, UserFlags, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
@@ -1238,6 +1238,15 @@ class BrowserUseAgentInlineForUser(admin.TabularInline):
     def has_delete_permission(self, request, obj=None):
         return False
 
+
+class UserFlagsInlineForUser(admin.StackedInline):
+    model = UserFlags
+    extra = 1
+    max_num = 1
+    can_delete = True
+    fields = ("is_vip",)
+
+
 User = get_user_model()
 
 if admin.site.is_registered(User):
@@ -1249,8 +1258,8 @@ if admin.site.is_registered(User):
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    # Remove the heavy TaskCredit inline and keep the agent inline only.
-    inlines = [BrowserUseAgentInlineForUser]
+    # Keep lightweight inlines only (flags, agents); omit heavy TaskCredit inline.
+    inlines = [UserFlagsInlineForUser, BrowserUseAgentInlineForUser]
 
     actions = ['queue_rollup_for_selected_users']
 
@@ -1269,7 +1278,7 @@ class CustomUserAdmin(UserAdmin):
 
     def get_queryset(self, request):
         """Annotate credit totals to avoid N+1 queries in the changelist."""
-        qs = super().get_queryset(request)
+        qs = super().get_queryset(request).select_related("flags")
         return qs.annotate(
             total_credits=Sum("task_credits__credits"),
             used_credits=Sum("task_credits__credits_used"),
