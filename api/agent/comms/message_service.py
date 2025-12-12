@@ -62,37 +62,63 @@ def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsE
     return ep
 
 @tracer.start_as_current_span("_get_or_create_conversation")
-def _get_or_create_conversation(channel: str, address: str, owner_agent=None) -> PersistentAgentConversation:
+def _get_or_create_conversation(
+    channel: str,
+    address: str,
+    owner_agent=None,
+    *,
+    target_endpoint: PersistentAgentCommsEndpoint | None = None,
+) -> PersistentAgentConversation:
     span = trace.get_current_span()
     span.set_attribute("channel", channel)
     span.set_attribute("address", address)
 
-    try:
-        conv, created = PersistentAgentConversation.objects.get_or_create(
-            channel=channel,
-            address=address,
-            defaults={"owner_agent": owner_agent},
-        )
-    except MultipleObjectsReturned:
-        span.set_attribute("get_or_create.fallback", True)
-        span.set_attribute("get_or_create.error", "MultipleObjectsReturned")
-        # Multiple rows exist for the same (channel, address). Pick a deterministic
-        # record so ingestion can continue and emit a warning for cleanup.
+    filters: dict[str, Any] = {"channel": channel, "address": address}
+    if owner_agent is not None:
+        filters["owner_agent"] = owner_agent
+
+    conv: PersistentAgentConversation | None = None
+    created = False
+
+    # For email, scope conversations by both the external sender and the target agent endpoint.
+    if channel == CommsChannel.EMAIL and target_endpoint is not None:
+        span.set_attribute("target_endpoint_id", str(target_endpoint.id))
         conv = (
-            PersistentAgentConversation.objects
-            .filter(channel=channel, address=address)
+            PersistentAgentConversation.objects.filter(**filters)
+            .filter(participants__endpoint=target_endpoint)
             .order_by("id")
             .first()
         )
-        created = False
-        logging.warning(
-            "Multiple conversations found for channel=%s address=%s; using %s",
-            channel,
-            address,
-            getattr(conv, "id", None),
-        )
         if conv is None:
-            raise
+            conv = PersistentAgentConversation.objects.create(**filters)
+            created = True
+
+    if conv is None:
+        try:
+            conv, created = PersistentAgentConversation.objects.get_or_create(
+                **filters,
+                defaults={"owner_agent": owner_agent},
+            )
+        except MultipleObjectsReturned:
+            span.set_attribute("get_or_create.fallback", True)
+            span.set_attribute("get_or_create.error", "MultipleObjectsReturned")
+            # Multiple rows exist for the same (channel, address). Pick a deterministic
+            # record so ingestion can continue and emit a warning for cleanup.
+            conv = (
+                PersistentAgentConversation.objects
+                .filter(**filters)
+                .order_by("id")
+                .first()
+            )
+            created = False
+            logging.warning(
+                "Multiple conversations found for channel=%s address=%s; using %s",
+                channel,
+                address,
+                getattr(conv, "id", None),
+            )
+            if conv is None:
+                raise
     if owner_agent and conv.owner_agent_id is None:
         conv.owner_agent = owner_agent
         conv.save(update_fields=["owner_agent"])
@@ -334,7 +360,12 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
     with traced("AGENT MSG Ingest", channel=channel_val) as span:
         from_ep = _get_or_create_endpoint(channel_val, parsed.sender)
         to_ep = _get_or_create_endpoint(channel_val, parsed.recipient)
-        conv = _get_or_create_conversation(channel_val, parsed.sender, owner_agent=to_ep.owner_agent)
+        conv = _get_or_create_conversation(
+            channel_val,
+            parsed.sender,
+            owner_agent=to_ep.owner_agent,
+            target_endpoint=to_ep,
+        )
 
         _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
         _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)

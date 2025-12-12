@@ -839,6 +839,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         PersistentAgentCommsEndpoint.objects.filter(
             conversation_memberships__conversation__owner_agent=agent
         )
+        .filter(owner_agent__isnull=True)
         .exclude(owner_agent=agent)
         .distinct()
         .order_by("channel", "address")
