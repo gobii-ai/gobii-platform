@@ -234,7 +234,7 @@ class AddonEntitlementService:
             stripe_invoice_id=unique_invoice_ref,
             plan=plan_id or PlanNames.FREE,
             additional_task=False,
-            grant_type=GrantTypeChoices.PLAN,
+            grant_type=GrantTypeChoices.TASK_PACK,
         )
         if owner_type == "organization":
             create_kwargs["organization"] = owner
