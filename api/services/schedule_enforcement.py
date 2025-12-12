@@ -10,9 +10,10 @@ import math
 from typing import Iterable, Optional
 
 from celery.schedules import crontab, schedule as celery_schedule
+from django.db.models import CharField, OuterRef, Subquery, Value
+from django.db.models.functions import Coalesce
 from api.agent.core.schedule_parser import ScheduleParser
 from constants.plans import PlanNames
-from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
@@ -268,15 +269,22 @@ def tool_config_min_for_plan(plan_name: str) -> Optional[int]:
 
 def agents_for_plan(plan_name: str):
     """Yield agents whose owner plan matches the provided plan name."""
-    from api.models import PersistentAgent
+    from api.models import OrganizationBilling, PersistentAgent, UserBilling
 
-    qs = PersistentAgent.objects.non_eval().select_related("user", "organization")
-    for agent in qs.iterator(chunk_size=500):
-        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
-        try:
-            plan = get_owner_plan(owner)
-        except Exception:
-            plan = None
-        plan_id = (plan or {}).get("id") or PlanNames.FREE
-        if str(plan_id).lower() == str(plan_name).lower():
-            yield agent
+    user_plan_subquery = Subquery(
+        UserBilling.objects.filter(user_id=OuterRef("user_id")).values("subscription")[:1]
+    )
+    org_plan_subquery = Subquery(
+        OrganizationBilling.objects.filter(organization_id=OuterRef("organization_id")).values("subscription")[:1]
+    )
+
+    agents_with_plans = PersistentAgent.objects.non_eval().annotate(
+        owner_plan=Coalesce(
+            org_plan_subquery,
+            user_plan_subquery,
+            Value(PlanNames.FREE),
+            output_field=CharField(),
+        )
+    )
+
+    yield from agents_with_plans.filter(owner_plan__iexact=plan_name).iterator(chunk_size=500)
