@@ -60,58 +60,7 @@
         </div>
       {% endif %}
 
-      {% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
-      {% if task_pack.price_id or contact_pack.price_id %}
-      <div class="gobii-card-base p-6">
-        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <h2 class="text-lg font-semibold text-slate-900">Add-ons</h2>
-            <p class="text-sm text-slate-500 mt-1">Adjust task and contact packs for this billing period.</p>
-          </div>
-        </div>
-
-        <div class="mt-4 grid gap-4 md:grid-cols-2">
-          {% if task_pack.price_id %}
-          <form method="post" action="{% url 'update_task_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-            {% csrf_token %}
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-slate-900">Task packs</p>
-                <p class="text-xs text-slate-500">Each adds {{ task_pack.task_delta|default:"0" }} task credits{% if task_pack.expires_at %} until {{ task_pack.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
-              </div>
-              <input type="number" name="quantity" min="0" value="{{ task_pack.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if not org_can_manage_billing or not org_has_stripe_subscription %}disabled{% endif %}>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <p class="text-xs text-slate-500">Current: {{ task_pack.quantity|default:0 }} pack{{ task_pack.quantity|default:0|pluralize }}</p>
-              <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if not org_can_manage_billing or not org_has_stripe_subscription %}opacity-50 cursor-not-allowed{% endif %}" {% if not org_can_manage_billing or not org_has_stripe_subscription %}disabled{% endif %}>
-                Save
-              </button>
-            </div>
-          </form>
-          {% endif %}
-
-          {% if contact_pack.price_id %}
-          <form method="post" action="{% url 'update_contact_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-            {% csrf_token %}
-            <div class="flex items-center justify-between gap-3">
-              <div>
-                <p class="text-sm font-semibold text-slate-900">Contact packs</p>
-                <p class="text-xs text-slate-500">Each adds {{ contact_pack.contact_delta|default:"0" }} contacts per agent{% if contact_pack.expires_at %} until {{ contact_pack.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
-              </div>
-              <input type="number" name="quantity" min="0" value="{{ contact_pack.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if not org_can_manage_billing or not org_has_stripe_subscription %}disabled{% endif %}>
-            </div>
-            <div class="flex items-center justify-between gap-3">
-              <p class="text-xs text-slate-500">Current: {{ contact_pack.quantity|default:0 }} pack{{ contact_pack.quantity|default:0|pluralize }}</p>
-              <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if not org_can_manage_billing or not org_has_stripe_subscription %}opacity-50 cursor-not-allowed{% endif %}" {% if not org_can_manage_billing or not org_has_stripe_subscription %}disabled{% endif %}>
-                Save
-              </button>
-            </div>
-          </form>
-          {% endif %}
-        </div>
-      </div>
-      {% endif %}
-      {% endwith %}
+      {% include "console/partials/addons_block.html" with addon_context=addon_context addons_disabled=not org_can_manage_billing or not org_has_stripe_subscription heading="Add-ons" subheading="Adjust task and contact packs for this billing period." %}
 
       <div class="gobii-card-base p-6">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -400,58 +349,7 @@
             </div>
           </div>
 
-          {% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
-          {% if task_pack.price_id or contact_pack.price_id %}
-          <div class="border border-gray-200 rounded-lg p-4 bg-white shadow-sm space-y-3">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
-                <p class="text-sm font-semibold text-gray-800">Add-ons</p>
-                <p class="text-xs text-gray-500">Tune task and contact packs for your subscription.</p>
-              </div>
-            </div>
-
-            <div class="grid gap-4 md:grid-cols-2">
-              {% if task_pack.price_id %}
-              <form method="post" action="{% url 'update_task_pack_quantity' %}" class="border border-gray-100 rounded-lg p-3 bg-white flex flex-col gap-3">
-                {% csrf_token %}
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-semibold text-gray-800">Task packs</p>
-                    <p class="text-xs text-gray-500">+{{ task_pack.task_delta|default:"0" }} credits {% if task_pack.expires_at %}until {{ task_pack.expires_at|date:"F j, Y" }}{% else %}this cycle{% endif %}.</p>
-                  </div>
-                  <input type="number" name="quantity" min="0" value="{{ task_pack.quantity|default:0 }}" class="w-24 rounded-md border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if not paid_subscriber %}disabled{% endif %}>
-                </div>
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-xs text-gray-500">Current: {{ task_pack.quantity|default:0 }} pack{{ task_pack.quantity|default:0|pluralize }}</p>
-                  <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if not paid_subscriber %}opacity-50 cursor-not-allowed{% endif %}" {% if not paid_subscriber %}disabled{% endif %}>
-                    Save
-                  </button>
-                </div>
-              </form>
-              {% endif %}
-
-              {% if contact_pack.price_id %}
-              <form method="post" action="{% url 'update_contact_pack_quantity' %}" class="border border-gray-100 rounded-lg p-3 bg-white flex flex-col gap-3">
-                {% csrf_token %}
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="text-sm font-semibold text-gray-800">Contact packs</p>
-                    <p class="text-xs text-gray-500">+{{ contact_pack.contact_delta|default:"0" }} contacts per agent {% if contact_pack.expires_at %}until {{ contact_pack.expires_at|date:"F j, Y" }}{% else %}this cycle{% endif %}.</p>
-                  </div>
-                  <input type="number" name="quantity" min="0" value="{{ contact_pack.quantity|default:0 }}" class="w-24 rounded-md border border-gray-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if not paid_subscriber %}disabled{% endif %}>
-                </div>
-                <div class="flex items-center justify-between gap-3">
-                  <p class="text-xs text-gray-500">Current: {{ contact_pack.quantity|default:0 }} pack{{ contact_pack.quantity|default:0|pluralize }}</p>
-                  <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if not paid_subscriber %}opacity-50 cursor-not-allowed{% endif %}" {% if not paid_subscriber %}disabled{% endif %}>
-                    Save
-                  </button>
-                </div>
-              </form>
-              {% endif %}
-            </div>
-          </div>
-          {% endif %}
-          {% endwith %}
+            {% include "console/partials/addons_block.html" with addon_context=addon_context addons_disabled=not paid_subscriber heading="Add-ons" subheading="Tune task and contact packs for your subscription." card_class="border border-gray-200 rounded-lg p-4 bg-white shadow-sm space-y-3" %}
 
           <div class="border border-gray-200 rounded-lg p-4 bg-gray-50/70">
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">

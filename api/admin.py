@@ -146,7 +146,7 @@ class StripeConfigAdmin(admin.ModelAdmin):
             },
         ),
         (
-            "Identifiers",
+            "Startup (Pro)",
             {
                 "fields": (
                     "startup_price_id",
@@ -158,6 +158,13 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_contact_cap_price_id",
                     "startup_dedicated_ip_price_id",
                     "startup_dedicated_ip_product_id",
+                )
+            },
+        ),
+        (
+            "Scale",
+            {
+                "fields": (
                     "scale_product_id",
                     "scale_price_id",
                     "scale_additional_task_price_id",
@@ -165,10 +172,6 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "scale_task_pack_price_id",
                     "scale_contact_cap_product_id",
                     "scale_contact_cap_price_id",
-                    "task_pack_delta_startup",
-                    "task_pack_delta_scale",
-                    "contact_pack_delta_startup",
-                    "contact_pack_delta_scale",
                     "scale_dedicated_ip_product_id",
                     "scale_dedicated_ip_price_id",
                 )
@@ -182,13 +185,25 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "org_team_product_id",
                     "org_team_dedicated_ip_price_id",
                     "org_team_dedicated_ip_product_id",
+                    "org_team_additional_task_product_id",
                     "org_team_additional_task_price_id",
                     "org_team_task_pack_product_id",
                     "org_team_task_pack_price_id",
-                    "task_pack_delta_org_team",
-                    "contact_pack_delta_org_team",
                     "org_team_contact_cap_product_id",
                     "org_team_contact_cap_price_id",
+                )
+            },
+        ),
+        (
+            "Add-on Deltas",
+            {
+                "fields": (
+                    "task_pack_delta_startup",
+                    "task_pack_delta_scale",
+                    "task_pack_delta_org_team",
+                    "contact_pack_delta_startup",
+                    "contact_pack_delta_scale",
+                    "contact_pack_delta_org_team",
                 )
             },
         ),
