@@ -705,6 +705,8 @@ BROWSER_AGENT_MAX_STEPS = env.int("BROWSER_AGENT_MAX_STEPS", default=100)
 BROWSER_AGENT_MAX_ACTIVE_TASKS = env.int("BROWSER_AGENT_MAX_ACTIVE_TASKS", default=3)
 # Maximum number of browser tasks an agent may spawn per calendar day.
 BROWSER_AGENT_DAILY_MAX_TASKS = env.int("BROWSER_AGENT_DAILY_MAX_TASKS", default=60)
+# Preferred vision detail level to request from browser_use when vision is enabled.
+BROWSER_AGENT_VISION_DETAIL_LEVEL = env("BROWSER_AGENT_VISION_DETAIL_LEVEL", default="auto")
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 

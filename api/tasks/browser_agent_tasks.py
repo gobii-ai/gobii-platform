@@ -45,6 +45,7 @@ from util import EphemeralXvfb, should_use_ephemeral_xvfb
 tracer = trace.get_tracer('gobii.utils')
 
 _COST_PRECISION = Decimal("0.000001")
+_VALID_VISION_DETAIL_LEVELS = {"auto", "low", "high"}
 
 
 def _quantize_cost_value(value: Any) -> Optional[Decimal]:
@@ -56,6 +57,18 @@ def _quantize_cost_value(value: Any) -> Optional[Decimal]:
     except (InvalidOperation, TypeError, ValueError):
         return None
     return decimal_value.quantize(_COST_PRECISION)
+
+
+def _normalize_vision_detail_level(detail_level: Optional[str], supports_vision: bool) -> Optional[str]:
+    """Return a normalized vision detail level when vision is enabled."""
+    if not supports_vision:
+        return None
+    if not detail_level:
+        return None
+    normalized = str(detail_level).lower()
+    if normalized not in _VALID_VISION_DETAIL_LEVELS:
+        return None
+    return normalized
 
 # Providers that should default to vision support when DB metadata is unavailable
 DEFAULT_PROVIDER_VISION_SUPPORT: dict[str, bool] = {
@@ -823,6 +836,7 @@ async def _run_agent(
     provider_backend_override: Optional[str] = None,
     override_max_output_tokens: Optional[int] = None,
     supports_vision: bool = True,
+    vision_detail_level: Optional[str] = None,
     is_eval: bool = False,
     max_steps_override: Optional[int] = None,
     extraction_llm_api_key: Optional[str] = None,
@@ -1150,6 +1164,10 @@ async def _run_agent(
                 "enable_memory": False,
                 "use_vision": bool(supports_vision),
             }
+            normalized_detail_level = _normalize_vision_detail_level(vision_detail_level, bool(supports_vision))
+            if normalized_detail_level:
+                agent_kwargs["vision_detail_level"] = normalized_detail_level
+                agent_span.set_attribute("browser_use.vision_detail_level", normalized_detail_level)
 
             if extraction_llm:
                 agent_kwargs["page_extraction_llm"] = extraction_llm
@@ -1427,6 +1445,7 @@ def _execute_agent_with_failover(
     persistent_agent_id: Optional[str] = None,
     is_eval: bool = False,
     max_steps: Optional[int] = None,
+    vision_detail_level: Optional[str] = None,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
@@ -1609,6 +1628,7 @@ def _execute_agent_with_failover(
                         extraction_supports_vision=extraction_supports_vision,
                         extraction_max_output_tokens=extraction_max_output_tokens,
                         extraction_provider_key=extraction_provider,
+                        vision_detail_level=vision_detail_level,
                     )
                 )
 
@@ -1867,6 +1887,7 @@ def _process_browser_use_task_core(
                     persistent_agent_id=persistent_agent_id,
                     is_eval=is_eval,
                     max_steps=plan_settings.max_browser_steps,
+                    vision_detail_level=plan_settings.vision_detail_level,
                 )
 
                 safe_result = _jsonify(raw_result)

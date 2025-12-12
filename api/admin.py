@@ -687,6 +687,7 @@ class BrowserConfigAdmin(admin.ModelAdmin):
         "max_browser_steps",
         "max_browser_tasks",
         "max_active_browser_tasks",
+        "vision_detail_level",
         "updated_at",
     )
     list_filter = ("plan_name",)
@@ -697,6 +698,7 @@ class BrowserConfigAdmin(admin.ModelAdmin):
             "Limits",
             {"fields": ("max_browser_steps", "max_browser_tasks", "max_active_browser_tasks")},
         ),
+        ("Vision", {"fields": ("vision_detail_level",)}),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )
 

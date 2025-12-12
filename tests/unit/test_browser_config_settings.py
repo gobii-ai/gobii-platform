@@ -6,7 +6,7 @@ from django.test import TestCase, tag
 
 from api.models import BrowserConfig, Organization
 from api.services.browser_settings import get_browser_settings_for_owner, invalidate_browser_settings_cache
-from api.tasks.browser_agent_tasks import _execute_agent_with_failover
+from api.tasks.browser_agent_tasks import _execute_agent_with_failover, _normalize_vision_detail_level
 from constants.plans import PlanNames
 
 
@@ -30,12 +30,14 @@ class BrowserConfigSettingsTests(TestCase):
         free_config.max_browser_tasks = 5
         free_config.max_active_browser_tasks = 4
         free_config.max_browser_steps = 50
+        free_config.vision_detail_level = "low"
         free_config.save()
 
         org_config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.ORG_TEAM)
         org_config.max_browser_tasks = 9
         org_config.max_active_browser_tasks = 8
         org_config.max_browser_steps = 75
+        org_config.vision_detail_level = "high"
         org_config.save()
 
         invalidate_browser_settings_cache()
@@ -47,9 +49,11 @@ class BrowserConfigSettingsTests(TestCase):
         self.assertEqual(user_settings.max_browser_tasks, 5)
         self.assertEqual(user_settings.max_active_browser_tasks, 4)
         self.assertEqual(user_settings.max_browser_steps, 50)
+        self.assertEqual(user_settings.vision_detail_level, "low")
         self.assertEqual(org_settings.max_browser_tasks, 9)
         self.assertEqual(org_settings.max_active_browser_tasks, 8)
         self.assertEqual(org_settings.max_browser_steps, 75)
+        self.assertEqual(org_settings.vision_detail_level, "high")
 
     @patch("api.tasks.browser_agent_tasks._run_agent", new_callable=AsyncMock)
     def test_execute_agent_with_failover_passes_step_limit(self, mock_run_agent):
@@ -61,7 +65,7 @@ class BrowserConfigSettingsTests(TestCase):
             "browser_model": None,
             "base_url": "",
             "backend": None,
-            "supports_vision": None,
+            "supports_vision": True,
             "max_output_tokens": None,
             "api_key": "sk-test",
         }]]
@@ -71,9 +75,16 @@ class BrowserConfigSettingsTests(TestCase):
             task_id="task-123",
             provider_priority=provider_priority,
             max_steps=42,
+            vision_detail_level="high",
         )
 
         self.assertEqual(result, "ok")
         self.assertIsInstance(usage, dict)
         mock_run_agent.assert_called_once()
         self.assertEqual(mock_run_agent.call_args.kwargs.get("max_steps_override"), 42)
+        self.assertEqual(mock_run_agent.call_args.kwargs.get("vision_detail_level"), "high")
+
+    def test_normalize_vision_detail_level(self):
+        self.assertEqual(_normalize_vision_detail_level("HIGH", True), "high")
+        self.assertIsNone(_normalize_vision_detail_level("unsupported", True))
+        self.assertIsNone(_normalize_vision_detail_level("low", False))

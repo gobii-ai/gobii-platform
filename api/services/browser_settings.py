@@ -15,8 +15,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_BROWSER_STEPS = getattr(settings, "BROWSER_AGENT_MAX_STEPS", 100)
 DEFAULT_MAX_BROWSER_TASKS = getattr(settings, "BROWSER_AGENT_DAILY_MAX_TASKS", 60)
 DEFAULT_MAX_ACTIVE_BROWSER_TASKS = getattr(settings, "BROWSER_AGENT_MAX_ACTIVE_TASKS", 3)
+_DEFAULT_VISION_LEVEL = getattr(settings, "BROWSER_AGENT_VISION_DETAIL_LEVEL", "auto")
+_VALID_VISION_LEVELS = {"auto", "low", "high"}
+DEFAULT_VISION_DETAIL_LEVEL = _DEFAULT_VISION_LEVEL.lower() if str(_DEFAULT_VISION_LEVEL).lower() in _VALID_VISION_LEVELS else "auto"
 
-_CACHE_KEY = "browser_settings:v1"
+_CACHE_KEY = "browser_settings:v2"
 _CACHE_TTL_SECONDS = 300
 
 
@@ -25,6 +28,7 @@ class BrowserPlanSettings:
     max_browser_steps: int
     max_browser_tasks: Optional[int]
     max_active_browser_tasks: Optional[int]
+    vision_detail_level: str
 
 
 def _get_browser_config_model():
@@ -49,12 +53,22 @@ def _normalise_step_limit(value: Optional[int]) -> int:
     return int_value if int_value > 0 else DEFAULT_MAX_BROWSER_STEPS
 
 
+def _normalise_vision_detail_level(value: Optional[str]) -> str:
+    if not value:
+        return DEFAULT_VISION_DETAIL_LEVEL
+    normalized = str(value).lower()
+    if normalized not in _VALID_VISION_LEVELS:
+        return DEFAULT_VISION_DETAIL_LEVEL
+    return normalized
+
+
 def _serialise(configs) -> dict:
     return {
         config.plan_name: {
             "max_browser_steps": config.max_browser_steps,
             "max_browser_tasks": config.max_browser_tasks,
             "max_active_browser_tasks": config.max_active_browser_tasks,
+            "vision_detail_level": getattr(config, "vision_detail_level", DEFAULT_VISION_DETAIL_LEVEL),
         }
         for config in configs
     }
@@ -69,6 +83,7 @@ def _ensure_defaults_exist() -> None:
                 "max_browser_steps": DEFAULT_MAX_BROWSER_STEPS,
                 "max_browser_tasks": DEFAULT_MAX_BROWSER_TASKS,
                 "max_active_browser_tasks": DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
+                "vision_detail_level": DEFAULT_VISION_DETAIL_LEVEL,
             },
         )
 
@@ -97,6 +112,7 @@ def get_browser_settings_for_plan(plan_name: Optional[str]) -> BrowserPlanSettin
         max_active_browser_tasks=_normalise_optional_limit(
             config.get("max_active_browser_tasks") if config else None
         ),
+        vision_detail_level=_normalise_vision_detail_level(config.get("vision_detail_level") if config else None),
     )
 
 
