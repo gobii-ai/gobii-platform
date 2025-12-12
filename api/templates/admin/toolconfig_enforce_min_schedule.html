@@ -1,0 +1,66 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<h1>{{ title }}</h1>
+
+<form method="post" novalidate>
+  {% csrf_token %}
+  <fieldset class="module aligned">
+    <div class="form-row">
+      <label for="id_plan_name">Plan</label>
+      <select name="plan_name" id="id_plan_name">
+        {% for plan in plans %}
+          <option value="{{ plan }}" {% if plan == selected_plan %}selected{% endif %}>{{ plan }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="form-row">
+      <label for="id_dry_run">Dry run</label>
+      <input type="checkbox" name="dry_run" id="id_dry_run" {% if dry_run %}checked{% endif %}>
+      <span class="help">Dry run will report proposed changes without saving them.</span>
+    </div>
+  </fieldset>
+  <div class="submit-row">
+    <input type="submit" value="Run enforcement" class="default">
+    <a class="button" href="{% url 'admin:api_toolconfig_changelist' %}">Back</a>
+  </div>
+</form>
+
+{% if result %}
+  <h2>Results</h2>
+  <ul>
+    <li>Plan: {{ selected_plan }}</li>
+    <li>Minimum interval: {{ result.min_interval_minutes }} minutes</li>
+    <li>Dry run: {{ result.dry_run|yesno:"Yes,No" }}</li>
+    <li>Agents scanned: {{ result.scanned }}</li>
+    <li>Schedules changed: {{ result.updated }}</li>
+    <li>Snapshots changed: {{ result.snapshot_updated }}</li>
+    <li>Unchanged: {{ result.unchanged }}</li>
+    <li>Errors: {{ result.errors }}</li>
+  </ul>
+
+  {% if result.sample_changes %}
+    <h3>Sample changes (max 20)</h3>
+    <table class="admintable">
+      <thead>
+        <tr>
+          <th>Agent ID</th>
+          <th>Schedule (before → after)</th>
+          <th>Snapshot (before → after)</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for change in result.sample_changes %}
+          <tr>
+            <td><code>{{ change.agent_id }}</code></td>
+            <td><code>{{ change.schedule_before }}</code> &rarr; <code>{{ change.schedule_after }}</code></td>
+            <td><code>{{ change.snapshot_before }}</code> &rarr; <code>{{ change.snapshot_after }}</code></td>
+            <td>{{ change.reason }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+{% endif %}
+{% endblock %}
