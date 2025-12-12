@@ -466,6 +466,10 @@ class StripeConfigForm(ModelForm):
         label="Org/Team price ID",
         required=False,
     )
+    org_team_additional_task_product_id = forms.CharField(
+        label="Org/Team ad-hoc task product ID",
+        required=False,
+    )
     org_team_additional_task_price_id = forms.CharField(
         label="Org/Team ad-hoc task price ID",
         required=False,
@@ -598,6 +602,7 @@ class StripeConfigForm(ModelForm):
 
             self.fields["org_team_product_id"].initial = instance.org_team_product_id
             self.fields["org_team_price_id"].initial = instance.org_team_price_id
+            self.fields["org_team_additional_task_product_id"].initial = instance.org_team_additional_task_product_id
             self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
 
             self.fields["org_team_task_pack_product_id"].initial = instance.org_team_task_pack_product_id
@@ -669,6 +674,7 @@ class StripeConfigForm(ModelForm):
             "org_team_product_id",
             "org_team_price_id",
 
+            "org_team_additional_task_product_id",
             "org_team_additional_task_price_id",
             "org_team_task_pack_product_id",
             "org_team_task_pack_price_id",

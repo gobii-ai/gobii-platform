@@ -310,6 +310,7 @@ def _resolve_addon_price_ids(owner_type: str, plan_id: str | None) -> dict[str, 
 
 def _build_addon_context(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
     price_ids = _resolve_addon_price_ids(owner_type, plan_id)
+    stripe_settings = get_stripe_settings()
     addon_context: dict[str, dict[str, Any]] = {}
 
     for kind, price_id in price_ids.items():
@@ -320,12 +321,30 @@ def _build_addon_context(owner, owner_type: str, plan_id: str | None) -> dict[st
         entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
         expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
 
+        task_delta = cfg.task_credits_delta if cfg else 0
+        contact_delta = cfg.contact_cap_delta if cfg else 0
+
+        if kind == "task_pack":
+            if owner_type == "organization":
+                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_org_team", 0)
+            elif plan_id == PlanNames.STARTUP:
+                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_startup", 0)
+            elif plan_id == PlanNames.SCALE:
+                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_scale", 0)
+        elif kind == "contact_pack":
+            if owner_type == "organization":
+                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_org_team", 0)
+            elif plan_id == PlanNames.STARTUP:
+                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_startup", 0)
+            elif plan_id == PlanNames.SCALE:
+                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_scale", 0)
+
         addon_context[kind] = {
             "price_id": price_id,
             "product_id": cfg.product_id if cfg else "",
             "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
-            "task_delta": cfg.task_credits_delta if cfg else 0,
-            "contact_delta": cfg.contact_cap_delta if cfg else 0,
+            "task_delta": task_delta,
+            "contact_delta": contact_delta,
             "expires_at": expires_at,
         }
 
@@ -8341,6 +8360,108 @@ def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int
     return session.url
 
 
+def _update_addon_quantity(
+    request,
+    owner,
+    owner_type: str,
+    addon_kind: str,
+    form_label: str,
+    success_message: str,
+    failure_noun: str,
+):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect("billing")
+
+    form = AddonQuantityForm(request.POST, label=form_label)
+    if not form.is_valid():
+        for field_errors in form.errors.values():
+            for error in field_errors:
+                messages.error(request, error)
+        return redirect(_billing_redirect(owner, owner_type))
+
+    plan_id = _get_owner_plan_id(owner, owner_type)
+    price_id = _resolve_addon_price_ids(owner_type, plan_id).get(addon_kind)
+    if not price_id:
+        messages.error(request, f"{form_label} price is not configured for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    subscription = get_active_subscription(owner)
+    if not subscription:
+        messages.error(request, "No active subscription found.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        desired_qty = int(form.cleaned_data["quantity"])
+        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
+        customer_id = (stripe_subscription.get("customer") or "")
+        if not customer_id:
+            messages.error(request, "Stripe customer not found for this subscription.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        return_url = request.build_absolute_uri(_billing_redirect(owner, owner_type))
+        item = _get_subscription_item_for_price(stripe_subscription, price_id)
+        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
+        if item:
+            if len(items_data) > 1:
+                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
+                updated_items = list(items_data) if isinstance(items_data, list) else []
+                for entry in updated_items:
+                    price = entry.get("price") or {}
+                    if price.get("id") == price_id:
+                        entry["quantity"] = desired_qty
+                        break
+                try:
+                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+                    tz = timezone.get_current_timezone()
+                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
+                    period_end_dt = timezone.make_aware(
+                        datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
+                        tz,
+                    )
+                    AddonEntitlementService.sync_subscription_entitlements(
+                        owner=owner,
+                        owner_type=owner_type,
+                        plan_id=plan_id,
+                        subscription_items=updated_items or items_data,
+                        period_start=period_start_dt,
+                        period_end=period_end_dt,
+                        created_via="console_direct_update",
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to sync %s add-on entitlements after direct update for %s",
+                        addon_kind,
+                        getattr(owner, "id", None) or owner,
+                    )
+                messages.success(request, success_message)
+                return redirect(_billing_redirect(owner, owner_type))
+            session_url = _start_addon_portal_session(
+                subscription_id=subscription.id,
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                item_id=item.get("id"),
+                return_url=return_url,
+            )
+        else:
+            cancel_url = return_url
+            session_url = _start_addon_checkout_session(
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                success_url=return_url,
+                cancel_url=cancel_url,
+            )
+        return redirect(session_url)
+    except Exception as exc:
+        logger.exception("Failed to update %s quantity for %s", addon_kind, getattr(owner, "id", None) or owner)
+        messages.error(request, f"Failed to update {failure_noun}: {exc}")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
 def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
     """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
     desired_qty = int(desired_qty)
@@ -8391,85 +8512,15 @@ def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: in
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Task Pack Quantity")
 def update_task_pack_quantity(request, owner, owner_type):
-    if not stripe_status().enabled:
-        messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
-
-    form = AddonQuantityForm(request.POST, label="Task packs")
-    if not form.is_valid():
-        for field_errors in form.errors.values():
-            for error in field_errors:
-                messages.error(request, error)
-        return redirect(_billing_redirect(owner, owner_type))
-
-    plan_id = _get_owner_plan_id(owner, owner_type)
-    price_id = _resolve_addon_price_ids(owner_type, plan_id).get("task_pack")
-    if not price_id:
-        messages.error(request, "Task pack price is not configured for your plan.")
-        return redirect(_billing_redirect(owner, owner_type))
-
-    subscription = get_active_subscription(owner)
-    if not subscription:
-        messages.error(request, "No active subscription found.")
-        return redirect(_billing_redirect(owner, owner_type))
-
-    try:
-        _assign_stripe_api_key()
-        desired_qty = int(form.cleaned_data["quantity"])
-        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
-        customer_id = (stripe_subscription.get("customer") or "")
-        if not customer_id:
-            messages.error(request, "Stripe customer not found for this subscription.")
-            return redirect(_billing_redirect(owner, owner_type))
-
-        return_url = request.build_absolute_uri(_billing_redirect(owner, owner_type))
-        item = _get_subscription_item_for_price(stripe_subscription, price_id)
-        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
-        if item:
-            if len(items_data) > 1:
-                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
-                # Keep entitlements in sync immediately when bypassing portal
-                try:
-                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
-                    tz = timezone.get_current_timezone()
-                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
-                    period_end_dt = timezone.make_aware(datetime.combine(period_end, datetime.min.time()), tz)
-                    AddonEntitlementService.sync_subscription_entitlements(
-                        owner=owner,
-                        owner_type=owner_type,
-                        plan_id=plan_id,
-                        subscription_items=items_data,
-                        period_start=period_start_dt,
-                        period_end=period_end_dt,
-                        created_via="console_direct_update",
-                    )
-                except Exception:
-                    logger.exception("Failed to sync add-on entitlements after direct update for %s", getattr(owner, "id", None) or owner)
-                messages.success(request, "Task pack quantity updated.")
-                return redirect(_billing_redirect(owner, owner_type))
-            session_url = _start_addon_portal_session(
-                subscription_id=subscription.id,
-                customer_id=customer_id,
-                price_id=price_id,
-                quantity=desired_qty,
-                item_id=item.get("id"),
-                return_url=return_url,
-            )
-        else:
-            cancel_url = return_url
-            session_url = _start_addon_checkout_session(
-                customer_id=customer_id,
-                price_id=price_id,
-                quantity=desired_qty,
-                success_url=return_url,
-                cancel_url=cancel_url,
-            )
-        return redirect(session_url)
-    except Exception as exc:
-        logger.exception("Failed to update task pack quantity for %s", getattr(owner, "id", None) or owner)
-        messages.error(request, f"Failed to update task packs: {exc}")
-
-    return redirect(_billing_redirect(owner, owner_type))
+    return _update_addon_quantity(
+        request,
+        owner,
+        owner_type,
+        addon_kind="task_pack",
+        form_label="Task packs",
+        success_message="Task pack quantity updated.",
+        failure_noun="task packs",
+    )
 
 
 @login_required
@@ -8478,84 +8529,15 @@ def update_task_pack_quantity(request, owner, owner_type):
 @with_billing_owner
 @tracer.start_as_current_span("BILLING Update Contact Pack Quantity")
 def update_contact_pack_quantity(request, owner, owner_type):
-    if not stripe_status().enabled:
-        messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
-
-    form = AddonQuantityForm(request.POST, label="Contact packs")
-    if not form.is_valid():
-        for field_errors in form.errors.values():
-            for error in field_errors:
-                messages.error(request, error)
-        return redirect(_billing_redirect(owner, owner_type))
-
-    plan_id = _get_owner_plan_id(owner, owner_type)
-    price_id = _resolve_addon_price_ids(owner_type, plan_id).get("contact_pack")
-    if not price_id:
-        messages.error(request, "Contact pack price is not configured for your plan.")
-        return redirect(_billing_redirect(owner, owner_type))
-
-    subscription = get_active_subscription(owner)
-    if not subscription:
-        messages.error(request, "No active subscription found.")
-        return redirect(_billing_redirect(owner, owner_type))
-
-    try:
-        _assign_stripe_api_key()
-        desired_qty = int(form.cleaned_data["quantity"])
-        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
-        customer_id = (stripe_subscription.get("customer") or "")
-        if not customer_id:
-            messages.error(request, "Stripe customer not found for this subscription.")
-            return redirect(_billing_redirect(owner, owner_type))
-
-        return_url = request.build_absolute_uri(_billing_redirect(owner, owner_type))
-        item = _get_subscription_item_for_price(stripe_subscription, price_id)
-        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
-        if item:
-            if len(items_data) > 1:
-                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
-                try:
-                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
-                    tz = timezone.get_current_timezone()
-                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
-                    period_end_dt = timezone.make_aware(datetime.combine(period_end, datetime.min.time()), tz)
-                    AddonEntitlementService.sync_subscription_entitlements(
-                        owner=owner,
-                        owner_type=owner_type,
-                        plan_id=plan_id,
-                        subscription_items=items_data,
-                        period_start=period_start_dt,
-                        period_end=period_end_dt,
-                        created_via="console_direct_update",
-                    )
-                except Exception:
-                    logger.exception("Failed to sync contact add-on entitlements after direct update for %s", getattr(owner, "id", None) or owner)
-                messages.success(request, "Contact pack quantity updated.")
-                return redirect(_billing_redirect(owner, owner_type))
-            session_url = _start_addon_portal_session(
-                subscription_id=subscription.id,
-                customer_id=customer_id,
-                price_id=price_id,
-                quantity=desired_qty,
-                item_id=item.get("id"),
-                return_url=return_url,
-            )
-        else:
-            cancel_url = return_url
-            session_url = _start_addon_checkout_session(
-                customer_id=customer_id,
-                price_id=price_id,
-                quantity=desired_qty,
-                success_url=return_url,
-                cancel_url=cancel_url,
-            )
-        return redirect(session_url)
-    except Exception as exc:
-        logger.exception("Failed to update contact pack quantity for %s", getattr(owner, "id", None) or owner)
-        messages.error(request, f"Failed to update contact packs: {exc}")
-
-    return redirect(_billing_redirect(owner, owner_type))
+    return _update_addon_quantity(
+        request,
+        owner,
+        owner_type,
+        addon_kind="contact_pack",
+        form_label="Contact packs",
+        success_message="Contact pack quantity updated.",
+        failure_noun="contact packs",
+    )
 
 
 @login_required

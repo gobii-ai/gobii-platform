@@ -40,6 +40,7 @@ class StripeSettings:
     scale_product_id: str
     org_team_product_id: str
     org_team_price_id: str
+    org_team_additional_task_product_id: str
     org_team_additional_task_price_id: str
     org_team_task_pack_product_id: str
     org_team_task_pack_price_id: str
@@ -97,6 +98,7 @@ def _env_defaults() -> StripeSettings:
         scale_dedicated_ip_price_id=env("STRIPE_SCALE_DEDICATED_IP_PRICE_ID", default="price_dummy_scale_dedicated_ip"),
         org_team_product_id=env("STRIPE_ORG_TEAM_PRODUCT_ID", default="prod_dummy_org_team"),
         org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
+        org_team_additional_task_product_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRODUCT_ID", default="prod_dummy_org_team_additional_task"),
         org_team_task_pack_product_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRODUCT_ID", default="prod_dummy_org_team_task_pack_product"),
         org_team_task_pack_price_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRICE_ID", default="prod_dummy_org_team_task_pack_price"),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
@@ -142,10 +144,8 @@ def _load_from_database() -> Optional[StripeSettings]:
         webhook_secret = None
     try:
         org_team_additional_price = config.org_team_additional_task_price_id or ""
-        org_team_additional_product = config.org_team_additional_task_product_id or ""
     except Exception:
         org_team_additional_price = ""
-        org_team_additional_product = ""
     try:
         org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
         org_team_contact_cap_price_id = config.org_team_contact_cap_price_id or ""
@@ -178,11 +178,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         scale_dedicated_ip_price_id=config.scale_dedicated_ip_price_id or "",
         org_team_product_id=config.org_team_product_id or "",
         org_team_price_id=config.org_team_price_id or "",
+        org_team_additional_task_product_id=getattr(config, "org_team_additional_task_product_id", "") or "",
         org_team_task_pack_product_id=config.org_team_task_pack_product_id or "",
         org_team_task_pack_price_id=config.org_team_task_pack_price_id or "",
-        task_pack_delta_startup=config.task_pack_delta_startup if hasattr(config, "task_pack_delta_startup") else env_defaults.task_pack_delta_startup,
-        task_pack_delta_scale=config.task_pack_delta_scale if hasattr(config, "task_pack_delta_scale") else env_defaults.task_pack_delta_scale,
-        task_pack_delta_org_team=config.task_pack_delta_org_team if hasattr(config, "task_pack_delta_org_team") else env_defaults.task_pack_delta_org_team,
+        task_pack_delta_startup=getattr(config, "task_pack_delta_startup", env_defaults.task_pack_delta_startup),
+        task_pack_delta_scale=getattr(config, "task_pack_delta_scale", env_defaults.task_pack_delta_scale),
+        task_pack_delta_org_team=getattr(config, "task_pack_delta_org_team", env_defaults.task_pack_delta_org_team),
         contact_pack_delta_startup=getattr(config, "contact_pack_delta_startup", env_defaults.contact_pack_delta_startup),
         contact_pack_delta_scale=getattr(config, "contact_pack_delta_scale", env_defaults.contact_pack_delta_scale),
         contact_pack_delta_org_team=getattr(config, "contact_pack_delta_org_team", env_defaults.contact_pack_delta_org_team),

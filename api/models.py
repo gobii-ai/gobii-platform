@@ -3321,7 +3321,7 @@ class StripeConfig(models.Model):
     def task_pack_delta_startup(self) -> int:
         try:
             return int(self.get_value("task_pack_delta_startup", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @task_pack_delta_startup.setter
@@ -3332,7 +3332,7 @@ class StripeConfig(models.Model):
     def task_pack_delta_scale(self) -> int:
         try:
             return int(self.get_value("task_pack_delta_scale", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @task_pack_delta_scale.setter
@@ -3343,7 +3343,7 @@ class StripeConfig(models.Model):
     def task_pack_delta_org_team(self) -> int:
         try:
             return int(self.get_value("task_pack_delta_org_team", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @task_pack_delta_org_team.setter
@@ -3354,7 +3354,7 @@ class StripeConfig(models.Model):
     def contact_pack_delta_startup(self) -> int:
         try:
             return int(self.get_value("contact_pack_delta_startup", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @contact_pack_delta_startup.setter
@@ -3365,7 +3365,7 @@ class StripeConfig(models.Model):
     def contact_pack_delta_scale(self) -> int:
         try:
             return int(self.get_value("contact_pack_delta_scale", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @contact_pack_delta_scale.setter
@@ -3376,7 +3376,7 @@ class StripeConfig(models.Model):
     def contact_pack_delta_org_team(self) -> int:
         try:
             return int(self.get_value("contact_pack_delta_org_team", "0") or 0)
-        except Exception:
+        except (TypeError, ValueError):
             return 0
 
     @contact_pack_delta_org_team.setter
