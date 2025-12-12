@@ -1,0 +1,10 @@
+{% extends "admin/change_list.html" %}
+
+{% block object-tools %}
+  <ul class="object-tools">
+      <li>
+          <a href="{% url 'admin:api_toolconfig_enforce_schedule' %}" class="button">Enforce Min Cron Schedule</a>
+      </li>
+      {{ block.super }}
+  </ul>
+{% endblock %}

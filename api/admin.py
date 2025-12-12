@@ -13,6 +13,11 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
+from api.services.schedule_enforcement import (
+    agents_for_plan,
+    enforce_minimum_for_agents,
+    tool_config_min_for_plan,
+)
 from api.agent.core.llm_config import AgentLLMTier
 from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
@@ -54,6 +59,7 @@ from .agent.files.filespace_service import enqueue_import_after_commit
 from .tasks import sync_ip_block, backfill_missing_proxy_records, proxy_health_check_single, garbage_collect_timed_out_tasks
 from .tasks.sms_tasks import sync_twilio_numbers, send_test_sms
 from config import settings
+from constants.plans import PlanNamesChoices
 
 from djstripe.models import Customer, BankAccount, Card
 from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
@@ -717,6 +723,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
     list_filter = ("plan_name",)
     readonly_fields = ("created_at", "updated_at")
     inlines = (ToolRateLimitInline,)
+    change_list_template = "admin/toolconfig_change_list.html"
     fieldsets = (
         (None, {"fields": ("plan_name",)}),
         (
@@ -732,6 +739,83 @@ class ToolConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover
         return False
+
+    def get_urls(self):
+        urls = super().get_urls()
+        custom = [
+            path(
+                "enforce-min-schedule/",
+                self.admin_site.admin_view(self.enforce_min_schedule_view),
+                name="api_toolconfig_enforce_schedule",
+            ),
+        ]
+        return custom + urls
+
+    def enforce_min_schedule_view(self, request):
+        """Enforce or dry-run minimum schedules for a given plan."""
+        changelist_url = reverse("admin:api_toolconfig_changelist")
+        base_context = {
+            **self.admin_site.each_context(request),
+            "title": "Enforce Minimum Cron Schedule",
+            "plans": PlanNamesChoices.values,
+            "selected_plan": None,
+            "dry_run": True,
+            "result": None,
+        }
+
+        if request.method != "POST":
+            return TemplateResponse(
+                request,
+                "admin/toolconfig_enforce_min_schedule.html",
+                base_context,
+            )
+
+        plan_name = (request.POST.get("plan_name") or "").strip() or PlanNamesChoices.FREE
+        dry_run = request.POST.get("dry_run") == "on"
+        min_minutes = tool_config_min_for_plan(plan_name)
+        if min_minutes is None:
+            self.message_user(
+                request,
+                f"No ToolConfig found for plan '{plan_name}'.",
+                level=messages.ERROR,
+            )
+            return HttpResponseRedirect(changelist_url)
+
+        base_context.update({"selected_plan": plan_name, "dry_run": dry_run})
+
+        agents = agents_for_plan(plan_name)
+        result = enforce_minimum_for_agents(
+            agents,
+            min_minutes,
+            dry_run=dry_run,
+            include_snapshots=True,
+        )
+
+        base_context["result"] = result
+
+        status_level = messages.SUCCESS if not result.get("errors") else messages.WARNING
+        summary_msg = (
+            f"Scanned {result.get('scanned', 0)} agent(s); "
+            f"would update {result.get('updated', 0)} schedule(s)"
+        )
+        if result.get("snapshot_updated"):
+            summary_msg += f" and {result.get('snapshot_updated')} snapshot(s)"
+        if dry_run:
+            summary_msg = "[DRY RUN] " + summary_msg
+        self.message_user(request, summary_msg, level=status_level)
+
+        if result.get("errors"):
+            self.message_user(
+                request,
+                f"Encountered {result['errors']} error(s) during enforcement.",
+                level=messages.ERROR,
+            )
+
+        return TemplateResponse(
+            request,
+            "admin/toolconfig_enforce_min_schedule.html",
+            base_context,
+        )
 
 
 @admin.register(PromptConfig)

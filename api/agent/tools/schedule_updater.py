@@ -6,13 +6,13 @@ This module provides functionality for agents to update their own cron schedules
 import logging
 from celery.schedules import crontab, schedule as celery_schedule
 from django.core.exceptions import ValidationError
-from django.utils import timezone
 
 from ..core.schedule_parser import ScheduleParser
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     get_tool_settings_for_owner,
 )
+from api.services.schedule_enforcement import cron_satisfies_min_interval, cron_interval_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -51,60 +51,12 @@ def _min_interval_minutes_for_agent(agent) -> int | None:
 
 
 def _cron_interval_seconds(schedule_obj: crontab, sample_runs: int = 5) -> float:
-    """Return the smallest interval (in seconds) between consecutive cron executions.
-
-    We sample multiple consecutive runs because some crons have uneven spacing
-    between occurrences (e.g., "10,35 * * * *" alternates 25 and 35 minutes).
-    """
-
-    def _next_run_from(start_time):
-        probe_time = start_time
-        original_nowfun = getattr(schedule_obj, "nowfun", None)
-        safety = 0
-        try:
-            schedule_obj.nowfun = lambda: probe_time
-            delta = schedule_obj.remaining_estimate(probe_time)
-            while delta.total_seconds() <= 0 and safety < 10:
-                probe_time = probe_time + abs(delta)
-                schedule_obj.nowfun = lambda: probe_time
-                delta = schedule_obj.remaining_estimate(probe_time)
-                safety += 1
-            return probe_time + delta
-        finally:
-            schedule_obj.nowfun = original_nowfun
-
-    reference_time = timezone.now().replace(second=0, microsecond=0)
-    runs = [_next_run_from(reference_time)]
-    for _ in range(max(sample_runs - 1, 1)):
-        runs.append(_next_run_from(runs[-1]))
-
-    intervals = [
-        float((runs[idx + 1] - runs[idx]).total_seconds())
-        for idx in range(len(runs) - 1)
-    ]
-    return min(intervals) if intervals else float("inf")
+    """Backward-compatible shim for code that calls this helper directly."""
+    return cron_interval_seconds(schedule_obj, sample_runs=sample_runs)
 
 
 def _cron_satisfies_min_interval(schedule_obj: crontab, min_interval_seconds: float) -> bool:
-    try:
-        interval_seconds = _cron_interval_seconds(schedule_obj)
-    except Exception as exc:  # pragma: no cover - fallback path
-        logger.warning("Falling back to basic cron frequency check: %s", exc, exc_info=True)
-        minute_values = sorted(list(schedule_obj.minute))
-        if not minute_values:
-            return True
-        if len(minute_values) == 1:
-            interval_seconds = 3600.0
-        else:
-            gaps = []
-            for idx, minute in enumerate(minute_values):
-                next_minute = minute_values[(idx + 1) % len(minute_values)]
-                gap = (next_minute - minute) % 60
-                if gap == 0:
-                    gap = 60
-                gaps.append(gap * 60)
-            interval_seconds = min(gaps)
-    return interval_seconds >= min_interval_seconds
+    return cron_satisfies_min_interval(schedule_obj, min_interval_seconds)
 
 
 def execute_update_schedule(agent, params: dict) -> dict:
