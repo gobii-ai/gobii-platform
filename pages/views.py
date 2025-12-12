@@ -400,7 +400,7 @@ class HomeAgentSpawnView(TemplateView):
                 # User is already logged in, go directly to contact form
                 return redirect('agent_create_contact')
             else:
-                # User needs to log in first, then continue to contact form
+                # User needs to sign up first, then continue to contact form
                 return redirect_to_login(
                     next=reverse('agent_create_contact'),
                     login_url=_signup_url_with_utms(request),

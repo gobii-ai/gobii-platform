@@ -262,7 +262,9 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         session["utm_querystring"] = "utm_medium=ads"
         session.save()
 
-        response = self.client.post(f"/pretrained-workers/{template.code}/hire/")
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code})
+        )
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
@@ -287,6 +289,21 @@ class AuthLinkTests(TestCase):
 
         self.assertIn(
             f'{reverse("account_login")}?next={next_url}&utm_source=newsletter',
+            response.content.decode(),
+        )
+
+    @tag("batch_pages")
+    def test_login_page_signup_link_keeps_next_and_utms(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_campaign=fall"
+        session.save()
+
+        next_url = reverse("agent_create_contact")
+        response = self.client.get(reverse("account_login"), {"next": next_url})
+        self.assertEqual(response.status_code, 200)
+
+        self.assertIn(
+            f'{reverse("account_signup")}?next={next_url}&utm_campaign=fall',
             response.content.decode(),
         )
 
