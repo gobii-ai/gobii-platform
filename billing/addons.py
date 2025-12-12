@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 from django.apps import apps
-from django.db import transaction
+from django.db import transaction, DatabaseError
 from django.db.models import F, IntegerField, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -62,7 +62,7 @@ class AddonEntitlementService:
                     metadata = getattr(price_obj, "metadata", {}) or {}
                     product_obj = getattr(price_obj, "product", None)
                     product_id = product_id or getattr(product_obj, "id", "") or ""
-        except Exception:
+        except (LookupError, DatabaseError):
             # Best-effort only; metadata is optional for tests and local dev
             metadata = metadata or {}
 
@@ -139,7 +139,7 @@ class AddonEntitlementService:
         qs = AddonEntitlementService._active_entitlements(owner, at_time).filter(price_id=price_id)
         try:
             return int(qs.aggregate(total=Coalesce(Sum("quantity"), 0)).get("total") or 0)
-        except Exception:
+        except (TypeError, ValueError, DatabaseError):
             return 0
 
     @staticmethod
