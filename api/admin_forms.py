@@ -479,6 +479,42 @@ class StripeConfigForm(ModelForm):
         label="Org/Team task pack price ID",
         required=False,
     )
+    task_pack_delta_startup = forms.IntegerField(
+        label="Task pack credits per unit (Startup/Pro)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
+    task_pack_delta_scale = forms.IntegerField(
+        label="Task pack credits per unit (Scale)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
+    task_pack_delta_org_team = forms.IntegerField(
+        label="Task pack credits per unit (Org Team)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
+    contact_pack_delta_startup = forms.IntegerField(
+        label="Contact pack per-unit delta (Startup/Pro)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
+    contact_pack_delta_scale = forms.IntegerField(
+        label="Contact pack per-unit delta (Scale)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
+    contact_pack_delta_org_team = forms.IntegerField(
+        label="Contact pack per-unit delta (Org Team)",
+        required=False,
+        min_value=0,
+        initial=0,
+    )
     org_team_contact_cap_product_id = forms.CharField(
         label="Org/Team contact cap product ID",
         required=False,
@@ -547,6 +583,12 @@ class StripeConfigForm(ModelForm):
 
             self.fields["scale_contact_cap_product_id"].initial = instance.scale_contact_cap_product_id
             self.fields["scale_contact_cap_price_id"].initial = instance.scale_contact_cap_price_id
+            self.fields["task_pack_delta_startup"].initial = getattr(instance, "task_pack_delta_startup", 0)
+            self.fields["task_pack_delta_scale"].initial = getattr(instance, "task_pack_delta_scale", 0)
+            self.fields["task_pack_delta_org_team"].initial = getattr(instance, "task_pack_delta_org_team", 0)
+            self.fields["contact_pack_delta_startup"].initial = getattr(instance, "contact_pack_delta_startup", 0)
+            self.fields["contact_pack_delta_scale"].initial = getattr(instance, "contact_pack_delta_scale", 0)
+            self.fields["contact_pack_delta_org_team"].initial = getattr(instance, "contact_pack_delta_org_team", 0)
 
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
             self.fields["startup_dedicated_ip_price_id"].initial = instance.startup_dedicated_ip_price_id
@@ -614,6 +656,12 @@ class StripeConfigForm(ModelForm):
 
             "scale_contact_cap_product_id",
             "scale_contact_cap_price_id",
+            "task_pack_delta_startup",
+            "task_pack_delta_scale",
+            "task_pack_delta_org_team",
+            "contact_pack_delta_startup",
+            "contact_pack_delta_scale",
+            "contact_pack_delta_org_team",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
             "scale_dedicated_ip_product_id",

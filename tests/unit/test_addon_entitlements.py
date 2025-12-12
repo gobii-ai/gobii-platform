@@ -29,6 +29,12 @@ class AddonEntitlementSyncTests(TestCase):
             scale_contact_cap_price_id="",
             org_team_task_pack_price_id="",
             org_team_contact_cap_price_id="",
+            task_pack_delta_startup=250,
+            task_pack_delta_scale=0,
+            task_pack_delta_org_team=0,
+            contact_pack_delta_startup=0,
+            contact_pack_delta_scale=0,
+            contact_pack_delta_org_team=0,
         )
 
         items = [
@@ -92,6 +98,49 @@ class AddonEntitlementSyncTests(TestCase):
         )
         contact_entitlement.refresh_from_db()
         self.assertLessEqual(contact_entitlement.expires_at, timezone.now())
+
+    @patch("billing.addons.get_stripe_settings")
+    def test_contact_pack_delta_overridden_per_plan(self, mock_settings):
+        mock_settings.return_value = SimpleNamespace(
+            startup_task_pack_price_id="",
+            startup_contact_cap_price_id="price_contact",
+            scale_task_pack_price_id="",
+            scale_contact_cap_price_id="",
+            org_team_task_pack_price_id="",
+            org_team_contact_cap_price_id="",
+            task_pack_delta_startup=0,
+            task_pack_delta_scale=0,
+            task_pack_delta_org_team=0,
+            contact_pack_delta_startup=9,
+            contact_pack_delta_scale=0,
+            contact_pack_delta_org_team=0,
+        )
+
+        items = [
+            {
+                "price": {
+                    "id": "price_contact",
+                    "product": "prod_contact",
+                    "metadata": {},  # no contact_cap_delta; rely on per-plan override
+                },
+                "quantity": 2,
+            },
+        ]
+
+        AddonEntitlementService.sync_subscription_entitlements(
+            owner=self.user,
+            owner_type="user",
+            plan_id=PlanNames.STARTUP,
+            subscription_items=items,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            created_via="test_sync",
+        )
+
+        ent = AddonEntitlementService.get_active_entitlements(self.user, "price_contact").first()
+        self.assertIsNotNone(ent)
+        self.assertEqual(ent.contact_cap_delta, 9)
+        self.assertEqual(ent.quantity, 2)
 
 
 @tag("batch_billing")

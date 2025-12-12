@@ -45,6 +45,12 @@ class StripeSettings:
     org_team_task_pack_price_id: str
     org_team_contact_cap_product_id: str
     org_team_contact_cap_price_id: str
+    task_pack_delta_startup: int
+    task_pack_delta_scale: int
+    task_pack_delta_org_team: int
+    contact_pack_delta_startup: int
+    contact_pack_delta_scale: int
+    contact_pack_delta_org_team: int
     startup_dedicated_ip_product_id: str
     startup_dedicated_ip_price_id: str
     scale_dedicated_ip_product_id: str
@@ -79,6 +85,12 @@ def _env_defaults() -> StripeSettings:
         scale_contact_cap_product_id=env("STRIPE_SCALE_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_scale_contact_cap"),
         scale_contact_cap_price_id=env("STRIPE_SCALE_CONTACT_CAP_PRICE_ID", default="price_dummy_scale_contact_cap"),
         scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
+        task_pack_delta_startup=env.int("STRIPE_TASK_PACK_DELTA_STARTUP", default=0),
+        task_pack_delta_scale=env.int("STRIPE_TASK_PACK_DELTA_SCALE", default=0),
+        task_pack_delta_org_team=env.int("STRIPE_TASK_PACK_DELTA_ORG_TEAM", default=0),
+        contact_pack_delta_startup=env.int("STRIPE_CONTACT_PACK_DELTA_STARTUP", default=0),
+        contact_pack_delta_scale=env.int("STRIPE_CONTACT_PACK_DELTA_SCALE", default=0),
+        contact_pack_delta_org_team=env.int("STRIPE_CONTACT_PACK_DELTA_ORG_TEAM", default=0),
         startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
         startup_dedicated_ip_price_id=env("STRIPE_STARTUP_DEDICATED_IP_PRICE_ID", default="price_dummy_startup_dedicated_ip"),
         scale_dedicated_ip_product_id=env("STRIPE_SCALE_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_scale_dedicated_ip"),
@@ -168,6 +180,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_price_id=config.org_team_price_id or "",
         org_team_task_pack_product_id=config.org_team_task_pack_product_id or "",
         org_team_task_pack_price_id=config.org_team_task_pack_price_id or "",
+        task_pack_delta_startup=config.task_pack_delta_startup if hasattr(config, "task_pack_delta_startup") else env_defaults.task_pack_delta_startup,
+        task_pack_delta_scale=config.task_pack_delta_scale if hasattr(config, "task_pack_delta_scale") else env_defaults.task_pack_delta_scale,
+        task_pack_delta_org_team=config.task_pack_delta_org_team if hasattr(config, "task_pack_delta_org_team") else env_defaults.task_pack_delta_org_team,
+        contact_pack_delta_startup=getattr(config, "contact_pack_delta_startup", env_defaults.contact_pack_delta_startup),
+        contact_pack_delta_scale=getattr(config, "contact_pack_delta_scale", env_defaults.contact_pack_delta_scale),
+        contact_pack_delta_org_team=getattr(config, "contact_pack_delta_org_team", env_defaults.contact_pack_delta_org_team),
         org_team_additional_task_price_id=org_team_additional_price,
         org_team_contact_cap_product_id=org_team_contact_cap_product_id,
         org_team_contact_cap_price_id=org_team_contact_cap_price_id,
