@@ -188,6 +188,29 @@ class AddonEntitlementService:
                 task_credits_delta=0,
                 contact_cap_delta=0,
             )
+
+            # Override task pack delta per plan when using a shared price
+            if owner_type == "organization":
+                cfg = AddonPriceConfig(
+                    price_id=cfg.price_id,
+                    product_id=cfg.product_id,
+                    task_credits_delta=stripe_settings.task_pack_delta_org_team if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
+                    contact_cap_delta=stripe_settings.contact_pack_delta_org_team if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                )
+            elif plan_id == PlanNames.STARTUP:
+                cfg = AddonPriceConfig(
+                    price_id=cfg.price_id,
+                    product_id=cfg.product_id,
+                    task_credits_delta=stripe_settings.task_pack_delta_startup if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
+                    contact_cap_delta=stripe_settings.contact_pack_delta_startup if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                )
+            elif plan_id == PlanNames.SCALE:
+                cfg = AddonPriceConfig(
+                    price_id=cfg.price_id,
+                    product_id=cfg.product_id,
+                    task_credits_delta=stripe_settings.task_pack_delta_scale if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
+                    contact_cap_delta=stripe_settings.contact_pack_delta_scale if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                )
             price_map[pid] = cfg
         return price_map
 

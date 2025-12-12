@@ -3338,6 +3338,72 @@ class StripeConfig(models.Model):
         self.set_value("org_team_task_pack_price_id", value)
 
     @property
+    def task_pack_delta_startup(self) -> int:
+        try:
+            return int(self.get_value("task_pack_delta_startup", "0") or 0)
+        except Exception:
+            return 0
+
+    @task_pack_delta_startup.setter
+    def task_pack_delta_startup(self, value: int | None) -> None:
+        self.set_value("task_pack_delta_startup", str(value) if value is not None else None)
+
+    @property
+    def task_pack_delta_scale(self) -> int:
+        try:
+            return int(self.get_value("task_pack_delta_scale", "0") or 0)
+        except Exception:
+            return 0
+
+    @task_pack_delta_scale.setter
+    def task_pack_delta_scale(self, value: int | None) -> None:
+        self.set_value("task_pack_delta_scale", str(value) if value is not None else None)
+
+    @property
+    def task_pack_delta_org_team(self) -> int:
+        try:
+            return int(self.get_value("task_pack_delta_org_team", "0") or 0)
+        except Exception:
+            return 0
+
+    @task_pack_delta_org_team.setter
+    def task_pack_delta_org_team(self, value: int | None) -> None:
+        self.set_value("task_pack_delta_org_team", str(value) if value is not None else None)
+
+    @property
+    def contact_pack_delta_startup(self) -> int:
+        try:
+            return int(self.get_value("contact_pack_delta_startup", "0") or 0)
+        except Exception:
+            return 0
+
+    @contact_pack_delta_startup.setter
+    def contact_pack_delta_startup(self, value: int | None) -> None:
+        self.set_value("contact_pack_delta_startup", str(value) if value is not None else None)
+
+    @property
+    def contact_pack_delta_scale(self) -> int:
+        try:
+            return int(self.get_value("contact_pack_delta_scale", "0") or 0)
+        except Exception:
+            return 0
+
+    @contact_pack_delta_scale.setter
+    def contact_pack_delta_scale(self, value: int | None) -> None:
+        self.set_value("contact_pack_delta_scale", str(value) if value is not None else None)
+
+    @property
+    def contact_pack_delta_org_team(self) -> int:
+        try:
+            return int(self.get_value("contact_pack_delta_org_team", "0") or 0)
+        except Exception:
+            return 0
+
+    @contact_pack_delta_org_team.setter
+    def contact_pack_delta_org_team(self, value: int | None) -> None:
+        self.set_value("contact_pack_delta_org_team", str(value) if value is not None else None)
+
+    @property
     def org_team_contact_cap_product_id(self) -> str:
         return self.get_value("org_team_contact_cap_product_id")
 
