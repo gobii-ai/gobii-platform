@@ -78,6 +78,7 @@ class AddonEntitlementSyncTests(TestCase):
         )
         self.assertEqual(addon_blocks.count(), 1)
         self.assertEqual(int(addon_blocks.first().credits), 500)
+        self.assertEqual(addon_blocks.first().grant_type, "task_pack")
 
         # Remove contact pack and ensure it expires
         AddonEntitlementService.sync_subscription_entitlements(
