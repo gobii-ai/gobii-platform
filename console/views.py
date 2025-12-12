@@ -30,6 +30,7 @@ from functools import cached_property, wraps
 import uuid
 
 from agents.services import AgentService, PretrainedWorkerTemplateService
+from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
@@ -8284,6 +8285,62 @@ def _update_subscription_item_quantity_generic(subscription_id: str, price_id: s
         stripe.SubscriptionItem.delete(existing_item.get("id"))
 
 
+from typing import Mapping
+
+
+def _get_subscription_item_for_price(subscription_data: Mapping[str, Any], price_id: str) -> Mapping[str, Any] | None:
+    items = (subscription_data.get("items") or {}).get("data", []) if isinstance(subscription_data, Mapping) else []
+    for item in items or []:
+        price = item.get("price") or {}
+        if price.get("id") == price_id:
+            return item
+    return None
+
+
+def _start_addon_portal_session(subscription_id: str, customer_id: str, price_id: str, quantity: int, return_url: str, item_id: str | None = None) -> str:
+    """Create a billing portal session to confirm add-on quantity changes."""
+    flow_data = {
+        "type": "subscription_update_confirm",
+        "subscription_update_confirm": {
+            "subscription": subscription_id,
+            "items": [
+                {
+                    "id": item_id,
+                    "price": price_id,
+                    "quantity": quantity,
+                }
+            ],
+        },
+    }
+
+    session = stripe.billing_portal.Session.create(
+        api_key=stripe.api_key,
+        customer=customer_id,
+        flow_data=flow_data,
+        return_url=return_url,
+    )
+    return session.url
+
+
+def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int, success_url: str, cancel_url: str) -> str:
+    """Fallback to Checkout when the subscription lacks the add-on item."""
+    session = stripe.checkout.Session.create(
+        api_key=stripe.api_key,
+        customer=customer_id,
+        success_url=success_url,
+        cancel_url=cancel_url,
+        mode="subscription",
+        allow_promotion_codes=True,
+        line_items=[
+            {
+                "price": price_id,
+                "quantity": quantity,
+            }
+        ],
+    )
+    return session.url
+
+
 def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: int) -> None:
     """Ensure the Stripe subscription item reflects the desired dedicated IP quantity."""
     desired_qty = int(desired_qty)
@@ -8359,8 +8416,55 @@ def update_task_pack_quantity(request, owner, owner_type):
     try:
         _assign_stripe_api_key()
         desired_qty = int(form.cleaned_data["quantity"])
-        _update_subscription_item_quantity_generic(subscription.id, price_id, desired_qty)
-        messages.success(request, "Task pack quantity updated.")
+        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
+        customer_id = (stripe_subscription.get("customer") or "")
+        if not customer_id:
+            messages.error(request, "Stripe customer not found for this subscription.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        return_url = request.build_absolute_uri(_billing_redirect(owner, owner_type))
+        item = _get_subscription_item_for_price(stripe_subscription, price_id)
+        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
+        if item:
+            if len(items_data) > 1:
+                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
+                # Keep entitlements in sync immediately when bypassing portal
+                try:
+                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+                    tz = timezone.get_current_timezone()
+                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
+                    period_end_dt = timezone.make_aware(datetime.combine(period_end, datetime.min.time()), tz)
+                    AddonEntitlementService.sync_subscription_entitlements(
+                        owner=owner,
+                        owner_type=owner_type,
+                        plan_id=plan_id,
+                        subscription_items=items_data,
+                        period_start=period_start_dt,
+                        period_end=period_end_dt,
+                        created_via="console_direct_update",
+                    )
+                except Exception:
+                    logger.exception("Failed to sync add-on entitlements after direct update for %s", getattr(owner, "id", None) or owner)
+                messages.success(request, "Task pack quantity updated.")
+                return redirect(_billing_redirect(owner, owner_type))
+            session_url = _start_addon_portal_session(
+                subscription_id=subscription.id,
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                item_id=item.get("id"),
+                return_url=return_url,
+            )
+        else:
+            cancel_url = return_url
+            session_url = _start_addon_checkout_session(
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                success_url=return_url,
+                cancel_url=cancel_url,
+            )
+        return redirect(session_url)
     except Exception as exc:
         logger.exception("Failed to update task pack quantity for %s", getattr(owner, "id", None) or owner)
         messages.error(request, f"Failed to update task packs: {exc}")
@@ -8399,8 +8503,54 @@ def update_contact_pack_quantity(request, owner, owner_type):
     try:
         _assign_stripe_api_key()
         desired_qty = int(form.cleaned_data["quantity"])
-        _update_subscription_item_quantity_generic(subscription.id, price_id, desired_qty)
-        messages.success(request, "Contact pack quantity updated.")
+        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
+        customer_id = (stripe_subscription.get("customer") or "")
+        if not customer_id:
+            messages.error(request, "Stripe customer not found for this subscription.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        return_url = request.build_absolute_uri(_billing_redirect(owner, owner_type))
+        item = _get_subscription_item_for_price(stripe_subscription, price_id)
+        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
+        if item:
+            if len(items_data) > 1:
+                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
+                try:
+                    period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+                    tz = timezone.get_current_timezone()
+                    period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
+                    period_end_dt = timezone.make_aware(datetime.combine(period_end, datetime.min.time()), tz)
+                    AddonEntitlementService.sync_subscription_entitlements(
+                        owner=owner,
+                        owner_type=owner_type,
+                        plan_id=plan_id,
+                        subscription_items=items_data,
+                        period_start=period_start_dt,
+                        period_end=period_end_dt,
+                        created_via="console_direct_update",
+                    )
+                except Exception:
+                    logger.exception("Failed to sync contact add-on entitlements after direct update for %s", getattr(owner, "id", None) or owner)
+                messages.success(request, "Contact pack quantity updated.")
+                return redirect(_billing_redirect(owner, owner_type))
+            session_url = _start_addon_portal_session(
+                subscription_id=subscription.id,
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                item_id=item.get("id"),
+                return_url=return_url,
+            )
+        else:
+            cancel_url = return_url
+            session_url = _start_addon_checkout_session(
+                customer_id=customer_id,
+                price_id=price_id,
+                quantity=desired_qty,
+                success_url=return_url,
+                cancel_url=cancel_url,
+            )
+        return redirect(session_url)
     except Exception as exc:
         logger.exception("Failed to update contact pack quantity for %s", getattr(owner, "id", None) or owner)
         messages.error(request, f"Failed to update contact packs: {exc}")
