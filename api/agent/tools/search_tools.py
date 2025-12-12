@@ -11,6 +11,7 @@ import re
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 import litellm  # re-exported for tests that patch LiteLLM directly
+from litellm import drop_params
 from opentelemetry import trace
 
 from ...models import PersistentAgent, PersistentAgentCompletion
@@ -215,6 +216,7 @@ def _search_with_llm(
                     ],
                     params=params,
                     tools=[enable_tools_def],
+                    drop_params=True,
                     **run_kwargs,
                 )
 

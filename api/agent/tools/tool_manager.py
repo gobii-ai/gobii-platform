@@ -377,6 +377,62 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     }
 
 
+def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
+    """
+    Trust a tool name and ensure it is marked enabled without refreshing the MCP catalog.
+
+    This bypasses MCP server discovery and only touches the persistence row + LRU eviction.
+    """
+    if not tool_name:
+        return {"status": "error", "message": "Tool name is required"}
+
+    now = datetime.now(UTC)
+    try:
+        row = PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name=tool_name,
+        ).first()
+    except Exception as exc:
+        logger.error("Failed to look up enabled tool %s: %s", tool_name, exc)
+        return {"status": "error", "message": str(exc)}
+
+    if row:
+        row.last_used_at = now
+        row.usage_count = (row.usage_count or 0) + 1
+        row.save(update_fields=["last_used_at", "usage_count"])
+        return {
+            "status": "success",
+            "message": f"Tool '{tool_name}' is already enabled (metadata untouched)",
+            "enabled": tool_name,
+            "disabled": None,
+        }
+
+    try:
+        row = PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name=tool_name,
+            last_used_at=now,
+            usage_count=1,
+        )
+    except Exception as exc:
+        logger.error("Failed to mark tool %s enabled without discovery: %s", tool_name, exc)
+        return {"status": "error", "message": str(exc)}
+
+    evicted = _evict_surplus_tools(agent, exclude=[tool_name])
+    disabled_tool = evicted[0] if evicted else None
+
+    message = f"Marked tool '{tool_name}' enabled without discovery"
+    if disabled_tool:
+        message += f" (disabled '{disabled_tool}' due to tool limit)"
+
+    return {
+        "status": "success",
+        "message": message,
+        "enabled": tool_name,
+        "disabled": disabled_tool,
+    }
+
+
 def ensure_default_tools_enabled(agent: PersistentAgent) -> None:
     """Ensure the default MCP tool set is enabled for new agents."""
     manager = _get_manager()
