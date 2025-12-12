@@ -19,7 +19,7 @@ from djstripe.models import Subscription, Customer, Invoice
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
-from config.plans import PLAN_CONFIG, get_plan_by_product_id
+from config.plans import PLAN_CONFIG, get_plan_by_product_id, get_plan_product_id
 from config.stripe_config import get_stripe_settings
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
