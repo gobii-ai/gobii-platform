@@ -38,6 +38,7 @@ from api.agent.tools.tool_manager import (
     ensure_default_tools_enabled,
     get_enabled_tool_definitions,
     execute_enabled_tool,
+    mark_tool_enabled_without_discovery,
 )
 from api.agent.tools.search_tools import (
     execute_search_tools,
@@ -1048,7 +1049,42 @@ class MCPToolFunctionsTests(TestCase):
         row.refresh_from_db()
         from django.utils import timezone
         self.assertGreater(row.last_used_at, timezone.now() - timezone.timedelta(seconds=10))
-        
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_mark_tool_enabled_without_discovery_skips_discovery(self, mock_get_manager):
+        result = mark_tool_enabled_without_discovery(self.agent, "mcp_test_tool")
+
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent, tool_full_name="mcp_test_tool"
+            ).exists()
+        )
+        mock_get_manager.assert_not_called()
+
+    @tag("batch_mcp_tools")
+    @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=1)
+    def test_mark_tool_enabled_without_discovery_evicts_oldest(self, mock_limit):
+        mark_tool_enabled_without_discovery(self.agent, "mcp_old_tool")
+        old_row = PersistentAgentEnabledTool.objects.get(
+            agent=self.agent, tool_full_name="mcp_old_tool"
+        )
+        old_row.last_used_at = timezone.now() - timedelta(days=1)
+        old_row.save(update_fields=["last_used_at"])
+
+        result = mark_tool_enabled_without_discovery(self.agent, "mcp_new_tool")
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("mcp_new_tool", result["message"])
+        names = set(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent).values_list(
+                "tool_full_name", flat=True
+            )
+        )
+        self.assertIn("mcp_new_tool", names)
+        self.assertNotIn("mcp_old_tool", names)
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_enable_mcp_tool_with_lru_eviction(self, mock_init, mock_get_tools):

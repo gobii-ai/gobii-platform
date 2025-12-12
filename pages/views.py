@@ -130,9 +130,9 @@ def _collect_dedicated_ip_line_items(existing_subs: list[dict], stripe_settings)
 
 
 
-def _login_url_with_utms(request) -> str:
-    """Append stored UTM query params to the login URL when available."""
-    base_url = resolve_url(settings.LOGIN_URL)
+def _signup_url_with_utms(request) -> str:
+    """Append stored UTM query params to the signup URL when available."""
+    base_url = resolve_url("account_signup")
     utm_qs = request.session.get("utm_querystring") or ""
     if utm_qs:
         separator = "&" if "?" in base_url else "?"
@@ -400,10 +400,10 @@ class HomeAgentSpawnView(TemplateView):
                 # User is already logged in, go directly to contact form
                 return redirect('agent_create_contact')
             else:
-                # User needs to log in first, then continue to contact form
+                # User needs to sign up first, then continue to contact form
                 return redirect_to_login(
                     next=reverse('agent_create_contact'),
-                    login_url=_login_url_with_utms(request),
+                    login_url=_signup_url_with_utms(request),
                 )
         
         # If form is invalid, re-render home page with errors
@@ -519,7 +519,7 @@ class PretrainedWorkerHireView(View):
 
         return redirect_to_login(
             next=reverse('agent_create_contact'),
-            login_url=_login_url_with_utms(request),
+            login_url=_signup_url_with_utms(request),
         )
 
 

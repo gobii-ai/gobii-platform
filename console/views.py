@@ -311,7 +311,7 @@ from constants.stripe import (
 )
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
-from api.agent.tools.tool_manager import enable_mcp_tool
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tasks import process_agent_events_task
 from api.services.persistent_agents import (
     PersistentAgentProvisioningError,
@@ -2376,7 +2376,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                     if selected_template and selected_template.default_tools:
                         for tool_name in selected_template.default_tools:
                             try:
-                                enable_mcp_tool(persistent_agent, tool_name)
+                                mark_tool_enabled_without_discovery(persistent_agent, tool_name)
                             except Exception as exc:
                                 logger.warning(
                                     "Failed to enable MCP tool '%s' for agent %s: %s",
