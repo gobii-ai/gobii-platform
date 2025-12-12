@@ -51,6 +51,7 @@ from api.services.browser_settings import (
     DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
     DEFAULT_MAX_BROWSER_STEPS,
     DEFAULT_MAX_BROWSER_TASKS,
+    DEFAULT_VISION_DETAIL_LEVEL,
 )
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -718,6 +719,12 @@ class DailyCreditConfig(models.Model):
         return f"{self.plan_name} daily credit pacing configuration"
 
 
+class VisionDetailLevelChoices(models.TextChoices):
+    AUTO = "auto", "Auto"
+    LOW = "low", "Low"
+    HIGH = "high", "High"
+
+
 class BrowserConfig(models.Model):
     """Per-plan browser agent configuration."""
 
@@ -739,6 +746,12 @@ class BrowserConfig(models.Model):
         default=DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
         help_text="Maximum concurrently active browser tasks; set to 0 for unlimited.",
     )
+    vision_detail_level = models.CharField(
+        max_length=8,
+        choices=VisionDetailLevelChoices.choices,
+        default=DEFAULT_VISION_DETAIL_LEVEL,
+        help_text="Vision detail level to pass to browser_use when vision support is enabled.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -749,6 +762,7 @@ class BrowserConfig(models.Model):
 
     def save(self, *args, **kwargs):
         self.plan_name = (self.plan_name or "").lower()
+        self.vision_detail_level = (self.vision_detail_level or DEFAULT_VISION_DETAIL_LEVEL).lower()
         result = super().save(*args, **kwargs)
         from api.services.browser_settings import invalidate_browser_settings_cache
 
