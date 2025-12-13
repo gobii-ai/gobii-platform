@@ -174,3 +174,30 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(cleaned[0]["updates"]), 2)
         self.assertNotIn("text_html", cleaned[0]["updates"][0])
         self.assertEqual(cleaned[0]["updates"][0]["text"], "plain")
+
+    def test_brightdata_pdf_urls_rejected(self):
+        tool_info = MCPToolInfo(
+            config_id=self.runtime.config_id,
+            full_name="mcp_brightdata_scrape_as_markdown",
+            server_name="brightdata",
+            tool_name="scrape_as_markdown",
+            description="Scrape",
+            parameters={},
+        )
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        params = {"url": "https://example.com/doc.pdf"}
+
+        with patch.object(manager, "_ensure_event_loop", return_value=MagicMock()), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock) as mock_exec, \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                params,
+            )
+
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn("PDF", response.get("message", ""))
+        self.assertIn("spawn_web_task", response.get("message", ""))
+        mock_exec.assert_not_called()
