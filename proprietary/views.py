@@ -39,10 +39,13 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         # When true, we'll say Upgrade for Startup plan
         startup_cta_text = "Choose Pro"
         scale_cta_text = "Choose Scale"
+        free_cta = "Get started for free"
         startup_cta_disabled = False
         scale_cta_disabled = False
         startup_current = False
         scale_current = False
+        free_current = False
+        free_disabled = False
 
         current_plan_id = ""
         plan_id = ""
@@ -54,8 +57,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 current_plan_id = plan_id
 
                 if plan_id == PlanNames.FREE:
+                    free_cta = "Current Plan"
                     startup_cta_text = "Upgrade to Pro"
                     scale_cta_text = "Upgrade to Scale"
+                    free_current = True
+                    free_disabled = True
                 elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"
                     scale_cta_text = "Upgrade to Scale"
@@ -92,6 +98,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "highlight": False,
                 "badge": None,
                 "disabled": False,
+                "current_plan": free_current,
+                "cta_disabled": free_disabled,
                 "features": [
                     format_contacts(PlanNames.FREE),
                     "5 always-on agents",
@@ -100,7 +108,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     "Community support",
                     "Standard rate limits",
                 ],
-                "cta": "Get started for free",
+                "cta": free_cta,
                 "cta_url": "/accounts/login/",
             },
             {
