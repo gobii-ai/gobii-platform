@@ -1,6 +1,6 @@
 import json
 import logging
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Tuple
 
 
 logger = logging.getLogger(__name__)
@@ -22,31 +22,43 @@ class MCPToolResultAdapter:
         return result
 
 
-class BrightDataSearchEngineAdapter(MCPToolResultAdapter):
+class BrightDataAdapterBase(MCPToolResultAdapter):
+    """Shared helpers for Bright Data adapters."""
+
+    def _extract_json_payload(self, result: Any) -> Optional[Tuple[Any, Any]]:
+        content_blocks = getattr(result, "content", None)
+        if not content_blocks or not isinstance(content_blocks, (list, tuple)):
+            return None
+
+        try:
+            first_block = content_blocks[0]
+        except IndexError:
+            return None
+
+        raw_text = getattr(first_block, "text", None)
+        if not raw_text or not isinstance(raw_text, str):
+            return None
+
+        try:
+            payload = json.loads(raw_text)
+        except json.JSONDecodeError:
+            return None
+
+        return first_block, payload
+
+
+class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
     """Strip heavy fields from Bright Data search responses."""
 
     server_name = "brightdata"
     tool_name = "search_engine"
 
     def adapt(self, result: Any) -> Any:
-        content_blocks = getattr(result, "content", None)
-        if not content_blocks:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
             return result
 
-        try:
-            first_block = content_blocks[0]
-        except Exception:
-            return result
-
-        raw_text = getattr(first_block, "text", None)
-        if not raw_text or not isinstance(raw_text, str):
-            return result
-
-        try:
-            payload = json.loads(raw_text)
-        except Exception:
-            return result
-
+        first_block, payload = parsed
         organic_results = payload.get("organic")
         if isinstance(organic_results, list):
             for item in organic_results:
@@ -58,30 +70,18 @@ class BrightDataSearchEngineAdapter(MCPToolResultAdapter):
         return result
 
 
-class BrightDataLinkedInCompanyProfileAdapter(MCPToolResultAdapter):
+class BrightDataLinkedInCompanyProfileAdapter(BrightDataAdapterBase):
     """Strip HTML blobs from Bright Data LinkedIn company profiles."""
 
     server_name = "brightdata"
     tool_name = "web_data_linkedin_company_profile"
 
     def adapt(self, result: Any) -> Any:
-        content_blocks = getattr(result, "content", None)
-        if not content_blocks:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
             return result
 
-        try:
-            first_block = content_blocks[0]
-        except Exception:
-            return result
-
-        raw_text = getattr(first_block, "text", None)
-        if not raw_text or not isinstance(raw_text, str):
-            return result
-
-        try:
-            payload = json.loads(raw_text)
-        except Exception:
-            return result
+        first_block, payload = parsed
 
         def strip_updates(node: Any):
             if isinstance(node, list):
@@ -101,31 +101,18 @@ class BrightDataLinkedInCompanyProfileAdapter(MCPToolResultAdapter):
         return result
 
 
-class BrightDataSearchEngineBatchAdapter(MCPToolResultAdapter):
+class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
     """Strip heavy fields from Bright Data batched search responses."""
 
     server_name = "brightdata"
     tool_name = "search_engine_batch"
 
     def adapt(self, result: Any) -> Any:
-        content_blocks = getattr(result, "content", None)
-        if not content_blocks:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
             return result
 
-        try:
-            first_block = content_blocks[0]
-        except Exception:
-            return result
-
-        raw_text = getattr(first_block, "text", None)
-        if not raw_text or not isinstance(raw_text, str):
-            return result
-
-        try:
-            payload = json.loads(raw_text)
-        except Exception:
-            return result
-
+        first_block, payload = parsed
         if isinstance(payload, list):
             for item in payload:
                 if not isinstance(item, dict):

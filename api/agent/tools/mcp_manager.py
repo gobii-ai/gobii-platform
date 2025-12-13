@@ -1201,11 +1201,13 @@ class MCPToolManager:
 
     @staticmethod
     def _is_pdf_url(url: str) -> bool:
+        if not isinstance(url, str):
+            return False
         try:
             parsed = urlparse(url)
-            return parsed.path.lower().endswith(".pdf")
-        except Exception:
+        except ValueError:
             return False
+        return parsed.path.lower().endswith(".pdf")
 
     def _brightdata_pdf_guard(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict[str, str]]:
         if tool_name not in {"scrape_as_markdown", "scrape_as_html"}:

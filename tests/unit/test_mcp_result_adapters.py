@@ -5,7 +5,10 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
 
 from api.agent.tools.mcp_manager import MCPServerRuntime, MCPToolInfo, MCPToolManager
-from api.agent.tools.mcp_result_adapters import BrightDataSearchEngineAdapter
+from api.agent.tools.mcp_result_adapters import (
+    BrightDataSearchEngineAdapter,
+    BrightDataSearchEngineBatchAdapter,
+)
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
@@ -57,8 +60,6 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
                 }
             }
         ]
-        from api.agent.tools.mcp_result_adapters import BrightDataSearchEngineBatchAdapter
-
         adapter = BrightDataSearchEngineBatchAdapter()
         result = DummyResult(json.dumps(payload))
 
