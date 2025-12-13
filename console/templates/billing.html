@@ -214,7 +214,7 @@
           {% endif %}
         {% else %}
           <div class="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Upgrade to a paid plan to enable dedicated IPs.
+            Upgrade to a <a href="{% url "proprietary:pricing" %}" title="Gobii Pro Plan" class="underline">Pro</a> or <a href="{% url "proprietary:pricing" %}" title="Gobii Scale Plan" class="underline">Scale</a> plan to enable dedicated IPs.
           </div>
         {% endif %}
 
@@ -263,6 +263,7 @@
         {% endif %}
       </div>
 
+      {% if account.paid == True %}
       <div class="gobii-card-base p-6"
            x-data="billingSettings({ enabled: {{ org_auto_purchase_state.enabled|yesno:'true,false' }}, infinite: {{ org_auto_purchase_state.infinite|yesno:'true,false' }}, maxTasks: {{ org_auto_purchase_state.max_tasks }}, canModify: {{ org_can_manage_billing|yesno:'true,false' }} })"
            x-init="loadSettings()">
@@ -314,7 +315,7 @@
           </div>
         </div>
       </div>
-
+      {% endif %}
     </div>
     {% endwith %}
   {% else %}
@@ -333,6 +334,11 @@
             <div class="flex flex-col">
               <span class="text-sm font-medium text-gray-500">Subscription Plan</span>
               <span class="text-lg font-semibold text-gray-800">{{ subscription_plan.name }}</span>
+              {% if account.paid == False or account.plan == "startup" %}
+              <span class="text-xs text-gray-400 mt-1">
+                <a href="{% url 'proprietary:pricing' %}" class="underline" title="Upgrade for additional features, tasks, contacts, and more.">Upgrade</a>
+              </span>
+              {% endif %}
             </div>
             <div class="mt-2 sm:mt-0">
               <span class="inline-flex items-center py-1.5 px-3 rounded-full text-sm font-medium bg-blue-50 text-blue-700">
@@ -365,7 +371,7 @@
               </form>
             {% else %}
               <div class="mt-3 rounded-md border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
-                Upgrade to a paid plan to enable dedicated IPs.
+                Upgrade to a <a href="{% url "proprietary:pricing" %}" title="Gobii Pro Plan" class="underline">Pro</a> or <a href="{% url "proprietary:pricing" %}" title="Gobii Scale Plan" class="underline">Scale</a> plan to enable dedicated IPs.
               </div>
             {% endif %}
 
@@ -451,6 +457,7 @@
             </div>
             {% endif %}
 
+            {% if account.paid == True  %}
             <div class="border-t border-gray-100"></div>
 
             <div class="flex flex-col space-y-3">
@@ -470,6 +477,7 @@
                   <label for="auto-purchase-toggle" class="sr-only">Enable auto-purchase</label>
                 </div>
               </div>
+              {% endif %}
 
               <div x-show="enabled" x-transition class="pl-4 border-l-2 border-blue-100 space-y-3">
                 <div class="flex items-center space-x-2">
