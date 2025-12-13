@@ -46,6 +46,31 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image", cleaned["organic"][1])
         self.assertEqual(cleaned["organic"][0]["title"], "Example")
 
+    def test_batch_adapter_strips_nested_images(self):
+        payload = [
+            {
+                "result": {
+                    "organic": [
+                        {"title": "One", "image": "http://example.com/1.png", "image_base64": "abc"},
+                        {"title": "Two", "image": "http://example.com/2.png"},
+                    ]
+                }
+            }
+        ]
+        from api.agent.tools.mcp_result_adapters import BrightDataSearchEngineBatchAdapter
+
+        adapter = BrightDataSearchEngineBatchAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        organic = cleaned[0]["result"]["organic"]
+        self.assertNotIn("image", organic[0])
+        self.assertNotIn("image_base64", organic[0])
+        self.assertNotIn("image", organic[1])
+        self.assertEqual(organic[0]["title"], "One")
+
 
 @tag("batch_mcp_tools")
 class MCPToolManagerAdapterIntegrationTests(TestCase):

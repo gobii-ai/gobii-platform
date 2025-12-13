@@ -101,6 +101,48 @@ class BrightDataLinkedInCompanyProfileAdapter(MCPToolResultAdapter):
         return result
 
 
+class BrightDataSearchEngineBatchAdapter(MCPToolResultAdapter):
+    """Strip heavy fields from Bright Data batched search responses."""
+
+    server_name = "brightdata"
+    tool_name = "search_engine_batch"
+
+    def adapt(self, result: Any) -> Any:
+        content_blocks = getattr(result, "content", None)
+        if not content_blocks:
+            return result
+
+        try:
+            first_block = content_blocks[0]
+        except Exception:
+            return result
+
+        raw_text = getattr(first_block, "text", None)
+        if not raw_text or not isinstance(raw_text, str):
+            return result
+
+        try:
+            payload = json.loads(raw_text)
+        except Exception:
+            return result
+
+        if isinstance(payload, list):
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                results = item.get("result")
+                if isinstance(results, dict):
+                    organic_results = results.get("organic")
+                    if isinstance(organic_results, list):
+                        for entry in organic_results:
+                            if isinstance(entry, dict):
+                                entry.pop("image", None)
+                                entry.pop("image_base64", None)
+
+        first_block.text = json.dumps(payload)
+        return result
+
+
 class MCPResultAdapterRegistry:
     """Registry of adapters keyed by provider/tool."""
 
@@ -113,6 +155,7 @@ class MCPResultAdapterRegistry:
             adapters=[
                 BrightDataSearchEngineAdapter(),
                 BrightDataLinkedInCompanyProfileAdapter(),
+                BrightDataSearchEngineBatchAdapter(),
             ]
         )
 
