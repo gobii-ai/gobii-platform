@@ -36,6 +36,7 @@ from django.conf import settings
 from django.db.models import Max
 from django.utils import timezone
 
+from .mcp_result_adapters import MCPResultAdapterRegistry
 from ...models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -231,6 +232,7 @@ class MCPToolManager:
         self._pd_agent_clients: Dict[str, Client] = {}
         self._httpx_client_factory = self._build_httpx_client_factory()
         self._pd_missing_credentials_logged = False
+        self._result_adapters = MCPResultAdapterRegistry.default()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -1011,6 +1013,7 @@ class MCPToolManager:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
+            result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
             # Convert result to consistent format
             if hasattr(result, 'is_error') and result.is_error:
@@ -1172,6 +1175,10 @@ class MCPToolManager:
                 "message": str(e)
             }
     
+    def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
+        """Run the tool response through any registered adapters."""
+        return self._result_adapters.adapt(server_name, tool_name, result)
+
     async def _execute_async(self, client: Client, tool_name: str, params: Dict[str, Any]):
         """Execute a tool asynchronously."""
         async with client:
