@@ -336,7 +336,7 @@
               <span class="text-lg font-semibold text-gray-800">{{ subscription_plan.name }}</span>
               {% if account.paid == False or account.plan == "startup" %}
               <span class="text-xs text-gray-400 mt-1">
-                <a href="{%  url 'proprietary:pricing' %}" class="underline" title="Upgrade for additional features, tasks, contacts, and more.">Upgrade</a>
+                <a href="{% url 'proprietary:pricing' %}" class="underline" title="Upgrade for additional features, tasks, contacts, and more.">Upgrade</a>
               </span>
               {% endif %}
             </div>
