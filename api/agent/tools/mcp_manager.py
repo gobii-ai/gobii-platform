@@ -19,6 +19,7 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
+from urllib.parse import urlparse
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
@@ -36,6 +37,7 @@ from django.conf import settings
 from django.db.models import Max
 from django.utils import timezone
 
+from .mcp_result_adapters import MCPResultAdapterRegistry
 from ...models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -231,6 +233,7 @@ class MCPToolManager:
         self._pd_agent_clients: Dict[str, Client] = {}
         self._httpx_client_factory = self._build_httpx_client_factory()
         self._pd_missing_credentials_logged = False
+        self._result_adapters = MCPResultAdapterRegistry.default()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
         """Ensure we have an event loop for async operations."""
@@ -989,6 +992,11 @@ class MCPToolManager:
                 "message": f"MCP server '{server_name}' is not available",
             }
 
+        if server_name == "brightdata":
+            pdf_error = self._brightdata_pdf_guard(actual_tool_name, params)
+            if pdf_error:
+                return pdf_error
+
         proxy_url = None
         proxy_error: Optional[str] = None
         if runtime and runtime.url:
@@ -1011,6 +1019,7 @@ class MCPToolManager:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
+            result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
             # Convert result to consistent format
             if hasattr(result, 'is_error') and result.is_error:
@@ -1172,6 +1181,45 @@ class MCPToolManager:
                 "message": str(e)
             }
     
+    def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
+        """Run the tool response through any registered adapters."""
+        return self._result_adapters.adapt(server_name, tool_name, result)
+
+    @staticmethod
+    def _extract_candidate_urls(params: Dict[str, Any]) -> List[str]:
+        if not isinstance(params, dict):
+            return []
+        urls: List[str] = []
+        string_keys = {"url", "link", "page", "target_url"}
+        list_keys = {"urls", "links", "pages", "targets", "target_urls"}
+        for key, value in params.items():
+            if key in string_keys and isinstance(value, str):
+                urls.append(value)
+            elif key in list_keys and isinstance(value, list):
+                urls.extend([v for v in value if isinstance(v, str)])
+        return urls
+
+    @staticmethod
+    def _is_pdf_url(url: str) -> bool:
+        if not isinstance(url, str):
+            return False
+        try:
+            parsed = urlparse(url)
+        except ValueError:
+            return False
+        return parsed.path.lower().endswith(".pdf")
+
+    def _brightdata_pdf_guard(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        if tool_name not in {"scrape_as_markdown", "scrape_as_html"}:
+            return None
+        urls = self._extract_candidate_urls(params)
+        if any(self._is_pdf_url(u) for u in urls):
+            return {
+                "status": "error",
+                "message": "PDF scraping is not supported for Bright Data snapshots. Use spawn_web_task to read PDFs instead.",
+            }
+        return None
+
     async def _execute_async(self, client: Client, tool_name: str, params: Dict[str, Any]):
         """Execute a tool asynchronously."""
         async with client:
