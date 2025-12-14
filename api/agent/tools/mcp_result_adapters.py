@@ -121,7 +121,8 @@ class BrightDataLinkedInPersonProfileAdapter(BrightDataAdapterBase):
             "default_avatar",
             "image_url",
             "image",
-
+            "img",
+            
             # Network Fields
             "people_also_viewed",
         }
