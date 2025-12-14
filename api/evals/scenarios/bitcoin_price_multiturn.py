@@ -64,7 +64,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                 "status": "error",
                 "message": "spawn_web_task disabled - use http_request for API calls"
             },
-            "search_web": {
+            "mcp_brightdata_search_engine": {
                 "status": "ok",
                 "result": (
                     "Found free Bitcoin price API: "
