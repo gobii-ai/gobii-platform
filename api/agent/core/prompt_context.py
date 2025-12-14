@@ -33,7 +33,6 @@ from ..tools.peer_dm import get_send_agent_message_tool
 from ..tools.request_contact_permission import get_request_contact_permission_tool
 from ..tools.schedule_updater import get_update_schedule_tool
 from ..tools.search_tools import get_search_tools_tool
-from ..tools.search_web import get_search_web_tool
 from ..tools.secure_credentials_request import get_secure_credentials_request_tool
 from ..tools.sms_sender import get_send_sms_tool
 from ..tools.spawn_web_task import (
@@ -1479,8 +1478,8 @@ def _get_system_instruction(
         "- **Tool discovery first**: When you need external data or APIs, call `search_tools` before anything else so the right tools (e.g., http_request) are enabled for this cycle. "
         "- **Data Retrieval vs. Page Reading**: Use `http_request` (GET) when you need structured/API data (JSON/CSV/feeds) and no page interaction or visual confirmation is required. If the user asks you to visit or read a specific site/page, default to `spawn_web_task` so the browser task records what you saw, even if the page is simple HTML. "
         "- **Interactive Browsing**: Use `spawn_web_task` for any user-facing page interaction or when the content on the page matters. It is slower/expensive, so skip it only when the goal is pure API/structured fetches. "
-        "- **Search**: Use `search_web` thoughtfully. When you need live or structured data (e.g., prices, metrics, feeds), your FIRST query should explicitly ask for an API/JSON endpoint (e.g., 'bitcoin price API json endpoint'). For general info, use a concise, high-signal query without spamming multiple searches; prefer one focused attempt (two max) before switching to another tool. Once you have a usable URL, move on to `http_request` or the right tool instead of repeating searches."
-        "- **API execution**: After you have an API URL and `http_request` is enabled, your very next action should be a single `http_request` (GET) to that URL. Do NOT re-run `search_tools` or `search_web` for the same goal unless the request fails or the URL is unusable."
+        "- **Search**: Use `mcp_brightdata_search_engine` thoughtfully. When you need live or structured data (e.g., prices, metrics, feeds), your FIRST query should explicitly ask for an API/JSON endpoint (e.g., 'bitcoin price API json endpoint'). For general info, use a concise, high-signal query without spamming multiple searches; prefer one focused attempt (two max) before switching to another tool. Once you have a usable URL, move on to `http_request` or the right tool instead of repeating searches."
+        "- **API execution**: After you have an API URL and `http_request` is enabled, your very next action should be a single `http_request` (GET) to that URL. Do NOT re-run `search_tools` or `mcp_brightdata_search_engine` for the same goal unless the request fails or the URL is unusable."
 
         "TOOL GUIDELINES: "
         "- 'http_request': Fetch data or APIs. Proxy handled automatically. "
@@ -1901,7 +1900,6 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_email_tool(),
         get_send_sms_tool(),
         get_send_chat_tool(),
-        get_search_web_tool(),
         get_spawn_web_task_tool(agent),
         get_update_schedule_tool(),
         get_update_charter_tool(),

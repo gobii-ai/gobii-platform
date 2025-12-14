@@ -82,7 +82,6 @@ from .prompt_context import (
 
 from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
-from ..tools.search_web import execute_search_web
 from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
 from ..tools.charter_updater import execute_update_charter
@@ -2036,8 +2035,6 @@ def _run_agent_loop(
                         result = execute_update_schedule(agent, tool_params)
                     elif tool_name == "update_charter":
                         result = execute_update_charter(agent, tool_params)
-                    elif tool_name == "search_web":
-                        result = execute_search_web(agent, tool_params)
                     elif tool_name == "secure_credentials_request":
                         result = execute_secure_credentials_request(agent, tool_params)
                     elif tool_name == "enable_database":
