@@ -81,7 +81,7 @@ def _fallback_builtin_selection(
     Heuristically select built-in tools when the LLM response does not call enable_tools.
 
     This keeps core tools like http_request available even if the LLM fails to emit a
-    function call, which otherwise causes the agent to loop on search_tools/search_web.
+    function call, which otherwise causes the agent to loop on search_tools/mcp_brightdata_search_engine.
     """
     text = f"{query} {content_text}".lower()
     candidates: list[str] = []

@@ -1784,8 +1784,22 @@ def _process_browser_use_task_core(
                 from ..agent.browser_actions import (
                     register_web_search_action
                 )
-                actions = ['web_search']
-                register_web_search_action(controller)
+                actions = ['mcp_brightdata_search_engine']
+                resolved_pa_id = persistent_agent_id
+                if resolved_pa_id is None and getattr(task_obj, "agent", None):
+                    try:
+                        resolved_pa_id = getattr(task_obj.agent, "persistent_agent_id", None)
+                    except Exception:
+                        resolved_pa_id = None
+                register_web_search_action(
+                    controller,
+                    persistent_agent_id=resolved_pa_id,
+                    browser_agent_id=str(task_obj.agent.id) if task_obj.agent else None,
+                    user_id=task_obj.user_id,
+                    organization_id=str(getattr(task_obj.organization, "id", None))
+                    if getattr(task_obj, "organization", None)
+                    else None,
+                )
                 if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
                     from ..agent.browser_actions import register_upload_actions
                     register_upload_actions(controller, persistent_agent_id)

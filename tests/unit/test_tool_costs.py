@@ -22,10 +22,10 @@ class ToolCostTests(TestCase):
         ToolCreditCost.objects.all().delete()
 
     def test_exact_match_uses_override(self):
-        ToolCreditCost.objects.create(tool_name="search_web", credit_cost=Decimal("0.10"))
+        ToolCreditCost.objects.create(tool_name="mcp_brightdata_search_engine", credit_cost=Decimal("0.10"))
         clear_tool_credit_cost_cache()
 
-        self.assertEqual(get_tool_credit_cost("search_web"), Decimal("0.10"))
+        self.assertEqual(get_tool_credit_cost("mcp_brightdata_search_engine"), Decimal("0.10"))
 
     def test_missing_tool_uses_default(self):
         self.assertEqual(get_tool_credit_cost("unknown_tool"), Decimal("0.50"))
@@ -47,13 +47,13 @@ class ToolCostTests(TestCase):
         self.assertEqual(get_default_task_credit_cost(), Decimal("0.75"))
 
     def test_cache_refreshes_after_override_change(self):
-        override = ToolCreditCost.objects.create(tool_name="search_web", credit_cost=Decimal("0.10"))
-        self.assertEqual(get_tool_credit_cost("search_web"), Decimal("0.10"))
+        override = ToolCreditCost.objects.create(tool_name="mcp_brightdata_search_engine", credit_cost=Decimal("0.10"))
+        self.assertEqual(get_tool_credit_cost("mcp_brightdata_search_engine"), Decimal("0.10"))
 
         override.credit_cost = Decimal("0.25")
         override.save()
 
-        self.assertEqual(get_tool_credit_cost("search_web"), Decimal("0.25"))
+        self.assertEqual(get_tool_credit_cost("mcp_brightdata_search_engine"), Decimal("0.25"))
 
     def test_get_tool_cost_for_email_channel(self):
         ToolCreditCost.objects.create(tool_name="send_email", credit_cost=Decimal("0.90"))
@@ -80,7 +80,7 @@ class ToolCostTests(TestCase):
     def test_get_most_expensive_tool_cost_uses_highest_db_value(self):
         ToolCreditCost.objects.bulk_create(
             [
-                ToolCreditCost(tool_name="search_web", credit_cost=Decimal("0.10")),
+                ToolCreditCost(tool_name="mcp_brightdata_search_engine", credit_cost=Decimal("0.10")),
                 ToolCreditCost(tool_name="sqlite_batch", credit_cost=Decimal("0.80")),
             ]
         )
@@ -93,7 +93,7 @@ class ToolCostTests(TestCase):
         config.default_task_cost = Decimal("0.75")
         config.save()
 
-        ToolCreditCost.objects.create(tool_name="search_web", credit_cost=Decimal("0.10"))
+        ToolCreditCost.objects.create(tool_name="mcp_brightdata_search_engine", credit_cost=Decimal("0.10"))
         clear_tool_credit_cost_cache()
 
         self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.75"))
