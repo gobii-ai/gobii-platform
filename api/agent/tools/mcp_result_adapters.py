@@ -101,6 +101,52 @@ class BrightDataLinkedInCompanyProfileAdapter(BrightDataAdapterBase):
         return result
 
 
+class BrightDataLinkedInPersonProfileAdapter(BrightDataAdapterBase):
+    """Adapter scaffold for Bright Data LinkedIn person profiles."""
+
+    server_name = "brightdata"
+    tool_name = "web_data_linkedin_person_profile"
+
+    def adapt(self, result: Any) -> Any:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            return result
+
+        first_block, payload = parsed
+        fields_to_strip = {
+            "description_html",
+            "company_logo_url",
+            "institute_logo_url",
+            "banner_image",
+            "default_avatar",
+            "image_url",
+            "image",
+
+            # Network Fields
+            "people_also_viewed",
+        }
+
+        def strip_fields(node: Any):
+            if isinstance(node, list):
+                for item in node:
+                    strip_fields(item)
+            elif isinstance(node, dict):
+                # Remove matching keys before recursing into values
+                for key in list(node.keys()):
+                    if (
+                        key in fields_to_strip
+                        or key.endswith("_html")
+                        or key.endswith("_img")
+                    ):
+                        node.pop(key, None)
+                for value in node.values():
+                    strip_fields(value)
+
+        strip_fields(payload)
+        first_block.text = json.dumps(payload)
+        return result
+
+
 class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
     """Strip heavy fields from Bright Data batched search responses."""
 
@@ -149,6 +195,7 @@ class MCPResultAdapterRegistry:
             adapters=[
                 BrightDataSearchEngineAdapter(),
                 BrightDataLinkedInCompanyProfileAdapter(),
+                BrightDataLinkedInPersonProfileAdapter(),
                 BrightDataSearchEngineBatchAdapter(),
             ]
         )
