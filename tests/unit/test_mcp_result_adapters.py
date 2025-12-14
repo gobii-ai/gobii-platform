@@ -72,6 +72,29 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image", organic[1])
         self.assertEqual(organic[0]["title"], "One")
 
+    def test_batch_adapter_strips_related_images(self):
+        payload = [
+            {
+                "result": {
+                    "related": [
+                        {"title": "Rel One", "image": "http://example.com/r1.png", "image_base64": "abc"},
+                        {"title": "Rel Two", "image": "http://example.com/r2.png"},
+                    ]
+                }
+            }
+        ]
+        adapter = BrightDataSearchEngineBatchAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        related = cleaned[0]["result"]["related"]
+        self.assertNotIn("image", related[0])
+        self.assertNotIn("image_base64", related[0])
+        self.assertNotIn("image", related[1])
+        self.assertEqual(related[0]["title"], "Rel One")
+
 
 @tag("batch_mcp_tools")
 class MCPToolManagerAdapterIntegrationTests(TestCase):

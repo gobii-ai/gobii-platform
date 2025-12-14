@@ -126,6 +126,13 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
                                 entry.pop("image", None)
                                 entry.pop("image_base64", None)
 
+                    related_results = results.get("related")
+                    if isinstance(related_results, list):
+                        for entry in related_results:
+                            if isinstance(entry, dict):
+                                entry.pop("image", None)
+                                entry.pop("image_base64", None)
+
         first_block.text = json.dumps(payload)
         return result
 
