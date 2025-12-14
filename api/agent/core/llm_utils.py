@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from django.conf import settings
 import litellm
 
 _HINT_KEYS = (
@@ -83,6 +84,9 @@ def run_completion(
         kwargs["parallel_tool_calls"] = bool(use_parallel_tool_calls)
     else:
         kwargs.pop("parallel_tool_calls", None)
+
+    if kwargs.get("timeout") is None:
+        kwargs["timeout"] = getattr(settings, "LITELLM_TIMEOUT_SECONDS", 600)
 
     return litellm.completion(**kwargs)
 

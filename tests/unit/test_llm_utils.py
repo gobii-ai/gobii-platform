@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, tag
+from django.test import SimpleTestCase, override_settings, tag
 
 from api.agent.core.llm_utils import run_completion
 
@@ -31,3 +31,30 @@ class RunCompletionReasoningTests(SimpleTestCase):
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs.get("reasoning_effort"), "low")
         self.assertNotIn("supports_reasoning", kwargs)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_TIMEOUT_SECONDS=321)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_timeout_defaults_to_settings_value(self, mock_completion):
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs.get("timeout"), 321)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_TIMEOUT_SECONDS=321)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_timeout_respects_explicit_value(self, mock_completion):
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            timeout=42,
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs.get("timeout"), 42)
