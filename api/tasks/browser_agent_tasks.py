@@ -1123,10 +1123,10 @@ async def _run_agent(
                 "FEW TIMES. LITERALLY JUST SKIP YOUR STEP AND REFRESH THE PAGE. YOU DONT "
                 "NEED TO NAVIGATE BACK OR REFRESH UNLESS IT PERSISTS. "
 
-                "IF YOU NEED TO SEARCH THE WEB, USE THE 'search_web' TOOL, RATHER THAN A SEARCH ENGINE. "
-                "INFORMATION RETURNED FROM 'search_web' CAN BE OUTDATED, SO WHEN IN DOUBT LOOK UP MORE RESENT INFORMATION DIRECTLY ON RELEVANT WEBSITES. "
+                "IF YOU NEED TO SEARCH THE WEB, USE THE 'mcp_brightdata_search_engine' TOOL, RATHER THAN A SEARCH ENGINE. "
+                "INFORMATION RETURNED FROM 'mcp_brightdata_search_engine' CAN BE OUTDATED, SO WHEN IN DOUBT LOOK UP MORE RESENT INFORMATION DIRECTLY ON RELEVANT WEBSITES. "
                 
-                "PREFER PRIMARY SOURCES --You can use 'search_web' to find primary sources, then access up-to-date information directly from the source. "
+                "PREFER PRIMARY SOURCES --You can use 'mcp_brightdata_search_engine' to find primary sources, then access up-to-date information directly from the source. "
                 
                 "IF YOU GET A CAPTCHA CHALLENGE THAT YOU CANNOT PASS IN TWO ATTEMPTS AND THERE "
                 "IS AN ALTERNATIVE WAY TO GET THE JOB DONE, JUST DO THAT INSTEAD OF FIGHTING "

@@ -71,13 +71,6 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                     "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
                 )
             },
-            "mcp_brightdata_search_engine": {
-                "status": "ok",
-                "result": (
-                    "Found free Bitcoin price API: "
-                    "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
-                )
-            },
             "http_request": {
                 "status": "ok",
                 "content": '{"bitcoin":{"usd":68500.50}}',
@@ -120,13 +113,13 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary="Agent avoided 'spawn_web_task'."
         )
 
-        # Verify search_web query pattern
+        # Verify mcp_brightdata_search_engine query pattern
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_search_query_pattern")
 
         search_calls = PersistentAgentToolCall.objects.filter(
             step__agent_id=agent_id,
             step__created_at__gte=btc_msg.timestamp,
-            tool_name='search_web'
+            tool_name='mcp_brightdata_search_engine'
         ).order_by('step__created_at')
 
         http_calls = PersistentAgentToolCall.objects.filter(

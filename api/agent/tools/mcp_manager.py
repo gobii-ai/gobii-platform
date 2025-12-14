@@ -203,6 +203,7 @@ class MCPToolManager:
 
     # Default MCP tools that should be enabled for all agents
     DEFAULT_ENABLED_TOOLS = [
+        "mcp_brightdata_search_engine",
         "mcp_brightdata_scrape_as_markdown",
         # Add more default tools here as needed
     ]
