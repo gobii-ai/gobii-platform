@@ -682,14 +682,15 @@ def _ensure_credit_for_tool(
     tool_name: str,
     span=None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
-) -> bool | Decimal:
+) -> bool | dict[str, Any]:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
-    Returns True if execution may proceed; False if insufficient or consumption fails.
-    In failure cases, this function records a step + system step and logging.
+    Returns False if insufficient or consumption fails. On success, returns a dict
+    containing the consumed cost and the TaskCredit (if any), so callers can attach
+    them to persisted steps for accurate usage attribution.
     """
     if tool_name == "send_chat_message":
-        return True
+        return {"cost": None, "credit": None}
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
     owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
@@ -705,6 +706,7 @@ def _ensure_credit_for_tool(
 
     cost: Decimal | None = None
     consumed: dict | None = None
+    consumed_credit = None
 
     # Determine tool cost up-front so we can gate on fractional balances
     try:
@@ -943,6 +945,7 @@ def _ensure_credit_for_tool(
     try:
         with transaction.atomic():
             consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
+            consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
         logger.error(
             "Credit consumption (in-loop) failed for agent %s (%s): %s",
@@ -1009,7 +1012,10 @@ def _ensure_credit_for_tool(
                 except Exception:
                     pass
 
-    return cost if cost is not None else True
+    return {
+        "cost": cost,
+        "credit": consumed_credit,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -1928,19 +1934,22 @@ def _run_agent_loop(
                             # Do not consume credits or record a step for ignored sleep
                             continue
                         # All tool calls are sleep; consume credits once per call and record step
-                        credits_consumed = _ensure_credit_for_tool(
+                        credit_info = _ensure_credit_for_tool(
                             agent,
                             tool_name,
                             span=tool_span,
                             credit_snapshot=credit_snapshot,
                         )
-                        if not credits_consumed:
+                        if not credit_info:
                             return cumulative_token_usage
+                        credits_consumed = credit_info.get("cost") if isinstance(credit_info, dict) else credit_info
+                        consumed_credit = credit_info.get("credit") if isinstance(credit_info, dict) else None
                         # Create sleep step with token usage if available
                         step_kwargs = {
                             "agent": agent,
                             "description": "Decided to sleep until next trigger.",
                             "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                            "task_credit": consumed_credit,
                         }
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
@@ -1960,15 +1969,17 @@ def _run_agent_loop(
                         continue
 
                     # Ensure credit is available and consume just-in-time for actionable tools
-                    credits_consumed = _ensure_credit_for_tool(
+                    credit_info = _ensure_credit_for_tool(
                         agent,
                         tool_name,
                         span=tool_span,
                         credit_snapshot=credit_snapshot,
                     )
-                    if not credits_consumed:
+                    if not credit_info:
                         # Credit insufficient or consumption failed; halt processing
                         return cumulative_token_usage
+                    credits_consumed = credit_info.get("cost") if isinstance(credit_info, dict) else credit_info
+                    consumed_credit = credit_info.get("credit") if isinstance(credit_info, dict) else None
                     try:
                         raw_args = getattr(call.function, "arguments", "") or ""
                         tool_params = json.loads(raw_args)
@@ -1991,6 +2002,8 @@ def _run_agent_loop(
                             step_kwargs = {
                                 "agent": agent,
                                 "description": step_text,
+                                "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                                "task_credit": consumed_credit,
                             }
                             _attach_completion(step_kwargs)
                             step = PersistentAgentStep.objects.create(**step_kwargs)
@@ -2092,7 +2105,8 @@ def _run_agent_loop(
                         step_kwargs = {
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None
+                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                            "task_credit": consumed_credit,
                         }
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
@@ -2122,6 +2136,7 @@ def _run_agent_loop(
                             "agent": agent,
                             "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
                             "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+                            "task_credit": consumed_credit,
                         }
                         _attach_completion(step_kwargs)
                         step = PersistentAgentStep.objects.create(**step_kwargs)
