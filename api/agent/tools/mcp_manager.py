@@ -331,16 +331,23 @@ class MCPToolManager:
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
 
-    def _refresh_servers_by_name(self, server_names: set[str]) -> bool:
-        """Refresh only the specified MCP servers without touching others."""
+    def _refresh_servers_by_name(self, server_names: set[str], *, scope: Optional[str] = None) -> bool:
+        """Refresh only the specified MCP servers without touching others.
+
+        When ``scope`` is provided, only servers matching both the name and scope
+        are refreshed to avoid mixing platform/user/org-scoped configs that share
+        a slug.
+        """
         if not server_names:
             return True
 
         try:
             configs = list(
-                MCPServerConfig.objects.filter(is_active=True, name__in=list(server_names)).select_related(
-                    "oauth_credential"
-                )
+                MCPServerConfig.objects.filter(
+                    is_active=True,
+                    name__in=list(server_names),
+                    **({"scope": scope} if scope else {}),
+                ).select_related("oauth_credential")
             )
         except Exception:  # pragma: no cover - defensive DB access
             logger.exception("Failed to refresh MCP servers for names: %s", sorted(server_names))
@@ -953,9 +960,9 @@ class MCPToolManager:
             needs_refresh = (not self._initialized) or self._needs_refresh()
             current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
             missing_names = allowed_set - current_names
-            if needs_refresh or missing_names:
-                if not self._refresh_servers_by_name(allowed_set):
-                    return []
+        if needs_refresh or missing_names:
+            if not self._refresh_servers_by_name(allowed_set):
+                return []
 
         configs = agent_accessible_server_configs(agent)
         if allowed_set is not None:
@@ -1047,10 +1054,17 @@ class MCPToolManager:
         needs_refresh = (not self._initialized) or self._needs_refresh()
         current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
         if needs_refresh or normalized_server not in current_names:
-            if not self._refresh_servers_by_name(allowed):
+            if not self._refresh_servers_by_name(allowed, scope=MCPServerConfig.Scope.PLATFORM):
                 return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
 
-        runtime = next((rt for rt in self._server_cache.values() if rt.name.lower() == normalized_server), None)
+        runtime = next(
+            (
+                rt
+                for rt in self._server_cache.values()
+                if rt.name.lower() == normalized_server and rt.scope == MCPServerConfig.Scope.PLATFORM
+            ),
+            None,
+        )
         if not runtime:
             return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
 
@@ -1080,8 +1094,15 @@ class MCPToolManager:
             return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
 
         try:
+            proxy_url = None
+            if runtime.url:
+                try:
+                    proxy_url = self._select_discovery_proxy_url(runtime)
+                except Exception as exc:
+                    return {"status": "error", "message": str(exc)}
+
             loop = self._ensure_event_loop()
-            with _use_mcp_proxy(None):
+            with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, info.tool_name, params))
             result = self._adapt_tool_result(runtime.name, info.tool_name, result)
 

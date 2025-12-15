@@ -1124,7 +1124,6 @@ async def _run_agent(
                 "NEED TO NAVIGATE BACK OR REFRESH UNLESS IT PERSISTS. "
 
                 "IF YOU NEED TO SEARCH THE WEB, USE THE 'mcp_brightdata_search_engine' TOOL, RATHER THAN A SEARCH ENGINE. "
-                "INFORMATION RETURNED FROM 'mcp_brightdata_search_engine' CAN BE OUTDATED, SO WHEN IN DOUBT LOOK UP MORE RESENT INFORMATION DIRECTLY ON RELEVANT WEBSITES. "
                 
                 "PREFER PRIMARY SOURCES --You can use 'mcp_brightdata_search_engine' to find primary sources, then access up-to-date information directly from the source. "
                 
