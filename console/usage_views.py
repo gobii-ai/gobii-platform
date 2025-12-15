@@ -5,7 +5,6 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.apps import apps
 from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDay, TruncHour
 from django.http import HttpRequest, JsonResponse
@@ -155,8 +154,8 @@ def _per_task_credit_expression() -> Case:
 
 
 def _resolve_agent_selection(
-    agent_filters_raw: Iterable[str],
-    accessible_agents: list[UsageAgentDescriptor],
+        agent_filters_raw: Iterable[str],
+        accessible_agents: list[UsageAgentDescriptor],
 ) -> tuple[list[str], list[uuid.UUID], bool, list[UsageAgentDescriptor], list[uuid.UUID]]:
     accessible_map = {agent.id: agent for agent in accessible_agents}
     accessible_ids = set(accessible_map.keys())
@@ -292,23 +291,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         ledger_total = _to_decimal(credit_agg.get("total"), DECIMAL_ZERO)
         ledger_used = _to_decimal(credit_agg.get("used"), DECIMAL_ZERO)
 
-        # Ledger usage over the billing window: sum credits_used on TaskCredit blocks
-        TaskCredit = apps.get_model("api", "TaskCredit")
-        period_credit_filters = {
-            "voided": False,
-            "granted_date__lte": period_end_dt,
-            "expiration_date__gte": period_start_dt,
-        }
-        if organization is not None:
-            period_credit_filters["organization"] = organization
-        else:
-            period_credit_filters["user"] = request.user
-
-        period_ledger_agg = TaskCredit.objects.filter(**period_credit_filters).aggregate(
-            used=Coalesce(Sum("credits_used"), credits_zero)
-        )
-        ledger_used_period = _to_decimal(period_ledger_agg.get("used"), DECIMAL_ZERO)
-
         if organization is None:
             quota_total = _to_decimal(TaskCreditService.get_tasks_entitled_for_owner(owner), DECIMAL_ZERO)
             quota_used = _to_decimal(
@@ -333,12 +315,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             usage_pct = (quota_used / quota_total) * Decimal("100")
             quota_used_pct = float(min(usage_pct, Decimal("100")))
 
-        recorded_total = combined_total
-        unattributed_total = ledger_used_period - recorded_total
-        if unattributed_total < DECIMAL_ZERO:
-            unattributed_total = DECIMAL_ZERO
-        total_credits = recorded_total + unattributed_total
-
         payload = {
             "period": {
                 "start": period_start.isoformat(),
@@ -362,9 +338,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                 },
                 "credits": {
                     "total": float(total_credits),
-                    "recorded": float(recorded_total),
-                    "unattributed": float(unattributed_total),
-                    "ledger_used": float(ledger_used_period),
                     "unit": "credits",
                 },
                 "quota": {
@@ -909,10 +882,10 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         }
 
         for row in (
-            steps_qs
-            .values("agent_id")
-            .order_by()
-            .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
+                steps_qs
+                        .values("agent_id")
+                        .order_by()
+                        .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
         ):
             persistent_agent_id = row.get("agent_id")
             browser_agent_id = persistent_id_map.get(persistent_agent_id)
