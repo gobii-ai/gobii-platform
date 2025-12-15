@@ -20,7 +20,7 @@ import contextlib
 import contextvars
 import sys
 from urllib.parse import urlparse
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
@@ -331,6 +331,55 @@ class MCPToolManager:
         self._server_cache = new_cache
         self._last_refresh_marker = latest_seen or timezone.now()
 
+    def _refresh_servers_by_name(self, server_names: set[str]) -> bool:
+        """Refresh only the specified MCP servers without touching others."""
+        if not server_names:
+            return True
+
+        try:
+            configs = list(
+                MCPServerConfig.objects.filter(is_active=True, name__in=list(server_names)).select_related(
+                    "oauth_credential"
+                )
+            )
+        except Exception:  # pragma: no cover - defensive DB access
+            logger.exception("Failed to refresh MCP servers for names: %s", sorted(server_names))
+            return False
+
+        refreshed_ids: set[str] = set()
+        latest_seen: Optional[datetime] = None
+
+        for cfg in configs:
+            runtime = self._build_runtime_from_config(cfg)
+            refreshed_ids.add(runtime.config_id)
+
+            prior = self._server_cache.get(runtime.config_id)
+            prior_oauth_updated = getattr(prior, "oauth_updated_at", None) if prior else None
+            if prior and prior.updated_at == runtime.updated_at and prior_oauth_updated == runtime.oauth_updated_at:
+                continue
+
+            self._safe_register_runtime(runtime)
+            if cfg.updated_at and (latest_seen is None or cfg.updated_at > latest_seen):
+                latest_seen = cfg.updated_at
+
+        # Remove stale caches for the requested server names
+        for config_id, runtime in list(self._server_cache.items()):
+            if runtime.name.lower() not in server_names:
+                continue
+            if config_id in refreshed_ids:
+                continue
+            self._discard_client(config_id)
+            self._server_cache.pop(config_id, None)
+            self._tools_cache.pop(config_id, None)
+
+        # Consider the manager initialized for the refreshed subset
+        self._initialized = True
+        marker = latest_seen or timezone.now()
+        if self._last_refresh_marker is None or marker > self._last_refresh_marker:
+            self._last_refresh_marker = marker
+
+        return True
+
     def _discard_client(self, config_id: str) -> None:
         client = self._clients.pop(config_id, None)
         if client:
@@ -339,6 +388,7 @@ class MCPToolManager:
             except Exception:
                 logger.debug("Error closing MCP client for %s", config_id, exc_info=True)
         self._tools_cache.pop(config_id, None)
+
     def _update_refresh_marker(self, runtime: MCPServerRuntime) -> None:
         marker = runtime.updated_at or timezone.now()
         if self._last_refresh_marker is None or marker > self._last_refresh_marker:
@@ -878,13 +928,39 @@ class MCPToolManager:
             all_tools.extend(server_tools)
         return all_tools
 
-    def get_tools_for_agent(self, agent: PersistentAgent) -> List[MCPToolInfo]:
+    def get_tools_for_agent(
+        self,
+        agent: PersistentAgent,
+        *,
+        allowed_server_names: Optional[Iterable[str]] = None,
+    ) -> List[MCPToolInfo]:
         """Return MCP tools that the given agent may access."""
 
-        if not self.initialize():
-            return []
+        allowed_set = None
+        if allowed_server_names is not None:
+            allowed_set = {
+                str(name).lower()
+                for name in allowed_server_names
+                if isinstance(name, str) and str(name).strip()
+            }
+            if not allowed_set:
+                return []
+
+        if allowed_set is None:
+            if not self.initialize():
+                return []
+        else:
+            needs_refresh = (not self._initialized) or self._needs_refresh()
+            current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
+            missing_names = allowed_set - current_names
+            if needs_refresh or missing_names:
+                if not self._refresh_servers_by_name(allowed_set):
+                    return []
 
         configs = agent_accessible_server_configs(agent)
+        if allowed_set is not None:
+            configs = [cfg for cfg in configs if str(getattr(cfg, "name", "")).lower() in allowed_set]
+
         desired_ids = {str(cfg.id) for cfg in configs}
 
         if not desired_ids:
@@ -892,9 +968,19 @@ class MCPToolManager:
 
         missing_ids = [config_id for config_id in desired_ids if config_id not in self._server_cache]
         if missing_ids:
-            logger.info("Refreshing MCP server cache to include missing configs: %s", missing_ids)
-            if not self.initialize(force=True):
-                return []
+            if allowed_set is None:
+                logger.info("Refreshing MCP server cache to include missing configs: %s", missing_ids)
+                if not self.initialize(force=True):
+                    return []
+            else:
+                logger.info(
+                    "Skipping unavailable MCP servers for agent %s due to allowlist: %s",
+                    getattr(agent, "id", None),
+                    missing_ids,
+                )
+                desired_ids = {config_id for config_id in desired_ids if config_id in self._server_cache}
+                if not desired_ids:
+                    return []
 
         tools: List[MCPToolInfo] = []
         for config_id in desired_ids:

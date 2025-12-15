@@ -190,7 +190,7 @@ def register_web_search_action(
                 )
 
             try:
-                ensure_default_tools_enabled(agent_ctx)
+                ensure_default_tools_enabled(agent_ctx, allowed_server_names=("brightdata",))
             except Exception:
                 logger.exception("Failed to ensure default MCP tools for agent %s", agent_ctx.id)
 
