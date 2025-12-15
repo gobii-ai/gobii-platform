@@ -81,7 +81,7 @@ class ToolRateLimitTests(TestCase):
         self.assertGreaterEqual(len(system_notes), 1)
 
     def test_unlisted_tool_not_limited(self):
-        allowed = _enforce_tool_rate_limit(self.agent, "search_web")
+        allowed = _enforce_tool_rate_limit(self.agent, "mcp_brightdata_search_engine")
 
         self.assertTrue(allowed)
         self.assertFalse(

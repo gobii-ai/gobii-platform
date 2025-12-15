@@ -32,7 +32,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 "status": "error",
                 "message": "spawn_web_task disabled for this eval - use http_request"
             },
-            "search_web": {
+            "mcp_brightdata_search_engine": {
                 "status": "ok",
                 "result": (
                     "Found free weather API: https://api.weather.gov/gridpoints/LWX/96,70/forecast "

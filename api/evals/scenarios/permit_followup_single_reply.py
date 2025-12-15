@@ -387,7 +387,7 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             first_reply, second_reply = outbound[0], outbound[1]
             search_between = PersistentAgentToolCall.objects.filter(
                 step__agent_id=agent_id,
-                tool_name="search_web",
+                tool_name="mcp_brightdata_search_engine",
                 step__created_at__gt=first_reply.timestamp,
                 step__created_at__lt=second_reply.timestamp,
             ).exists()

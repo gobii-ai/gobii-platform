@@ -433,7 +433,11 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
     }
 
 
-def ensure_default_tools_enabled(agent: PersistentAgent) -> None:
+def ensure_default_tools_enabled(
+    agent: PersistentAgent,
+    *,
+    allowed_server_names: Optional[Iterable[str]] = None,
+) -> None:
     """Ensure the default MCP tool set is enabled for new agents."""
     manager = _get_manager()
 
@@ -445,7 +449,10 @@ def ensure_default_tools_enabled(agent: PersistentAgent) -> None:
     if not missing:
         return
 
-    available = {tool.full_name for tool in manager.get_tools_for_agent(agent)}
+    available = {
+        tool.full_name
+        for tool in manager.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
+    }
 
     for tool_name in missing:
         if manager.is_tool_blacklisted(tool_name):

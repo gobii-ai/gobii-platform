@@ -1,104 +1,144 @@
 """
-Custom browser use agent action for web search using Exa.
-
-This module provides web search functionality for browser use agents,
-allowing them to search the web directly without spawning separate tasks.
+Custom browser use agent action for web search using Bright Data MCP search.
 """
 
+import json
 import logging
-from typing import Dict, Any
+from typing import Any, List, Optional
 
 from opentelemetry import trace
 from browser_use import ActionResult
-from exa_py import Exa
 
-from config import settings
 from ..core.web_search_formatter import format_search_results, format_search_error
+from ..tools.mcp_manager import execute_platform_mcp_tool
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 
-def register_web_search_action(controller):
-    """Register the search_web action with the given controller."""
-    
-    logger.info("Registering search_web action to controller %s", controller)
-    
-    @controller.action('Search the web using Exa search engine. Returns relevant web content for the query.')
-    def search_web(query: str) -> ActionResult:
+class _SearchResult:
+    """Lightweight struct for formatting search results."""
+
+    def __init__(
+        self,
+        title: str = "",
+        url: str = "",
+        text: str = "",
+        published_date: Optional[str] = None,
+    ) -> None:
+        self.title = title
+        self.url = url
+        self.text = text
+        self.published_date = published_date
+
+
+def _format_brightdata_results(raw_result: Any, query: str) -> str:
+    """Normalize Bright Data search payloads into our shared formatter."""
+    payload = raw_result
+    if isinstance(raw_result, str):
+        try:
+            payload = json.loads(raw_result)
+        except json.JSONDecodeError:
+            return raw_result
+
+    items: Optional[List[Any]] = None
+    if isinstance(payload, dict):
+        candidate = payload.get("organic") or payload.get("results")
+        if isinstance(candidate, list):
+            items = candidate
+    elif isinstance(payload, list):
+        items = payload
+
+    if not items:
+        return format_search_error("No search results returned from Bright Data", query)
+
+    normalized: List[_SearchResult] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or item.get("name") or ""
+        url = item.get("url") or item.get("link") or ""
+        text = (
+            item.get("snippet")
+            or item.get("description")
+            or item.get("text")
+            or item.get("content")
+            or ""
+        )
+        published = (
+            item.get("published_date")
+            or item.get("publishedAt")
+            or item.get("date")
+        )
+        normalized.append(_SearchResult(title=title, url=url, text=text, published_date=published))
+
+    if not normalized:
+        return format_search_error("No search results returned from Bright Data", query)
+
+    return format_search_results(normalized, query)
+
+
+def register_web_search_action(
+    controller
+):
+    """Register the Bright Data search action with the given controller."""
+
+    logger.info("Registering mcp_brightdata_search_engine action to controller %s (platform scope)", controller)
+
+    @controller.action(
+        "Search the web using Bright Data search engine. Returns relevant web content for the query."
+    )
+    def mcp_brightdata_search_engine(query: str) -> ActionResult:
         """
-        Search the web using Exa search engine.
-        
+        Search the web using Bright Data MCP search.
+
         Args:
             query: Search query string. Be specific and detailed for best results.
-            
+
         Returns:
             ActionResult containing search results with titles, URLs, and content excerpts.
         """
         with tracer.start_as_current_span("Browser Agent Web Search") as span:
             span.set_attribute("search.query", query)
-            span.set_attribute("search.engine", "exa")
-            
+
             if not query:
                 logger.warning("Empty search query provided")
                 return ActionResult(
                     extracted_content="Error: Search query cannot be empty",
-                    include_in_memory=False
+                    include_in_memory=False,
                 )
-            
-            # Check if Exa API key is configured
-            if not settings.EXA_SEARCH_API_KEY:
-                logger.error("Exa API key not configured")
-                return ActionResult(
-                    extracted_content="Error: Web search is not configured on this system",
-                    include_in_memory=False
-                )
-            
-            logger.info("Browser agent performing web search: %s", query)
-            
+
             try:
-                exa = Exa(api_key=settings.EXA_SEARCH_API_KEY)
-                search_result = exa.search_and_contents(
-                    query=query,
-                    type="auto",
-                    num_results=10,
-                    context=True,
-                    text={
-                        "max_characters": 10000
-                    }
+                span.set_attribute("search.engine", "brightdata_mcp")
+                response = execute_platform_mcp_tool(
+                    "brightdata",
+                    "mcp_brightdata_search_engine",
+                    {"query": query},
                 )
-                
-                if not search_result or not search_result.results:
-                    span.add_event('No search results found')
-                    logger.warning("No search results found for query: %s", query)
-                    return ActionResult(
-                        extracted_content=format_search_error("No search results found for the given query", query),
-                        include_in_memory=True
-                    )
-                
-                # Format results using shared formatter with XML-like tags
-                result_text = format_search_results(search_result.results, query)
-                result_count = len(search_result.results)
-                
-                span.set_attribute('search.results.count', result_count)
-                span.set_attribute('search.results.total_chars', len(result_text))
-                
-                logger.info(
-                    "Web search returned %d results, %d total chars", 
-                    result_count, 
-                    len(result_text)
+            except Exception as exc:
+                logger.exception("Bright Data MCP search failed")
+                response = {"status": "error", "message": str(exc)}
+
+            status = response.get("status") if isinstance(response, dict) else None
+            if status == "success":
+                result_text = _format_brightdata_results(response.get("result"), query)
+                return ActionResult(extracted_content=result_text, include_in_memory=True)
+
+            message = None
+            if isinstance(response, dict):
+                message = response.get("message") or response.get("result")
+
+            if message:
+                span.add_event("Bright Data search error")
+                span.set_attribute("error.message", str(message))
+                logger.warning(
+                    "Bright Data search failed: %s",
+                    message,
                 )
-                
-                return ActionResult(
-                    extracted_content=result_text,
-                    include_in_memory=True
-                )
-                
-            except Exception as e:
-                span.add_event('Web search failed')
-                span.set_attribute('error.message', str(e))
-                logger.error("Web search failed: %s", str(e))
-                return ActionResult(
-                    extracted_content=format_search_error(f"Web search failed: {str(e)}", query),
-                    include_in_memory=False
-                )
+
+            return ActionResult(
+                extracted_content=format_search_error(
+                    message or "Web search failed for an unknown reason.", query
+                ),
+                include_in_memory=False,
+            )
