@@ -154,8 +154,8 @@ def _per_task_credit_expression() -> Case:
 
 
 def _resolve_agent_selection(
-    agent_filters_raw: Iterable[str],
-    accessible_agents: list[UsageAgentDescriptor],
+        agent_filters_raw: Iterable[str],
+        accessible_agents: list[UsageAgentDescriptor],
 ) -> tuple[list[str], list[uuid.UUID], bool, list[UsageAgentDescriptor], list[uuid.UUID]]:
     accessible_map = {agent.id: agent for agent in accessible_agents}
     accessible_ids = set(accessible_map.keys())
@@ -882,10 +882,10 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         }
 
         for row in (
-            steps_qs
-            .values("agent_id")
-            .order_by()
-            .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
+                steps_qs
+                        .values("agent_id")
+                        .order_by()
+                        .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
         ):
             persistent_agent_id = row.get("agent_id")
             browser_agent_id = persistent_id_map.get(persistent_agent_id)

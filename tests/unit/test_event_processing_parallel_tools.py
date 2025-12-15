@@ -30,7 +30,7 @@ class TestParallelToolCallsExecution(TestCase):
         )
         enable_tools(self.agent, ["sqlite_batch"])
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_send_sms', return_value={"status": "success"})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing.build_prompt_context')
