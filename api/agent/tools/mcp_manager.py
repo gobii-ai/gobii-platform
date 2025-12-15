@@ -1037,6 +1037,74 @@ class MCPToolManager:
 
         return definitions
     
+    def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute a platform-scoped MCP tool without an agent context."""
+        normalized_server = (server_name or "").strip().lower()
+        if not normalized_server or not tool_name:
+            return {"status": "error", "message": "Server name and tool name are required"}
+
+        allowed = {normalized_server}
+        needs_refresh = (not self._initialized) or self._needs_refresh()
+        current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
+        if needs_refresh or normalized_server not in current_names:
+            if not self._refresh_servers_by_name(allowed):
+                return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
+
+        runtime = next((rt for rt in self._server_cache.values() if rt.name.lower() == normalized_server), None)
+        if not runtime:
+            return {"status": "error", "message": f"MCP server '{server_name}' is not available"}
+
+        if runtime.name == "pipedream":
+            return {"status": "error", "message": "Pipedream MCP requires an agent context"}
+
+        info = self._resolve_tool_info(tool_name)
+        if not info or info.server_name.lower() != normalized_server:
+            return {"status": "error", "message": f"MCP tool '{tool_name}' not found for server '{server_name}'"}
+
+        if self._is_tool_blacklisted(tool_name):
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
+            }
+
+        if runtime.name == "brightdata":
+            pdf_error = self._brightdata_pdf_guard(info.tool_name, params)
+            if pdf_error:
+                return pdf_error
+
+        if not self._ensure_runtime_registered(runtime):
+            return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}
+
+        client = self._clients.get(info.config_id)
+        if not client:
+            return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
+
+        try:
+            loop = self._ensure_event_loop()
+            with _use_mcp_proxy(None):
+                result = loop.run_until_complete(self._execute_async(client, info.tool_name, params))
+            result = self._adapt_tool_result(runtime.name, info.tool_name, result)
+
+            if hasattr(result, "is_error") and result.is_error:
+                return {
+                    "status": "error",
+                    "message": str(result.content[0].text if result.content else "Unknown error"),
+                }
+
+            content = None
+            if result.data is not None:
+                content = result.data
+            elif result.content:
+                for block in result.content:
+                    if hasattr(block, "text"):
+                        content = block.text
+                        break
+
+            return {"status": "success", "result": content}
+        except Exception as exc:
+            logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
+            return {"status": "error", "message": str(exc)}
+
     def execute_mcp_tool(self, agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
         import time
@@ -1511,6 +1579,11 @@ def execute_mcp_tool(agent: PersistentAgent, tool_name: str, params: Dict[str, A
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
     return _mcp_manager.execute_mcp_tool(agent, tool_name, params)
+
+
+def execute_platform_mcp_tool(server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute a platform-scoped MCP tool without an agent context."""
+    return _mcp_manager.execute_platform_tool(server_name, tool_name, params)
 
 
 def get_mcp_manager() -> MCPToolManager:
