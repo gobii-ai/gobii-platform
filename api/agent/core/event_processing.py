@@ -988,28 +988,55 @@ def _ensure_credit_for_tool(
         )
         return False
 
-    if cost is not None:
+    # Update the cached daily state immediately so subsequent tool calls in the same batch
+    # see the cost impact (DB-backed aggregation lags until the step is persisted).
+    if cost is not None and isinstance(daily_state, dict):
         try:
-            updated_state = get_agent_daily_credit_state(agent)
-        except Exception as exc:
-            logger.error(
-                "Failed to refresh daily credit usage for agent %s: %s",
+            used_value = daily_state.get("used", Decimal("0"))
+            if not isinstance(used_value, Decimal):
+                used_value = Decimal(str(used_value))
+            new_used = used_value + cost
+            daily_state["used"] = new_used
+
+            # Recompute remaining fields (best-effort; do not fail tool execution).
+            hard_limit_value = daily_state.get("hard_limit")
+            if hard_limit_value is not None:
+                hard_remaining_after = hard_limit_value - new_used
+                daily_state["hard_limit_remaining"] = (
+                    hard_remaining_after if hard_remaining_after > Decimal("0") else Decimal("0")
+                )
+            soft_target_value = daily_state.get("soft_target")
+            if soft_target_value is not None:
+                soft_remaining_after = soft_target_value - new_used
+                soft_remaining_after = (
+                    soft_remaining_after if soft_remaining_after > Decimal("0") else Decimal("0")
+                )
+                daily_state["soft_target_remaining"] = soft_remaining_after
+                daily_state["remaining"] = soft_remaining_after
+                daily_state["soft_target_exceeded"] = soft_remaining_after <= Decimal("0")
+        except Exception:
+            logger.debug(
+                "Failed to update cached daily_state after consuming credit for agent %s",
                 agent.id,
-                exc,
+                exc_info=True,
             )
-        else:
-            if credit_snapshot is not None:
-                credit_snapshot["daily_state"] = updated_state
-                credit_snapshot.pop("available", None)
-            if span is not None:
-                try:
-                    remaining_after = updated_state.get("hard_limit_remaining")
-                    span.set_attribute(
-                        "credit_check.daily_remaining_after",
-                        float(remaining_after) if remaining_after is not None else -1.0,
-                    )
-                except Exception:
-                    pass
+
+    if credit_snapshot is not None:
+        credit_snapshot["daily_state"] = daily_state
+        # Force a fresh account-wide balance lookup next time.
+        credit_snapshot.pop("available", None)
+
+    if span is not None:
+        try:
+            remaining_after = (
+                daily_state.get("hard_limit_remaining") if isinstance(daily_state, dict) else None
+            )
+            span.set_attribute(
+                "credit_check.daily_remaining_after",
+                float(remaining_after) if remaining_after is not None else -1.0,
+            )
+        except Exception:
+            pass
 
     return {
         "cost": cost,

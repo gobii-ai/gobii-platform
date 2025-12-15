@@ -72,6 +72,7 @@ from .budget import AgentBudgetManager, get_current_context as get_budget_contex
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from .llm_config import (
     AgentLLMTier,
+    apply_tier_credit_multiplier,
     get_agent_llm_tier,
     get_llm_config,
     get_llm_config_with_failover,
@@ -1109,6 +1110,16 @@ def add_budget_awareness_sections(
 
     sections: List[tuple[str, str, int, bool]] = []
 
+    def _format_age(delta: timedelta) -> str:
+        seconds = int(max(0, delta.total_seconds()))
+        if seconds < 60:
+            return f"{seconds}s"
+        if seconds < 3600:
+            return f"{seconds // 60}m"
+        if seconds < 86400:
+            return f"{seconds // 3600}h"
+        return f"{seconds // 86400}d"
+
     if max_iterations and max_iterations > 0:
         iteration_text = (
             f"Iteration progress: {current_iteration}/{max_iterations} in this processing cycle."
@@ -1257,6 +1268,51 @@ def add_budget_awareness_sections(
             # Do not block prompt creation if credit summary fails
             pass
 
+        # Burn-rate awareness helps the agent self-throttle smoothly.
+        try:
+            burn_rate = daily_credit_state.get("burn_rate_per_hour")
+            burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
+            burn_window = daily_credit_state.get("burn_rate_window_minutes")
+            if burn_rate is not None and burn_threshold is not None and burn_window is not None:
+                burn_status = (
+                    f"Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
+                    f"(threshold: {burn_threshold} credits/hour). "
+                    "If you are above threshold without new user input, the system may pause you; pace accordingly."
+                )
+                sections.append(("burn_rate_status", burn_status, 2, True))
+        except Exception:
+            logger.debug("Failed to generate burn-rate summary for prompt.", exc_info=True)
+
+    # Time awareness for pacing (avoid rapid-fire tool calls).
+    if agent is not None:
+        try:
+            anchor = getattr(agent, "last_interaction_at", None) or getattr(agent, "created_at", None)
+            if anchor is not None:
+                delta = dj_timezone.now() - anchor
+                sections.append(
+                    (
+                        "time_since_last_interaction",
+                        f"Time since last user interaction: {_format_age(delta)} (at {anchor.isoformat()}).",
+                        2,
+                        True,
+                    )
+                )
+        except Exception:
+            logger.debug("Failed to generate time-since-interaction prompt.", exc_info=True)
+
+        sections.append(
+            (
+                "pacing_guidance",
+                (
+                    "Pacing: Avoid rapid-fire tool calls. Prefer one tool call, then reassess. "
+                    "Batch multiple calls ONLY when it clearly reduces total work. "
+                    "If there is no urgent new input, consider sleeping until the next trigger."
+                ),
+                2,
+                True,
+            )
+        )
+
     try:
         default_cost, overrides = get_tool_cost_overview()
 
@@ -1268,15 +1324,16 @@ def add_budget_awareness_sections(
             # .normalize() removes trailing zeros and converts e.g. 1.00 to 1.
             return str(normalized.normalize())
 
-        summary_parts = [
-            f"Default tool call cost: {_format_cost(default_cost)} credits."
-        ]
+        effective_default_cost = (
+            apply_tier_credit_multiplier(agent, default_cost) if agent is not None else default_cost
+        )
+        summary_parts = [f"Default tool call cost: {_format_cost(effective_default_cost)} credits."]
         if overrides:
             sorted_overrides = sorted(overrides.items())
             max_entries = 5
             display_pairs = sorted_overrides[:max_entries]
             overrides_text = ", ".join(
-                f"{name}={_format_cost(cost)}"
+                f"{name}={_format_cost(apply_tier_credit_multiplier(agent, cost) if agent is not None else cost)}"
                 for name, cost in display_pairs
             )
             extra_count = len(sorted_overrides) - len(display_pairs)
@@ -1715,6 +1772,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 "meta": f"[{s.created_at.isoformat()}] Tool {tc.tool_name} called.",
                 "params": json.dumps(tc.tool_params)
             }
+            if getattr(s, "credits_cost", None) is not None:
+                components["cost"] = f"{s.credits_cost} credits"
             if tc.result:
                 components["result"] = str(tc.result)
 
@@ -1839,6 +1898,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         # Component weights within each event
         COMPONENT_WEIGHTS = {
             "meta": 3,        # High priority - always want to see what happened
+            "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
             "content": 2,     # Medium priority for message content (SMS, etc.)

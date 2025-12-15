@@ -2,6 +2,7 @@ import json
 import shutil
 import tempfile
 from datetime import timedelta
+from decimal import Decimal
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -41,6 +42,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
+    PersistentAgentToolCall,
     PromptConfig,
     UserBilling,
     ToolConfig,
@@ -135,6 +137,37 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<schedule>No schedule configured</schedule>', content)
         self.assertIn('<current_datetime>', content)
         self.assertIn('</current_datetime>', content)
+        self.assertIn('<pacing_guidance>', content)
+        self.assertIn('<time_since_last_interaction>', content)
+        self.assertIn('<burn_rate_status>', content)
+
+    def test_tool_call_history_includes_cost_component(self):
+        """Tool-call unified history should include a dedicated <cost> component."""
+        with patch(
+            "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={"success": True, "credit": None},
+        ):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Tool call: search_tools",
+                credits_cost=Decimal("1.234"),
+            )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="search_tools",
+            tool_params={"query": "hello"},
+            result=json.dumps({"status": "ok"}),
+        )
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message['content']
+        self.assertIn("_tool_call>", content)
+        self.assertIn("<cost>1.234 credits</cost>", content)
 
     def test_mcp_servers_listed_in_prompt(self):
         """Accessible MCP servers should be enumerated in the prompt context."""

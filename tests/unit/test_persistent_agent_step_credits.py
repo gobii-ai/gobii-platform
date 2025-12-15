@@ -3,6 +3,7 @@ from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from datetime import timedelta
+from unittest.mock import patch
 
 from api.models import (
     BrowserUseAgent,
@@ -88,6 +89,30 @@ class PersistentAgentStepCreditsTests(TestCase):
         step.refresh_from_db()
         self.assertEqual(step.credits_cost, Decimal("0.25"))
         self.assertIsNotNone(step.task_credit)
+
+    def test_step_with_task_credit_does_not_consume_again(self):
+        credit = (
+            TaskCredit.objects.filter(
+                user=self.user,
+                expiration_date__gte=timezone.now(),
+                voided=False,
+            )
+            .order_by("expiration_date")
+            .first()
+        )
+        self.assertIsNotNone(credit)
+
+        with patch("api.models.TaskCreditService.check_and_consume_credit_for_owner") as consume_mock:
+            consume_mock.side_effect = AssertionError("Expected no additional credit consumption")
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description="Pre-charged step",
+                credits_cost=Decimal("0.250"),
+                task_credit=credit,
+            )
+        step.refresh_from_db()
+        self.assertEqual(step.task_credit_id, credit.id)
+        self.assertEqual(step.credits_cost, Decimal("0.250"))
 
     def test_org_owned_agent_consumes_org_credits(self):
         # Create an organization and grant it credits

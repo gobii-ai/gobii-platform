@@ -306,7 +306,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertFalse(result)
+        self.assertIs(result, False)
         mock_consume.assert_not_called()
 
         step = PersistentAgentStep.objects.get(agent=self.agent)
@@ -336,7 +336,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertFalse(result)
+        self.assertIs(result, False)
         step = PersistentAgentStep.objects.get(agent=self.agent)
         self.assertIn("insufficient credits", step.description)
         self.assertTrue(
@@ -463,7 +463,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertFalse(result)
+        self.assertIs(result, False)
         mock_consume.assert_not_called()
         step = PersistentAgentStep.objects.filter(agent=self.agent).order_by('-created_at').first()
         self.assertIsNotNone(step)
@@ -500,7 +500,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertFalse(result)
+        self.assertIs(result, False)
         mock_consume.assert_not_called()
         events = [
             call.kwargs
