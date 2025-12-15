@@ -6182,7 +6182,7 @@ class PersistentAgentMessage(models.Model):
     latest_sent_at = models.DateTimeField(null=True, blank=True)
     latest_delivered_at = models.DateTimeField(null=True, blank=True)
     latest_error_code = models.CharField(max_length=64, blank=True)
-    latest_error_message = models.CharField(max_length=256, blank=True)
+    latest_error_message = models.TextField(blank=True)
 
     class Meta:
         indexes = [
