@@ -11,6 +11,8 @@ from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
 from opentelemetry import baggage, trace
+from waffle import switch_is_active
+from django.conf import settings
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
@@ -174,6 +176,76 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
 
     try:
+        from constants.feature_flags import AGENT_CRON_THROTTLE
+        from config.redis_client import get_redis_client
+        from api.services.cron_throttle import (
+            cron_throttle_gate_key,
+            cron_throttle_footer_cooldown_key,
+            cron_throttle_pending_footer_key,
+            evaluate_free_plan_cron_throttle,
+        )
+
+        agent = (
+            PersistentAgent.objects
+            .select_related(
+                "organization",
+                "organization__billing",
+                "user",
+                "user__billing",
+                "preferred_contact_endpoint",
+            )
+            .filter(id=persistent_agent_id)
+            .first()
+        )
+        if agent is None:
+            raise PersistentAgent.DoesNotExist
+
+        if switch_is_active(AGENT_CRON_THROTTLE):
+            decision = evaluate_free_plan_cron_throttle(agent, cron_expression)
+            if decision.throttling_applies:
+                redis_client = get_redis_client()
+                ttl_seconds = max(1, int(decision.effective_interval_seconds))
+                try:
+                    acquired = redis_client.set(
+                        cron_throttle_gate_key(str(agent.id)),
+                        "1",
+                        ex=ttl_seconds,
+                        nx=True,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Cron throttle redis gate failed for agent %s; allowing cron execution.",
+                        agent.id,
+                    )
+                    acquired = True
+
+                if not acquired:
+                    try:
+                        cooldown_key = cron_throttle_footer_cooldown_key(str(agent.id))
+                        if not redis_client.exists(cooldown_key):
+                            pending_key = cron_throttle_pending_footer_key(str(agent.id))
+                            pending_ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_MAX_INTERVAL_DAYS", 30))
+                            pending_ttl_seconds = max(1, pending_ttl_days * 86400)
+                            redis_client.set(
+                                pending_key,
+                                "1",
+                                ex=pending_ttl_seconds,
+                                nx=True,
+                            )
+                    except Exception:
+                        logger.debug(
+                            "Failed to mark cron throttle footer pending for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                    logger.info(
+                        "Skipping cron trigger for agent %s due to free-plan throttling (stage=%s interval=%ss)",
+                        agent.id,
+                        decision.stage,
+                        decision.effective_interval_seconds,
+                    )
+                    return
+
         # Create the cron trigger record first
         with transaction.atomic():
             agent = PersistentAgent.objects.select_for_update().get(id=persistent_agent_id)

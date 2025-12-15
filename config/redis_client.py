@@ -8,8 +8,6 @@ Provides a centralized, production-ready Redis client for all use cases:
 
 All operations use the same underlying Redis instance configured via REDIS_URL.
 """
-from __future__ import annotations
-
 import logging
 from functools import lru_cache
 from typing import Final, Any, Dict, Optional
@@ -60,8 +58,15 @@ class _FakeRedis:
     def get(self, key: str) -> Optional[Any]:
         return self._kv.get(key)
 
-    def set(self, key: str, value: Any):
+    def set(self, key: str, value: Any, ex: int | None = None, nx: bool | None = None):
+        if nx and self.exists(key):
+            return False
         self._kv[key] = value
+        if ex is not None:
+            try:
+                self._ttl[key] = int(ex)
+            except Exception:
+                self._ttl[key] = 0
         return True
 
     def delete(self, key: str) -> int:

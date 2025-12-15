@@ -644,6 +644,17 @@ AGENT_SOFT_EXPIRATION_DOWNGRADE_GRACE_HOURS = env.int("AGENT_SOFT_EXPIRATION_DOW
 # Retention window for persisted prompt archives
 PROMPT_ARCHIVE_RETENTION_DAYS = env.int("PROMPT_ARCHIVE_RETENTION_DAYS", default=14)
 
+# ────────── Free Plan Cron Throttle Settings ──────────
+# These settings control exponential backoff for cron-triggered scheduled runs on
+# free-plan agents. The throttle starts at 2× the agent's configured schedule
+# interval once the agent is older than START_AGE_DAYS, then doubles every
+# STAGE_DAYS until capped at MAX_INTERVAL_DAYS.
+AGENT_CRON_THROTTLE_START_AGE_DAYS = env.int("AGENT_CRON_THROTTLE_START_AGE_DAYS", default=16)
+AGENT_CRON_THROTTLE_STAGE_DAYS = env.int("AGENT_CRON_THROTTLE_STAGE_DAYS", default=7)
+AGENT_CRON_THROTTLE_MAX_INTERVAL_DAYS = env.int("AGENT_CRON_THROTTLE_MAX_INTERVAL_DAYS", default=30)
+# Rate-limit the throttle notice so users do not get spammed when triggers are skipped.
+AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS = env.int("AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", default=7)
+
 # Feature flags (django-waffle)
 # Default to explicit management in admin; core features are not gated anymore.
 # You can still override with WAFFLE_FLAG_DEFAULT=1 in environments where you want missing flags active.
