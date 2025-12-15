@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import timedelta
 from decimal import Decimal
-from typing import List, Tuple, Union, Optional, Dict, Any
+from typing import List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
 import litellm
@@ -682,7 +682,7 @@ def _ensure_credit_for_tool(
     tool_name: str,
     span=None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
-) -> bool | dict[str, Any]:
+) -> dict[str, Any] | Literal[False]:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
     Returns False if insufficient or consumption fails. On success, returns a dict
