@@ -6506,20 +6506,26 @@ class PersistentAgentStep(models.Model):
             should_charge = self.credits_cost is not None or completion_requires_billing
 
             if owner is not None and should_charge:
-                default_cost = get_default_task_credit_cost()
-                if self.credits_cost is not None:
-                    amount = self.credits_cost
+                if self.task_credit_id is not None:
+                    # Credits were already consumed upstream (e.g., just-in-time tool gating).
+                    # Do NOT consume again; keep the existing linkage for audit.
+                    if completion_to_mark is not None and self.credits_cost is not None:
+                        completion_mark_amount = self.credits_cost
                 else:
-                    amount = _apply_tier_multiplier(self.agent, default_cost)
-                    self.credits_cost = amount
-                result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
+                    default_cost = get_default_task_credit_cost()
+                    if self.credits_cost is not None:
+                        amount = self.credits_cost
+                    else:
+                        amount = _apply_tier_multiplier(self.agent, default_cost)
+                        self.credits_cost = amount
+                    result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
 
-                if not result.get('success'):
-                    raise ValidationError({"quota": result.get('error_message')})
+                    if not result.get('success'):
+                        raise ValidationError({"quota": result.get('error_message')})
 
-                self.task_credit = result.get('credit')
-                if completion_to_mark is not None:
-                    completion_mark_amount = amount
+                    self.task_credit = result.get('credit')
+                    if completion_to_mark is not None:
+                        completion_mark_amount = amount
             elif completion_to_mark is not None and self.credits_cost is not None:
                 # Owner-less steps (system agents) may still want the completion marked with explicit cost.
                 completion_mark_amount = self.credits_cost
