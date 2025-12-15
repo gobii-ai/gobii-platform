@@ -146,21 +146,28 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
             const available = resolvedSummary.metrics.quota.available
             const total = resolvedSummary.metrics.quota.total
             const used = resolvedSummary.metrics.quota.used
-            const usedPct = Math.round(resolvedSummary.metrics.quota.used_pct)
+            const usedPctRaw = resolvedSummary.metrics.quota.used_pct
+            const usedPct = Number.isFinite(usedPctRaw) ? Math.round(usedPctRaw) : 0
+            const unlimitedQuota = total < 0 || available < 0
 
-            value = total > 0 ? creditFormatter.format(available) : '0'
+            if (unlimitedQuota) {
+              value = '∞'
+              caption = 'Unlimited task credits during this billing period.'
+            } else if (total > 0) {
+              value = creditFormatter.format(available)
 
-            caption =
-              total > 0
-                ? `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used)`
-                : 'No active quota for this context. Consider upgrading your plan.'
-            progressPct = Math.max(0, Math.min(100, usedPct))
-            if (progressPct >= 100) {
-              progressClass = 'bg-gradient-to-r from-red-400 to-red-500'
-            } else if (progressPct >= 90) {
-              progressClass = 'bg-gradient-to-r from-orange-400 to-orange-500'
+              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used)`
+              progressPct = Math.max(0, Math.min(100, usedPct))
+              if (progressPct >= 100) {
+                progressClass = 'bg-gradient-to-r from-red-400 to-red-500'
+              } else if (progressPct >= 90) {
+                progressClass = 'bg-gradient-to-r from-orange-400 to-orange-500'
+              } else {
+                progressClass = 'bg-gradient-to-r from-blue-500 to-sky-500'
+              }
             } else {
-              progressClass = 'bg-gradient-to-r from-blue-500 to-sky-500'
+              value = '0'
+              caption = 'No active quota for this context. Consider upgrading your plan.'
             }
             break
           }

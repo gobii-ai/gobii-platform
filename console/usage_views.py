@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.views import View
 
 from billing.services import BillingService
+from tasks.services import TaskCreditService
 
 from api.models import (
     BrowserUseAgent,
@@ -19,9 +20,9 @@ from api.models import (
     Organization,
     PersistentAgentStep,
     PersistentAgentToolCall,
-    TaskCredit,
 )
 from console.context_helpers import build_console_context
+from util.constants.task_constants import TASKS_UNLIMITED
 
 
 API_AGENT_ID = "api"
@@ -271,31 +272,51 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         cancelled_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.CANCELLED, DECIMAL_ZERO)
         total_credits = combined_total
 
-        now = timezone.now()
-        credit_filters = {
-            "granted_date__lte": now,
-            "expiration_date__gte": now,
-            "voided": False,
-        }
-        if organization is not None:
-            credit_filters["organization"] = organization
-        else:
-            credit_filters["user"] = request.user
-
         credits_zero = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
-        credit_agg = TaskCredit.objects.filter(**credit_filters).aggregate(
+
+        task_credit_qs = TaskCreditService.get_current_task_credit_for_owner(owner)
+        credit_agg = task_credit_qs.aggregate(
             available=Coalesce(Sum("available_credits"), credits_zero),
             total=Coalesce(Sum("credits"), credits_zero),
             used=Coalesce(Sum("credits_used"), credits_zero),
         )
 
-        available_credits = credit_agg.get("available") or Decimal("0")
-        quota_total = credit_agg.get("total") or Decimal("0")
-        quota_used = credit_agg.get("used") or Decimal("0")
+        def _to_decimal(value: object, default: Decimal = DECIMAL_ZERO) -> Decimal:
+            try:
+                return Decimal(value)
+            except Exception:
+                return default
+
+        ledger_available = _to_decimal(credit_agg.get("available"), DECIMAL_ZERO)
+        ledger_total = _to_decimal(credit_agg.get("total"), DECIMAL_ZERO)
+        ledger_used = _to_decimal(credit_agg.get("used"), DECIMAL_ZERO)
+
+        if organization is None:
+            quota_total = _to_decimal(TaskCreditService.get_tasks_entitled_for_owner(owner), DECIMAL_ZERO)
+            quota_used = _to_decimal(
+                TaskCreditService.get_owner_task_credits_used(owner, task_credits=task_credit_qs),
+                DECIMAL_ZERO,
+            )
+            available_credits = _to_decimal(
+                TaskCreditService.calculate_available_tasks_for_owner(owner, task_credits=task_credit_qs),
+                DECIMAL_ZERO,
+            )
+        else:
+            quota_total = ledger_total
+            quota_used = ledger_used
+            available_credits = ledger_available
+
+        unlimited_quota = quota_total == Decimal(TASKS_UNLIMITED)
+        if not unlimited_quota:
+            available_credits = max(available_credits, DECIMAL_ZERO)
 
         quota_used_pct = 0.0
-        if quota_total > 0:
-            quota_used_pct = float((quota_used / quota_total) * Decimal("100"))
+        if not unlimited_quota and quota_total > 0:
+            usage_pct = (quota_used / quota_total) * Decimal("100")
+            quota_used_pct = float(min(usage_pct, Decimal("100")))
+
+        agents_filtered = bool(filtered_agent_ids)
+        credits_consumed = quota_used if not agents_filtered else total_credits
 
         payload = {
             "period": {
@@ -319,7 +340,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                     "cancelled": float(cancelled_credit),
                 },
                 "credits": {
-                    "total": float(total_credits),
+                    "total": float(credits_consumed),
                     "unit": "credits",
                 },
                 "quota": {

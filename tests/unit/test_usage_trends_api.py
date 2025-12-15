@@ -18,6 +18,7 @@ from api.models import (
 )
 from constants.grant_types import GrantTypeChoices
 from console.usage_views import API_AGENT_ID
+from tasks.services import TaskCreditService
 
 
 def _grant_task_credits(*, user=None, organization=None, credits: Decimal = Decimal("25")) -> None:
@@ -818,3 +819,35 @@ class UsageSummaryAPITests(TestCase):
         self.assertAlmostEqual(tasks_metrics["in_progress"], 0.0)
         self.assertAlmostEqual(tasks_metrics["pending"], 0.0)
         self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.5)
+
+    def test_summary_uses_credit_ledger_for_consumed_totals(self):
+        TaskCredit.objects.filter(user=self.user).update(credits_used=Decimal("5"))
+        expected_used = TaskCreditService.get_owner_task_credits_used(self.user)
+
+        response = self.client.get(reverse("console_usage_summary"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], float(expected_used))
+        self.assertAlmostEqual(payload["metrics"]["quota"]["used"], float(expected_used))
+        available = TaskCreditService.calculate_available_tasks(self.user)
+        self.assertAlmostEqual(payload["metrics"]["quota"]["available"], float(available))
+
+    def test_personal_summary_uses_entitlement_when_no_grants(self):
+        User = get_user_model()
+        other_user = User.objects.create_user(
+            username="nogrants@example.com",
+            email="nogrants@example.com",
+            password="password123",
+        )
+        self.client.force_login(other_user)
+        TaskCredit.objects.filter(user=other_user).delete()
+
+        response = self.client.get(reverse("console_usage_summary"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        entitled = TaskCreditService.get_tasks_entitled_for_owner(other_user)
+        self.assertEqual(payload["metrics"]["quota"]["total"], float(entitled))
+        self.assertEqual(payload["metrics"]["quota"]["available"], float(entitled))
+        self.assertEqual(payload["metrics"]["credits"]["total"], 0.0)
