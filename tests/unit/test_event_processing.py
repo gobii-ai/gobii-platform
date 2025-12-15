@@ -555,6 +555,61 @@ class CronTriggerTaskTests(TestCase):
         # Verify orphaned beat task removal was called
         mock_remove_beat_task.assert_called_once_with(nonexistent_agent_id)
 
+    @patch('api.agent.tasks.process_events.switch_is_active', return_value=True)
+    @patch('config.redis_client.get_redis_client')
+    @patch('api.agent.tasks.process_events.process_agent_events')
+    def test_cron_trigger_task_throttles_old_free_agents_and_marks_footer_pending(
+        self,
+        mock_process_events,
+        mock_get_redis,
+        _mock_switch,
+    ):
+        """Second cron trigger should be skipped when throttled, and a footer notice marked pending."""
+
+        class _FakeRedis:
+            def __init__(self):
+                self._store = {}
+
+            def get(self, key):
+                return self._store.get(key)
+
+            def set(self, key, value, ex=None, nx=None):
+                if nx and key in self._store:
+                    return False
+                self._store[key] = value
+                return True
+
+            def delete(self, key):
+                self._store.pop(key, None)
+                return 1
+
+            def exists(self, key):
+                return 1 if key in self._store else 0
+
+        fake_redis = _FakeRedis()
+        mock_get_redis.return_value = fake_redis
+
+        # Age the agent so throttling is active (defaults: start at 16 days)
+        old_ts = timezone.now() - timedelta(days=20)
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(created_at=old_ts, schedule="@daily")
+        self.agent.refresh_from_db()
+
+        cron_expression = "@daily"
+
+        # First run allowed
+        process_agent_cron_trigger_task(str(self.agent.id), cron_expression)
+        self.assertEqual(PersistentAgentCronTrigger.objects.count(), 1)
+        mock_process_events.assert_called_once_with(str(self.agent.id))
+
+        # Second run skipped due to redis gate (NX=False)
+        process_agent_cron_trigger_task(str(self.agent.id), cron_expression)
+        self.assertEqual(PersistentAgentCronTrigger.objects.count(), 1)
+        mock_process_events.assert_called_once_with(str(self.agent.id))
+
+        from api.services.cron_throttle import cron_throttle_pending_footer_key
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        self.assertTrue(fake_redis.get(pending_key))
+
     @patch('redbeat.RedBeatSchedulerEntry.from_key')
     @patch('celery.current_app')
     def test_remove_orphaned_celery_beat_task_success(self, mock_celery_app, mock_from_key):

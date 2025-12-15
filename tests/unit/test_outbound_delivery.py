@@ -5,6 +5,7 @@ and HTML-to-plaintext conversion using inscriptis.
 
 import os
 from unittest.mock import patch, MagicMock
+from datetime import timedelta
 from django.test import TestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -18,7 +19,7 @@ from api.models import (
     DeliveryStatus,
     BrowserUseAgent,
 )
-from api.agent.comms.outbound_delivery import deliver_agent_email, _convert_sms_body_to_plaintext
+from api.agent.comms.outbound_delivery import deliver_agent_email, deliver_agent_sms, _convert_sms_body_to_plaintext
 from config import settings
 from inscriptis import get_text
 
@@ -242,7 +243,7 @@ class EmailDeliveryTests(TestCase):
         self.assertIn("This is a test with bold text.", actual_plaintext)
         self.assertIn("* First item", actual_plaintext)
         self.assertIn("* Second item", actual_plaintext)
-        
+
         # Verify it handles different HTML structures correctly
         complex_html = """
         <div>
@@ -312,6 +313,96 @@ class EmailDeliveryTests(TestCase):
             
             # Verify send was called
             mock_msg.send.assert_called_once_with(fail_silently=False)
+
+
+@tag("batch_outbound_delivery")
+class SMSThrottleNoticeTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="sms-throttle@example.com",
+            email="sms-throttle@example.com",
+            password="password",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="SMS Throttle Browser Agent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="SMS Throttle Agent",
+            charter="Test cron throttle sms suffix",
+            browser_use_agent=self.browser_agent,
+            schedule="@daily",
+        )
+        # Age the agent past the throttle threshold
+        PersistentAgent.objects.filter(pk=self.agent.pk).update(
+            created_at=timezone.now() - timedelta(days=20)
+        )
+        self.agent.refresh_from_db()
+
+        self.from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15550001111",
+            is_primary=True,
+        )
+        self.to_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15550002222",
+        )
+
+    @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
+    @patch("config.redis_client.get_redis_client")
+    @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="sms123")
+    def test_deliver_agent_sms_appends_throttle_notice_when_pending(self, _mock_send, mock_get_redis, _mock_switch):
+        class _FakeRedis:
+            def __init__(self):
+                self._store = {}
+
+            def get(self, key):
+                return self._store.get(key)
+
+            def set(self, key, value, ex=None, nx=None):
+                if nx and key in self._store:
+                    return False
+                self._store[key] = value
+                return True
+
+            def delete(self, key):
+                self._store.pop(key, None)
+                return 1
+
+        fake_redis = _FakeRedis()
+        mock_get_redis.return_value = fake_redis
+
+        from api.services.cron_throttle import (
+            cron_throttle_footer_cooldown_key,
+            cron_throttle_pending_footer_key,
+        )
+
+        pending_key = cron_throttle_pending_footer_key(str(self.agent.id))
+        fake_redis.set(pending_key, "1")
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="Hello there",
+            raw_payload={},
+        )
+
+        deliver_agent_sms(message)
+
+        # Ensure the throttle notice was appended to the outbound SMS body.
+        last_call = _mock_send.call_args_list[-1]
+        sent_body = last_call.kwargs.get("body", "")
+        self.assertIn("Hello there", sent_body)
+        self.assertIn("🥺", sent_body)
+        self.assertIn("/subscribe/pro/", sent_body)
+
+        self.assertFalse(fake_redis.get(pending_key))
+        self.assertTrue(fake_redis.get(cron_throttle_footer_cooldown_key(str(self.agent.id))))
 
 
 @tag("batch_outbound_delivery")

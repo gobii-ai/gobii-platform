@@ -4,6 +4,7 @@ import os
 from django.core.mail import get_connection
 from django.conf import settings
 from django.utils import timezone
+from waffle import switch_is_active
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
@@ -748,6 +749,43 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     # Convert content to an SMS-friendly plaintext version
     original_body = message.body
     plaintext_body = _convert_sms_body_to_plaintext(original_body)
+
+    try:
+        from constants.feature_flags import AGENT_CRON_THROTTLE
+        from config.redis_client import get_redis_client
+        from api.services.cron_throttle import (
+            build_upgrade_link,
+            cron_throttle_footer_cooldown_key,
+            cron_throttle_pending_footer_key,
+            evaluate_free_plan_cron_throttle,
+            select_cron_throttle_sms_suffix,
+        )
+
+        agent = getattr(message, "owner_agent", None)
+        if agent is not None and switch_is_active(AGENT_CRON_THROTTLE):
+            redis_client = get_redis_client()
+            pending_key = cron_throttle_pending_footer_key(str(agent.id))
+            if redis_client.get(pending_key):
+                decision = evaluate_free_plan_cron_throttle(agent, (getattr(agent, "schedule", None) or ""))
+                if decision.throttling_applies:
+                    suffix = select_cron_throttle_sms_suffix(
+                        agent_name=agent.name,
+                        effective_interval_seconds=decision.effective_interval_seconds,
+                        upgrade_link=build_upgrade_link(),
+                    )
+                    plaintext_body = f"{plaintext_body}\n\n{suffix}".strip()
+                    ttl_days = int(getattr(settings, "AGENT_CRON_THROTTLE_NOTICE_TTL_DAYS", 7))
+                    ttl_seconds = max(1, ttl_days * 86400)
+                    redis_client.delete(pending_key)
+                    redis_client.set(
+                        cron_throttle_footer_cooldown_key(str(agent.id)),
+                        "1",
+                        ex=ttl_seconds,
+                    )
+                else:
+                    redis_client.delete(pending_key)
+    except Exception:
+        logger.debug("Failed applying cron throttle SMS notice for message %s", message.id, exc_info=True)
 
     logger.info(
         "Prepared SMS body for message %s. Original length: %d, Plaintext length: %d",
