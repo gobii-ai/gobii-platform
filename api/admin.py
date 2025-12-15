@@ -720,6 +720,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
         "plan_name",
         "min_cron_schedule_minutes",
         "search_web_result_count",
+        "duplicate_similarity_threshold",
         "updated_at",
     )
     list_filter = ("plan_name",)
@@ -735,6 +736,10 @@ class ToolConfigAdmin(admin.ModelAdmin):
         (
             "Search web",
             {"fields": ("search_web_result_count",)},
+        ),
+        (
+            "Duplicates",
+            {"fields": ("duplicate_similarity_threshold",)},
         ),
         ("Metadata", {"fields": ("created_at", "updated_at")}),
     )

@@ -16,6 +16,11 @@ from django.db.models import Prefetch
 
 from ...encryption import SecretsEncryption
 from ...llm.utils import normalize_model_name
+from ...services.tool_settings import (
+    DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+    get_tool_settings_for_owner,
+    normalize_duplicate_similarity_threshold,
+)
 from ...models import (
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
@@ -28,7 +33,7 @@ import litellm
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SIMILARITY_THRESHOLD = 0.97
+DEFAULT_SIMILARITY_THRESHOLD = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
 
 
 @dataclass
@@ -276,6 +281,25 @@ def _embedding_similarity_from_legacy(left: str, right: str) -> Optional[float]:
     return None
 
 
+def _resolve_similarity_threshold(agent: PersistentAgent, similarity_threshold: Optional[float]) -> float:
+    if similarity_threshold is not None:
+        return normalize_duplicate_similarity_threshold(similarity_threshold)
+
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner:
+        try:
+            settings = get_tool_settings_for_owner(owner)
+            return getattr(settings, "duplicate_similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
+        except Exception:
+            logger.warning(
+                "Failed to resolve similarity threshold for agent %s",
+                getattr(agent, "id", None),
+                exc_info=True,
+            )
+
+    return DEFAULT_SIMILARITY_THRESHOLD
+
+
 def detect_recent_duplicate_message(
         agent: PersistentAgent,
         *,
@@ -283,7 +307,7 @@ def detect_recent_duplicate_message(
         body: str,
         to_address: Optional[str] = None,
         conversation_id: Optional[UUID] = None,
-        similarity_threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+        similarity_threshold: Optional[float] = None,
 ) -> Optional[DuplicateDetectionResult]:
     """
     Check whether the pending outbound message is a recent duplicate.
@@ -320,11 +344,13 @@ def detect_recent_duplicate_message(
     if previous_body == current_body:
         return DuplicateDetectionResult(reason="exact", previous_message=previous_message)
 
+    threshold = _resolve_similarity_threshold(agent, similarity_threshold)
+
     similarity = _embedding_similarity(previous_body, current_body)
     if similarity is None:
         similarity = _compute_levenshtein_ratio(previous_body, current_body)
 
-    if similarity >= similarity_threshold:
+    if similarity >= threshold:
         return DuplicateDetectionResult(
             reason="similarity", previous_message=previous_message, similarity=similarity
         )
