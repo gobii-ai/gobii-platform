@@ -8,6 +8,7 @@ from api.agent.tools.mcp_manager import MCPServerRuntime, MCPToolInfo, MCPToolMa
 from api.agent.tools.mcp_result_adapters import (
     BrightDataSearchEngineAdapter,
     BrightDataSearchEngineBatchAdapter,
+    BrightDataLinkedInPersonProfileAdapter,
 )
 from api.models import (
     BrowserUseAgent,
@@ -94,6 +95,52 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image_base64", related[0])
         self.assertNotIn("image", related[1])
         self.assertEqual(related[0]["title"], "Rel One")
+
+
+@tag("batch_mcp_tools")
+class BrightDataLinkedInPersonProfileAdapterTests(SimpleTestCase):
+    def test_strips_html_and_image_fields_recursively(self):
+        payload = {
+            "headline": "Senior Engineer",
+            "description_html": "<p>about</p>",
+            "company": {"name": "Acme", "company_logo_url": "http://logo", "tagline_html": "<p>tag</p>"},
+            "positions": [
+                {"title": "X", "banner_image": "http://banner", "details": {"summary_html": "<p>sum</p>", "note_img": "img"}},
+                {"title": "Y", "institute_logo_url": "http://inst", "extras_html": "<span>x</span>"},
+            ],
+            "default_avatar": "http://avatar",
+            "misc_img": "http://misc",
+            "notes": [{"content_html": "<p>c</p>", "text": "plain"}],
+            "image": "http://example.com/image.png",
+            "image_url": "http://example.com/image2.png",
+            "people_also_viewed": [
+                {"name": "Alice", "image_url": "http://example.com/alice.png"},
+                {"name": "Bob", "image": "http://example.com/bob.png"},
+            ],
+        }
+        adapter = BrightDataLinkedInPersonProfileAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        self.assertEqual(cleaned["headline"], "Senior Engineer")
+        self.assertNotIn("description_html", cleaned)
+        self.assertEqual(cleaned["company"]["name"], "Acme")
+        self.assertNotIn("company_logo_url", cleaned["company"])
+        self.assertNotIn("tagline_html", cleaned["company"])
+        self.assertNotIn("banner_image", cleaned["positions"][0])
+        self.assertNotIn("summary_html", cleaned["positions"][0]["details"])
+        self.assertNotIn("note_img", cleaned["positions"][0]["details"])
+        self.assertNotIn("institute_logo_url", cleaned["positions"][1])
+        self.assertNotIn("extras_html", cleaned["positions"][1])
+        self.assertNotIn("default_avatar", cleaned)
+        self.assertNotIn("misc_img", cleaned)
+        self.assertNotIn("content_html", cleaned["notes"][0])
+        self.assertEqual(cleaned["notes"][0]["text"], "plain")
+        self.assertNotIn("image", cleaned)
+        self.assertNotIn("image_url", cleaned)
+        self.assertNotIn("people_also_viewed", cleaned)
 
 
 @tag("batch_mcp_tools")
