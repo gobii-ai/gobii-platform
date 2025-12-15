@@ -19,7 +19,7 @@ from ...llm.utils import normalize_model_name
 from ...services.tool_settings import (
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
     get_tool_settings_for_owner,
-    _normalize_duplicate_similarity_threshold,
+    normalize_duplicate_similarity_threshold,
 )
 from ...models import (
     EmbeddingsLLMTier,
@@ -283,15 +283,13 @@ def _embedding_similarity_from_legacy(left: str, right: str) -> Optional[float]:
 
 def _resolve_similarity_threshold(agent: PersistentAgent, similarity_threshold: Optional[float]) -> float:
     if similarity_threshold is not None:
-        return _normalize_duplicate_similarity_threshold(similarity_threshold)
+        return normalize_duplicate_similarity_threshold(similarity_threshold)
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
     if owner:
         try:
             settings = get_tool_settings_for_owner(owner)
-            return _normalize_duplicate_similarity_threshold(
-                getattr(settings, "duplicate_similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
-            )
+            return getattr(settings, "duplicate_similarity_threshold", DEFAULT_SIMILARITY_THRESHOLD)
         except Exception:
             logger.warning(
                 "Failed to resolve similarity threshold for agent %s",

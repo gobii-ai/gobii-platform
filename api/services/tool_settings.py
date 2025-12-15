@@ -132,7 +132,7 @@ def _normalize_search_web_result_count(value: Optional[int]) -> int:
     return int_value
 
 
-def _normalize_duplicate_similarity_threshold(value: Optional[float]) -> float:
+def normalize_duplicate_similarity_threshold(value: Optional[float]) -> float:
     try:
         float_value = float(value)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -155,7 +155,7 @@ def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
         search_web_result_count=_normalize_search_web_result_count(
             config.get("search_web_result_count") if config else None
         ),
-        duplicate_similarity_threshold=_normalize_duplicate_similarity_threshold(
+        duplicate_similarity_threshold=normalize_duplicate_similarity_threshold(
             config.get("duplicate_similarity_threshold") if config else None
         ),
     )
