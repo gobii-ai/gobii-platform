@@ -821,6 +821,12 @@ class UsageSummaryAPITests(TestCase):
         self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.5)
 
     def test_summary_uses_credit_ledger_for_consumed_totals(self):
+        BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("2.0"),
+        )
         TaskCredit.objects.filter(user=self.user).update(credits_used=Decimal("5"))
         expected_used = TaskCreditService.get_owner_task_credits_used(self.user)
 
@@ -828,10 +834,42 @@ class UsageSummaryAPITests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
-        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], float(expected_used))
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 2.0)
         self.assertAlmostEqual(payload["metrics"]["quota"]["used"], float(expected_used))
         available = TaskCreditService.calculate_available_tasks(self.user)
         self.assertAlmostEqual(payload["metrics"]["quota"]["available"], float(available))
+
+    def test_summary_respects_requested_date_window_for_credits(self):
+        tz = timezone.get_current_timezone()
+        past_day = timezone.make_aware(datetime(2023, 1, 10, 12, 0, 0), tz)
+
+        old_task = BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("3.0"),
+        )
+        BrowserUseAgentTask.objects.filter(pk=old_task.pk).update(created_at=past_day)
+
+        recent_task = BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("7.0"),
+        )
+        BrowserUseAgentTask.objects.filter(pk=recent_task.pk).update(created_at=timezone.now())
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            {
+                "from": past_day.date().isoformat(),
+                "to": past_day.date().isoformat(),
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertAlmostEqual(payload["metrics"]["credits"]["total"], 3.0)
 
     def test_personal_summary_uses_entitlement_when_no_grants(self):
         User = get_user_model()

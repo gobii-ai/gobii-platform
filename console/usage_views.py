@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -284,7 +284,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         def _to_decimal(value: object, default: Decimal = DECIMAL_ZERO) -> Decimal:
             try:
                 return Decimal(value)
-            except Exception:
+            except (TypeError, ValueError, InvalidOperation):
                 return default
 
         ledger_available = _to_decimal(credit_agg.get("available"), DECIMAL_ZERO)
@@ -315,9 +315,6 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             usage_pct = (quota_used / quota_total) * Decimal("100")
             quota_used_pct = float(min(usage_pct, Decimal("100")))
 
-        agents_filtered = bool(filtered_agent_ids)
-        credits_consumed = quota_used if not agents_filtered else total_credits
-
         payload = {
             "period": {
                 "start": period_start.isoformat(),
@@ -340,7 +337,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                     "cancelled": float(cancelled_credit),
                 },
                 "credits": {
-                    "total": float(credits_consumed),
+                    "total": float(total_credits),
                     "unit": "credits",
                 },
                 "quota": {
