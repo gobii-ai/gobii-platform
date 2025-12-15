@@ -15,11 +15,14 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentMessage,
     UserPhoneNumber,
+    ToolConfig,
     build_web_agent_address,
     build_web_user_address,
 )
+from api.services.tool_settings import invalidate_tool_settings_cache
 from api.services.web_sessions import start_web_session
 from config import settings
+from constants.plans import PlanNamesChoices
 
 
 User = get_user_model()
@@ -253,5 +256,47 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         assert result is not None
         self.assertEqual(result.reason, "similarity")
         self.assertAlmostEqual(result.similarity or 0.0, 0.99)
+        mock_embedding_similarity.assert_called_once()
+        mock_levenshtein_ratio.assert_called_once()
+
+    @patch("api.agent.tools.outbound_duplicate_guard._compute_levenshtein_ratio", return_value=0.82)
+    @patch("api.agent.tools.outbound_duplicate_guard._embedding_similarity", return_value=None)
+    def test_similarity_threshold_respects_tool_config(
+        self,
+        mock_embedding_similarity,
+        mock_levenshtein_ratio,
+        mock_close_old_connections,
+    ):
+        ToolConfig.objects.update_or_create(
+            plan_name=PlanNamesChoices.FREE,
+            defaults={"duplicate_similarity_threshold": 0.8},
+        )
+        invalidate_tool_settings_cache()
+
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=self.email_address,
+            defaults={"owner_agent": None},
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.email_from,
+            to_endpoint=to_endpoint,
+            is_outbound=True,
+            body="Please review the latest draft.",
+            raw_payload={"subject": "Draft"},
+        )
+
+        result = detect_recent_duplicate_message(
+            self.agent,
+            channel=CommsChannel.EMAIL,
+            body="Please review the latest draft soon.",
+            to_address=self.email_address,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.reason, "similarity")
+        self.assertAlmostEqual(result.similarity or 0.0, 0.82)
         mock_embedding_similarity.assert_called_once()
         mock_levenshtein_ratio.assert_called_once()

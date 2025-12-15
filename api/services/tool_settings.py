@@ -1,4 +1,5 @@
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import Dict, Optional
 
@@ -12,6 +13,7 @@ from util.subscription_helper import get_owner_plan
 
 DEFAULT_MIN_CRON_SCHEDULE_MINUTES = getattr(settings, "PERSISTENT_AGENT_MIN_SCHEDULE_MINUTES", 30)
 DEFAULT_SEARCH_WEB_RESULT_COUNT = 5
+DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD = 0.97
 
 _CACHE_KEY = "tool_settings:v3"
 _CACHE_TTL_SECONDS = 300
@@ -24,6 +26,7 @@ class ToolPlanSettings:
     min_cron_schedule_minutes: Optional[int]
     rate_limits: Dict[str, Optional[int]] = field(default_factory=dict)
     search_web_result_count: int = DEFAULT_SEARCH_WEB_RESULT_COUNT
+    duplicate_similarity_threshold: float = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
 
     def hourly_limit_for_tool(self, tool_name: str) -> Optional[int]:
         """Return the hourly limit for the given tool or None if unlimited."""
@@ -52,6 +55,11 @@ def _serialise(configs) -> dict:
             "min_cron_schedule_minutes": config.min_cron_schedule_minutes,
             "rate_limits": rate_limits,
             "search_web_result_count": getattr(config, "search_web_result_count", DEFAULT_SEARCH_WEB_RESULT_COUNT),
+            "duplicate_similarity_threshold": getattr(
+                config,
+                "duplicate_similarity_threshold",
+                DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+            ),
         }
     return payload
 
@@ -64,6 +72,7 @@ def _ensure_defaults_exist() -> None:
             defaults={
                 "min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
                 "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
+                "duplicate_similarity_threshold": DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
             },
         )
 
@@ -123,6 +132,16 @@ def _normalize_search_web_result_count(value: Optional[int]) -> int:
     return int_value
 
 
+def _normalize_duplicate_similarity_threshold(value: Optional[float]) -> float:
+    try:
+        float_value = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
+    if math.isnan(float_value) or float_value < 0.0 or float_value > 1.0:
+        return DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
+    return float_value
+
+
 def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
     settings_map = _load_settings()
     normalized_plan = (plan_name or PlanNames.FREE).lower()
@@ -135,6 +154,9 @@ def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
         rate_limits=_normalize_rate_limits(config.get("rate_limits") if config else {}),
         search_web_result_count=_normalize_search_web_result_count(
             config.get("search_web_result_count") if config else None
+        ),
+        duplicate_similarity_threshold=_normalize_duplicate_similarity_threshold(
+            config.get("duplicate_similarity_threshold") if config else None
         ),
     )
 
