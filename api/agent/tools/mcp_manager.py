@@ -943,6 +943,8 @@ class MCPToolManager:
     ) -> List[MCPToolInfo]:
         """Return MCP tools that the given agent may access."""
 
+        needs_refresh = (not self._initialized) or self._needs_refresh()
+        missing_names: set[str] = set()
         allowed_set = None
         if allowed_server_names is not None:
             allowed_set = {
@@ -954,15 +956,14 @@ class MCPToolManager:
                 return []
 
         if allowed_set is None:
-            if not self.initialize():
+            if needs_refresh and not self.initialize():
                 return []
         else:
-            needs_refresh = (not self._initialized) or self._needs_refresh()
             current_names = {runtime.name.lower() for runtime in self._server_cache.values()}
             missing_names = allowed_set - current_names
-        if needs_refresh or missing_names:
-            if not self._refresh_servers_by_name(allowed_set):
-                return []
+            if needs_refresh or missing_names:
+                if not self._refresh_servers_by_name(allowed_set):
+                    return []
 
         configs = agent_accessible_server_configs(agent)
         if allowed_set is not None:
