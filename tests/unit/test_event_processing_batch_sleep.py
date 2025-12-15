@@ -41,7 +41,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         )
         enable_tools(self.agent, ["sqlite_batch"])
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "success"})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "queued"})
@@ -99,7 +99,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ignored"})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
@@ -146,7 +146,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         for step in sleep_steps:
             self.assertEqual(step.completion_id, completion.id)
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
@@ -201,7 +201,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         self.assertIn('total_tokens', result_usage)
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_spawn_web_task', return_value={"status": "pending", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "sent", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
@@ -264,7 +264,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
         self.assertFalse(sleep_steps.exists())
 
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value=True)
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')

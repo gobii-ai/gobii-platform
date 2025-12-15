@@ -377,7 +377,8 @@ class PersistentAgentToolCreditTests(TestCase):
         span = MagicMock()
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertEqual(result, Decimal("1"))
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("cost"), Decimal("1"))
         self.assertFalse(
             self.agent.steps.filter(description__icontains="Skipped tool").exists(),
             "Soft target exhaustion should not emit a skip step until the hard limit is reached.",
@@ -411,7 +412,8 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query")
 
-        self.assertEqual(result, Decimal("1"))
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("cost"), Decimal("1"))
         mock_track_event.assert_called_once()
         kwargs = mock_track_event.call_args.kwargs
         self.assertEqual(kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_SOFT_LIMIT_EXCEEDED)
@@ -433,7 +435,9 @@ class PersistentAgentToolCreditTests(TestCase):
 
         result = _ensure_credit_for_tool(self.agent, "sqlite_query", span=span)
 
-        self.assertEqual(result, Decimal("0.8"))
+        self.assertIsInstance(result, dict)
+        self.assertEqual(result.get("cost"), Decimal("0.8"))
+        self.assertIsNotNone(result.get("credit"))
         mock_consume.assert_called_once()
         span.set_attribute.assert_any_call("credit_check.consumed_in_loop", True)
 

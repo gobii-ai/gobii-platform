@@ -702,7 +702,7 @@ def _ensure_credit_for_tool(
     )
 
     if not settings.GOBII_PROPRIETARY_MODE or owner is None:
-        return True
+        return {"cost": None, "credit": None}
 
     cost: Decimal | None = None
     consumed: dict | None = None
@@ -1942,8 +1942,8 @@ def _run_agent_loop(
                         )
                         if not credit_info:
                             return cumulative_token_usage
-                        credits_consumed = credit_info.get("cost") if isinstance(credit_info, dict) else credit_info
-                        consumed_credit = credit_info.get("credit") if isinstance(credit_info, dict) else None
+                        credits_consumed = credit_info.get("cost")
+                        consumed_credit = credit_info.get("credit")
                         # Create sleep step with token usage if available
                         step_kwargs = {
                             "agent": agent,
@@ -1978,8 +1978,8 @@ def _run_agent_loop(
                     if not credit_info:
                         # Credit insufficient or consumption failed; halt processing
                         return cumulative_token_usage
-                    credits_consumed = credit_info.get("cost") if isinstance(credit_info, dict) else credit_info
-                    consumed_credit = credit_info.get("credit") if isinstance(credit_info, dict) else None
+                    credits_consumed = credit_info.get("cost")
+                    consumed_credit = credit_info.get("credit")
                     try:
                         raw_args = getattr(call.function, "arguments", "") or ""
                         tool_params = json.loads(raw_args)
