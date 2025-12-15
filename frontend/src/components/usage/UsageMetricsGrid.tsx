@@ -24,8 +24,8 @@ const metricDefinitions: MetricDefinition[] = [
   },
   {
     id: 'quota',
-    label: 'Quota remaining',
-    baseCaption: 'Shows remaining task credits before throttling applies.',
+    label: 'Current billing quota',
+    baseCaption: 'Remaining task credits for the active billing cycle (not affected by date filters).',
   },
 ]
 
@@ -149,14 +149,15 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
             const usedPctRaw = resolvedSummary.metrics.quota.used_pct
             const usedPct = Number.isFinite(usedPctRaw) ? Math.round(usedPctRaw) : 0
             const unlimitedQuota = total < 0 || available < 0
+            const quotaCaptionSuffix = 'Current billing cycle; date filters do not change this value.'
 
             if (unlimitedQuota) {
               value = '∞'
-              caption = 'Unlimited task credits during this billing period.'
+              caption = `Unlimited task credits. ${quotaCaptionSuffix}`
             } else if (total > 0) {
               value = creditFormatter.format(available)
 
-              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used)`
+              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used). ${quotaCaptionSuffix}`
               progressPct = Math.max(0, Math.min(100, usedPct))
               if (progressPct >= 100) {
                 progressClass = 'bg-gradient-to-r from-red-400 to-red-500'
