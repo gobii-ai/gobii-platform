@@ -8,6 +8,8 @@ class Migration(migrations.Migration):
         ("api", "0232_merge_20251215_2135"),
     ]
 
+    atomic = False
+
     def dedupe_endpoints(apps, schema_editor):
         Endpoint = apps.get_model("api", "PersistentAgentCommsEndpoint")
         Message = apps.get_model("api", "PersistentAgentMessage")
