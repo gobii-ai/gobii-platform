@@ -400,8 +400,25 @@ def get_stripe_customer(owner) -> Customer | None:
             )
             return None
 
-def get_active_subscription(owner) -> Subscription | None:
-    """Fetch the first active licensed subscription for a user or organization."""
+def _subscription_products(sub) -> set[str]:
+    products: set[str] = set()
+    try:
+        data = getattr(sub, "stripe_data", {}) or {}
+        items = (data.get("items") or {}).get("data") or []
+        for item in items:
+            price = item.get("price") or {}
+            product = price.get("product")
+            if isinstance(product, dict):
+                product = product.get("id")
+            if isinstance(product, str) and product:
+                products.add(product)
+    except Exception:
+        logger.debug("Failed to extract subscription products", exc_info=True)
+    return products
+
+
+def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> Subscription | None:
+    """Fetch an active licensed subscription, preferring one that carries the base plan product."""
     with traced("SUBSCRIPTION - Get Active Subscription") as span:
         owner_type = _resolve_owner_type(owner)
         owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
@@ -437,6 +454,26 @@ def get_active_subscription(owner) -> Subscription | None:
             owner_id,
             subs,
         )
+
+        preferred_products: set[str] = set()
+        if preferred_plan_id:
+            try:
+                preferred_products.add(str(PLAN_CONFIG.get(preferred_plan_id, {}).get("product_id") or ""))
+            except Exception:
+                preferred_products = set()
+        preferred_products = {p for p in preferred_products if p}
+
+        plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+
+        def _sort_key(sub):
+            products = _subscription_products(sub)
+            preferred_match = 0 if (preferred_products and products.intersection(preferred_products)) else 1
+            plan_match = 0 if products.intersection(plan_products) else 1
+            cancel_flag = 1 if sub.stripe_data.get("cancel_at_period_end") else 0
+            period_end = sub.stripe_data.get("current_period_end") or 0
+            return (preferred_match, plan_match, cancel_flag, period_end)
+
+        subs.sort(key=_sort_key)
 
         return subs[0] if subs else None
 

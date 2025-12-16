@@ -8329,7 +8329,7 @@ def _update_addon_quantity(
         messages.error(request, f"{form_label} price is not configured for your plan.")
         return redirect(_billing_redirect(owner, owner_type))
 
-    subscription = get_active_subscription(owner)
+    subscription = get_active_subscription(owner, preferred_plan_id=_get_owner_plan_id(owner, owner_type))
     if not subscription:
         messages.error(request, "No active subscription found.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -8346,30 +8346,40 @@ def _update_addon_quantity(
         item = _get_subscription_item_for_price(stripe_subscription, price_id)
         items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
         updated_items = list(items_data) if isinstance(items_data, list) else []
-
+        current_qty = 0
         if item:
-            if desired_qty <= 0:
+            try:
+                current_qty = int(item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                current_qty = 0
+
+        if item and desired_qty == current_qty:
+            messages.success(request, success_message)
+            return redirect(_billing_redirect(owner, owner_type))
+
+        if desired_qty <= 0:
+            if item:
                 stripe.SubscriptionItem.delete(item.get("id"))
                 updated_items = [
                     entry for entry in updated_items if (entry.get("price") or {}).get("id") != price_id
                 ]
-            else:
-                stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
-                for entry in updated_items:
-                    price = entry.get("price") or {}
-                    if price.get("id") == price_id:
-                        entry["quantity"] = desired_qty
-                        break
+            messages.success(request, success_message)
+        elif item:
+            stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
+            for entry in updated_items:
+                price = entry.get("price") or {}
+                if price.get("id") == price_id:
+                    entry["quantity"] = desired_qty
+                    break
+            messages.success(request, success_message)
         else:
-            if desired_qty <= 0:
-                messages.success(request, success_message)
-                return redirect(_billing_redirect(owner, owner_type))
             stripe.SubscriptionItem.create(
                 subscription=subscription.id,
                 price=price_id,
                 quantity=desired_qty,
             )
             updated_items.append({"price": {"id": price_id}, "quantity": desired_qty})
+            messages.success(request, success_message)
 
         try:
             period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
@@ -8390,11 +8400,10 @@ def _update_addon_quantity(
             )
         except Exception:
             logger.exception(
-                "Failed to sync %s add-on entitlements after direct update for %s",
+                "Failed to sync %s add-on entitlements after update for %s",
                 addon_kind,
                 getattr(owner, "id", None) or owner,
             )
-        messages.success(request, success_message)
         return redirect(_billing_redirect(owner, owner_type))
     except stripe.error.StripeError as exc:
         logger.warning("Stripe API error while updating addon quantity: %s", exc)

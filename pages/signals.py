@@ -1046,9 +1046,6 @@ def handle_subscription_event(event, **kwargs):
         try:
             for item in source_data.get("items", {}).get("data", []) or []:
                 usage_type = _item_usage_type(item).lower()
-                if usage_type == "metered":
-                    continue
-
                 price = item.get("price") or {}
                 product = price.get("product")
                 if isinstance(product, Mapping):
@@ -1057,6 +1054,9 @@ def handle_subscription_event(event, **kwargs):
                 if product and product in plan_products:
                     licensed_item = item
                     break
+
+                if usage_type == "metered":
+                    continue
 
                 if fallback_item is None:
                     fallback_item = item
