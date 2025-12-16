@@ -316,10 +316,21 @@ class AddonEntitlementService:
         """Align entitlements to match subscription items and refresh TaskCredit blocks."""
         price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
         if not price_map:
+            model = AddonEntitlementService._get_model()
+            now = timezone.now()
+            stale = model.objects.for_owner(owner).filter(is_recurring=True)
+            if stale.exists():
+                stale.update(expires_at=now)
             return
 
         model = AddonEntitlementService._get_model()
-        active_now = model.objects.for_owner(owner).filter(price_id__in=price_map.keys(), is_recurring=True)
+        now = timezone.now()
+        active_for_owner = model.objects.for_owner(owner).filter(is_recurring=True)
+        misconfigured = active_for_owner.exclude(price_id__in=price_map.keys())
+        if misconfigured.exists():
+            misconfigured.update(expires_at=now)
+
+        active_now = active_for_owner.filter(price_id__in=price_map.keys())
 
         desired_prices: dict[str, tuple[int, AddonPriceConfig, Mapping[str, Any]]] = {}
         for item in subscription_items or []:

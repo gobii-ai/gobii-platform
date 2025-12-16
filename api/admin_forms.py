@@ -689,8 +689,14 @@ class StripeConfigForm(ModelForm):
             "org_team_task_meter_event_name",
         ]
         for field_name in simple_fields:
-            value = self.cleaned_data.get(field_name)
-            instance.set_value(field_name, (value or "").strip() or None)
+            raw_value = self.cleaned_data.get(field_name)
+            if raw_value is None:
+                cleaned_value = None
+            elif isinstance(raw_value, str):
+                cleaned_value = raw_value.strip() or None
+            else:
+                cleaned_value = str(raw_value)
+            instance.set_value(field_name, cleaned_value)
 
         if commit:
             instance.save()

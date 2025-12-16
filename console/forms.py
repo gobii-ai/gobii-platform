@@ -46,6 +46,7 @@ class DedicatedIpAddForm(forms.Form):
 class AddonQuantityForm(forms.Form):
     quantity = forms.IntegerField(
         min_value=0,
+        max_value=999,
         widget=forms.NumberInput(
             attrs={
                 "class": "py-2 px-2 w-24 border-gray-200 rounded-lg text-sm text-center focus:border-blue-500 focus:ring-blue-500",

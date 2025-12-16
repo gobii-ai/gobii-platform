@@ -142,6 +142,47 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertEqual(ent.contact_cap_delta, 9)
         self.assertEqual(ent.quantity, 2)
 
+    @patch("billing.addons.get_stripe_settings")
+    def test_sync_expires_entitlements_when_prices_missing(self, mock_settings):
+        mock_settings.return_value = SimpleNamespace(
+            startup_task_pack_price_id="",
+            startup_contact_cap_price_id="",
+            scale_task_pack_price_id="",
+            scale_contact_cap_price_id="",
+            org_team_task_pack_price_id="",
+            org_team_contact_cap_price_id="",
+            task_pack_delta_startup=0,
+            task_pack_delta_scale=0,
+            task_pack_delta_org_team=0,
+            contact_pack_delta_startup=0,
+            contact_pack_delta_scale=0,
+            contact_pack_delta_org_team=0,
+        )
+
+        AddonEntitlement = apps.get_model("api", "AddonEntitlement")
+        ent = AddonEntitlement.objects.create(
+            user=self.user,
+            price_id="legacy_price",
+            quantity=1,
+            task_credits_delta=100,
+            starts_at=self.period_start - timedelta(days=1),
+            is_recurring=True,
+        )
+
+        AddonEntitlementService.sync_subscription_entitlements(
+            owner=self.user,
+            owner_type="user",
+            plan_id=PlanNames.STARTUP,
+            subscription_items=[],
+            period_start=self.period_start,
+            period_end=self.period_end,
+            created_via="test_sync",
+        )
+
+        ent.refresh_from_db()
+        self.assertIsNotNone(ent.expires_at)
+        self.assertLessEqual(ent.expires_at, timezone.now())
+
 
 @tag("batch_billing")
 class AddonContactCapTests(TestCase):
