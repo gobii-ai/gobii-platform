@@ -2294,8 +2294,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
 
                         user_sms_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.SMS,
-                            address__iexact=user_primary_sms.phone_number,
-                            defaults={'address': user_primary_sms.phone_number, 'owner_agent': None},
+                            address=user_primary_sms.phone_number,
+                            defaults={'owner_agent': None},
                         )
 
                         user_contact = user_primary_sms.phone_number
@@ -2323,8 +2323,8 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         # Always create the EXTERNAL endpoint for the user's contact address
                         user_email_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.EMAIL,
-                            address__iexact=user_contact_email,
-                            defaults={'address': user_contact_email, 'owner_agent': None},
+                            address=user_contact_email,
+                            defaults={'owner_agent': None},
                         )
 
                         user_contact = user_contact_email
@@ -2546,8 +2546,8 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
 
                 user_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
                     channel=CommsChannel.SMS,
-                    address__iexact=phone.phone_number,
-                    defaults={"address": phone.phone_number, "owner_agent": None},
+                    address=phone.phone_number,
+                    defaults={"owner_agent": None},
                 )
 
                 self.agent.preferred_contact_endpoint = user_ep

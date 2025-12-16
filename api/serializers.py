@@ -538,8 +538,8 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({'preferred_contact_endpoint': ['User email required to select email contact endpoint.']})
             endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
                 channel=CommsChannel.EMAIL,
-                address__iexact=email,
-                defaults={'address': email, 'owner_agent': None},
+                address=email,
+                defaults={'owner_agent': None},
             )
             return endpoint
 
@@ -552,8 +552,8 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
 
             endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
                 channel=CommsChannel.SMS,
-                address__iexact=sms_number.phone_number,
-                defaults={'address': sms_number.phone_number, 'owner_agent': None},
+                address=sms_number.phone_number,
+                defaults={'owner_agent': None},
             )
             return endpoint
 

@@ -63,7 +63,7 @@ class Migration(migrations.Migration):
                 reassign(dup.id, canonical.id)
                 dup.delete()
 
-        Endpoint.objects.filter(channel="email").exclude(address=Lower("address")).update(address=Lower("address"))
+        Endpoint.objects.exclude(address=Lower("address")).update(address=Lower("address"))
 
     operations = [
         migrations.RunPython(dedupe_endpoints, migrations.RunPython.noop),

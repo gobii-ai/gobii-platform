@@ -5085,14 +5085,15 @@ class PersistentAgentCommsEndpoint(models.Model):
         def get_or_create(self, defaults=None, **kwargs):
             channel = kwargs.get("channel")
             defaults = defaults.copy() if defaults else {}
-            if "address" in kwargs:
-                normalized = self._normalized(channel, kwargs["address"])
-                if channel == CommsChannel.EMAIL:
-                    kwargs.pop("address")
-                    kwargs["address__iexact"] = normalized
-                    defaults.setdefault("address", normalized)
-                else:
-                    kwargs["address"] = normalized
+            addr = None
+            if "address__iexact" in kwargs:
+                addr = kwargs.pop("address__iexact")
+            elif "address" in kwargs:
+                addr = kwargs.pop("address")
+            if addr is not None:
+                normalized = self._normalized(channel, addr)
+                kwargs["address__iexact"] = normalized
+                defaults.setdefault("address", normalized)
             if "address" in defaults:
                 defaults["address"] = self._normalized(channel, defaults.get("address"))
             return super().get_or_create(defaults=defaults, **kwargs)
@@ -5129,9 +5130,7 @@ class PersistentAgentCommsEndpoint(models.Model):
         if address is None:
             return None
         normalized = address.strip()
-        if str(channel) == CommsChannel.EMAIL:
-            return normalized.lower()
-        return normalized
+        return normalized.lower()
 
     def save(self, *args, **kwargs):
         self.address = self.normalize_address(self.channel, self.address)
