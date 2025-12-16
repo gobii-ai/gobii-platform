@@ -103,7 +103,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": [
                     format_contacts(PlanNames.FREE),
                     "5 always-on agents",
-                    "After 30 days, workspace stays saved; schedules throttle down (Maintenance Mode) until you upgrade",
+                    "Always-on agents run up to 30 days",
+                    "Keep your agents when you upgrade",
                     "Basic API access",
                     "Community support",
                     "Standard rate limits",
