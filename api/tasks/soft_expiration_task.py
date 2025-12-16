@@ -82,19 +82,19 @@ def _send_sleep_notification(agent) -> None:
     current_site = Site.objects.get_current()
     protocol = "https://"                       # your outbound scheme
     base = f"{protocol}{current_site.domain}"
-    upgrade_link = f"{base}/subscribe/pro/"
+    upgrade_link = f"{base}/pricing/"
 
     now = timezone.now()
     subject = "I’m going to sleep for now 💤"
     body_email = (
         "<p>Since I haven’t heard from you in a while, I’m going to take a nap to save resources.</p>"
         "<p>Need me? Just reply to this message to wake me up anytime.</p>"
-        f"<p>Want agents that never sleep? <a href=\"{upgrade_link}\">Upgrade to Pro</a>.</p>"
+        f"<p>Want agents that never expire or turn off? <a href=\"{upgrade_link}\">Upgrade to Pro or Scale</a>.</p>"
         f"<p>Best,<br>{agent.name}</p>"
     )
     body_sms = (
         "I haven’t heard from you lately, so I’m going to sleep. "
-        f"Text me to wake me anytime. Upgrade to Pro for agents that never sleep: {upgrade_link}"
+        f"Text me to wake me anytime. Upgrade to Pro or Scale for agents that never expire or turn off: {upgrade_link}"
     )
 
     if ep.channel == CommsChannel.EMAIL:
