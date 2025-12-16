@@ -92,9 +92,9 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "name": "Free Tier",
                 "price": 0,
                 "price_label": "$0",
-                "desc": "Actually useful free tier",
+                "desc": "Get started with core features",
                 "tasks": "100",
-                "pricing_model": "Always free",
+                "pricing_model": "Free to start",
                 "highlight": False,
                 "badge": None,
                 "disabled": False,
@@ -103,7 +103,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": [
                     format_contacts(PlanNames.FREE),
                     "5 always-on agents",
-                    "30 day time limit for always-on agents",
+                    "Always-on agents run up to 30 days",
+                    "Keep your agents when you upgrade",
                     "Basic API access",
                     "Community support",
                     "Standard rate limits",
@@ -128,6 +129,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     format_contacts(PlanNames.STARTUP),
                     "Unlimited always-on agents",
                     "No time limit for always-on agents",
+                    "Agents never expire or turn off",
                     "$0.10 per task beyond 500",
                     "Priority support",
                     "Higher rate limits",
@@ -150,6 +152,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": [
                     format_contacts(PlanNames.SCALE),
                     "Unlimited always-on agents",
+                    "Agents never expire or turn off",
+                    "Highest intelligence levels available",
                     "Dedicated onboarding specialist",
                     "$0.04 per task beyond 10,000",
                     "Priority work queue",
@@ -170,10 +174,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
-            ["Tasks included per month", "100", "500", "10,000"],
+            ["Tasks included", "100 (one-time, 30 days)", "500/month", "10,000/month"],
             ["Cost per additional task", "—", "$0.10", "$0.04"],
             ["API rate limit (requests/min)", "60", "600", "1,500"],
             ["Max contacts per agent", *max_contacts_per_agent],
+            ["Agents never expire or turn off", "—", "✓", "✓"],
             ["Priority task execution", "—", "✓", "✓"],
             ["Dedicated onboarding", "—", "—", "✓"],
             ["Batch scheduling & queueing", "—", "—", "✓"],
@@ -188,15 +193,15 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "How does the pricing work?",
-                "The Free tier includes 100 tasks per month. The Pro tier includes 500 tasks, then charges $0.10 for each additional task. The Scale tier includes 10,000 tasks with $0.04 pricing after that.",
+                "The Free tier includes 100 tasks (one-time, valid for 30 days). The Pro tier includes 500 tasks per month, then charges $0.10 for each additional task. The Scale tier includes 10,000 tasks per month with $0.04 pricing after that.",
             ),
             (
                 "Is there any commitment?",
-                "No. You can use the free tier forever, and the Pro tier is purely pay-as-you-go with no monthly commitment.",
+                "No. Start on the Free tier and upgrade anytime. Pro and Scale are month-to-month and you can cancel anytime.",
             ),
             (
                 "What happens if I exceed my free tasks?",
-                "On the Free tier, you'll need to wait until your next billing cycle to run more tasks. On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
+                "On the Free tier, you'll need to upgrade to run more tasks. On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
             ),
             (
                 "Do you offer enterprise features?",

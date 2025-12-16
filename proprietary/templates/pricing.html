@@ -105,14 +105,14 @@
             {% endif %}
           </div>
           
-          <p class="text-xs text-slate-500 mb-6">{{ plan.pricing_model }}</p>
-          
-          <ul class="text-sm text-slate-600 space-y-3 flex-1 mb-6">
-            <li><span class="font-semibold">{{ plan.tasks }}</span> tasks included</li>
-            {% for feature in plan.features %}
-            <li>{{ feature }}</li>
-            {% endfor %}
-          </ul>
+	          <p class="text-xs text-slate-500 mb-6">{{ plan.pricing_model }}</p>
+	          
+	          <ul class="text-sm text-slate-600 space-y-3 flex-1 mb-6">
+	            <li><span class="font-semibold">{{ plan.tasks }}</span> tasks included{% if plan.code == PlanNames.FREE %} (one-time, 30 days){% endif %}</li>
+	            {% for feature in plan.features %}
+	            <li>{{ feature }}</li>
+	            {% endfor %}
+	          </ul>
           {% if plan.disabled or plan.cta_disabled or plan.current_plan %}
             <span class="inline-flex items-center justify-center px-4 py-2 text-sm font-semibold rounded-lg bg-slate-200 text-slate-500 cursor-not-allowed select-none">{{ plan.cta }}</span>
           {% else %}
