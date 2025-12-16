@@ -1363,6 +1363,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
                 billing = getattr(organization, "billing", None)
                 seat_purchase_required = bool(getattr(billing, "purchased_seats", 0) <= 0)
+                has_stripe_subscription = bool(getattr(billing, "stripe_subscription_id", None))
                 seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
                 seat_reduction_form = OrganizationSeatReductionForm(org=organization)
 
@@ -1400,6 +1401,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     "organization",
                     overview.get("plan", {}).get("id"),
                 )
+                org_addons_disabled = (not can_manage_billing) or (not has_stripe_subscription)
 
                 context.update({
                     'organization': organization,
@@ -1411,9 +1413,10 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                     'seat_purchase_form': seat_purchase_form,
                     'seat_reduction_form': seat_reduction_form,
                     'seat_purchase_required': seat_purchase_required,
-                    'org_has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
+                    'org_has_stripe_subscription': has_stripe_subscription,
                     'org_pending_seat_change': overview.get('pending_seats', {}),
                     'addon_context': addon_context,
+                    'org_addons_disabled': org_addons_disabled,
                 })
                 billing_view_props = Analytics.with_org_properties(
                     {
@@ -1461,6 +1464,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
 
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
+        context['personal_addons_disabled'] = not paid_subscriber
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
