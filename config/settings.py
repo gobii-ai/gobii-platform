@@ -297,7 +297,6 @@ TEMPLATES = [
                 "analytics_tags": "templatetags.analytics_tags",
                 "social_extras": "templatetags.social_extras",
                 "vite_tags": "templatetags.vite_tags",
-                "auth_links": "templatetags.auth_links",
             },
         },
     },

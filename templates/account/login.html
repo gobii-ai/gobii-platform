@@ -1,11 +1,11 @@
 {% extends "allauth/layouts/entrance.html" %}
-{% load socialaccount social_extras auth_links %}
+{% load socialaccount social_extras %}
 {% load account %}
 
 {% block title %}Sign in{% endblock %}
 
 {% block body_inner %}
-{% auth_redirect_url 'account_signup' redirect_field_value redirect_field_name as account_signup_url %}
+{% url 'account_signup' as account_signup_url %}
 <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
   <div class="p-8">
 
@@ -13,7 +13,9 @@
     <h1 class="text-center text-2xl font-bold text-gray-900">Sign in</h1>
     <p class="mt-2 text-center text-sm text-gray-500">
       Don't have an account yet?
-      <a href="{{ account_signup_url }}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% with request.session.utm_querystring as utm_qs %}
+      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% endwith %}
     </p>
 
     {% provider_app_exists 'google' as has_google_provider %}

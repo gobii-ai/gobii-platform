@@ -1,5 +1,5 @@
 
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
@@ -98,7 +98,7 @@ class HomePageTests(TestCase):
         self.assertEqual(session["agent_charter"], "Custom charter")
 
     @tag("batch_pages")
-    def test_home_spawn_redirects_to_signup(self):
+    def test_home_spawn_redirects_to_login(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
         session.save()
@@ -107,7 +107,7 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_signup"))
+        self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
         self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
@@ -255,7 +255,7 @@ class PretrainedWorkerDirectoryTests(TestCase):
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
     @tag("batch_pages")
-    def test_hire_redirects_to_signup(self):
+    def test_hire_redirects_to_login(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
         session = self.client.session
@@ -268,7 +268,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(response.status_code, 302)
 
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("account_signup"))
+        self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
         self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
@@ -278,7 +278,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
     @tag("batch_pages")
-    def test_signup_page_signin_link_keeps_next_and_utms(self):
+    def test_signup_page_signin_link_includes_utms(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
         session.save()
@@ -288,12 +288,13 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         self.assertIn(
-            f'{reverse("account_login")}?next={next_url}&utm_source=newsletter',
+            f'{reverse("account_login")}?utm_source=newsletter',
             response.content.decode(),
         )
+        self.assertNotIn(f'{reverse("account_login")}?next=', response.content.decode())
 
     @tag("batch_pages")
-    def test_login_page_signup_link_keeps_next_and_utms(self):
+    def test_login_page_signup_link_includes_utms(self):
         session = self.client.session
         session["utm_querystring"] = "utm_campaign=fall"
         session.save()
@@ -303,9 +304,10 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
         self.assertIn(
-            f'{reverse("account_signup")}?next={next_url}&utm_campaign=fall',
+            f'{reverse("account_signup")}?utm_campaign=fall',
             response.content.decode(),
         )
+        self.assertNotIn(f'{reverse("account_signup")}?next=', response.content.decode())
 
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
