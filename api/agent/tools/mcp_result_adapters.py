@@ -107,7 +107,7 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
                 if isinstance(item, dict):
                     _strip_image_fields(item)
 
-        first_block.text = json.dumps(payload, enforce_ascii=False)
+        first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
 
@@ -219,7 +219,7 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
                             if isinstance(entry, dict):
                                 _strip_image_fields(entry)
 
-        first_block.text = json.dumps(payload, enforce_ascii=False)
+        first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
 
