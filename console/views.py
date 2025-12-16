@@ -285,71 +285,6 @@ def _resolve_dedicated_ip_pricing(plan):
     return price_decimal, normalized_currency
 
 
-def _resolve_addon_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
-    stripe_settings = get_stripe_settings()
-    if owner_type == "organization":
-        return {
-            "task_pack": getattr(stripe_settings, "org_team_task_pack_price_id", ""),
-            "contact_pack": getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
-        }
-
-    if plan_id == PlanNames.STARTUP:
-        return {
-            "task_pack": getattr(stripe_settings, "startup_task_pack_price_id", ""),
-            "contact_pack": getattr(stripe_settings, "startup_contact_cap_price_id", ""),
-        }
-
-    if plan_id == PlanNames.SCALE:
-        return {
-            "task_pack": getattr(stripe_settings, "scale_task_pack_price_id", ""),
-            "contact_pack": getattr(stripe_settings, "scale_contact_cap_price_id", ""),
-        }
-
-    return {}
-
-
-def _build_addon_context(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
-    price_ids = _resolve_addon_price_ids(owner_type, plan_id)
-    stripe_settings = get_stripe_settings()
-    addon_context: dict[str, dict[str, Any]] = {}
-
-    for kind, price_id in price_ids.items():
-        if not price_id:
-            continue
-
-        cfg = AddonEntitlementService.get_price_config(price_id)
-        entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
-        expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
-
-        task_delta = cfg.task_credits_delta if cfg else 0
-        contact_delta = cfg.contact_cap_delta if cfg else 0
-
-        if kind == "task_pack":
-            if owner_type == "organization":
-                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_org_team", 0)
-            elif plan_id == PlanNames.STARTUP:
-                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_startup", 0)
-            elif plan_id == PlanNames.SCALE:
-                task_delta = task_delta or getattr(stripe_settings, "task_pack_delta_scale", 0)
-        elif kind == "contact_pack":
-            if owner_type == "organization":
-                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_org_team", 0)
-            elif plan_id == PlanNames.STARTUP:
-                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_startup", 0)
-            elif plan_id == PlanNames.SCALE:
-                contact_delta = contact_delta or getattr(stripe_settings, "contact_pack_delta_scale", 0)
-
-        addon_context[kind] = {
-            "price_id": price_id,
-            "product_id": cfg.product_id if cfg else "",
-            "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
-            "task_delta": task_delta,
-            "contact_delta": contact_delta,
-            "expires_at": expires_at,
-        }
-
-    return addon_context
-
 from .forms import (
     ApiKeyForm,
     PersistentAgentForm,
@@ -1396,7 +1331,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 if granted > 0:
                     usage_pct = min(100, float((used / granted) * 100))
 
-                addon_context = _build_addon_context(
+                addon_context = AddonEntitlementService.get_addon_context_for_owner(
                     organization,
                     "organization",
                     overview.get("plan", {}).get("id"),
@@ -1489,7 +1424,11 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
             'dedicated_ip_currency': price_currency,
         })
 
-        addon_context = _build_addon_context(request.user, "user", subscription_plan.get("id"))
+        addon_context = AddonEntitlementService.get_addon_context_for_owner(
+            request.user,
+            "user",
+            subscription_plan.get("id"),
+        )
         context["addon_context"] = addon_context
 
         _apply_subscribe_success_context(request, context)
@@ -8385,7 +8324,7 @@ def _update_addon_quantity(
         return redirect(_billing_redirect(owner, owner_type))
 
     plan_id = _get_owner_plan_id(owner, owner_type)
-    price_id = _resolve_addon_price_ids(owner_type, plan_id).get(addon_kind)
+    price_id = AddonEntitlementService.get_price_ids(owner_type, plan_id).get(addon_kind)
     if not price_id:
         messages.error(request, f"{form_label} price is not configured for your plan.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -8459,9 +8398,12 @@ def _update_addon_quantity(
                 cancel_url=cancel_url,
             )
         return redirect(session_url)
+    except stripe.error.StripeError as exc:
+        logger.warning("Stripe API error while updating addon quantity: %s", exc)
+        messages.error(request, f"A billing error occurred: {exc}")
     except Exception as exc:
         logger.exception("Failed to update %s quantity for %s", addon_kind, getattr(owner, "id", None) or owner)
-        messages.error(request, f"Failed to update {failure_noun}: {exc}")
+        messages.error(request, f"An unexpected error occurred while updating {failure_noun}.")
 
     return redirect(_billing_redirect(owner, owner_type))
 

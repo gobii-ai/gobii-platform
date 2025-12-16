@@ -30,6 +30,29 @@ class AddonEntitlementService:
     """Helpers for aggregating active add-on entitlements."""
 
     @staticmethod
+    def _resolve_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+        stripe_settings = get_stripe_settings()
+        if owner_type == "organization":
+            return {
+                "task_pack": getattr(stripe_settings, "org_team_task_pack_price_id", ""),
+                "contact_pack": getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
+            }
+
+        if plan_id == PlanNames.STARTUP:
+            return {
+                "task_pack": getattr(stripe_settings, "startup_task_pack_price_id", ""),
+                "contact_pack": getattr(stripe_settings, "startup_contact_cap_price_id", ""),
+            }
+
+        if plan_id == PlanNames.SCALE:
+            return {
+                "task_pack": getattr(stripe_settings, "scale_task_pack_price_id", ""),
+                "contact_pack": getattr(stripe_settings, "scale_contact_cap_price_id", ""),
+            }
+
+        return {}
+
+    @staticmethod
     def _get_model():
         return apps.get_model("api", "AddonEntitlement")
 
@@ -150,33 +173,14 @@ class AddonEntitlementService:
         return qs
 
     @staticmethod
+    def get_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+        return AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+
+    @staticmethod
     def _build_price_map(plan_id: str | None, owner_type: str) -> dict[str, AddonPriceConfig]:
         """Return relevant add-on price configs for the owner/plan."""
         stripe_settings = get_stripe_settings()
-        price_ids: list[str] = []
-
-        if owner_type == "organization":
-            price_ids.extend(
-                [
-                    getattr(stripe_settings, "org_team_task_pack_price_id", ""),
-                    getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
-                ]
-            )
-        else:
-            if plan_id == PlanNames.STARTUP:
-                price_ids.extend(
-                    [
-                        getattr(stripe_settings, "startup_task_pack_price_id", ""),
-                        getattr(stripe_settings, "startup_contact_cap_price_id", ""),
-                    ]
-                )
-            elif plan_id == PlanNames.SCALE:
-                price_ids.extend(
-                    [
-                        getattr(stripe_settings, "scale_task_pack_price_id", ""),
-                        getattr(stripe_settings, "scale_contact_cap_price_id", ""),
-                    ]
-                )
+        price_ids: list[str] = list(AddonEntitlementService._resolve_price_ids(owner_type, plan_id).values())
 
         price_map: dict[str, AddonPriceConfig] = {}
         for pid in price_ids:
@@ -213,6 +217,38 @@ class AddonEntitlementService:
                 )
             price_map[pid] = cfg
         return price_map
+
+    @staticmethod
+    def get_addon_context_for_owner(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
+        """Return add-on context keyed by add-on kind for the given owner."""
+        price_ids = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        if not price_ids:
+            return {}
+
+        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
+        addon_context: dict[str, dict[str, Any]] = {}
+
+        for kind, price_id in price_ids.items():
+            if not price_id:
+                continue
+
+            cfg = price_map.get(price_id)
+            if not cfg:
+                continue
+
+            entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
+            expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
+
+            addon_context[kind] = {
+                "price_id": price_id,
+                "product_id": cfg.product_id,
+                "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
+                "task_delta": cfg.task_credits_delta,
+                "contact_delta": cfg.contact_cap_delta,
+                "expires_at": expires_at,
+            }
+
+        return addon_context
 
     @staticmethod
     def _upsert_task_credit_block(owner, owner_type: str, plan_id: str, entitlement, period_end) -> None:
