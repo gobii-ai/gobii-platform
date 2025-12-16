@@ -8,8 +8,8 @@ from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
 from django.db import IntegrityError, connection, models, transaction
-from django.db.models import UniqueConstraint, Q
-from django.db.models import UniqueConstraint, Sum, Count
+from django.db.models import Count, Q, Sum, UniqueConstraint
+from django.db.models.functions import Lower
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -5071,6 +5071,34 @@ class PersistentAgentWebhook(models.Model):
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 
+    class EndpointManager(models.Manager):
+        @staticmethod
+        def _normalized(channel: str, address: str | None) -> str | None:
+            return PersistentAgentCommsEndpoint.normalize_address(channel, address)
+
+        def create(self, **kwargs):
+            channel = kwargs.get("channel")
+            if "address" in kwargs:
+                kwargs["address"] = self._normalized(channel, kwargs["address"])
+            return super().create(**kwargs)
+
+        def get_or_create(self, defaults=None, **kwargs):
+            channel = kwargs.get("channel")
+            defaults = defaults.copy() if defaults else {}
+            if "address" in kwargs:
+                normalized = self._normalized(channel, kwargs["address"])
+                if channel == CommsChannel.EMAIL:
+                    kwargs.pop("address")
+                    kwargs["address__iexact"] = normalized
+                    defaults.setdefault("address", normalized)
+                else:
+                    kwargs["address"] = normalized
+            if "address" in defaults:
+                defaults["address"] = self._normalized(channel, defaults.get("address"))
+            return super().get_or_create(defaults=defaults, **kwargs)
+
+    objects = EndpointManager()
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     owner_agent = models.ForeignKey(
         "PersistentAgent",
@@ -5084,11 +5112,30 @@ class PersistentAgentCommsEndpoint(models.Model):
     is_primary = models.BooleanField(default=False)
 
     class Meta:
-        unique_together = ("channel", "address")
+        constraints = [
+            models.UniqueConstraint(
+                Lower("address"),
+                "channel",
+                name="pa_endpoint_ci_channel_address",
+            ),
+        ]
         indexes = [
             models.Index(fields=["owner_agent", "channel"], name="pa_ep_agent_channel_idx"),
         ]
         ordering = ["channel", "address"]
+
+    @staticmethod
+    def normalize_address(channel: str, address: str | None) -> str | None:
+        if address is None:
+            return None
+        normalized = address.strip()
+        if str(channel) == CommsChannel.EMAIL:
+            return normalized.lower()
+        return normalized
+
+    def save(self, *args, **kwargs):
+        self.address = self.normalize_address(self.channel, self.address)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.channel}:{self.address}"

@@ -2295,7 +2295,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         user_sms_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.SMS,
                             address__iexact=user_primary_sms.phone_number,
-                            defaults={'address': user_primary_sms.phone_number, 'owner_agent': None}
+                            defaults={'address': user_primary_sms.phone_number, 'owner_agent': None},
                         )
 
                         user_contact = user_primary_sms.phone_number
@@ -2324,7 +2324,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                         user_email_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
                             channel=CommsChannel.EMAIL,
                             address__iexact=user_contact_email,
-                            defaults={'address': user_contact_email, 'owner_agent': None}
+                            defaults={'address': user_contact_email, 'owner_agent': None},
                         )
 
                         user_contact = user_contact_email
