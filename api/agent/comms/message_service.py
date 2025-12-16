@@ -522,15 +522,14 @@ def get_agent_id_from_address(channel: CommsChannel | str, address: str) -> UUID
     """
     Get the agent ID associated with a given address.
 
-    This is a placeholder implementation that should be replaced with actual logic
-    to retrieve the agent ID based on the channel and address.
-
-    For now, it returns a hardcoded UUID for testing purposes.
-
     """
     channel_val = channel.value if isinstance(channel, CommsChannel) else channel
+    normalized = PersistentAgentCommsEndpoint.normalize_address(channel_val, address)
     try:
-        endpoint = PersistentAgentCommsEndpoint.objects.get(channel=channel_val, address=address)
+        endpoint = PersistentAgentCommsEndpoint.objects.get(
+            channel=channel_val,
+            address__iexact=normalized,
+        )
         return endpoint.owner_agent_id
     except PersistentAgentCommsEndpoint.DoesNotExist:
         return None

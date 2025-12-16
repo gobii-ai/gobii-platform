@@ -256,8 +256,8 @@ class AgentTransferService:
 
         endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.EMAIL,
-            address__iexact=email,
-            defaults={"address": email, "owner_agent": None},
+            address=email,
+            defaults={"owner_agent": None},
         )
         return endpoint
 
