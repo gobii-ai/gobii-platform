@@ -1,74 +1,107 @@
 {% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
 {% if task_pack.options or contact_pack.options %}
-<div class="{{ card_class|default:'gobii-card-base p-6' }}">
-  <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-    <div>
-      <h2 class="text-lg font-semibold text-slate-900">{{ heading|default:"Add-ons" }}</h2>
-      {% if subheading %}
-      <p class="text-sm text-slate-500 mt-1">{{ subheading }}</p>
-      {% endif %}
+<form method="post" action="{% url 'update_addons' %}">
+  {% csrf_token %}
+  <div class="{{ card_class|default:'gobii-card-base p-6' }}">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-slate-900">{{ heading|default:"Add-ons" }}</h2>
+        {% if subheading %}
+        <p class="text-sm text-slate-500 mt-1">{{ subheading }}</p>
+        {% endif %}
+      </div>
     </div>
-  </div>
 
-  <div class="mt-4 grid gap-4 md:grid-cols-2">
-    <div class="space-y-4">
-      {% if task_pack.options %}
-        {% for option in task_pack.options %}
-        <form method="post" action="{% url 'update_task_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-          {% csrf_token %}
-          <input type="hidden" name="price_id" value="{{ option.price_id }}">
-          <div class="flex items-center justify-between gap-3">
-            <div>
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">Task packs</p>
+            <p class="text-xs text-slate-500">Choose the bundle and set the total quantity.</p>
+          </div>
+        </div>
+        {% if task_pack.options %}
+          {% for option in task_pack.options %}
+          <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
+            <div class="space-y-1">
               <p class="text-sm font-semibold text-slate-900">
-                Task packs{% if task_pack.options|length > 1 %} ({{ option.task_delta|default:"0" }} credits each){% endif %}
+                {% if task_pack.options|length > 1 %}+{{ option.task_delta|default:"0" }} credits{% else %}Task pack{% endif %}
               </p>
               {% if option.price_display %}
               <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
               {% endif %}
-              <p class="text-xs text-slate-500">Each adds {{ option.task_delta|default:"0" }} task credits{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+              <p class="text-xs text-slate-500">Adds {{ option.task_delta|default:"0" }} task credits{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
             </div>
-            <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-600" for="quantity__{{ option.price_id }}">Qty</label>
+              <input type="number" id="quantity__{{ option.price_id }}" name="quantity__{{ option.price_id }}" min="0" value="{{ option.quantity|default:0 }}" class="w-20 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
+            </div>
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <p class="text-xs text-slate-500">Current: {{ option.quantity|default:0 }} pack{{ option.quantity|default:0|pluralize }}</p>
-            <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
-              Save
-            </button>
-          </div>
-        </form>
-        {% endfor %}
-      {% endif %}
-    </div>
+          {% endfor %}
+        {% endif %}
+      </div>
 
-    <div class="space-y-4">
-      {% if contact_pack.options %}
-        {% for option in contact_pack.options %}
-        <form method="post" action="{% url 'update_contact_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-          {% csrf_token %}
-          <input type="hidden" name="price_id" value="{{ option.price_id }}">
-          <div class="flex items-center justify-between gap-3">
-            <div>
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">Contact packs</p>
+            <p class="text-xs text-slate-500">Pick your bundle and total quantity.</p>
+          </div>
+        </div>
+        {% if contact_pack.options %}
+          {% for option in contact_pack.options %}
+          <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
+            <div class="space-y-1">
               <p class="text-sm font-semibold text-slate-900">
-                Contact packs{% if contact_pack.options|length > 1 %} (+{{ option.contact_delta|default:"0" }} contacts each){% endif %}
+                {% if contact_pack.options|length > 1 %}+{{ option.contact_delta|default:"0" }} contacts{% else %}Contact pack{% endif %}
               </p>
               {% if option.price_display %}
               <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
               {% endif %}
-              <p class="text-xs text-slate-500">Each adds {{ option.contact_delta|default:"0" }} contacts per agent{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+              <p class="text-xs text-slate-500">Adds {{ option.contact_delta|default:"0" }} contacts per agent{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
             </div>
-            <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
+            <div class="flex items-center gap-2">
+              <label class="text-xs text-slate-600" for="quantity__{{ option.price_id }}">Qty</label>
+              <input type="number" id="quantity__{{ option.price_id }}" name="quantity__{{ option.price_id }}" min="0" value="{{ option.quantity|default:0 }}" class="w-20 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
+            </div>
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <p class="text-xs text-slate-500">Current: {{ option.quantity|default:0 }} pack{{ option.quantity|default:0|pluralize }}</p>
-            <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
-              Save
-            </button>
-          </div>
-        </form>
-        {% endfor %}
-      {% endif %}
+          {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="mt-6 flex flex-col gap-3">
+      <div class="flex flex-col gap-1">
+        <p class="text-sm font-semibold text-slate-900">Current add-ons</p>
+        <ul class="text-xs text-slate-600 space-y-1">
+          {% with has_summary=False %}
+            {% for option in task_pack.options %}
+              {% if option.quantity|default:0 > 0 %}
+                {% with has_summary=True %}
+                <li>Task pack: {{ option.quantity }} x +{{ option.task_delta|default:"0" }} credits{% if option.price_display %} ({{ option.price_display }}){% endif %}</li>
+                {% endwith %}
+              {% endif %}
+            {% endfor %}
+            {% for option in contact_pack.options %}
+              {% if option.quantity|default:0 > 0 %}
+                {% with has_summary=True %}
+                <li>Contact pack: {{ option.quantity }} x +{{ option.contact_delta|default:"0" }} contacts{% if option.price_display %} ({{ option.price_display }}){% endif %}</li>
+                {% endwith %}
+              {% endif %}
+            {% endfor %}
+            {% if not has_summary %}
+              <li>No add-ons selected.</li>
+            {% endif %}
+          {% endwith %}
+        </ul>
+      </div>
+      <div class="flex justify-end">
+        <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
+          Save add-ons
+        </button>
+      </div>
     </div>
   </div>
-</div>
+</form>
 {% endif %}
 {% endwith %}

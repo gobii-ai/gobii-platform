@@ -8514,6 +8514,145 @@ def update_contact_pack_quantity(request, owner, owner_type):
 @require_POST
 @transaction.atomic
 @with_billing_owner
+@tracer.start_as_current_span("BILLING Update Add-ons Batch")
+def update_addons(request, owner, owner_type):
+    if not stripe_status().enabled:
+        messages.error(request, "Stripe billing is not available in this deployment.")
+        return redirect("billing")
+
+    plan_id = _get_owner_plan_id(owner, owner_type)
+    task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "task_pack")
+    contact_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "contact_pack")
+    all_options = (task_options or []) + (contact_options or [])
+    if not all_options:
+        messages.error(request, "No add-ons are configured for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    price_to_kind: dict[str, str] = {}
+    for opt in task_options or []:
+        price_to_kind[opt.price_id] = "task_pack"
+    for opt in contact_options or []:
+        price_to_kind[opt.price_id] = "contact_pack"
+
+    desired_quantities: dict[str, int] = {}
+    for key, value in request.POST.items():
+        if not key.startswith("quantity__"):
+            continue
+        price_id = key.replace("quantity__", "", 1)
+        if price_id not in price_to_kind:
+            continue
+        try:
+            qty = int(value)
+        except (TypeError, ValueError):
+            messages.error(request, "Quantities must be whole numbers.")
+            return redirect(_billing_redirect(owner, owner_type))
+        if qty < 0 or qty > 999:
+            messages.error(request, "Quantities must be between 0 and 999.")
+            return redirect(_billing_redirect(owner, owner_type))
+        desired_quantities[price_id] = qty
+
+    if not desired_quantities:
+        messages.error(request, "No add-on quantities provided.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    subscription = get_active_subscription(owner, preferred_plan_id=plan_id)
+    if not subscription:
+        messages.error(request, "No active subscription found.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    try:
+        _assign_stripe_api_key()
+        stripe_subscription = stripe.Subscription.retrieve(subscription.id, expand=["customer", "items.data.price"])
+        customer_id = (stripe_subscription.get("customer") or "")
+        if not customer_id:
+            messages.error(request, "Stripe customer not found for this subscription.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+        items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
+        updated_items = list(items_data) if isinstance(items_data, list) else []
+
+        # Build existing quantities map
+        existing_qty: dict[str, int] = {}
+        item_id_by_price: dict[str, str] = {}
+        for item in items_data or []:
+            price = item.get("price") or {}
+            pid = price.get("id")
+            if not pid:
+                continue
+            item_id_by_price[pid] = item.get("id")
+            try:
+                existing_qty[pid] = int(item.get("quantity") or 0)
+            except (TypeError, ValueError):
+                existing_qty[pid] = 0
+
+        changes_made = False
+        for price_id, desired_qty in desired_quantities.items():
+            current_qty = existing_qty.get(price_id, 0)
+            if desired_qty == current_qty:
+                continue
+
+            if desired_qty > 0:
+                if price_id in item_id_by_price:
+                    stripe.SubscriptionItem.modify(item_id_by_price[price_id], quantity=desired_qty)
+                    for entry in updated_items:
+                        price = entry.get("price") or {}
+                        if price.get("id") == price_id:
+                            entry["quantity"] = desired_qty
+                            break
+                else:
+                    stripe.SubscriptionItem.create(
+                        subscription=subscription.id,
+                        price=price_id,
+                        quantity=desired_qty,
+                    )
+                    updated_items.append({"price": {"id": price_id}, "quantity": desired_qty})
+            else:
+                if price_id in item_id_by_price:
+                    stripe.SubscriptionItem.delete(item_id_by_price[price_id])
+                    updated_items = [
+                        entry for entry in updated_items if (entry.get("price") or {}).get("id") != price_id
+                    ]
+            changes_made = True
+
+        if changes_made:
+            try:
+                period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+                tz = timezone.get_current_timezone()
+                period_start_dt = timezone.make_aware(datetime.combine(period_start, datetime.min.time()), tz)
+                period_end_dt = timezone.make_aware(
+                    datetime.combine(period_end + timedelta(days=1), datetime.min.time()),
+                    tz,
+                )
+                AddonEntitlementService.sync_subscription_entitlements(
+                    owner=owner,
+                    owner_type=owner_type,
+                    plan_id=plan_id,
+                    subscription_items=updated_items,
+                    period_start=period_start_dt,
+                    period_end=period_end_dt,
+                    created_via="console_batch_update",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to sync add-on entitlements after batch update for %s",
+                    getattr(owner, "id", None) or owner,
+                )
+
+        messages.success(request, "Add-ons updated.")
+    except stripe.error.StripeError as exc:
+        logger.warning("Stripe API error while updating addons: %s", exc)
+        messages.error(request, f"A billing error occurred: {exc}")
+    except Exception as exc:
+        logger.exception("Failed to update add-ons for %s", getattr(owner, "id", None) or owner)
+        messages.error(request, "An unexpected error occurred while updating add-ons.")
+
+    return redirect(_billing_redirect(owner, owner_type))
+
+
+@login_required
+@require_POST
+@transaction.atomic
+@with_billing_owner
 @tracer.start_as_current_span("BILLING Add Dedicated IP Quantity")
 def add_dedicated_ip_quantity(request, owner, owner_type):
     if not stripe_status().enabled:
