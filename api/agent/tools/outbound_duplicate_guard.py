@@ -61,7 +61,7 @@ class DuplicateDetectionResult:
             "message": message,
             "duplicate_detected": True,
             "duplicate_reason": self.reason,
-            "auto_sleep_ok": True
+            "auto_sleep_ok": False
         }
         when = self.previous_message.timestamp
         if when:
