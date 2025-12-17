@@ -320,7 +320,7 @@ wheels = [
 
 [[package]]
 name = "browser-use"
-version = "0.11.1"
+version = "0.11.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -361,9 +361,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid7" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/95/17/5a229d4a8f702bf8742199d5c6809de033ace3b355e16b25fe2fe14eaabd/browser_use-0.11.1.tar.gz", hash = "sha256:b99fe298536040ed2d81a777ee87393f9f32bf9f4c660404c2297ea9d6799703", size = 500685, upload-time = "2025-12-12T23:43:17.045Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/42/aacaba1ee2599101ccb14fde3c4732d6e994d9d616b3a7b9c12f8ac5d5b4/browser_use-0.11.2.tar.gz", hash = "sha256:543face2fd5662ee89526d2099a79e01468b51784cdcc85faa36a81fdae4aa68", size = 501474, upload-time = "2025-12-16T22:07:49.749Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e6/65/6de8d32f3842065e12977ca643df20b280b297e3dbec5113e9a6253f36b5/browser_use-0.11.1-py3-none-any.whl", hash = "sha256:456e2867d3a962745aef48634a12d5d2f45dbe3b652ae687e80dabdc944c4b36", size = 598208, upload-time = "2025-12-12T23:43:15.585Z" },
+    { url = "https://files.pythonhosted.org/packages/3d/04/9d0b9ee9b176fe329d424bf4337982b021b264295aa2fb9a7aef885abd61/browser_use-0.11.2-py3-none-any.whl", hash = "sha256:6ac57c0e2a495749fc83c1faee85001737567f8cd4301ebfcda2a886018a325b", size = 599219, upload-time = "2025-12-16T22:07:48.39Z" },
 ]
 
 [[package]]
@@ -1252,7 +1252,7 @@ requires-dist = [
     { name = "aiohttp-retry", specifier = "==2.9.1" },
     { name = "bleach", specifier = "~=6.2.0" },
     { name = "boto3", specifier = "~=1.38.39" },
-    { name = "browser-use", specifier = "==0.11.1" },
+    { name = "browser-use", specifier = "==0.11.2" },
     { name = "celery", specifier = "~=5.5.2" },
     { name = "celery-redbeat", specifier = "~=2.3.2" },
     { name = "channels", specifier = ">=4.3.1" },
