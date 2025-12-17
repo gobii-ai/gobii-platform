@@ -70,7 +70,23 @@ export type AuditStepEvent = {
   system_notes?: string | null
 }
 
-export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent
+export type AuditSystemMessageEvent = {
+  kind: 'system_message'
+  id: string
+  timestamp: string | null
+  delivered_at: string | null
+  body: string
+  is_active: boolean
+  broadcast_id: string | null
+  created_by: {
+    id: string
+    email?: string | null
+    name?: string | null
+  } | null
+  can_edit: boolean
+}
+
+export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent
 export type AuditRunStartedEvent = {
   kind: 'run_started'
   run_id: string

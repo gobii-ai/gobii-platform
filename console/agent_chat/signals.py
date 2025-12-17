@@ -15,9 +15,16 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PersistentAgentSystemMessage,
 )
 from console.agent_audit.realtime import send_audit_event
-from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_step, serialize_tool_call
+from console.agent_audit.serializers import (
+    serialize_completion,
+    serialize_message,
+    serialize_step,
+    serialize_tool_call,
+    serialize_system_message,
+)
 
 from .timeline import (
     build_processing_snapshot,
@@ -167,6 +174,17 @@ def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bo
         logger.debug("Failed to broadcast audit run start %s", getattr(instance, "step_id", None), exc_info=True)
 
 
+@receiver(post_save, sender=PersistentAgentSystemMessage)
+def broadcast_system_message(sender, instance: PersistentAgentSystemMessage, created: bool, **kwargs):
+    if not instance.agent_id:
+        return
+    try:
+        payload = serialize_system_message(instance)
+        _broadcast_audit_event(str(instance.agent_id), payload, instance.created_at)
+    except Exception:
+        logger.debug("Failed to broadcast audit system message %s", getattr(instance, "id", None), exc_info=True)
+
+
 @receiver(post_save, sender=BrowserUseAgentTask)
 @receiver(post_delete, sender=BrowserUseAgentTask)
 def broadcast_processing_state(sender, instance: BrowserUseAgentTask, **kwargs):
@@ -196,3 +214,14 @@ def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
     payload = serialize_processing_snapshot(snapshot)
     _send(_group_name(agent.id), "processing_event", payload)
+    try:
+        send_audit_event(
+            str(agent.id),
+            {
+                "kind": "processing_status",
+                "active": snapshot.active,
+                "timestamp": timezone.now().isoformat(),
+            },
+        )
+    except Exception:
+        logger.debug("Failed to broadcast processing status to audit channel for agent %s", agent.id, exc_info=True)

@@ -20,18 +20,20 @@ type AuditState = {
   jumpToTime: (day: string) => Promise<void>
   setSelectedDay: (day: string | null) => void
   receiveRealtimeEvent: (payload: any) => void
+  setProcessingActive: (active: boolean) => void
 }
 
 function mergeEvents(existing: AuditEvent[], incoming: AuditEvent[]): AuditEvent[] {
-  const seen = new Set(existing.map((e) => `${e.kind}:${(e as any).id}`))
-  const merged: AuditEvent[] = [...existing]
-  incoming.forEach((ev) => {
-    const key = `${ev.kind}:${(ev as any).id}`
-    if (!seen.has(key)) {
-      seen.add(key)
-      merged.push(ev)
-    }
-  })
+  const map = new Map<string, AuditEvent>()
+  for (const event of existing) {
+    const key = `${event.kind}:${(event as any).id}`
+    map.set(key, event)
+  }
+  for (const event of incoming) {
+    const key = `${event.kind}:${(event as any).id}`
+    map.set(key, event)
+  }
+  const merged = Array.from(map.values())
   merged.sort((a, b) => {
     const at = (a as any).timestamp || ''
     const bt = (b as any).timestamp || ''
@@ -158,12 +160,22 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ selectedTimestamp: day })
   },
 
+  setProcessingActive(active: boolean) {
+    set({ processingActive: active })
+  },
+
   receiveRealtimeEvent(payload: any) {
     const state = get()
     const agentId = state.agentId
     if (!agentId) return
     const kind: string | undefined = payload?.kind
     if (!kind) return
+
+    if (kind === 'processing_status') {
+      const active = Boolean(payload?.active)
+      set({ processingActive: active })
+      return
+    }
 
     if (kind === 'run_started') {
       // Ignore run_started for flattened view

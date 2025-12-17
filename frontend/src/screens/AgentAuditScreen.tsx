@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Cpu, Filter, MessageCircle, Stethoscope, StepForward, Wrench, type LucideIcon } from 'lucide-react'
+import { Copy, Cpu, Filter, Megaphone, MessageCircle, RefreshCcw, Stethoscope, StepForward, Wrench, type LucideIcon } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive } from '../types/agentAudit'
-import { fetchPromptArchive } from '../api/agentAudit'
+import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent } from '../types/agentAudit'
+import { createSystemMessage, fetchPromptArchive, triggerProcessEvents, updateSystemMessage } from '../api/agentAudit'
 import { StructuredDataTable } from '../components/common/StructuredDataTable'
 import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
+import { Modal } from '../components/common/Modal'
+import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
 
 type AgentAuditScreenProps = {
   agentId: string
@@ -351,6 +353,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     selectedTimestamp: selectedDay,
     processingActive,
     setSelectedDay,
+    setProcessingActive,
   } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
@@ -367,6 +370,14 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     hideAgentSteps: false,
     hideToolCalls: false,
   })
+  const [processBusy, setProcessBusy] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [messageModalOpen, setMessageModalOpen] = useState(false)
+  const [editingMessage, setEditingMessage] = useState<AuditSystemMessageEvent | null>(null)
+  const [messageBody, setMessageBody] = useState('')
+  const [messageActive, setMessageActive] = useState(true)
+  const [messageSubmitting, setMessageSubmitting] = useState(false)
+  const [messageError, setMessageError] = useState<string | null>(null)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
@@ -405,6 +416,14 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     })
   }, [events, filters])
 
+  useEffect(() => {
+    if (editingMessage) {
+      setMessageBody(editingMessage.body || '')
+      setMessageActive(editingMessage.is_active)
+      setMessageModalOpen(true)
+    }
+  }, [editingMessage])
+
   const handleLoadPrompt = async (archiveId: string) => {
     setPromptState((current) => ({ ...current, [archiveId]: { loading: true } }))
     try {
@@ -415,6 +434,54 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
         ...current,
         [archiveId]: { loading: false, error: err instanceof Error ? err.message : 'Failed to load prompt' },
       }))
+    }
+  }
+
+  const handleProcessEvents = async () => {
+    if (!agentId) return
+    setProcessBusy(true)
+    setActionError(null)
+    try {
+      const payload = await triggerProcessEvents(agentId)
+      setProcessingActive(payload.processing_active ?? true)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to queue processing')
+    } finally {
+      setProcessBusy(false)
+    }
+  }
+
+  const handleEditMessage = (message: AuditSystemMessageEvent) => {
+    setEditingMessage(message)
+  }
+
+  const resetMessageForm = () => {
+    setEditingMessage(null)
+    setMessageBody('')
+    setMessageActive(true)
+    setMessageModalOpen(false)
+    setMessageError(null)
+  }
+
+  const handleSubmitMessage = async () => {
+    if (!agentId) return
+    if (!messageBody.trim()) {
+      setMessageError('Message body is required')
+      return
+    }
+    setMessageSubmitting(true)
+    setMessageError(null)
+    try {
+      const payload =
+        editingMessage != null
+          ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
+          : await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
+      useAgentAuditStore.getState().receiveRealtimeEvent(payload)
+      resetMessageForm()
+    } catch (err) {
+      setMessageError(err instanceof Error ? err.message : 'Failed to save system message')
+    } finally {
+      setMessageSubmitting(false)
     }
   }
 
@@ -493,6 +560,32 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+              onClick={handleProcessEvents}
+              disabled={processBusy || processingActive}
+            >
+              <RefreshCcw
+                className={`h-4 w-4 ${processingActive ? 'animate-spin' : ''}`}
+                aria-hidden
+              />
+              {processingActive ? 'Processing…' : processBusy ? 'Queueing…' : 'Process events'}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:border-amber-300 hover:text-amber-900"
+              onClick={() => {
+                setEditingMessage(null)
+                setMessageBody('')
+                setMessageActive(true)
+                setMessageModalOpen(true)
+                setMessageError(null)
+              }}
+            >
+              <Megaphone className="h-4 w-4" aria-hidden />
+              Add system message
+            </button>
             <div className="relative">
               <button
                 type="button"
@@ -581,6 +674,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           </div>
         </div>
 
+        {actionError ? <div className="mt-2 text-sm text-rose-600">{actionError}</div> : null}
         {error ? <div className="mt-4 text-sm text-rose-600">{error}</div> : null}
         {loading && !events.length ? <div className="mt-6 text-sm text-slate-700">Loading audit data…</div> : null}
 
@@ -620,6 +714,22 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                   </div>
                 )
               }
+              if (event.kind === 'system_message') {
+                return (
+                  <div key={event.id} {...wrapperProps}>
+                    <SystemMessageCard
+                      message={event as AuditSystemMessageEvent}
+                      onEdit={event.can_edit ? handleEditMessage : undefined}
+                      renderBody={(body) =>
+                        renderHtmlOrText(body, {
+                          htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
+                          textClassName: 'whitespace-pre-wrap break-words rounded-md bg-amber-50/60 px-3 py-2 text-sm text-slate-900 shadow-inner shadow-amber-200/60',
+                        })
+                      }
+                    />
+                  </div>
+                )
+              }
               if (event.kind === 'step') {
                 return (
                   <div key={event.id} {...wrapperProps}>
@@ -645,6 +755,63 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           </div>
         </div>
       </div>
+
+      {messageModalOpen ? (
+        <Modal
+          title={editingMessage ? 'Edit system message' : 'Add system message'}
+          subtitle="System directives are injected ahead of the agent instructions."
+          onClose={resetMessageForm}
+          icon={Megaphone}
+          iconBgClass="bg-amber-100"
+          iconColorClass="text-amber-700"
+          widthClass="sm:max-w-2xl"
+          footer={
+            <div className="flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-400"
+                onClick={handleSubmitMessage}
+                disabled={messageSubmitting}
+              >
+                {messageSubmitting ? 'Saving…' : editingMessage ? 'Update message' : 'Add message'}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                onClick={resetMessageForm}
+                disabled={messageSubmitting}
+              >
+                Cancel
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-3">
+            <label className="block text-sm font-semibold text-slate-800">
+              Message
+              <textarea
+                className="mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 shadow-inner shadow-slate-200/60 focus:border-slate-400 focus:outline-none focus:ring-0"
+                rows={6}
+                value={messageBody}
+                onChange={(e) => setMessageBody(e.target.value)}
+                placeholder="Enter the directive to deliver to this agent..."
+                disabled={messageSubmitting}
+              />
+            </label>
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-slate-300 text-amber-700 focus:ring-amber-600"
+                checked={messageActive}
+                onChange={(e) => setMessageActive(e.target.checked)}
+                disabled={messageSubmitting}
+              />
+              Keep active for future prompts
+            </label>
+            {messageError ? <div className="text-sm text-rose-600">{messageError}</div> : null}
+          </div>
+        </Modal>
+      ) : null}
     </div>
   )
 }

@@ -1437,6 +1437,22 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
             message_ids = [message.id for message, _ in message_payloads]
             PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
             _record_system_directive_steps(agent, message_payloads)
+
+            # Broadcast updated delivery status to audit subscribers.
+            try:
+                from console.agent_audit.serializers import serialize_system_message
+                from console.agent_audit.realtime import send_audit_event
+
+                for message, _ in message_payloads:
+                    message.delivered_at = now
+                    payload = serialize_system_message(message)
+                    send_audit_event(str(agent.id), payload)
+            except Exception:
+                logger.debug(
+                    "Failed to broadcast system directive delivery for agent %s",
+                    agent.id,
+                    exc_info=True,
+                )
     except Exception:
         logger.exception(
             "Failed to process system prompt messages for agent %s. These messages will not be injected in this cycle.",
