@@ -353,6 +353,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     selectedTimestamp: selectedDay,
     processingActive,
     setSelectedDay,
+    setProcessingActive,
   } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
@@ -441,7 +442,9 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     setProcessQueueing(true)
     setActionError(null)
     try {
-      await triggerProcessEvents(agentId)
+      const payload = await triggerProcessEvents(agentId)
+      const active = Boolean(payload.processing_active || payload.queued)
+      setProcessingActive(active)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to queue processing')
     } finally {
@@ -470,11 +473,11 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     setMessageSubmitting(true)
     setMessageError(null)
     try {
-      if (editingMessage != null) {
-        await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
-      } else {
-        await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
-      }
+      const payload =
+        editingMessage != null
+          ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
+          : await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
+      useAgentAuditStore.getState().receiveRealtimeEvent(payload)
       resetMessageForm()
     } catch (err) {
       setMessageError(err instanceof Error ? err.message : 'Failed to save system message')
