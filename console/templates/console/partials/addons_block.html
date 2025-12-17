@@ -1,0 +1,219 @@
+{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
+{% if task_pack.options or contact_pack.options %}
+<form method="post" action="{% url 'update_addons' %}">
+  {% csrf_token %}
+  <div class="{{ card_class|default:'gobii-card-base p-6' }}">
+    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div>
+        <h2 class="text-lg font-semibold text-slate-900">{{ heading|default:"Add-ons" }}</h2>
+        <p class="text-sm text-slate-500 mt-1">Add additional capacity to get the most out of your current subscription.</p>
+      </div>
+    </div>
+
+    <div class="mt-4 grid gap-4 md:grid-cols-2">
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">Task packs</p>
+            <p class="text-xs text-slate-500">Add additional task credits for this cycle.</p>
+          </div>
+        </div>
+        {% if task_pack.options %}
+          {% for option in task_pack.options %}
+          <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
+            <div class="space-y-1">
+              <p class="text-sm font-semibold text-slate-900">
+                {% if task_pack.options|length > 1 %}{{ option.task_delta|default:"0" }} credits{% else %}Task pack{% endif %}
+              </p>
+              {% if option.price_display %}
+              <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Decrease task pack quantity" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
+                </svg>
+              </button>
+              <input
+                type="hidden"
+                id="quantity__{{ option.price_id }}"
+                name="quantity__{{ option.price_id }}"
+                min="0"
+                value="{{ option.quantity|default:0 }}"
+                data-addon-kind="task"
+                data-delta="{{ option.task_delta|default:'0' }}"
+                data-price-cents="{{ option.unit_amount|default:'' }}"
+                data-currency="{{ option.currency|upper }}"
+                {% if addons_disabled %}disabled{% endif %}
+              >
+              <span id="display__{{ option.price_id }}" class="w-10 text-center text-sm font-semibold text-slate-900">{{ option.quantity|default:0 }}</span>
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Increase task pack quantity" data-direction="up" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">Contact packs</p>
+            <p class="text-xs text-slate-500">Increase per-agent contacts for this cycle.</p>
+          </div>
+        </div>
+        {% if contact_pack.options %}
+          {% for option in contact_pack.options %}
+          <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
+            <div class="space-y-1">
+              <p class="text-sm font-semibold text-slate-900">
+                {% if contact_pack.options|length > 1 %}{{ option.contact_delta|default:"0" }} contacts{% else %}Contact pack{% endif %}
+              </p>
+              {% if option.price_display %}
+              <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Decrease contact pack quantity" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
+                </svg>
+              </button>
+              <input
+                type="hidden"
+                id="quantity__{{ option.price_id }}"
+                name="quantity__{{ option.price_id }}"
+                min="0"
+                value="{{ option.quantity|default:0 }}"
+                data-addon-kind="contact"
+                data-delta="{{ option.contact_delta|default:'0' }}"
+                data-price-cents="{{ option.unit_amount|default:'' }}"
+                data-currency="{{ option.currency|upper }}"
+                {% if addons_disabled %}disabled{% endif %}
+              >
+              <span id="display__{{ option.price_id }}" class="w-10 text-center text-sm font-semibold text-slate-900">{{ option.quantity|default:0 }}</span>
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Increase contact pack quantity" data-direction="up" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="mt-6 flex flex-col gap-3">
+      <div class="flex flex-wrap items-center gap-3 text-xs text-slate-700">
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total task credits</span>
+          <span id="addons-total-tasks" class="font-semibold text-slate-900">{{ addon_context.totals.task_credits|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total contact uplift</span>
+          <span id="addons-total-contacts" class="font-semibold text-slate-900">{{ addon_context.totals.contact_cap|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total add-on price</span>
+          <span id="addons-total-price" class="font-semibold text-slate-900">
+            {% if addon_context.totals.amount_display %}
+              {{ addon_context.totals.amount_display }}
+            {% else %}
+              —
+            {% endif %}
+          </span>
+        </span>
+      </div>
+      <div class="flex justify-end">
+        <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
+          Save add-ons
+        </button>
+      </div>
+    </div>
+  </div>
+</form>
+{% endif %}
+{% endwith %}
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const qtyInputs = document.querySelectorAll("input[data-addon-kind]");
+    const adjustButtons = document.querySelectorAll("button[data-qty-target]");
+    const totalTasksEl = document.getElementById("addons-total-tasks");
+    const totalContactsEl = document.getElementById("addons-total-contacts");
+    const totalPriceEl = document.getElementById("addons-total-price");
+
+    const formatMoney = (cents, currency) => {
+      if (!cents) return "—";
+      try {
+        const major = (parseInt(cents, 10) || 0) / 100;
+        const symbol = "$";
+        return `${symbol}${major.toFixed(2)}`;
+      } catch (e) {
+        return "—";
+      }
+    };
+
+    const recalcTotals = () => {
+      let taskTotal = 0;
+      let contactTotal = 0;
+      let priceCents = 0;
+      let currency = "";
+
+      qtyInputs.forEach((input) => {
+        const qty = parseInt(input.value, 10) || 0;
+        const delta = parseInt(input.dataset.delta || "0", 10) || 0;
+        const cents = parseInt(input.dataset.priceCents || "0", 10) || 0;
+        const kind = (input.dataset.addonKind || "").toLowerCase();
+        if (!currency) {
+          currency = input.dataset.currency || "";
+        }
+        if (qty <= 0) {
+          return;
+        }
+        if (kind === "task") {
+          taskTotal += delta * qty;
+        } else if (kind === "contact") {
+          contactTotal += delta * qty;
+        }
+        priceCents += cents * qty;
+      });
+
+      if (totalTasksEl) totalTasksEl.textContent = taskTotal;
+      if (totalContactsEl) totalContactsEl.textContent = contactTotal;
+      if (totalPriceEl) totalPriceEl.textContent = priceCents > 0 ? formatMoney(priceCents, currency || "USD") : "—";
+    };
+
+    qtyInputs.forEach((input) => {
+      input.addEventListener("input", recalcTotals);
+      input.addEventListener("change", recalcTotals);
+    });
+
+    adjustButtons.forEach((btn) => {
+      const targetId = btn.getAttribute("data-qty-target");
+      const displayId = btn.getAttribute("data-qty-display");
+      const direction = btn.getAttribute("data-direction") === "up" ? 1 : -1;
+      btn.addEventListener("click", () => {
+        const target = document.getElementById(targetId);
+        const display = document.getElementById(displayId);
+        if (!target || target.disabled) return;
+        const current = parseInt(target.value, 10) || 0;
+        const next = Math.max(0, Math.min(999, current + direction));
+        target.value = next;
+        if (display) display.textContent = next;
+        target.dispatchEvent(new Event("input"));
+      });
+    });
+
+    recalcTotals();
+  });
+</script>

@@ -26,6 +26,7 @@ from util.integrations import stripe_status, IntegrationDisabledError
 from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
+from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 
 try:
@@ -399,8 +400,25 @@ def get_stripe_customer(owner) -> Customer | None:
             )
             return None
 
-def get_active_subscription(owner) -> Subscription | None:
-    """Fetch the first active licensed subscription for a user or organization."""
+def _subscription_products(sub) -> set[str]:
+    products: set[str] = set()
+    try:
+        data = getattr(sub, "stripe_data", {}) or {}
+        items = (data.get("items") or {}).get("data") or []
+        for item in items:
+            price = item.get("price") or {}
+            product = price.get("product")
+            if isinstance(product, dict):
+                product = product.get("id")
+            if isinstance(product, str) and product:
+                products.add(product)
+    except Exception:
+        logger.debug("Failed to extract subscription products", exc_info=True)
+    return products
+
+
+def get_active_subscription(owner, *, preferred_plan_id: str | None = None) -> Subscription | None:
+    """Fetch an active licensed subscription, preferring one that carries the base plan product."""
     with traced("SUBSCRIPTION - Get Active Subscription") as span:
         owner_type = _resolve_owner_type(owner)
         owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
@@ -436,6 +454,26 @@ def get_active_subscription(owner) -> Subscription | None:
             owner_id,
             subs,
         )
+
+        preferred_products: set[str] = set()
+        if preferred_plan_id:
+            try:
+                preferred_products.add(str(PLAN_CONFIG.get(preferred_plan_id, {}).get("product_id") or ""))
+            except Exception:
+                preferred_products = set()
+        preferred_products = {p for p in preferred_products if p}
+
+        plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+
+        def _sort_key(sub):
+            products = _subscription_products(sub)
+            preferred_match = 0 if (preferred_products and products.intersection(preferred_products)) else 1
+            plan_match = 0 if products.intersection(plan_products) else 1
+            cancel_flag = 1 if sub.stripe_data.get("cancel_at_period_end") else 0
+            period_end = sub.stripe_data.get("current_period_end") or 0
+            return (preferred_match, plan_match, cancel_flag, period_end)
+
+        subs.sort(key=_sort_key)
 
         return subs[0] if subs else None
 
@@ -1412,6 +1450,14 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
     """
     default_limit = PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
 
+    addon_uplift = AddonEntitlementService.get_contact_cap_uplift(organization or user)
+    def _with_addon(value: int | None) -> int:
+        try:
+            base = int(value or 0)
+        except (TypeError, ValueError):
+            base = 0
+        return base + addon_uplift
+
     if organization is not None:
         plan = get_organization_plan(organization)
         if not plan:
@@ -1419,12 +1465,14 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
                 "get_user_max_contacts_per_agent org %s: No plan found, defaulting to free plan",
                 getattr(organization, 'id', 'n/a'),
             )
-            return default_limit
+            return _with_addon(default_limit)
 
         try:
-            return int(plan.get("max_contacts_per_agent", default_limit))
+            base_limit = int(plan.get("max_contacts_per_agent", default_limit))
         except (ValueError, TypeError):
-            return default_limit
+            base_limit = default_limit
+
+        return _with_addon(base_limit)
 
     # Check for per-user override stored on billing
     try:
@@ -1440,7 +1488,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             and billing_record.max_contacts_per_agent is not None
             and billing_record.max_contacts_per_agent > 0
         ):
-            return int(billing_record.max_contacts_per_agent)
+            return _with_addon(billing_record.max_contacts_per_agent)
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: billing lookup failed for user %s: %s",
@@ -1453,7 +1501,7 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
         from api.models import UserQuota
         quota = UserQuota.objects.filter(user=user).first()
         if quota and quota.max_agent_contacts is not None and quota.max_agent_contacts > 0:
-            return int(quota.max_agent_contacts)
+            return _with_addon(quota.max_agent_contacts)
     except Exception as e:
         logger.error(
             "get_user_max_contacts_per_agent: quota lookup failed for user %s: %s",
@@ -1468,9 +1516,11 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
             "get_user_max_contacts_per_agent %s: No plan found, defaulting to free plan",
             getattr(user, 'id', 'n/a')
         )
-        return default_limit
+        return _with_addon(default_limit)
 
     try:
-        return int(plan.get("max_contacts_per_agent", default_limit))
+        base_limit = int(plan.get("max_contacts_per_agent", default_limit))
     except (ValueError, TypeError):
-        return default_limit
+        base_limit = default_limit
+
+    return _with_addon(base_limit)

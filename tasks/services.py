@@ -11,6 +11,7 @@ from datetime import timezone as dt_timezone
 from django.utils.dateparse import parse_datetime, parse_date
 
 from api import models
+from billing.addons import AddonEntitlementService
 from billing.services import BillingService
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames, PlanNamesChoices
@@ -631,7 +632,8 @@ class TaskCreditService:
 
         if tasks_granted == 0:
             monthly_limit = plan.get("monthly_task_credits") if plan else None
-            tasks_granted = monthly_limit or 0
+            addon_uplift = AddonEntitlementService.get_task_credit_uplift(user)
+            tasks_granted = (monthly_limit or 0) + addon_uplift
 
         return tasks_granted + addl_tasks
 
@@ -643,7 +645,6 @@ class TaskCreditService:
 
         plan = get_organization_plan(organization)
         addl_limit = get_organization_extra_task_limit(organization)
-
         if addl_limit == TASKS_UNLIMITED:
             return TASKS_UNLIMITED
 
@@ -658,7 +659,8 @@ class TaskCreditService:
         tasks_granted = tasks_granted_qs.aggregate(total_granted=Sum('credits'))['total_granted'] or 0
 
         if tasks_granted == 0:
-            tasks_granted = get_organization_task_credit_limit(organization)
+            addon_uplift = AddonEntitlementService.get_task_credit_uplift(organization)
+            tasks_granted = get_organization_task_credit_limit(organization) + addon_uplift
 
         if addl_limit <= 0:
             return tasks_granted

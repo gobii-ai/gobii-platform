@@ -43,6 +43,33 @@ class DedicatedIpAddForm(forms.Form):
     )
 
 
+class AddonQuantityForm(forms.Form):
+    quantity = forms.IntegerField(
+        min_value=0,
+        max_value=999,
+        widget=forms.NumberInput(
+            attrs={
+                "class": "py-2 px-2 w-24 border-gray-200 rounded-lg text-sm text-center focus:border-blue-500 focus:ring-blue-500",
+                "inputmode": "numeric",
+                "max": "999",
+            }
+        ),
+        label="Quantity",
+        help_text="Total units to keep on your subscription.",
+        initial=0,
+    )
+    price_id = forms.CharField(
+        required=False,
+        max_length=255,
+        widget=forms.HiddenInput(),
+    )
+
+    def __init__(self, *args, label: str | None = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        if label:
+            self.fields["quantity"].label = label
+
+
 class ApiKeyForm(forms.ModelForm):
     class Meta:
         model = ApiKey

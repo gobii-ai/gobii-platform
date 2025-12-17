@@ -19,7 +19,7 @@ from djstripe.models import Subscription, Customer, Invoice
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
-from config.plans import PLAN_CONFIG, get_plan_by_product_id
+from config.plans import PLAN_CONFIG, get_plan_by_product_id, get_plan_product_id
 from config.stripe_config import get_stripe_settings
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
@@ -34,6 +34,7 @@ from marketing_events.context import extract_click_context
 import logging
 import stripe
 
+from billing.addons import AddonEntitlementService
 from api.models import UserBilling, OrganizationBilling, UserAttribution
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
@@ -984,12 +985,18 @@ def handle_subscription_event(event, **kwargs):
             subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
+        current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
         cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
 
         span.set_attribute('subscription.current_period_start', str(current_period_start_dt))
+        span.set_attribute('subscription.current_period_end', str(current_period_end_dt))
         span.set_attribute('subscription.cancel_at', str(cancel_at_dt))
         span.set_attribute('subscription.cancel_at_period_end', str(cancel_at_period_end_flag))
+
+        if current_period_end_dt is None:
+            current_period_end_dt = _coerce_datetime(getattr(sub, "current_period_end", None))
+            span.set_attribute('subscription.current_period_end_fallback', str(current_period_end_dt))
 
         if cancel_at_dt is None:
             cancel_at_dt = _coerce_datetime(getattr(sub, "cancel_at", None))
@@ -1039,9 +1046,6 @@ def handle_subscription_event(event, **kwargs):
         try:
             for item in source_data.get("items", {}).get("data", []) or []:
                 usage_type = _item_usage_type(item).lower()
-                if usage_type == "metered":
-                    continue
-
                 price = item.get("price") or {}
                 product = price.get("product")
                 if isinstance(product, Mapping):
@@ -1050,6 +1054,9 @@ def handle_subscription_event(event, **kwargs):
                 if product and product in plan_products:
                     licensed_item = item
                     break
+
+                if usage_type == "metered":
+                    continue
 
                 if fallback_item is None:
                     fallback_item = item
@@ -1076,6 +1083,28 @@ def handle_subscription_event(event, **kwargs):
                 plan_value = plan_choice.value
             except Exception:
                 plan_value = PlanNamesChoices.FREE.value
+
+            items_data: list[Mapping[str, Any]] = []
+            try:
+                items_data = ((source_data.get("items") or {}).get("data") or []) if isinstance(source_data, Mapping) else []
+            except Exception:
+                items_data = []
+
+            try:
+                AddonEntitlementService.sync_subscription_entitlements(
+                    owner=owner,
+                    owner_type=owner_type,
+                    plan_id=plan_value,
+                    subscription_items=items_data,
+                    period_start=current_period_start_dt or timezone.now(),
+                    period_end=current_period_end_dt,
+                    created_via="subscription_webhook",
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to sync add-on entitlements for owner %s during subscription webhook",
+                    getattr(owner, "id", None) or owner,
+                )
 
             stripe_settings = get_stripe_settings()
 
