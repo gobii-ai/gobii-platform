@@ -17,7 +17,6 @@
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-semibold text-slate-900">Task packs</p>
-            <p class="text-xs text-slate-500">Choose the bundle and set the total quantity.</p>
           </div>
         </div>
         {% if task_pack.options %}
@@ -25,7 +24,7 @@
           <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
             <div class="space-y-1">
               <p class="text-sm font-semibold text-slate-900">
-                {% if task_pack.options|length > 1 %}+{{ option.task_delta|default:"0" }} credits{% else %}Task pack{% endif %}
+                {% if task_pack.options|length > 1 %}{{ option.task_delta|default:"0" }} credits{% else %}Task pack{% endif %}
               </p>
               {% if option.price_display %}
               <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
@@ -45,7 +44,6 @@
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm font-semibold text-slate-900">Contact packs</p>
-            <p class="text-xs text-slate-500">Pick your bundle and total quantity.</p>
           </div>
         </div>
         {% if contact_pack.options %}
@@ -53,7 +51,7 @@
           <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
             <div class="space-y-1">
               <p class="text-sm font-semibold text-slate-900">
-                {% if contact_pack.options|length > 1 %}+{{ option.contact_delta|default:"0" }} contacts{% else %}Contact pack{% endif %}
+                {% if contact_pack.options|length > 1 %}{{ option.contact_delta|default:"0" }} contacts{% else %}Contact pack{% endif %}
               </p>
               {% if option.price_display %}
               <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
@@ -71,29 +69,25 @@
     </div>
 
     <div class="mt-6 flex flex-col gap-3">
-      <div class="flex flex-col gap-1">
-        <p class="text-sm font-semibold text-slate-900">Current add-ons</p>
-        <ul class="text-xs text-slate-600 space-y-1">
-          {% with has_summary=False %}
-            {% for option in task_pack.options %}
-              {% if option.quantity|default:0 > 0 %}
-                {% with has_summary=True %}
-                <li>Task pack: {{ option.quantity }} x +{{ option.task_delta|default:"0" }} credits{% if option.price_display %} ({{ option.price_display }}){% endif %}</li>
-                {% endwith %}
-              {% endif %}
-            {% endfor %}
-            {% for option in contact_pack.options %}
-              {% if option.quantity|default:0 > 0 %}
-                {% with has_summary=True %}
-                <li>Contact pack: {{ option.quantity }} x +{{ option.contact_delta|default:"0" }} contacts{% if option.price_display %} ({{ option.price_display }}){% endif %}</li>
-                {% endwith %}
-              {% endif %}
-            {% endfor %}
-            {% if not has_summary %}
-              <li>No add-ons selected.</li>
+      <div class="flex flex-wrap items-center gap-3 text-xs text-slate-700">
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total task credits</span>
+          <span class="font-semibold text-slate-900">{{ addon_context.totals.task_credits|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total contact uplift</span>
+          <span class="font-semibold text-slate-900">{{ addon_context.totals.contact_cap|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+          <span class="text-slate-500">Total add-on price</span>
+          <span class="font-semibold text-slate-900">
+            {% if addon_context.totals.amount_display %}
+              {{ addon_context.totals.amount_display }}
+            {% else %}
+              —
             {% endif %}
-          {% endwith %}
-        </ul>
+          </span>
+        </span>
       </div>
       <div class="flex justify-end">
         <button type="submit" class="inline-flex items-center px-4 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>

@@ -315,6 +315,11 @@ class AddonEntitlementService:
         price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
         addon_context: dict[str, dict[str, Any]] = {}
 
+        total_task = 0
+        total_contact = 0
+        total_amount = 0
+        currency = ""
+
         for kind, price_ids in price_lists.items():
             if not price_ids:
                 continue
@@ -333,11 +338,19 @@ class AddonEntitlementService:
                         display_price = f"{(cfg.currency or 'USD').upper()} {major}"
                 except (InvalidOperation, TypeError):
                     display_price = ""
+                qty = AddonEntitlementService.get_active_quantity_for_price(owner, price_id)
+                if cfg.task_credits_delta:
+                    total_task += cfg.task_credits_delta * qty
+                if cfg.contact_cap_delta:
+                    total_contact += cfg.contact_cap_delta * qty
+                if cfg.unit_amount is not None:
+                    total_amount += cfg.unit_amount * qty
+                currency = currency or (cfg.currency or "").upper()
                 options.append(
                     {
                         "price_id": price_id,
                         "product_id": cfg.product_id,
-                        "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
+                        "quantity": qty,
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
                         "expires_at": expires_at,
@@ -353,6 +366,22 @@ class AddonEntitlementService:
                 # Preserve backward-compatible accessors for callers that expect a single option.
                 addon_context[kind]["price_id"] = options[0]["price_id"]
                 addon_context[kind]["product_id"] = options[0]["product_id"]
+
+        amount_display = ""
+        if total_amount and currency:
+            try:
+                major_total = (Decimal(total_amount) / Decimal("100")).quantize(Decimal("0.01"))
+                amount_display = f"{currency} {major_total}"
+            except (InvalidOperation, TypeError):
+                amount_display = ""
+
+        addon_context["totals"] = {
+            "task_credits": total_task,
+            "contact_cap": total_contact,
+            "amount_cents": total_amount,
+            "currency": currency,
+            "amount_display": amount_display,
+        }
 
         return addon_context
 
