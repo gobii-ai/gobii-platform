@@ -22,6 +22,9 @@
               <p class="text-sm font-semibold text-slate-900">
                 Task packs{% if task_pack.options|length > 1 %} ({{ option.task_delta|default:"0" }} credits each){% endif %}
               </p>
+              {% if option.price_display %}
+              <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
+              {% endif %}
               <p class="text-xs text-slate-500">Each adds {{ option.task_delta|default:"0" }} task credits{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
             </div>
             <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
@@ -48,6 +51,9 @@
               <p class="text-sm font-semibold text-slate-900">
                 Contact packs{% if contact_pack.options|length > 1 %} (+{{ option.contact_delta|default:"0" }} contacts each){% endif %}
               </p>
+              {% if option.price_display %}
+              <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
+              {% endif %}
               <p class="text-xs text-slate-500">Each adds {{ option.contact_delta|default:"0" }} contacts per agent{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
             </div>
             <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Mapping
 
 from django.apps import apps
@@ -24,6 +25,8 @@ class AddonPriceConfig:
     product_id: str
     task_credits_delta: int = 0
     contact_cap_delta: int = 0
+    unit_amount: int | None = None
+    currency: str = ""
 
 
 class AddonEntitlementService:
@@ -109,10 +112,16 @@ class AddonEntitlementService:
 
         metadata: Mapping[str, Any] = {}
         product_id = ""
+        unit_amount: int | None = None
+        currency = ""
 
         if isinstance(price_data, Mapping):
             metadata = price_data.get("metadata") or {}
             product_id = price_data.get("product") or ""
+            currency = (price_data.get("currency") or "").lower()
+            unit_amount = AddonEntitlementService._safe_int(
+                price_data.get("unit_amount") or price_data.get("unit_amount_decimal")
+            )
             if isinstance(product_id, Mapping):
                 product_id = product_id.get("id") or ""
         try:
@@ -123,6 +132,11 @@ class AddonEntitlementService:
                     metadata = getattr(price_obj, "metadata", {}) or {}
                     product_obj = getattr(price_obj, "product", None)
                     product_id = product_id or getattr(product_obj, "id", "") or ""
+                    currency = currency or getattr(price_obj, "currency", "") or ""
+                    try:
+                        unit_amount = unit_amount or AddonEntitlementService._safe_int(getattr(price_obj, "unit_amount", None))
+                    except Exception:
+                        unit_amount = unit_amount or None
         except (LookupError, DatabaseError):
             # Best-effort only; metadata is optional for tests and local dev
             metadata = metadata or {}
@@ -146,6 +160,8 @@ class AddonEntitlementService:
             product_id=str(product_id or ""),
             task_credits_delta=task_delta,
             contact_cap_delta=contact_delta,
+            unit_amount=unit_amount,
+            currency=currency or "",
         )
 
     @staticmethod
@@ -254,6 +270,8 @@ class AddonEntitlementService:
                 product_id="",
                 task_credits_delta=0,
                 contact_cap_delta=0,
+                unit_amount=None,
+                currency="",
             )
 
             # Override task pack delta per plan when using a shared price
@@ -263,6 +281,8 @@ class AddonEntitlementService:
                     product_id=cfg.product_id,
                     task_credits_delta=stripe_settings.task_pack_delta_org_team if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
                     contact_cap_delta=stripe_settings.contact_pack_delta_org_team if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                    unit_amount=cfg.unit_amount,
+                    currency=cfg.currency,
                 )
             elif plan_id == PlanNames.STARTUP:
                 cfg = AddonPriceConfig(
@@ -270,6 +290,8 @@ class AddonEntitlementService:
                     product_id=cfg.product_id,
                     task_credits_delta=stripe_settings.task_pack_delta_startup if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
                     contact_cap_delta=stripe_settings.contact_pack_delta_startup if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                    unit_amount=cfg.unit_amount,
+                    currency=cfg.currency,
                 )
             elif plan_id == PlanNames.SCALE:
                 cfg = AddonPriceConfig(
@@ -277,6 +299,8 @@ class AddonEntitlementService:
                     product_id=cfg.product_id,
                     task_credits_delta=stripe_settings.task_pack_delta_scale if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
                     contact_cap_delta=stripe_settings.contact_pack_delta_scale if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
+                    unit_amount=cfg.unit_amount,
+                    currency=cfg.currency,
                 )
             price_map[pid] = cfg
         return price_map
@@ -302,6 +326,13 @@ class AddonEntitlementService:
                     continue
                 entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
                 expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
+                display_price = ""
+                try:
+                    if cfg.unit_amount is not None:
+                        major = (Decimal(cfg.unit_amount) / Decimal("100")).quantize(Decimal("0.01"))
+                        display_price = f"{(cfg.currency or 'USD').upper()} {major}"
+                except (InvalidOperation, TypeError):
+                    display_price = ""
                 options.append(
                     {
                         "price_id": price_id,
@@ -310,6 +341,9 @@ class AddonEntitlementService:
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
                         "expires_at": expires_at,
+                        "unit_amount": cfg.unit_amount,
+                        "currency": cfg.currency,
+                        "price_display": display_price,
                     }
                 )
             if options:
