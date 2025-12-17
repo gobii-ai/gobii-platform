@@ -353,7 +353,6 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     selectedTimestamp: selectedDay,
     processingActive,
     setSelectedDay,
-    setProcessingActive,
   } = useAgentAuditStore((state) => state)
   const [promptState, setPromptState] = useState<Record<string, PromptState>>({})
   const eventsRef = useRef<HTMLDivElement | null>(null)
@@ -370,7 +369,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     hideAgentSteps: false,
     hideToolCalls: false,
   })
-  const [processBusy, setProcessBusy] = useState(false)
+  const [processQueueing, setProcessQueueing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [editingMessage, setEditingMessage] = useState<AuditSystemMessageEvent | null>(null)
@@ -393,12 +392,6 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
-
-  useEffect(() => {
-    if (!processingActive) {
-      setProcessBusy(false)
-    }
-  }, [processingActive])
 
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
@@ -444,16 +437,15 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   }
 
   const handleProcessEvents = async () => {
-    if (!agentId) return
-    setProcessBusy(true)
+    if (!agentId || processQueueing) return
+    setProcessQueueing(true)
     setActionError(null)
     try {
-      const payload = await triggerProcessEvents(agentId)
-      setProcessingActive(payload.processing_active ?? true)
+      await triggerProcessEvents(agentId)
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to queue processing')
     } finally {
-      setProcessBusy(false)
+      setProcessQueueing(false)
     }
   }
 
@@ -478,11 +470,11 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     setMessageSubmitting(true)
     setMessageError(null)
     try {
-      const payload =
-        editingMessage != null
-          ? await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
-          : await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
-      useAgentAuditStore.getState().receiveRealtimeEvent(payload)
+      if (editingMessage != null) {
+        await updateSystemMessage(agentId, editingMessage.id, { body: messageBody, is_active: messageActive })
+      } else {
+        await createSystemMessage(agentId, { body: messageBody, is_active: messageActive })
+      }
       resetMessageForm()
     } catch (err) {
       setMessageError(err instanceof Error ? err.message : 'Failed to save system message')
@@ -570,13 +562,13 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               type="button"
               className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
               onClick={handleProcessEvents}
-              disabled={processBusy || processingActive}
+              disabled={processQueueing || processingActive}
             >
               <RefreshCcw
                 className={`h-4 w-4 ${processingActive ? 'animate-spin' : ''}`}
                 aria-hidden
               />
-              {processingActive ? 'Processing…' : processBusy ? 'Queueing…' : 'Process events'}
+              {processingActive ? 'Processing…' : processQueueing ? 'Queueing…' : 'Process events'}
             </button>
             <button
               type="button"
@@ -725,7 +717,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                   <div key={event.id} {...wrapperProps}>
                     <SystemMessageCard
                       message={event as AuditSystemMessageEvent}
-                      onEdit={event.can_edit ? handleEditMessage : undefined}
+                      onEdit={handleEditMessage}
                       renderBody={(body) =>
                         renderHtmlOrText(body, {
                           htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',

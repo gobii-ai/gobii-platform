@@ -18,13 +18,12 @@ from api.models import (
     PersistentAgentToolCall,
     PersistentAgentSystemMessage,
 )
-from console.agent_audit.realtime import send_audit_event
+from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
     serialize_completion,
     serialize_message,
     serialize_step,
     serialize_tool_call,
-    serialize_system_message,
 )
 
 from .timeline import (
@@ -177,13 +176,7 @@ def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bo
 
 @receiver(post_save, sender=PersistentAgentSystemMessage)
 def broadcast_system_message(sender, instance: PersistentAgentSystemMessage, created: bool, **kwargs):
-    if not instance.agent_id:
-        return
-    try:
-        payload = serialize_system_message(instance)
-        _broadcast_audit_event(str(instance.agent_id), payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit system message %s", getattr(instance, "id", None), exc_info=True)
+    broadcast_system_message_audit(instance)
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)

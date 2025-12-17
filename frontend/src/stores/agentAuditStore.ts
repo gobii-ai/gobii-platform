@@ -20,7 +20,6 @@ type AuditState = {
   jumpToTime: (day: string) => Promise<void>
   setSelectedDay: (day: string | null) => void
   receiveRealtimeEvent: (payload: any) => void
-  setProcessingActive: (active: boolean) => void
 }
 
 function mergeEvents(existing: AuditEvent[], incoming: AuditEvent[]): AuditEvent[] {
@@ -158,10 +157,6 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
 
   setSelectedDay(day: string | null) {
     set({ selectedTimestamp: day })
-  },
-
-  setProcessingActive(active: boolean) {
-    set({ processingActive: active })
   },
 
   receiveRealtimeEvent(payload: any) {

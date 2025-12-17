@@ -52,7 +52,6 @@ class StaffAgentAuditAPITests(TestCase):
         data = response.json()
         self.assertEqual(data.get("kind"), "system_message")
         self.assertEqual(data.get("body"), "Priority directive")
-        self.assertTrue(data.get("can_edit"))
 
     def test_system_message_requires_staff(self):
         self.client.force_login(self.nonstaff)

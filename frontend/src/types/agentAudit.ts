@@ -83,7 +83,6 @@ export type AuditSystemMessageEvent = {
     email?: string | null
     name?: string | null
   } | null
-  can_edit: boolean
 }
 
 export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent

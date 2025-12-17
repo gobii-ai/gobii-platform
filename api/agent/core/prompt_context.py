@@ -1440,13 +1440,11 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
 
             # Broadcast updated delivery status to audit subscribers.
             try:
-                from console.agent_audit.serializers import serialize_system_message
-                from console.agent_audit.realtime import send_audit_event
+                from console.agent_audit.realtime import broadcast_system_message_audit
 
                 for message, _ in message_payloads:
                     message.delivered_at = now
-                    payload = serialize_system_message(message)
-                    send_audit_event(str(agent.id), payload)
+                    broadcast_system_message_audit(message)
             except Exception:
                 logger.debug(
                     "Failed to broadcast system directive delivery for agent %s",

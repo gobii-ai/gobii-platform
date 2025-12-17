@@ -34,7 +34,7 @@ export function SystemMessageCard({ message, onEdit, renderBody }: SystemMessage
         </div>
         <div className="flex items-center gap-2">
           <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ring-1 ${statusClass}`}>{statusLabel}</span>
-          {message.can_edit && onEdit ? (
+          {onEdit ? (
             <button
               type="button"
               onClick={() => onEdit(message)}

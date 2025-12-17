@@ -150,5 +150,4 @@ def serialize_system_message(message: PersistentAgentSystemMessage) -> dict:
         }
         if created_by
         else None,
-        "can_edit": True,
     }
