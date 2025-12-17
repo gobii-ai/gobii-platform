@@ -153,9 +153,11 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_additional_task_price_id",
                     "startup_task_pack_product_id",
                     "startup_task_pack_price_id",
+                    "startup_task_pack_price_ids",
                     "startup_product_id",
                     "startup_contact_cap_product_id",
                     "startup_contact_cap_price_id",
+                    "startup_contact_cap_price_ids",
                     "startup_dedicated_ip_price_id",
                     "startup_dedicated_ip_product_id",
                 )
@@ -170,8 +172,10 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "scale_additional_task_price_id",
                     "scale_task_pack_product_id",
                     "scale_task_pack_price_id",
+                    "scale_task_pack_price_ids",
                     "scale_contact_cap_product_id",
                     "scale_contact_cap_price_id",
+                    "scale_contact_cap_price_ids",
                     "scale_dedicated_ip_product_id",
                     "scale_dedicated_ip_price_id",
                 )
@@ -189,8 +193,10 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "org_team_additional_task_price_id",
                     "org_team_task_pack_product_id",
                     "org_team_task_pack_price_id",
+                    "org_team_task_pack_price_ids",
                     "org_team_contact_cap_product_id",
                     "org_team_contact_cap_price_id",
+                    "org_team_contact_cap_price_ids",
                 )
             },
         ),

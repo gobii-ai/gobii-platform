@@ -143,6 +143,65 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertEqual(ent.quantity, 2)
 
     @patch("billing.addons.get_stripe_settings")
+    def test_sync_handles_multiple_contact_pack_prices(self, mock_settings):
+        mock_settings.return_value = SimpleNamespace(
+            startup_task_pack_price_id="",
+            startup_task_pack_price_ids=(),
+            startup_contact_cap_price_id="",
+            startup_contact_cap_price_ids=("price_contact_small", "price_contact_large"),
+            scale_task_pack_price_id="",
+            scale_contact_cap_price_id="",
+            org_team_task_pack_price_id="",
+            org_team_contact_cap_price_id="",
+            task_pack_delta_startup=0,
+            task_pack_delta_scale=0,
+            task_pack_delta_org_team=0,
+            contact_pack_delta_startup=0,
+            contact_pack_delta_scale=0,
+            contact_pack_delta_org_team=0,
+        )
+
+        items = [
+            {
+                "price": {
+                    "id": "price_contact_small",
+                    "product": "prod_contact_small",
+                    "metadata": {"contact_cap_delta": "20"},
+                },
+                "quantity": 1,
+            },
+            {
+                "price": {
+                    "id": "price_contact_large",
+                    "product": "prod_contact_large",
+                    "metadata": {"contact_cap_delta": "50"},
+                },
+                "quantity": 2,
+            },
+        ]
+
+        AddonEntitlementService.sync_subscription_entitlements(
+            owner=self.user,
+            owner_type="user",
+            plan_id=PlanNames.STARTUP,
+            subscription_items=items,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            created_via="test_sync",
+        )
+
+        small = AddonEntitlementService.get_active_entitlements(self.user, "price_contact_small").first()
+        large = AddonEntitlementService.get_active_entitlements(self.user, "price_contact_large").first()
+
+        self.assertIsNotNone(small)
+        self.assertEqual(small.contact_cap_delta, 20)
+        self.assertEqual(small.quantity, 1)
+
+        self.assertIsNotNone(large)
+        self.assertEqual(large.contact_cap_delta, 50)
+        self.assertEqual(large.quantity, 2)
+
+    @patch("billing.addons.get_stripe_settings")
     def test_sync_expires_entitlements_when_prices_missing(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
             startup_task_pack_price_id="",

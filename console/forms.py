@@ -58,6 +58,11 @@ class AddonQuantityForm(forms.Form):
         help_text="Total units to keep on your subscription.",
         initial=0,
     )
+    price_id = forms.CharField(
+        required=False,
+        max_length=255,
+        widget=forms.HiddenInput(),
+    )
 
     def __init__(self, *args, label: str | None = None, **kwargs):
         super().__init__(*args, **kwargs)

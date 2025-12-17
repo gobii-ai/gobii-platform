@@ -1,5 +1,5 @@
 {% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
-{% if task_pack.price_id or contact_pack.price_id %}
+{% if task_pack.options or contact_pack.options %}
 <div class="{{ card_class|default:'gobii-card-base p-6' }}">
   <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
     <div>
@@ -11,42 +11,52 @@
   </div>
 
   <div class="mt-4 grid gap-4 md:grid-cols-2">
-    {% if task_pack.price_id %}
-    <form method="post" action="{% url 'update_task_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-      {% csrf_token %}
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <p class="text-sm font-semibold text-slate-900">Task packs</p>
-          <p class="text-xs text-slate-500">Each adds {{ task_pack.task_delta|default:"0" }} task credits{% if task_pack.expires_at %} until {{ task_pack.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+    {% if task_pack.options %}
+      {% for option in task_pack.options %}
+      <form method="post" action="{% url 'update_task_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
+        {% csrf_token %}
+        <input type="hidden" name="price_id" value="{{ option.price_id }}">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">
+              Task packs{% if task_pack.options|length > 1 %} ({{ option.task_delta|default:"0" }} credits each){% endif %}
+            </p>
+            <p class="text-xs text-slate-500">Each adds {{ option.task_delta|default:"0" }} task credits{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+          </div>
+          <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
         </div>
-        <input type="number" name="quantity" min="0" value="{{ task_pack.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">Current: {{ task_pack.quantity|default:0 }} pack{{ task_pack.quantity|default:0|pluralize }}</p>
-        <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
-          Save
-        </button>
-      </div>
-    </form>
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs text-slate-500">Current: {{ option.quantity|default:0 }} pack{{ option.quantity|default:0|pluralize }}</p>
+          <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
+            Save
+          </button>
+        </div>
+      </form>
+      {% endfor %}
     {% endif %}
 
-    {% if contact_pack.price_id %}
-    <form method="post" action="{% url 'update_contact_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
-      {% csrf_token %}
-      <div class="flex items-center justify-between gap-3">
-        <div>
-          <p class="text-sm font-semibold text-slate-900">Contact packs</p>
-          <p class="text-xs text-slate-500">Each adds {{ contact_pack.contact_delta|default:"0" }} contacts per agent{% if contact_pack.expires_at %} until {{ contact_pack.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+    {% if contact_pack.options %}
+      {% for option in contact_pack.options %}
+      <form method="post" action="{% url 'update_contact_pack_quantity' %}" class="border border-slate-100 rounded-lg p-4 bg-white shadow-sm flex flex-col gap-3">
+        {% csrf_token %}
+        <input type="hidden" name="price_id" value="{{ option.price_id }}">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">
+              Contact packs{% if contact_pack.options|length > 1 %} (+{{ option.contact_delta|default:"0" }} contacts each){% endif %}
+            </p>
+            <p class="text-xs text-slate-500">Each adds {{ option.contact_delta|default:"0" }} contacts per agent{% if option.expires_at %} until {{ option.expires_at|date:"F j, Y" }}{% else %} this cycle{% endif %}.</p>
+          </div>
+          <input type="number" name="quantity" min="0" value="{{ option.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
         </div>
-        <input type="number" name="quantity" min="0" value="{{ contact_pack.quantity|default:0 }}" class="w-24 rounded-md border border-slate-200 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500" {% if addons_disabled %}disabled{% endif %}>
-      </div>
-      <div class="flex items-center justify-between gap-3">
-        <p class="text-xs text-slate-500">Current: {{ contact_pack.quantity|default:0 }} pack{{ contact_pack.quantity|default:0|pluralize }}</p>
-        <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
-          Save
-        </button>
-      </div>
-    </form>
+        <div class="flex items-center justify-between gap-3">
+          <p class="text-xs text-slate-500">Current: {{ option.quantity|default:0 }} pack{{ option.quantity|default:0|pluralize }}</p>
+          <button type="submit" class="inline-flex items-center px-3 py-2 text-sm font-semibold text-white bg-blue-600 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-600 {% if addons_disabled %}opacity-50 cursor-not-allowed{% endif %}" {% if addons_disabled %}disabled{% endif %}>
+            Save
+          </button>
+        </div>
+      </form>
+      {% endfor %}
     {% endif %}
   </div>
 </div>

@@ -1,5 +1,6 @@
 """Helpers for accessing Stripe configuration with database overrides."""
 import environ
+import json
 
 from dataclasses import dataclass, replace
 from functools import lru_cache
@@ -28,15 +29,19 @@ class StripeSettings:
     startup_additional_task_price_id: str
     startup_task_pack_product_id: str
     startup_task_pack_price_id: str
+    startup_task_pack_price_ids: tuple[str, ...]
     startup_contact_cap_product_id: str
     startup_contact_cap_price_id: str
+    startup_contact_cap_price_ids: tuple[str, ...]
     startup_product_id: str
     scale_price_id: str
     scale_additional_task_price_id: str
     scale_task_pack_product_id: str
     scale_task_pack_price_id: str
+    scale_task_pack_price_ids: tuple[str, ...]
     scale_contact_cap_product_id: str
     scale_contact_cap_price_id: str
+    scale_contact_cap_price_ids: tuple[str, ...]
     scale_product_id: str
     org_team_product_id: str
     org_team_price_id: str
@@ -44,8 +49,10 @@ class StripeSettings:
     org_team_additional_task_price_id: str
     org_team_task_pack_product_id: str
     org_team_task_pack_price_id: str
+    org_team_task_pack_price_ids: tuple[str, ...]
     org_team_contact_cap_product_id: str
     org_team_contact_cap_price_id: str
+    org_team_contact_cap_price_ids: tuple[str, ...]
     task_pack_delta_startup: int
     task_pack_delta_scale: int
     task_pack_delta_org_team: int
@@ -65,6 +72,33 @@ class StripeSettings:
     org_task_meter_id: str
 
 
+def _parse_price_id_list(raw_value: str | list[str] | tuple[str, ...] | None) -> tuple[str, ...]:
+    """Normalize stored/comma-separated/JSON values into a tuple of IDs."""
+    if not raw_value:
+        return tuple()
+
+    if isinstance(raw_value, (list, tuple, set)):
+        values = raw_value
+    else:
+        values = raw_value
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+                if isinstance(parsed, (list, tuple, set)):
+                    values = parsed
+            except (TypeError, ValueError, json.JSONDecodeError):
+                values = [part.strip() for part in raw_value.split(",")]
+
+    ids: list[str] = []
+    for candidate in values or []:
+        if not candidate:
+            continue
+        text = str(candidate).strip()
+        if text and text not in ids:
+            ids.append(text)
+    return tuple(ids)
+
+
 def _env_defaults() -> StripeSettings:
     return StripeSettings(
         release_env=getattr(settings, "GOBII_RELEASE_ENV", "local"),
@@ -75,16 +109,20 @@ def _env_defaults() -> StripeSettings:
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_task_pack_product_id=env("STRIPE_STARTUP_TASK_PACK_PRODUCT_ID", default="prod_dummy_startup_task_pack_product"),
         startup_task_pack_price_id=env("STRIPE_STARTUP_TASK_PACK_PRICE_ID", default="prod_dummy_startup_task_pack_price"),
+        startup_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_STARTUP_TASK_PACK_PRICE_IDS", default=[])),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
         startup_contact_cap_product_id=env("STRIPE_STARTUP_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_startup_contact_cap"),
         startup_contact_cap_price_id=env("STRIPE_STARTUP_CONTACT_CAP_PRICE_ID", default="price_dummy_startup_contact_cap"),
+        startup_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_STARTUP_CONTACT_CAP_PRICE_IDS", default=[])),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
         scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
         scale_task_pack_product_id=env("STRIPE_SCALE_TASK_PACK_PRODUCT_ID", default="prod_dummy_scale_task_pack_product"),
         scale_task_pack_price_id=env("STRIPE_SCALE_TASK_PACK_PRICE_ID", default="prod_dummy_scale_task_pack_price"),
+        scale_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_SCALE_TASK_PACK_PRICE_IDS", default=[])),
         scale_additional_task_price_id=env("STRIPE_SCALE_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_scale_additional_task"),
         scale_contact_cap_product_id=env("STRIPE_SCALE_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_scale_contact_cap"),
         scale_contact_cap_price_id=env("STRIPE_SCALE_CONTACT_CAP_PRICE_ID", default="price_dummy_scale_contact_cap"),
+        scale_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_SCALE_CONTACT_CAP_PRICE_IDS", default=[])),
         scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
         task_pack_delta_startup=env.int("STRIPE_TASK_PACK_DELTA_STARTUP", default=0),
         task_pack_delta_scale=env.int("STRIPE_TASK_PACK_DELTA_SCALE", default=0),
@@ -101,9 +139,11 @@ def _env_defaults() -> StripeSettings:
         org_team_additional_task_product_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRODUCT_ID", default="prod_dummy_org_team_additional_task"),
         org_team_task_pack_product_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRODUCT_ID", default="prod_dummy_org_team_task_pack_product"),
         org_team_task_pack_price_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRICE_ID", default="prod_dummy_org_team_task_pack_price"),
+        org_team_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_ORG_TEAM_TASK_PACK_PRICE_IDS", default=[])),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
         org_team_contact_cap_product_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_org_team_contact_cap"),
         org_team_contact_cap_price_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRICE_ID", default="price_dummy_org_team_contact_cap"),
+        org_team_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_ORG_TEAM_CONTACT_CAP_PRICE_IDS", default=[])),
         org_team_dedicated_ip_product_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_org_dedicated_ip"),
         org_team_dedicated_ip_price_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRICE_ID", default="price_dummy_org_dedicated_ip"),
         task_meter_id=env("STRIPE_TASK_METER_ID", default="meter_dummy_task"),
@@ -152,6 +192,30 @@ def _load_from_database() -> Optional[StripeSettings]:
     except Exception:
         org_team_contact_cap_product_id = ""
         org_team_contact_cap_price_id = ""
+    try:
+        startup_task_pack_price_ids = _parse_price_id_list(getattr(config, "startup_task_pack_price_ids", None))
+    except Exception:
+        startup_task_pack_price_ids = tuple()
+    try:
+        startup_contact_cap_price_ids = _parse_price_id_list(getattr(config, "startup_contact_cap_price_ids", None))
+    except Exception:
+        startup_contact_cap_price_ids = tuple()
+    try:
+        scale_task_pack_price_ids = _parse_price_id_list(getattr(config, "scale_task_pack_price_ids", None))
+    except Exception:
+        scale_task_pack_price_ids = tuple()
+    try:
+        scale_contact_cap_price_ids = _parse_price_id_list(getattr(config, "scale_contact_cap_price_ids", None))
+    except Exception:
+        scale_contact_cap_price_ids = tuple()
+    try:
+        org_team_task_pack_price_ids = _parse_price_id_list(getattr(config, "org_team_task_pack_price_ids", None))
+    except Exception:
+        org_team_task_pack_price_ids = tuple()
+    try:
+        org_team_contact_cap_price_ids = _parse_price_id_list(getattr(config, "org_team_contact_cap_price_ids", None))
+    except Exception:
+        org_team_contact_cap_price_ids = tuple()
 
     return replace(
         env_defaults,
@@ -161,16 +225,20 @@ def _load_from_database() -> Optional[StripeSettings]:
         startup_price_id=config.startup_price_id or "",
         startup_task_pack_product_id=config.startup_task_pack_product_id or "",
         startup_task_pack_price_id=config.startup_task_pack_price_id or "",
+        startup_task_pack_price_ids=startup_task_pack_price_ids or env_defaults.startup_task_pack_price_ids,
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_contact_cap_product_id=config.startup_contact_cap_product_id or "",
         startup_contact_cap_price_id=config.startup_contact_cap_price_id or "",
+        startup_contact_cap_price_ids=startup_contact_cap_price_ids or env_defaults.startup_contact_cap_price_ids,
         startup_product_id=config.startup_product_id or "",
         scale_price_id=config.scale_price_id or "",
         scale_task_pack_product_id=config.scale_task_pack_product_id or "",
         scale_task_pack_price_id=config.scale_task_pack_price_id or "",
+        scale_task_pack_price_ids=scale_task_pack_price_ids or env_defaults.scale_task_pack_price_ids,
         scale_additional_task_price_id=config.scale_additional_task_price_id or "",
         scale_contact_cap_product_id=config.scale_contact_cap_product_id or "",
         scale_contact_cap_price_id=config.scale_contact_cap_price_id or "",
+        scale_contact_cap_price_ids=scale_contact_cap_price_ids or env_defaults.scale_contact_cap_price_ids,
         scale_product_id=config.scale_product_id or "",
         startup_dedicated_ip_product_id=config.startup_dedicated_ip_product_id or "",
         startup_dedicated_ip_price_id=config.startup_dedicated_ip_price_id or "",
@@ -181,6 +249,7 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_task_product_id=getattr(config, "org_team_additional_task_product_id", "") or "",
         org_team_task_pack_product_id=config.org_team_task_pack_product_id or "",
         org_team_task_pack_price_id=config.org_team_task_pack_price_id or "",
+        org_team_task_pack_price_ids=org_team_task_pack_price_ids or env_defaults.org_team_task_pack_price_ids,
         task_pack_delta_startup=getattr(config, "task_pack_delta_startup", env_defaults.task_pack_delta_startup),
         task_pack_delta_scale=getattr(config, "task_pack_delta_scale", env_defaults.task_pack_delta_scale),
         task_pack_delta_org_team=getattr(config, "task_pack_delta_org_team", env_defaults.task_pack_delta_org_team),
@@ -190,6 +259,7 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_task_price_id=org_team_additional_price,
         org_team_contact_cap_product_id=org_team_contact_cap_product_id,
         org_team_contact_cap_price_id=org_team_contact_cap_price_id,
+        org_team_contact_cap_price_ids=org_team_contact_cap_price_ids or env_defaults.org_team_contact_cap_price_ids,
         org_team_dedicated_ip_product_id=config.org_team_dedicated_ip_product_id or "",
         org_team_dedicated_ip_price_id=config.org_team_dedicated_ip_price_id or "",
         task_meter_id=config.task_meter_id or "",

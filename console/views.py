@@ -8324,9 +8324,26 @@ def _update_addon_quantity(
         return redirect(_billing_redirect(owner, owner_type))
 
     plan_id = _get_owner_plan_id(owner, owner_type)
-    price_id = AddonEntitlementService.get_price_ids(owner_type, plan_id).get(addon_kind)
-    if not price_id:
+    price_options = AddonEntitlementService.get_price_options(owner_type, plan_id, addon_kind)
+    if not price_options:
         messages.error(request, f"{form_label} price is not configured for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    valid_price_ids = {cfg.price_id for cfg in price_options}
+    selected_price_id = (form.cleaned_data.get("price_id") or "").strip()
+    if selected_price_id and selected_price_id not in valid_price_ids:
+        messages.error(request, f"That {form_label.lower()} tier is not available for your plan.")
+        return redirect(_billing_redirect(owner, owner_type))
+
+    if not selected_price_id:
+        if len(price_options) == 1:
+            selected_price_id = price_options[0].price_id
+        else:
+            messages.error(request, f"Choose a {form_label.lower()} tier to update.")
+            return redirect(_billing_redirect(owner, owner_type))
+
+    price_id = selected_price_id
+    if not price_id:
         return redirect(_billing_redirect(owner, owner_type))
 
     subscription = get_active_subscription(owner, preferred_plan_id=_get_owner_plan_id(owner, owner_type))

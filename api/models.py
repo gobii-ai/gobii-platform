@@ -3170,6 +3170,31 @@ class StripeConfig(models.Model):
             return False
         return entry.has_value
 
+    @staticmethod
+    def _parse_list_value(raw: str | None) -> list[str]:
+        if not raw:
+            return []
+        value: list[str] = []
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, (list, tuple, set)):
+                value = list(parsed)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            value = []
+        if not value:
+            value = [part.strip() for part in str(raw).split(",")]
+        return [item for item in (str(s).strip() for s in value if s) if item]
+
+    def _set_list_value(self, name: str, value: list[str] | tuple[str, ...] | str | None) -> None:
+        if value is None:
+            self.set_value(name, None)
+            return
+        if isinstance(value, (list, tuple, set)):
+            joined = ",".join(str(item).strip() for item in value if item)
+        else:
+            joined = str(value).strip()
+        self.set_value(name, joined or None)
+
     @property
     def webhook_secret(self) -> str:
         return self.get_value("webhook_secret")
@@ -3210,6 +3235,14 @@ class StripeConfig(models.Model):
         self.set_value("startup_task_pack_price_id", value)
 
     @property
+    def startup_task_pack_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("startup_task_pack_price_ids"))
+
+    @startup_task_pack_price_ids.setter
+    def startup_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("startup_task_pack_price_ids", value)
+
+    @property
     def startup_contact_cap_product_id(self) -> str:
         return self.get_value("startup_contact_cap_product_id")
 
@@ -3224,6 +3257,14 @@ class StripeConfig(models.Model):
     @startup_contact_cap_price_id.setter
     def startup_contact_cap_price_id(self, value: str | None) -> None:
         self.set_value("startup_contact_cap_price_id", value)
+
+    @property
+    def startup_contact_cap_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("startup_contact_cap_price_ids"))
+
+    @startup_contact_cap_price_ids.setter
+    def startup_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("startup_contact_cap_price_ids", value)
 
     @property
     def startup_product_id(self) -> str:
@@ -3266,6 +3307,14 @@ class StripeConfig(models.Model):
         self.set_value("scale_task_pack_price_id", value)
 
     @property
+    def scale_task_pack_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("scale_task_pack_price_ids"))
+
+    @scale_task_pack_price_ids.setter
+    def scale_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("scale_task_pack_price_ids", value)
+
+    @property
     def scale_contact_cap_product_id(self) -> str:
         return self.get_value("scale_contact_cap_product_id")
 
@@ -3280,6 +3329,14 @@ class StripeConfig(models.Model):
     @scale_contact_cap_price_id.setter
     def scale_contact_cap_price_id(self, value: str | None) -> None:
         self.set_value("scale_contact_cap_price_id", value)
+
+    @property
+    def scale_contact_cap_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("scale_contact_cap_price_ids"))
+
+    @scale_contact_cap_price_ids.setter
+    def scale_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("scale_contact_cap_price_ids", value)
 
     @property
     def scale_product_id(self) -> str:
@@ -3336,6 +3393,14 @@ class StripeConfig(models.Model):
     @org_team_task_pack_price_id.setter
     def org_team_task_pack_price_id(self, value: str | None) -> None:
         self.set_value("org_team_task_pack_price_id", value)
+
+    @property
+    def org_team_task_pack_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("org_team_task_pack_price_ids"))
+
+    @org_team_task_pack_price_ids.setter
+    def org_team_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("org_team_task_pack_price_ids", value)
 
     @property
     def task_pack_delta_startup(self) -> int:
@@ -3418,6 +3483,14 @@ class StripeConfig(models.Model):
     @org_team_contact_cap_price_id.setter
     def org_team_contact_cap_price_id(self, value: str | None) -> None:
         self.set_value("org_team_contact_cap_price_id", value)
+
+    @property
+    def org_team_contact_cap_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("org_team_contact_cap_price_ids"))
+
+    @org_team_contact_cap_price_ids.setter
+    def org_team_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("org_team_contact_cap_price_ids", value)
 
     @property
     def startup_dedicated_ip_product_id(self) -> str:

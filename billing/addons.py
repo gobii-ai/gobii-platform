@@ -31,23 +31,61 @@ class AddonEntitlementService:
 
     @staticmethod
     def _resolve_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+        def _normalize_price_list(*values: Any) -> list[str]:
+            ids: list[str] = []
+            for raw in values:
+                if not raw:
+                    continue
+                if isinstance(raw, (list, tuple, set)):
+                    candidates = raw
+                else:
+                    text = str(raw).strip()
+                    if not text:
+                        continue
+                    candidates = [part.strip() for part in text.split(",")]
+                for candidate in candidates:
+                    if not candidate:
+                        continue
+                    cid = str(candidate).strip()
+                    if cid and cid not in ids:
+                        ids.append(cid)
+            return ids
+
         stripe_settings = get_stripe_settings()
         if owner_type == "organization":
             return {
-                "task_pack": getattr(stripe_settings, "org_team_task_pack_price_id", ""),
-                "contact_pack": getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
+                "task_pack": _normalize_price_list(
+                    getattr(stripe_settings, "org_team_task_pack_price_ids", ()),
+                    getattr(stripe_settings, "org_team_task_pack_price_id", ""),
+                ),
+                "contact_pack": _normalize_price_list(
+                    getattr(stripe_settings, "org_team_contact_cap_price_ids", ()),
+                    getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
+                ),
             }
 
         if plan_id == PlanNames.STARTUP:
             return {
-                "task_pack": getattr(stripe_settings, "startup_task_pack_price_id", ""),
-                "contact_pack": getattr(stripe_settings, "startup_contact_cap_price_id", ""),
+                "task_pack": _normalize_price_list(
+                    getattr(stripe_settings, "startup_task_pack_price_ids", ()),
+                    getattr(stripe_settings, "startup_task_pack_price_id", ""),
+                ),
+                "contact_pack": _normalize_price_list(
+                    getattr(stripe_settings, "startup_contact_cap_price_ids", ()),
+                    getattr(stripe_settings, "startup_contact_cap_price_id", ""),
+                ),
             }
 
         if plan_id == PlanNames.SCALE:
             return {
-                "task_pack": getattr(stripe_settings, "scale_task_pack_price_id", ""),
-                "contact_pack": getattr(stripe_settings, "scale_contact_cap_price_id", ""),
+                "task_pack": _normalize_price_list(
+                    getattr(stripe_settings, "scale_task_pack_price_ids", ()),
+                    getattr(stripe_settings, "scale_task_pack_price_id", ""),
+                ),
+                "contact_pack": _normalize_price_list(
+                    getattr(stripe_settings, "scale_contact_cap_price_ids", ()),
+                    getattr(stripe_settings, "scale_contact_cap_price_id", ""),
+                ),
             }
 
         return {}
@@ -173,14 +211,39 @@ class AddonEntitlementService:
         return qs
 
     @staticmethod
-    def get_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+    def get_price_ids(owner_type: str, plan_id: str | None) -> dict[str, list[str]]:
         return AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+
+    @staticmethod
+    def get_price_options(owner_type: str, plan_id: str | None, addon_kind: str | None = None) -> list[AddonPriceConfig]:
+        """Return ordered price options for the add-on kind (or all kinds) for the plan/owner."""
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
+
+        ordered_ids: list[str] = []
+        if addon_kind:
+            ordered_ids.extend(price_lists.get(addon_kind, []))
+        else:
+            for ids in price_lists.values():
+                ordered_ids.extend(ids or [])
+
+        options: list[AddonPriceConfig] = []
+        for pid in ordered_ids:
+            cfg = price_map.get(pid)
+            if cfg:
+                options.append(cfg)
+        return options
 
     @staticmethod
     def _build_price_map(plan_id: str | None, owner_type: str) -> dict[str, AddonPriceConfig]:
         """Return relevant add-on price configs for the owner/plan."""
         stripe_settings = get_stripe_settings()
-        price_ids: list[str] = list(AddonEntitlementService._resolve_price_ids(owner_type, plan_id).values())
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        price_ids: list[str] = []
+        for ids in price_lists.values():
+            for pid in ids or []:
+                if pid not in price_ids:
+                    price_ids.append(pid)
 
         price_map: dict[str, AddonPriceConfig] = {}
         for pid in price_ids:
@@ -221,32 +284,41 @@ class AddonEntitlementService:
     @staticmethod
     def get_addon_context_for_owner(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
         """Return add-on context keyed by add-on kind for the given owner."""
-        price_ids = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
-        if not price_ids:
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        if not price_lists:
             return {}
 
         price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
         addon_context: dict[str, dict[str, Any]] = {}
 
-        for kind, price_id in price_ids.items():
-            if not price_id:
+        for kind, price_ids in price_lists.items():
+            if not price_ids:
                 continue
 
-            cfg = price_map.get(price_id)
-            if not cfg:
-                continue
-
-            entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
-            expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
-
-            addon_context[kind] = {
-                "price_id": price_id,
-                "product_id": cfg.product_id,
-                "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
-                "task_delta": cfg.task_credits_delta,
-                "contact_delta": cfg.contact_cap_delta,
-                "expires_at": expires_at,
-            }
+            options: list[dict[str, Any]] = []
+            for price_id in price_ids:
+                cfg = price_map.get(price_id)
+                if not cfg:
+                    continue
+                entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
+                expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
+                options.append(
+                    {
+                        "price_id": price_id,
+                        "product_id": cfg.product_id,
+                        "quantity": AddonEntitlementService.get_active_quantity_for_price(owner, price_id),
+                        "task_delta": cfg.task_credits_delta,
+                        "contact_delta": cfg.contact_cap_delta,
+                        "expires_at": expires_at,
+                    }
+                )
+            if options:
+                addon_context[kind] = {
+                    "options": options,
+                }
+                # Preserve backward-compatible accessors for callers that expect a single option.
+                addon_context[kind]["price_id"] = options[0]["price_id"]
+                addon_context[kind]["product_id"] = options[0]["product_id"]
 
         return addon_context
 
