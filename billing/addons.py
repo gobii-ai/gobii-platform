@@ -335,7 +335,10 @@ class AddonEntitlementService:
                 try:
                     if cfg.unit_amount is not None:
                         major = (Decimal(cfg.unit_amount) / Decimal("100")).quantize(Decimal("0.01"))
-                        display_price = f"{(cfg.currency or 'USD').upper()} {major}"
+                        if not cfg.currency or (cfg.currency or "").lower() == "usd":
+                            display_price = f"${major}"
+                        else:
+                            display_price = f"{(cfg.currency or '').upper()} {major}"
                 except (InvalidOperation, TypeError):
                     display_price = ""
                 qty = AddonEntitlementService.get_active_quantity_for_price(owner, price_id)
