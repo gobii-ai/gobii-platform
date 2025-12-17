@@ -60,8 +60,6 @@
         </div>
       {% endif %}
 
-      {% include "console/partials/addons_block.html" with addon_context=addon_context addons_disabled=org_addons_disabled heading="Add-ons" subheading="Adjust task and contact packs for this billing period." %}
-
       <div class="gobii-card-base p-6">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
@@ -185,6 +183,8 @@
           {% endwith %}
         {% endif %}
       </div>
+
+      {% include "console/partials/addons_block.html" with addon_context=addon_context addons_disabled=org_addons_disabled heading="Add-ons" subheading="Adjust task and contact packs for this billing period." %}
 
       <div class="gobii-card-base p-6">
         <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
