@@ -11,6 +11,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemMessage,
 )
 
 
@@ -63,9 +64,13 @@ def _aggregate_counts(agent: PersistentAgent, *, start: datetime, end: datetime,
         PersistentAgentMessage.objects.filter(owner_agent=agent),
         "timestamp",
     )
+    system_message_counts = _bucket_counts(
+        PersistentAgentSystemMessage.objects.filter(agent=agent),
+        "created_at",
+    )
 
     combined: Dict[date, int] = {}
-    for bucket_map in (completion_counts, tool_call_counts, plain_step_counts, message_counts):
+    for bucket_map in (completion_counts, tool_call_counts, plain_step_counts, message_counts, system_message_counts):
         for bucket, count in bucket_map.items():
             combined[bucket] = combined.get(bucket, 0) + count
     return combined
@@ -93,10 +98,16 @@ def _earliest_activity_date(agent: PersistentAgent, tzinfo: dt_timezone) -> date
         .aggregate(value=Min("timestamp"))
         .get("value")
     )
+    system_message_min = (
+        PersistentAgentSystemMessage.objects.filter(agent=agent)
+        .aggregate(value=Min("created_at"))
+        .get("value")
+    )
 
     _maybe_add(completion_min)
     _maybe_add(tool_min)
     _maybe_add(message_min)
+    _maybe_add(system_message_min)
     _maybe_add(getattr(agent, "created_at", None))
 
     if not candidates:

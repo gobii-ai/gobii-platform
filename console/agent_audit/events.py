@@ -11,14 +11,21 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PersistentAgentSystemMessage,
 )
-from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_prompt_meta, serialize_tool_call
+from console.agent_audit.serializers import (
+    serialize_completion,
+    serialize_message,
+    serialize_prompt_meta,
+    serialize_tool_call,
+    serialize_system_message,
+)
 
 DEFAULT_LIMIT = 30
 MAX_LIMIT = 100
 EVENTS_FETCH_MULTIPLIER = 20
 
-AuditKind = Literal["completion", "tool_call", "message", "step", "pivot"]
+AuditKind = Literal["completion", "tool_call", "message", "step", "system_message", "pivot"]
 
 
 def _normalize_dt(dt: datetime | None) -> datetime | None:
@@ -223,6 +230,27 @@ def _step_events(agent: PersistentAgent, cursor: Cursor | None, limit: int, *, s
     return events
 
 
+def _system_message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int, *, start: datetime | None = None, end: datetime | None = None) -> list[dict]:
+    qs = (
+        PersistentAgentSystemMessage.objects.filter(agent=agent)
+        .select_related("created_by")
+        .order_by("-created_at", "-id")
+    )
+    if cursor:
+        qs = _apply_cursor_filter(qs, cursor, "created_at", "id")
+    qs = _apply_range_filter(qs, start, end, "created_at")
+    slice_count = limit * EVENTS_FETCH_MULTIPLIER if start is None and end is None else None
+    messages = list(qs[:slice_count])
+    events: list[dict] = []
+    for message in messages:
+        ts = _normalize_dt(message.created_at)
+        sort_value = _microsecond_epoch(ts) if ts else 0
+        payload = serialize_system_message(message)
+        payload["_sort_key"] = (sort_value, "system_message", str(message.id))
+        events.append(payload)
+    return events
+
+
 def _cursor_from_datetime(dt: datetime | None) -> Cursor | None:
     if dt is None:
         return None
@@ -248,6 +276,7 @@ def fetch_audit_events(
     events.extend(_tool_call_events(agent, cursor_obj, limit))
     events.extend(_message_events(agent, cursor_obj, limit))
     events.extend(_step_events(agent, cursor_obj, limit))
+    events.extend(_system_message_events(agent, cursor_obj, limit))
 
     events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
     filtered = _filter_events_by_cursor(events, cursor_obj)
@@ -282,6 +311,7 @@ def fetch_audit_events_between(agent: PersistentAgent, *, start: datetime, end: 
     events.extend(_tool_call_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
     events.extend(_message_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
     events.extend(_step_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
+    events.extend(_system_message_events(agent, cursor=None, limit=MAX_LIMIT, start=start, end=end))
 
     events.sort(key=lambda e: e.get("_sort_key") or (0, "", ""), reverse=True)
     for ev in events:

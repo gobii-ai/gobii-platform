@@ -2,7 +2,14 @@ from datetime import datetime, timezone as dt_timezone
 
 from django.utils import timezone
 
-from api.models import PersistentAgentMessage, PersistentAgentStep, PersistentAgentCompletion, PersistentAgentPromptArchive, PersistentAgentSystemStep
+from api.models import (
+    PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentCompletion,
+    PersistentAgentPromptArchive,
+    PersistentAgentSystemStep,
+    PersistentAgentSystemMessage,
+)
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:
@@ -121,4 +128,26 @@ def serialize_step(step: PersistentAgentStep) -> dict:
         "is_system": bool(system_step),
         "system_code": system_step.code if system_step else None,
         "system_notes": system_step.notes if system_step else None,
+    }
+
+
+def serialize_system_message(message: PersistentAgentSystemMessage) -> dict:
+    timestamp = _dt_to_iso(message.created_at)
+    delivered_at = _dt_to_iso(message.delivered_at)
+    created_by = getattr(message, "created_by", None)
+    return {
+        "kind": "system_message",
+        "id": str(message.id),
+        "timestamp": timestamp,
+        "delivered_at": delivered_at,
+        "body": message.body or "",
+        "is_active": bool(message.is_active),
+        "broadcast_id": str(message.broadcast_id) if message.broadcast_id else None,
+        "created_by": {
+            "id": str(created_by.id),
+            "email": getattr(created_by, "email", None),
+            "name": getattr(created_by, "get_full_name", lambda: None)() or getattr(created_by, "username", None),
+        }
+        if created_by
+        else None,
     }

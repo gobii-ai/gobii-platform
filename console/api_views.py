@@ -41,6 +41,7 @@ from api.models import (
     MCPServerOAuthSession,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentSystemMessage,
     PersistentLLMTier,
     PersistentModelEndpoint,
     PersistentTierEndpoint,
@@ -55,8 +56,10 @@ from api.models import (
 from django.core.files.storage import default_storage
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.timeline import build_audit_timeline
+from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
 from api.encryption import SecretsEncryption
+from api.agent.tasks import process_agent_events_task
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -762,6 +765,87 @@ class StaffAgentAuditDayDebugAPIView(SystemAdminAPIView):
 
         events = fetch_audit_events_between(agent, start=start, end=end)
         return JsonResponse({"count": len(events), "events": events}, safe=False)
+
+
+class StaffAgentProcessEventsAPIView(SystemAdminAPIView):
+    """Staff-only hook to enqueue a PROCESS_EVENTS run for an agent."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        try:
+            process_agent_events_task.delay(str(agent.id))
+            queued = True
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Failed to queue process events for agent %s", agent.id)
+            return JsonResponse({"error": "queue_failed", "detail": str(exc)}, status=500)
+
+        processing_active = compute_processing_status(agent)
+        return JsonResponse({"queued": queued, "processing_active": processing_active}, status=202)
+
+
+class StaffAgentSystemMessageAPIView(SystemAdminAPIView):
+    """Create a per-agent system directive for staff audit UI."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        body = (payload.get("body") or "").strip()
+        if not body:
+            return HttpResponseBadRequest("body is required")
+
+        is_active = payload.get("is_active", True)
+        message = PersistentAgentSystemMessage.objects.create(
+            agent=agent,
+            body=body,
+            is_active=bool(is_active),
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+
+        return JsonResponse(serialize_system_message(message), status=201)
+
+
+class StaffAgentSystemMessageDetailAPIView(SystemAdminAPIView):
+    """Update an existing system directive from the staff audit UI."""
+
+    http_method_names = ["patch"]
+
+    def patch(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        message = get_object_or_404(PersistentAgentSystemMessage, pk=message_id, agent=agent)
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        updates: list[str] = []
+
+        if "body" in payload:
+            body = (payload.get("body") or "").strip()
+            if not body:
+                return HttpResponseBadRequest("body cannot be blank")
+            if message.body != body:
+                message.body = body
+                updates.append("body")
+
+        if "is_active" in payload:
+            is_active = bool(payload.get("is_active"))
+            if message.is_active != is_active:
+                message.is_active = is_active
+                updates.append("is_active")
+
+        if updates:
+            message.save(update_fields=updates)
+
+        return JsonResponse(serialize_system_message(message))
 
 
 class StaffPromptArchiveAPIView(SystemAdminAPIView):

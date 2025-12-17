@@ -1,5 +1,5 @@
 import type { AuditEvent, AuditTimelineBucket, PromptArchive } from '../types/agentAudit'
-import { jsonFetch } from './http'
+import { jsonFetch, jsonRequest } from './http'
 
 type EventsResponse = {
   events: AuditEvent[]
@@ -45,4 +45,26 @@ export async function fetchAuditTimeline(agentId: string, params: { days?: numbe
   query.set('tz_offset_minutes', tzOffset.toString())
   const url = `/console/api/staff/agents/${agentId}/audit/timeline/${query.toString() ? `?${query.toString()}` : ''}`
   return jsonFetch<TimelineResponse>(url)
+}
+
+export async function triggerProcessEvents(agentId: string): Promise<{ queued: boolean; processing_active: boolean }> {
+  const url = `/console/api/staff/agents/${agentId}/audit/process/`
+  return jsonRequest(url, { method: 'POST', includeCsrf: true })
+}
+
+export async function createSystemMessage(
+  agentId: string,
+  payload: { body: string; is_active?: boolean },
+): Promise<AuditEvent> {
+  const url = `/console/api/staff/agents/${agentId}/system-messages/`
+  return jsonRequest(url, { method: 'POST', includeCsrf: true, json: payload })
+}
+
+export async function updateSystemMessage(
+  agentId: string,
+  messageId: string,
+  payload: { body?: string; is_active?: boolean },
+): Promise<AuditEvent> {
+  const url = `/console/api/staff/agents/${agentId}/system-messages/${messageId}/`
+  return jsonRequest(url, { method: 'PATCH', includeCsrf: true, json: payload })
 }

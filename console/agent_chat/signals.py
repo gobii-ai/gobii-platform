@@ -5,6 +5,7 @@ from channels.layers import get_channel_layer
 from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
+from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
@@ -15,9 +16,15 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PersistentAgentSystemMessage,
 )
-from console.agent_audit.realtime import send_audit_event
-from console.agent_audit.serializers import serialize_completion, serialize_message, serialize_step, serialize_tool_call
+from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
+from console.agent_audit.serializers import (
+    serialize_completion,
+    serialize_message,
+    serialize_step,
+    serialize_tool_call,
+)
 
 from .timeline import (
     build_processing_snapshot,
@@ -57,7 +64,7 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     _broadcast_processing(step.agent)
 
 
-def _broadcast_audit_event(agent_id: str | None, payload: dict, timestamp=None) -> None:
+def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
     if not agent_id:
         return
     send_audit_event(agent_id, payload)
@@ -83,7 +90,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
     _send(_group_name(instance.owner_agent_id), "timeline_event", payload)
     try:
         audit_payload = serialize_message(instance)
-        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload, instance.timestamp)
+        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
 
@@ -107,10 +114,10 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         try:
             if not (step.description or "").startswith("Tool call"):
                 step_payload = serialize_step(step)
-                _broadcast_audit_event(str(step.agent_id), step_payload, step.created_at)
+                _broadcast_audit_event(str(step.agent_id), step_payload)
             if getattr(step, "tool_call", None):
                 audit_payload = serialize_tool_call(step)
-                _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+                _broadcast_audit_event(str(step.agent_id), audit_payload)
         except Exception:
             logger.debug("Failed to broadcast audit tool step %s", getattr(step, "id", None), exc_info=True)
 
@@ -125,7 +132,7 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
     emit_tool_call_realtime(step)
     try:
         audit_payload = serialize_tool_call(step)
-        _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+        _broadcast_audit_event(str(step.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
 
@@ -136,7 +143,7 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
         return
     try:
         audit_payload = serialize_completion(instance)
-        _broadcast_audit_event(str(instance.agent_id), audit_payload, instance.created_at)
+        _broadcast_audit_event(str(instance.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
 
@@ -165,6 +172,11 @@ def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bo
         send_audit_event(str(instance.step.agent_id), payload)
     except Exception:
         logger.debug("Failed to broadcast audit run start %s", getattr(instance, "step_id", None), exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgentSystemMessage)
+def broadcast_system_message(sender, instance: PersistentAgentSystemMessage, created: bool, **kwargs):
+    broadcast_system_message_audit(instance)
 
 
 @receiver(post_save, sender=BrowserUseAgentTask)
@@ -196,3 +208,14 @@ def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
     payload = serialize_processing_snapshot(snapshot)
     _send(_group_name(agent.id), "processing_event", payload)
+    try:
+        send_audit_event(
+            str(agent.id),
+            {
+                "kind": "processing_status",
+                "active": snapshot.active,
+                "timestamp": timezone.now().isoformat(),
+            },
+        )
+    except Exception:
+        logger.debug("Failed to broadcast processing status to audit channel for agent %s", agent.id, exc_info=True)
