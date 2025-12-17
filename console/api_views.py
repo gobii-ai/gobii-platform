@@ -843,7 +843,7 @@ class StaffAgentSystemMessageDetailAPIView(SystemAdminAPIView):
                 updates.append("is_active")
 
         if updates:
-            message.save(update_fields=updates + ["updated_at"] if hasattr(message, "updated_at") else updates)
+            message.save(update_fields=updates)
 
         return JsonResponse(serialize_system_message(message))
 

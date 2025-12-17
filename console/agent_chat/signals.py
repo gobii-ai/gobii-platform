@@ -65,7 +65,7 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     _broadcast_processing(step.agent)
 
 
-def _broadcast_audit_event(agent_id: str | None, payload: dict, timestamp=None) -> None:
+def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
     if not agent_id:
         return
     send_audit_event(agent_id, payload)
@@ -91,7 +91,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
     _send(_group_name(instance.owner_agent_id), "timeline_event", payload)
     try:
         audit_payload = serialize_message(instance)
-        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload, instance.timestamp)
+        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
 
@@ -115,10 +115,10 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         try:
             if not (step.description or "").startswith("Tool call"):
                 step_payload = serialize_step(step)
-                _broadcast_audit_event(str(step.agent_id), step_payload, step.created_at)
+                _broadcast_audit_event(str(step.agent_id), step_payload)
             if getattr(step, "tool_call", None):
                 audit_payload = serialize_tool_call(step)
-                _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+                _broadcast_audit_event(str(step.agent_id), audit_payload)
         except Exception:
             logger.debug("Failed to broadcast audit tool step %s", getattr(step, "id", None), exc_info=True)
 
@@ -133,7 +133,7 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
     emit_tool_call_realtime(step)
     try:
         audit_payload = serialize_tool_call(step)
-        _broadcast_audit_event(str(step.agent_id), audit_payload, step.created_at)
+        _broadcast_audit_event(str(step.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
 
@@ -144,7 +144,7 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
         return
     try:
         audit_payload = serialize_completion(instance)
-        _broadcast_audit_event(str(instance.agent_id), audit_payload, instance.created_at)
+        _broadcast_audit_event(str(instance.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
 
@@ -181,7 +181,7 @@ def broadcast_system_message(sender, instance: PersistentAgentSystemMessage, cre
         return
     try:
         payload = serialize_system_message(instance)
-        _broadcast_audit_event(str(instance.agent_id), payload, instance.created_at)
+        _broadcast_audit_event(str(instance.agent_id), payload)
     except Exception:
         logger.debug("Failed to broadcast audit system message %s", getattr(instance, "id", None), exc_info=True)
 
