@@ -394,6 +394,12 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
 
+  useEffect(() => {
+    if (!processingActive) {
+      setProcessBusy(false)
+    }
+  }, [processingActive])
+
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
       if (event.kind === 'tool_call') {
