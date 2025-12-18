@@ -445,6 +445,19 @@ def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
     context.setdefault("step_id", str(system_step.step_id))
     return context
 
+def _build_console_url(route_name: str, **kwargs) -> str:
+    """Return a console URL, preferring absolute when PUBLIC_SITE_URL is set."""
+    try:
+        path = reverse(route_name, kwargs=kwargs or None)
+    except Exception:
+        logger.debug("Failed to reverse URL for %s", route_name, exc_info=True)
+        path = ""
+
+    base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").rstrip("/")
+    if base_url and path:
+        return f"{base_url}{path}"
+    return path or ""
+
 def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
     """Return a short capability summary for plan, add-ons, dedicated IPs, and key links."""
 
@@ -462,15 +475,9 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         plan_name = (plan.get("name") or plan_id or "unknown").strip()
         available_plans = ", ".join(cfg.get("name") or name for name, cfg in PLAN_CONFIG.items())
 
-        addon_ctx = AddonEntitlementService.get_addon_context_for_owner(owner, owner_type, plan_id)
-        totals = addon_ctx.get("totals", {}) if isinstance(addon_ctx, dict) else {}
-        task_addons = addon_ctx.get("task_pack", {}) if isinstance(addon_ctx, dict) else {}
-        contact_addons = addon_ctx.get("contact_pack", {}) if isinstance(addon_ctx, dict) else {}
-
-        task_pack_qty = sum(_safe_int(opt.get("quantity")) for opt in task_addons.get("options", []))
-        contact_pack_qty = sum(_safe_int(opt.get("quantity")) for opt in contact_addons.get("options", []))
-        task_uplift = _safe_int(totals.get("task_credits"))
-        contact_uplift = _safe_int(totals.get("contact_cap"))
+        addon_uplift = AddonEntitlementService.get_uplift(owner)
+        task_uplift = _safe_int(getattr(addon_uplift, "task_credits", 0))
+        contact_uplift = _safe_int(getattr(addon_uplift, "contact_cap", 0))
 
         base_contact_cap = _safe_int(plan.get("max_contacts_per_agent"))
         effective_contact_cap = base_contact_cap + contact_uplift
@@ -481,14 +488,9 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         except Exception:
             dedicated_total = 0
 
-        base_url = getattr(settings, "PUBLIC_SITE_URL", "").rstrip("/")
-        detail_path = reverse("agent_detail", kwargs={"pk": agent.id})
-        billing_path = reverse("billing")
-        agent_config_url = f"{base_url}{detail_path}" if base_url else detail_path
-        billing_url = f"{base_url}{billing_path}" if base_url else billing_path
-
-        pricing_path = reverse("pricing")
-        pricing_url = f"{base_url}{pricing_path}" if base_url else pricing_path
+        agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+        billing_url = _build_console_url("billing")
+        pricing_url = _build_console_url("pricing")
 
         settings_lines: list[str] = [
             "Agent name.",
@@ -496,7 +498,7 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
             ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
             " or if they want to remove the task credit limit."),
             "Dedicated IP assignment.",
-            "Custom email settings."
+            "Custom email settings.",
             "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
             "MCP servers to connect the agent to external services.",
             "Peer links to communicate with other agents.",
@@ -510,8 +512,9 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
             f"Plan: {plan_name} (id {plan_id or 'unknown'}). Available plans: {available_plans}."
         )
         if plan_id and plan_id != "free":
-            settings_lines.append = (" - Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits) "
-                                 "Higher intelligence will use more task credits but will yield better results.")
+            settings_lines.append(
+                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
+            )
             lines.append(
                 f"Intelligence selection available on this plan; change the agent's intelligence level on the agent settings page ({agent_config_url})."
             )
@@ -520,16 +523,18 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
                 f"Upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
             )
 
-        if task_pack_qty or contact_pack_qty or task_uplift or contact_uplift:
-            lines.append(
-                f"Add-ons: task packs {task_pack_qty} (+{task_uplift} credits), contact packs {contact_pack_qty} (+{contact_uplift} contacts)."
-            )
-        else:
-            lines.append("Add-ons: none active (task/contact packs not purchased).")
+        addon_parts: list[str] = []
+        if task_uplift:
+            addon_parts.append(f"+{task_uplift} credits")
+        if contact_uplift:
+            addon_parts.append(f"+{contact_uplift} contacts")
+        lines.append(
+            f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active."
+        )
 
-        if effective_contact_cap:
+        if effective_contact_cap or contact_uplift:
             lines.append(
-                f"Per-agent contact cap: {effective_contact_cap} (base {base_contact_cap or '?'} + add-ons)."
+                f"Per-agent contact cap: {effective_contact_cap} (base {base_contact_cap or 0} + add-ons)."
             )
 
         agent_settings = (
