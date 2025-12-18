@@ -10,6 +10,9 @@ def capi(user, event_name, properties=None, request=None, context=None):
     """
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
         return
+    release_env = str(getattr(settings, "GOBII_RELEASE_ENV", "local") or "").lower()
+    if release_env not in ("prod", "production"):
+        return
     payload = {
         "event_name": event_name,
         "properties": properties or {},
