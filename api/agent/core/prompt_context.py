@@ -29,6 +29,8 @@ from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
 from util.subscription_helper import get_owner_plan
+from tasks.services import TaskCreditService
+from util.constants.task_constants import TASKS_UNLIMITED
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from ..tools.charter_updater import get_update_charter_tool
@@ -467,6 +469,15 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         except (TypeError, ValueError):
             return 0
 
+    def _format_decimal(value: Any) -> str:
+        try:
+            dec = Decimal(value)
+            if dec == dec.to_integral():
+                return str(dec.quantize(Decimal("1")))
+            return format(dec.normalize(), "f")
+        except Exception:
+            return str(value)
+
     try:
         owner = agent.organization or agent.user
         owner_type = "organization" if agent.organization_id else "user"
@@ -509,7 +520,7 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
 
         lines: list[str] = []
         lines.append(
-            f"Plan: {plan_name} (id {plan_id or 'unknown'}). Available plans: {available_plans}."
+            f"Plan: {plan_name}. Available plans: {available_plans}."
         )
         if plan_id and plan_id != "free":
             settings_lines.append(
@@ -537,8 +548,30 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
                 f"Per-agent contact cap: {effective_contact_cap} (base {base_contact_cap or 0} + add-ons)."
             )
 
+        try:
+            from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+
+            active_contacts = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).count()
+            pending_contacts = AgentAllowlistInvite.objects.filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING,
+            ).count()
+            total_contacts = active_contacts + pending_contacts
+            if effective_contact_cap:
+                lines.append(f"Contact usage: {total_contacts}/{effective_contact_cap}.")
+        except Exception:
+            logger.debug("Failed to compute contact usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
+
+        try:
+            entitled = TaskCreditService.get_tasks_entitled_for_owner(owner)
+            used_total = TaskCreditService.get_owner_task_credits_used(owner)
+            limit_text = "unlimited" if entitled == TASKS_UNLIMITED else _format_decimal(entitled)
+            lines.append(f"Account task credits: {_format_decimal(used_total)}/{limit_text}.")
+        except Exception:
+            logger.debug("Failed to compute task credit usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
+
         agent_settings = (
-            "Agent settings include: " + "\n - ".join(settings_lines)
+            "Agent settings include: \n - " + "\n - ".join(settings_lines)
         )
 
         lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
