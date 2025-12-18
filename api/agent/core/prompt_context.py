@@ -480,7 +480,6 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
 
     try:
         owner = agent.organization or agent.user
-        owner_type = "organization" if agent.organization_id else "user"
         plan = get_owner_plan(owner) or {}
         plan_id = str(plan.get("id") or "").lower()
         plan_name = (plan.get("name") or plan_id or "unknown").strip()
@@ -493,7 +492,6 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         base_contact_cap = _safe_int(plan.get("max_contacts_per_agent"))
         effective_contact_cap = base_contact_cap + contact_uplift
 
-        dedicated_total = 0
         try:
             dedicated_total = DedicatedProxyService.allocated_count(owner)
         except Exception:
@@ -505,6 +503,7 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
 
         settings_lines: list[str] = [
             "Agent name.",
+            "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
             "Active status: Activate or deactivate this agent.",
             ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
             " or if they want to remove the task credit limit."),
@@ -518,10 +517,7 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
             "Agent deletion: delete this agent forever."
         ]
 
-        lines: list[str] = []
-        lines.append(
-            f"Plan: {plan_name}. Available plans: {available_plans}."
-        )
+        lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
         if plan_id and plan_id != "free":
             settings_lines.append(
                 "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
@@ -575,7 +571,8 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         )
 
         lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
-        lines.append(f"Agent settings: {agent_config_url}. Billing: {billing_url}.")
+        lines.append(f"Billing page: {billing_url}.")
+        lines.append(f"Agent settings: {agent_config_url}.")
         lines.append(agent_settings)
 
         return "\n".join(lines)
