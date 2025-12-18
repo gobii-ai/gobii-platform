@@ -12,6 +12,7 @@ from uuid import UUID, uuid4
 import zstandard as zstd
 from litellm import token_counter
 from opentelemetry import trace
+from django.urls import reverse
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -20,10 +21,14 @@ from django.db.models import Q, Prefetch, Sum
 from django.utils import timezone as dj_timezone
 
 from config import settings
+from config.plans import PLAN_CONFIG
+from billing.addons import AddonEntitlementService
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 from api.services import mcp_servers as mcp_server_service
+from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
+from util.subscription_helper import get_owner_plan
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from ..tools.charter_updater import get_update_charter_tool
@@ -440,6 +445,106 @@ def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
     context.setdefault("step_id", str(system_step.step_id))
     return context
 
+def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
+    """Return a short capability summary for plan, add-ons, dedicated IPs, and key links."""
+
+    def _safe_int(value: Any) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return 0
+
+    try:
+        owner = agent.organization or agent.user
+        owner_type = "organization" if agent.organization_id else "user"
+        plan = get_owner_plan(owner) or {}
+        plan_id = str(plan.get("id") or "").lower()
+        plan_name = (plan.get("name") or plan_id or "unknown").strip()
+        available_plans = ", ".join(cfg.get("name") or name for name, cfg in PLAN_CONFIG.items())
+
+        addon_ctx = AddonEntitlementService.get_addon_context_for_owner(owner, owner_type, plan_id)
+        totals = addon_ctx.get("totals", {}) if isinstance(addon_ctx, dict) else {}
+        task_addons = addon_ctx.get("task_pack", {}) if isinstance(addon_ctx, dict) else {}
+        contact_addons = addon_ctx.get("contact_pack", {}) if isinstance(addon_ctx, dict) else {}
+
+        task_pack_qty = sum(_safe_int(opt.get("quantity")) for opt in task_addons.get("options", []))
+        contact_pack_qty = sum(_safe_int(opt.get("quantity")) for opt in contact_addons.get("options", []))
+        task_uplift = _safe_int(totals.get("task_credits"))
+        contact_uplift = _safe_int(totals.get("contact_cap"))
+
+        base_contact_cap = _safe_int(plan.get("max_contacts_per_agent"))
+        effective_contact_cap = base_contact_cap + contact_uplift
+
+        dedicated_total = 0
+        try:
+            dedicated_total = DedicatedProxyService.allocated_count(owner)
+        except Exception:
+            dedicated_total = 0
+
+        base_url = getattr(settings, "PUBLIC_SITE_URL", "").rstrip("/")
+        detail_path = reverse("agent_detail", kwargs={"pk": agent.id})
+        billing_path = reverse("billing")
+        agent_config_url = f"{base_url}{detail_path}" if base_url else detail_path
+        billing_url = f"{base_url}{billing_path}" if base_url else billing_path
+
+        pricing_path = reverse("pricing")
+        pricing_url = f"{base_url}{pricing_path}" if base_url else pricing_path
+
+        settings_lines: list[str] = [
+            "Agent name.",
+            "Active status: Activate or deactivate this agent.",
+            ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
+            " or if they want to remove the task credit limit."),
+            "Dedicated IP assignment.",
+            "Custom email settings."
+            "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
+            "MCP servers to connect the agent to external services.",
+            "Peer links to communicate with other agents.",
+            "Outbound webhooks to send data to external services.",
+            "Agent transfer: Transfer this agent to another user or organization.",
+            "Agent deletion: delete this agent forever."
+        ]
+
+        lines: list[str] = []
+        lines.append(
+            f"Plan: {plan_name} (id {plan_id or 'unknown'}). Available plans: {available_plans}."
+        )
+        if plan_id and plan_id != "free":
+            settings_lines.append = (" - Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits) "
+                                 "Higher intelligence will use more task credits but will yield better results.")
+            lines.append(
+                f"Intelligence selection available on this plan; change the agent's intelligence level on the agent settings page ({agent_config_url})."
+            )
+        else:
+            lines.append(
+                f"Upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+            )
+
+        if task_pack_qty or contact_pack_qty or task_uplift or contact_uplift:
+            lines.append(
+                f"Add-ons: task packs {task_pack_qty} (+{task_uplift} credits), contact packs {contact_pack_qty} (+{contact_uplift} contacts)."
+            )
+        else:
+            lines.append("Add-ons: none active (task/contact packs not purchased).")
+
+        if effective_contact_cap:
+            lines.append(
+                f"Per-agent contact cap: {effective_contact_cap} (base {base_contact_cap or '?'} + add-ons)."
+            )
+
+        agent_settings = (
+            "Agent settings include: " + "\n - ".join(settings_lines)
+        )
+
+        lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
+        lines.append(f"Agent settings: {agent_config_url}. Billing: {billing_url}.")
+        lines.append(agent_settings)
+
+        return "\n".join(lines)
+    except Exception:
+        logger.exception("Failed to build agent capabilities block for agent %s", getattr(agent, "id", "unknown"))
+        return ""
+
 @tracer.start_as_current_span("Build Prompt Context")
 def build_prompt_context(
     agent: PersistentAgent,
@@ -545,6 +650,15 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
+
+    capabilities_block = _build_agent_capabilities_block(agent)
+    if capabilities_block:
+        important_group.section_text(
+            "agent_capabilities",
+            capabilities_block,
+            weight=2,
+            shrinker="hmt",
+        )
 
     # Contacts block - use promptree natively
     recent_contacts_text = _build_contacts_block(agent, important_group, span)
