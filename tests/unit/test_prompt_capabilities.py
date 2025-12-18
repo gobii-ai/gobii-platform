@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
-from api.agent.core.prompt_context import _build_agent_capabilities_block
+from api.agent.core.prompt_context import _build_agent_capabilities_sections
 from api.models import BrowserUseAgent, PersistentAgent
 from billing.addons import AddonUplift
 
@@ -64,15 +64,24 @@ class AgentCapabilitiesPromptTests(TestCase):
             allow_outbound=True,
         )
 
-        block = _build_agent_capabilities_block(self.agent)
+        sections = _build_agent_capabilities_sections(self.agent)
+        plan_info = sections.get("plan_info", "")
+        agent_settings = sections.get("agent_settings", "")
+        email_settings = sections.get("agent_email_settings", "")
 
-        self.assertIn("Plan: Pro", block)
-        self.assertIn("Available plans", block)
-        self.assertIn("Intelligence selection available", block)
-        self.assertIn("Add-ons: +2000 credits; +10 contacts.", block)
-        self.assertIn("Per-agent contact cap: 30 (base 20", block)
-        self.assertIn("Contact usage: 1/30", block)
-        self.assertIn("Account task credits: 3.5/10", block)
-        self.assertIn("Dedicated IPs purchased: 2", block)
-        self.assertIn(f"/console/agents/{self.agent.id}/", block)
-        self.assertIn("/console/billing/", block)
+        self.assertIn("Plan: Pro", plan_info)
+        self.assertIn("Available plans", plan_info)
+        self.assertIn("Intelligence selection available", plan_info)
+        self.assertIn("Add-ons: +2000 credits; +10 contacts.", plan_info)
+        self.assertIn("Per-agent contact cap: 30 (base 20", plan_info)
+        self.assertIn("Contact usage: 1/30", plan_info)
+        self.assertIn("Account task credits: 3.5/10", plan_info)
+        self.assertIn("Dedicated IPs purchased: 2", plan_info)
+        self.assertIn("/console/billing/", plan_info)
+        self.assertNotIn(f"/console/agents/{self.agent.id}/", plan_info)
+
+        self.assertIn(f"/console/agents/{self.agent.id}/", agent_settings)
+        self.assertIn("Agent email settings", email_settings)
+        self.assertIn("SMTP (outbound)", email_settings)
+        self.assertIn("IMAP (inbound)", email_settings)
+        self.assertIn(f"/console/agents/{self.agent.id}/email/", email_settings)

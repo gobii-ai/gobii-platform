@@ -461,7 +461,13 @@ def _build_console_url(route_name: str, **kwargs) -> str:
     return path or ""
 
 def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
-    """Return a short capability summary for plan, add-ons, dedicated IPs, and key links."""
+    """Deprecated: kept for backward compatibility; returns only plan_info text."""
+    sections = _build_agent_capabilities_sections(agent)
+    return sections.get("plan_info", "")
+
+
+def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]:
+    """Return structured capability text for plan/plan_info, settings, and email settings."""
 
     def _safe_int(value: Any) -> int:
         try:
@@ -501,33 +507,14 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
         billing_url = _build_console_url("billing")
         pricing_url = _build_console_url("pricing")
 
-        settings_lines: list[str] = [
-            "Agent name.",
-            "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
-            "Active status: Activate or deactivate this agent.",
-            ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
-            " or if they want to remove the task credit limit."),
-            "Dedicated IP assignment.",
-            "Custom email settings.",
-            "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
-            "MCP servers to connect the agent to external services.",
-            "Peer links to communicate with other agents.",
-            "Outbound webhooks to send data to external services.",
-            "Agent transfer: Transfer this agent to another user or organization.",
-            "Agent deletion: delete this agent forever."
-        ]
-
         lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
         if plan_id and plan_id != "free":
-            settings_lines.append(
-                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
-            )
             lines.append(
-                f"Intelligence selection available on this plan; change the agent's intelligence level on the agent settings page ({agent_config_url})."
+                "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
             )
         else:
             lines.append(
-                f"Upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+                f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
             )
 
         addon_parts: list[str] = []
@@ -541,7 +528,7 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
 
         if effective_contact_cap or contact_uplift:
             lines.append(
-                f"Per-agent contact cap: {effective_contact_cap} (base {base_contact_cap or 0} + add-ons)."
+                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
             )
 
         try:
@@ -562,23 +549,68 @@ def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
             entitled = TaskCreditService.get_tasks_entitled_for_owner(owner)
             used_total = TaskCreditService.get_owner_task_credits_used(owner)
             limit_text = "unlimited" if entitled == TASKS_UNLIMITED else _format_decimal(entitled)
-            lines.append(f"Account task credits: {_format_decimal(used_total)}/{limit_text}.")
+            lines.append(f"Account task credits: {_format_decimal(used_total)} used, {limit_text} total.")
         except Exception:
             logger.debug("Failed to compute task credit usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
 
-        agent_settings = (
-            "Agent settings include: \n - " + "\n - ".join(settings_lines)
-        )
-
         lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
         lines.append(f"Billing page: {billing_url}.")
-        lines.append(f"Agent settings: {agent_config_url}.")
-        lines.append(agent_settings)
 
-        return "\n".join(lines)
+        return {
+            "plan_info": "\n".join(lines),
+            "agent_settings": _build_agent_settings_section(agent),
+            "agent_email_settings": _build_agent_email_settings_section(agent),
+        }
     except Exception:
         logger.exception("Failed to build agent capabilities block for agent %s", getattr(agent, "id", "unknown"))
-        return ""
+        return {}
+
+
+def _build_agent_settings_section(agent: PersistentAgent) -> str:
+    """Return a bullet-style list of configurable settings for the agent."""
+    agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+    settings_lines: list[str] = [
+        "Agent name.",
+        "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
+        "Active status: Activate or deactivate this agent.",
+        ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
+        " or if they want to remove the task credit limit."),
+        "Dedicated IP assignment.",
+        "Custom email settings.",
+        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
+        "MCP servers to connect the agent to external services.",
+        "Peer links to communicate with other agents.",
+        "Outbound webhooks to send data to external services.",
+        "Agent transfer: Transfer this agent to another user or organization.",
+        "Agent deletion: delete this agent forever.",
+        f"Agent settings page: {agent_config_url}",
+    ]
+
+    try:
+        owner = agent.organization or agent.user
+        plan = get_owner_plan(owner) or {}
+        plan_id = str(plan.get("id") or "").lower()
+        if plan_id and plan_id != "free":
+            settings_lines.append(
+                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
+            )
+    except Exception:
+        logger.debug("Failed to append intelligence setting note for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
+
+    return "Agent settings:\n- " + "\n- ".join(settings_lines)
+
+
+def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
+    """Return a short description of email settings fields."""
+    email_settings_url = _build_console_url("agent_email_settings", pk=agent.id)
+    lines: list[str] = [
+        "Agent email address/endpoints: create or update the agent's email address (endpoint).",
+        "SMTP (outbound): host/port, security (SSL or STARTTLS), auth mode, username/password, outbound enable toggle.",
+        "IMAP (inbound): host/port, security (SSL or STARTTLS), username/password, folder, inbound enable toggle, IDLE enable, poll interval seconds.",
+        "Utilities: Test SMTP, Test IMAP, Poll now for inbound mail (after saving credentials).",
+        f"Manage agent email settings: {email_settings_url}",
+    ]
+    return "Agent email settings:\n- " + "\n- ".join(lines)
 
 @tracer.start_as_current_span("Build Prompt Context")
 def build_prompt_context(
@@ -686,14 +718,18 @@ def build_prompt_context(
         non_shrinkable=True
     )
 
-    capabilities_block = _build_agent_capabilities_block(agent)
-    if capabilities_block:
-        important_group.section_text(
-            "agent_capabilities",
-            capabilities_block,
-            weight=2,
-            shrinker="hmt",
-        )
+    capabilities_sections = _build_agent_capabilities_sections(agent)
+    if capabilities_sections:
+        cap_group = important_group.group("agent_capabilities", weight=2)
+        plan_info_text = capabilities_sections.get("plan_info")
+        if plan_info_text:
+            cap_group.section_text("plan_info", plan_info_text, weight=2, non_shrinkable=True)
+        settings_text = capabilities_sections.get("agent_settings")
+        if settings_text:
+            cap_group.section_text("agent_settings", settings_text, weight=1, non_shrinkable=True)
+        email_settings_text = capabilities_sections.get("agent_email_settings")
+        if email_settings_text:
+            cap_group.section_text("agent_email_settings", email_settings_text, weight=1, non_shrinkable=True)
 
     # Contacts block - use promptree natively
     recent_contacts_text = _build_contacts_block(agent, important_group, span)
