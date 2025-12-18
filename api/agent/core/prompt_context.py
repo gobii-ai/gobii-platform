@@ -506,6 +506,9 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         agent_config_url = _build_console_url("agent_detail", pk=agent.id)
         billing_url = _build_console_url("billing")
         pricing_url = _build_console_url("pricing")
+        capabilities_note = (
+            "This section shows the plan/subscription info for your Gobii account and the agent settings available to the user."
+        )
 
         lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
         if plan_id and plan_id != "free":
@@ -545,18 +548,11 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         except Exception:
             logger.debug("Failed to compute contact usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
 
-        try:
-            entitled = TaskCreditService.get_tasks_entitled_for_owner(owner)
-            used_total = TaskCreditService.get_owner_task_credits_used(owner)
-            limit_text = "unlimited" if entitled == TASKS_UNLIMITED else _format_decimal(entitled)
-            lines.append(f"Account task credits: {_format_decimal(used_total)} used, {limit_text} total.")
-        except Exception:
-            logger.debug("Failed to compute task credit usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True)
-
         lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
         lines.append(f"Billing page: {billing_url}.")
 
         return {
+            "agent_capabilities_note": capabilities_note,
             "plan_info": "\n".join(lines),
             "agent_settings": _build_agent_settings_section(agent),
             "agent_email_settings": _build_agent_email_settings_section(agent),
@@ -721,6 +717,14 @@ def build_prompt_context(
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
         cap_group = important_group.group("agent_capabilities", weight=2)
+        capabilities_note = capabilities_sections.get("agent_capabilities_note")
+        if capabilities_note:
+            cap_group.section_text(
+                "agent_capabilities_note",
+                capabilities_note,
+                weight=2,
+                non_shrinkable=True,
+            )
         plan_info_text = capabilities_sections.get("plan_info")
         if plan_info_text:
             cap_group.section_text("plan_info", plan_info_text, weight=2, non_shrinkable=True)
