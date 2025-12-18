@@ -507,7 +507,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         billing_url = _build_console_url("billing")
         pricing_url = _build_console_url("pricing")
         capabilities_note = (
-            "This section shows the plan/subscription info for your Gobii account and the agent settings available to the user."
+            "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
         )
 
         lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
