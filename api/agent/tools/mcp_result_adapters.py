@@ -230,20 +230,14 @@ class BrightDataScrapeAsMarkdownAdapter(BrightDataAdapterBase):
     tool_name = "scrape_as_markdown"
 
     def adapt(self, result: Any) -> Any:
-        content_blocks = getattr(result, "content", None)
-        if not content_blocks or not isinstance(content_blocks, (list, tuple)):
-            return result
-
         try:
-            first_block = content_blocks[0]
-        except IndexError:
+            first_block = result.content[0]
+            raw_text = first_block.text
+        except (AttributeError, IndexError, TypeError):
             return result
 
-        raw_text = getattr(first_block, "text", None)
-        if not raw_text or not isinstance(raw_text, str):
-            return result
-
-        first_block.text = scrub_markdown_data_images(raw_text)
+        if isinstance(raw_text, str):
+            first_block.text = scrub_markdown_data_images(raw_text)
         return result
 
 

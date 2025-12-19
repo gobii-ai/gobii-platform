@@ -13,6 +13,6 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='taskcredit',
             name='grant_type',
-            field=models.CharField(choices=[('Plan', 'Plan'), ('Compensation', 'Compensation'), ('Promo', 'Promo'), ('task_pack', 'Task Pack')], default='Plan', help_text='Type of grant for these credits (e.g., PLAN, COMPENSATION, PROMO)', max_length=32),
+            field=models.CharField(choices=[('Plan', 'Plan'), ('Compensation', 'Compensation'), ('Promo', 'Promo'), ('task_pack', 'Task Pack')], default='Plan', help_text='Type of grant for these credits (e.g., PLAN, COMPENSATION, PROMO, TASK_PACK)', max_length=32),
         ),
     ]

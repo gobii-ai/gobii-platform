@@ -548,7 +548,7 @@ class TaskCredit(models.Model):
         max_length=32,
         choices=GrantTypeChoices.choices,
         default=GrantTypeChoices.PLAN,
-        help_text="Type of grant for these credits (e.g., PLAN, COMPENSATION, PROMO)"
+        help_text="Type of grant for these credits (e.g., PLAN, COMPENSATION, PROMO, TASK_PACK)"
     )
 
     voided = models.BooleanField(
