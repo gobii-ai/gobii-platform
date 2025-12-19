@@ -1,9 +1,51 @@
+import contextlib
+import contextvars
 import json
 import logging
+import re
 from typing import Any, List, Optional, Tuple
 
+from django.db import DatabaseError
+
+from api.services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)
+_RESULT_OWNER_CONTEXT: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "mcp_result_owner",
+    default=None,
+)
+_DATA_IMAGE_MARKDOWN_RE = re.compile(
+    r"!\[([^\]]*)\]\(\s*data:image\/[a-z0-9.+-]+;base64,[^)]+?\s*\)",
+    re.IGNORECASE,
+)
+
+
+@contextlib.contextmanager
+def mcp_result_owner_context(owner: Any):
+    """Provide owner context for adapters that need plan-specific settings."""
+    token = _RESULT_OWNER_CONTEXT.set(owner)
+    try:
+        yield
+    finally:
+        _RESULT_OWNER_CONTEXT.reset(token)
+
+
+def scrub_markdown_data_images(text: str) -> str:
+    return _DATA_IMAGE_MARKDOWN_RE.sub(
+        lambda match: f"![{match.group(1)}]()",
+        text,
+    )
+
+
+def _strip_image_fields(entry: dict[str, Any]) -> None:
+    entry.pop("image", None)
+    entry.pop("image_base64", None)
+    images = entry.get("images")
+    if isinstance(images, list):
+        for image_entry in images:
+            if isinstance(image_entry, dict):
+                image_entry.pop("image", None)
+                image_entry.pop("image_base64", None)
 
 
 class MCPToolResultAdapter:
@@ -63,8 +105,7 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
         if isinstance(organic_results, list):
             for item in organic_results:
                 if isinstance(item, dict):
-                    item.pop("image", None)
-                    item.pop("image_base64", None)
+                    _strip_image_fields(item)
 
         first_block.text = json.dumps(payload)
         return result
@@ -170,17 +211,90 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
                     if isinstance(organic_results, list):
                         for entry in organic_results:
                             if isinstance(entry, dict):
-                                entry.pop("image", None)
-                                entry.pop("image_base64", None)
+                                _strip_image_fields(entry)
 
                     related_results = results.get("related")
                     if isinstance(related_results, list):
                         for entry in related_results:
                             if isinstance(entry, dict):
-                                entry.pop("image", None)
-                                entry.pop("image_base64", None)
+                                _strip_image_fields(entry)
 
         first_block.text = json.dumps(payload)
+        return result
+
+
+class BrightDataScrapeAsMarkdownAdapter(BrightDataAdapterBase):
+    """Strip embedded data images from markdown snapshots."""
+
+    server_name = "brightdata"
+    tool_name = "scrape_as_markdown"
+
+    def adapt(self, result: Any) -> Any:
+        try:
+            first_block = result.content[0]
+            raw_text = first_block.text
+        except (AttributeError, IndexError, TypeError):
+            return result
+
+        if isinstance(raw_text, str):
+            first_block.text = scrub_markdown_data_images(raw_text)
+        return result
+
+
+class BrightDataScrapeBatchAdapter(BrightDataAdapterBase):
+    """Strip embedded data images from batched markdown snapshots."""
+
+    server_name = "brightdata"
+    tool_name = "scrape_batch"
+
+    def adapt(self, result: Any) -> Any:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            return result
+
+        first_block, payload = parsed
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                content = entry.get("content")
+                if isinstance(content, str):
+                    entry["content"] = scrub_markdown_data_images(content)
+
+        first_block.text = json.dumps(payload)
+        return result
+
+
+class BrightDataAmazonProductSearchAdapter(BrightDataAdapterBase):
+    """Limit Bright Data Amazon product search results."""
+
+    server_name = "brightdata"
+    tool_name = "web_data_amazon_product_search"
+
+    def adapt(self, result: Any) -> Any:
+        try:
+            settings = get_tool_settings_for_owner(_RESULT_OWNER_CONTEXT.get())
+        except DatabaseError:
+            logger.error("Failed to load tool settings for Bright Data result limit.", exc_info=True)
+            return result
+
+        limit = getattr(settings, "brightdata_amazon_product_search_limit", None)
+        if not isinstance(limit, int) or limit <= 0:
+            return result
+
+        if isinstance(getattr(result, "data", None), list):
+            if len(result.data) > limit:
+                result.data = result.data[:limit]
+            return result
+
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            return result
+
+        first_block, payload = parsed
+        if isinstance(payload, list) and len(payload) > limit:
+            first_block.text = json.dumps(payload[:limit])
+
         return result
 
 
@@ -198,6 +312,9 @@ class MCPResultAdapterRegistry:
                 BrightDataLinkedInCompanyProfileAdapter(),
                 BrightDataLinkedInPersonProfileAdapter(),
                 BrightDataSearchEngineBatchAdapter(),
+                BrightDataScrapeAsMarkdownAdapter(),
+                BrightDataScrapeBatchAdapter(),
+                BrightDataAmazonProductSearchAdapter(),
             ]
         )
 

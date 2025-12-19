@@ -37,7 +37,7 @@ from django.conf import settings
 from django.db.models import Max
 from django.utils import timezone
 
-from .mcp_result_adapters import MCPResultAdapterRegistry
+from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
 from ...models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -212,6 +212,7 @@ class MCPToolManager:
     # Tools matching these patterns will be excluded from discovery and execution
     TOOL_BLACKLIST = [
         "mcp_brightdata_scraping_browser_*",  # Blacklist all scraping browser tools
+        "mcp_brightdata_scrape_as_html", # usually results in huge result sets that we don't want
         "select_apps"
         # Add more blacklist patterns here as needed
     ]
@@ -1105,7 +1106,8 @@ class MCPToolManager:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, info.tool_name, params))
-            result = self._adapt_tool_result(runtime.name, info.tool_name, result)
+            with mcp_result_owner_context(None):
+                result = self._adapt_tool_result(runtime.name, info.tool_name, result)
 
             if hasattr(result, "is_error") and result.is_error:
                 return {
@@ -1196,7 +1198,9 @@ class MCPToolManager:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
-            result = self._adapt_tool_result(server_name, actual_tool_name, result)
+            owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+            with mcp_result_owner_context(owner):
+                result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
             # Convert result to consistent format
             if hasattr(result, 'is_error') and result.is_error:

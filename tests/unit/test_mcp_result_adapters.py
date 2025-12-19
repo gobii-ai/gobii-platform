@@ -9,13 +9,17 @@ from api.agent.tools.mcp_result_adapters import (
     BrightDataSearchEngineAdapter,
     BrightDataSearchEngineBatchAdapter,
     BrightDataLinkedInPersonProfileAdapter,
+    BrightDataScrapeAsMarkdownAdapter,
+    BrightDataScrapeBatchAdapter,
 )
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
     PersistentAgent,
     PersistentAgentEnabledTool,
+    ToolConfig,
 )
+from constants.plans import PlanNames
 
 
 class DummyContent:
@@ -49,6 +53,32 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image_base64", cleaned["organic"][0])
         self.assertNotIn("image", cleaned["organic"][1])
         self.assertEqual(cleaned["organic"][0]["title"], "Example")
+
+    def test_strips_nested_images_from_organic_results(self):
+        payload = {
+            "organic": [
+                {
+                    "title": "Example",
+                    "images": [
+                        {
+                            "image": "http://example.com/nested.png",
+                            "image_base64": "abc",
+                            "caption": "keep",
+                        }
+                    ],
+                }
+            ]
+        }
+        adapter = BrightDataSearchEngineAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        nested = cleaned["organic"][0]["images"][0]
+        self.assertNotIn("image", nested)
+        self.assertNotIn("image_base64", nested)
+        self.assertEqual(nested["caption"], "keep")
 
     def test_batch_adapter_strips_nested_images(self):
         payload = [
@@ -141,6 +171,44 @@ class BrightDataLinkedInPersonProfileAdapterTests(SimpleTestCase):
         self.assertNotIn("image", cleaned)
         self.assertNotIn("image_url", cleaned)
         self.assertNotIn("people_also_viewed", cleaned)
+
+
+@tag("batch_mcp_tools")
+class BrightDataScrapeAsMarkdownAdapterTests(SimpleTestCase):
+    def test_scrubs_data_image_markdown(self):
+        payload = (
+            "Intro ![logo](data:image/png;base64,AAA) "
+            "more ![icon](data:image/svg+xml;base64,BBB) "
+            "keep ![ok](https://example.com/a.png)"
+        )
+        adapter = BrightDataScrapeAsMarkdownAdapter()
+        result = DummyResult(payload)
+
+        adapted = adapter.adapt(result)
+
+        self.assertEqual(
+            adapted.content[0].text,
+            "Intro ![logo]() more ![icon]() keep ![ok](https://example.com/a.png)",
+        )
+
+
+@tag("batch_mcp_tools")
+class BrightDataScrapeBatchAdapterTests(SimpleTestCase):
+    def test_scrubs_data_images_inside_batch_payload(self):
+        payload = [
+            {"url": "https://example.com", "content": "![hero](data:image/jpeg;base64,CCC) text"},
+            {"url": "https://example.com/2", "content": "No images here"},
+            {"url": "https://example.com/3", "content": None},
+        ]
+        adapter = BrightDataScrapeBatchAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        self.assertEqual(cleaned[0]["content"], "![hero]() text")
+        self.assertEqual(cleaned[1]["content"], "No images here")
+        self.assertIsNone(cleaned[2]["content"])
 
 
 @tag("batch_mcp_tools")
@@ -270,6 +338,40 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(cleaned[0]["updates"]), 2)
         self.assertNotIn("text_html", cleaned[0]["updates"][0])
         self.assertEqual(cleaned[0]["updates"][0]["text"], "plain")
+
+    def test_execute_mcp_tool_truncates_brightdata_amazon_product_search(self):
+        ToolConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={"brightdata_amazon_product_search_limit": 2},
+        )
+        tool_info = MCPToolInfo(
+            config_id=self.runtime.config_id,
+            full_name="mcp_brightdata_web_data_amazon_product_search",
+            server_name="brightdata",
+            tool_name="web_data_amazon_product_search",
+            description="Amazon product search",
+            parameters={},
+        )
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        payload = [{"id": 1}, {"id": 2}, {"id": 3}]
+        dummy_result = DummyResult(json.dumps(payload))
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"query": "test"},
+            )
+
+        self.assertEqual(response.get("status"), "success")
+        cleaned = json.loads(response.get("result"))
+        self.assertEqual(len(cleaned), 2)
+        self.assertEqual(cleaned[0]["id"], 1)
 
     def test_brightdata_pdf_urls_rejected(self):
         tool_info = MCPToolInfo(
