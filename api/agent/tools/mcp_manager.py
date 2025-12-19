@@ -212,6 +212,7 @@ class MCPToolManager:
     # Tools matching these patterns will be excluded from discovery and execution
     TOOL_BLACKLIST = [
         "mcp_brightdata_scraping_browser_*",  # Blacklist all scraping browser tools
+        "mcp_brightdata_scrape_as_html", # usually results in huge result sets that we don't want
         "select_apps"
         # Add more blacklist patterns here as needed
     ]
