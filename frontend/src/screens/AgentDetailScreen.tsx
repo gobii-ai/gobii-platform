@@ -331,7 +331,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [formState, setFormState] = useState<FormState>(initialFormState)
   const [savedAvatarUrl, setSavedAvatarUrl] = useState<string | null>(initialData.agent.avatarUrl ?? null)
   const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(initialData.agent.avatarUrl ?? null)
-  const [avatarPreviewObjectUrl, setAvatarPreviewObjectUrl] = useState<string | null>(null)
+  const avatarPreviewObjectUrlRef = useRef<string | null>(null)
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [removeAvatar, setRemoveAvatar] = useState(false)
   const avatarInputRef = useRef<HTMLInputElement | null>(null)
@@ -356,6 +356,13 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [peerLinkCandidates, setPeerLinkCandidates] = useState(initialData.peerLinks.candidates)
   const [peerLinkDefaults, setPeerLinkDefaults] = useState(initialData.peerLinks.defaults)
   const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
+
+  const clearAvatarPreviewUrl = useCallback(() => {
+    if (avatarPreviewObjectUrlRef.current) {
+      URL.revokeObjectURL(avatarPreviewObjectUrlRef.current)
+      avatarPreviewObjectUrlRef.current = null
+    }
+  }, [])
 
   const generalHasChanges = useMemo(() => {
     return (
@@ -442,13 +449,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   })
 }, [])
 
-  const clearAvatarPreviewUrl = useCallback(() => {
-    if (avatarPreviewObjectUrl) {
-      URL.revokeObjectURL(avatarPreviewObjectUrl)
-      setAvatarPreviewObjectUrl(null)
-    }
-  }, [avatarPreviewObjectUrl])
-
   const handleAvatarChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0]
@@ -459,7 +459,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       setAvatarFile(file)
       setRemoveAvatar(false)
       const objectUrl = URL.createObjectURL(file)
-      setAvatarPreviewObjectUrl(objectUrl)
+      avatarPreviewObjectUrlRef.current = objectUrl
       setAvatarPreviewUrl(objectUrl)
     },
     [clearAvatarPreviewUrl],
@@ -487,11 +487,12 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
   useEffect(() => {
     return () => {
-      if (avatarPreviewObjectUrl) {
-        URL.revokeObjectURL(avatarPreviewObjectUrl)
+      if (avatarPreviewObjectUrlRef.current) {
+        URL.revokeObjectURL(avatarPreviewObjectUrlRef.current)
+        avatarPreviewObjectUrlRef.current = null
       }
     }
-  }, [avatarPreviewObjectUrl])
+  }, [])
 
   const submitFormData = useCallback(
     async (formData: FormData) => {
