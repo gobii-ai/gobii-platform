@@ -57,6 +57,7 @@ from api.services.browser_settings import (
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     DEFAULT_SEARCH_WEB_RESULT_COUNT,
+    DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
 )
 from constants.regex import E164_PHONE_REGEX
@@ -794,6 +795,10 @@ class ToolConfig(models.Model):
     search_web_result_count = models.PositiveIntegerField(
         default=DEFAULT_SEARCH_WEB_RESULT_COUNT,
         help_text="Preferred number of results to return from search_web (Exa).",
+    )
+    brightdata_amazon_product_search_limit = models.PositiveIntegerField(
+        default=DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
+        help_text="Maximum number of results to keep from Bright Data amazon product search.",
     )
     duplicate_similarity_threshold = models.FloatField(
         default=DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,

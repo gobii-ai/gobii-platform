@@ -17,7 +17,9 @@ from api.models import (
     MCPServerConfig,
     PersistentAgent,
     PersistentAgentEnabledTool,
+    ToolConfig,
 )
+from constants.plans import PlanNames
 
 
 class DummyContent:
@@ -336,6 +338,40 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(cleaned[0]["updates"]), 2)
         self.assertNotIn("text_html", cleaned[0]["updates"][0])
         self.assertEqual(cleaned[0]["updates"][0]["text"], "plain")
+
+    def test_execute_mcp_tool_truncates_brightdata_amazon_product_search(self):
+        ToolConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={"brightdata_amazon_product_search_limit": 2},
+        )
+        tool_info = MCPToolInfo(
+            config_id=self.runtime.config_id,
+            full_name="mcp_brightdata_web_data_amazon_product_search",
+            server_name="brightdata",
+            tool_name="web_data_amazon_product_search",
+            description="Amazon product search",
+            parameters={},
+        )
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        payload = [{"id": 1}, {"id": 2}, {"id": 3}]
+        dummy_result = DummyResult(json.dumps(payload))
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"query": "test"},
+            )
+
+        self.assertEqual(response.get("status"), "success")
+        cleaned = json.loads(response.get("result"))
+        self.assertEqual(len(cleaned), 2)
+        self.assertEqual(cleaned[0]["id"], 1)
 
     def test_brightdata_pdf_urls_rejected(self):
         tool_info = MCPToolInfo(

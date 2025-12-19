@@ -1,14 +1,33 @@
+import contextlib
+import contextvars
 import json
 import logging
 import re
 from typing import Any, List, Optional, Tuple
 
+from django.db import DatabaseError
+
+from api.services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)
+_RESULT_OWNER_CONTEXT: contextvars.ContextVar[Any] = contextvars.ContextVar(
+    "mcp_result_owner",
+    default=None,
+)
 _DATA_IMAGE_MARKDOWN_RE = re.compile(
     r"!\[([^\]]*)\]\(\s*data:image\/[a-z0-9.+-]+;base64,[^)]+?\s*\)",
     re.IGNORECASE,
 )
+
+
+@contextlib.contextmanager
+def mcp_result_owner_context(owner: Any):
+    """Provide owner context for adapters that need plan-specific settings."""
+    token = _RESULT_OWNER_CONTEXT.set(owner)
+    try:
+        yield
+    finally:
+        _RESULT_OWNER_CONTEXT.reset(token)
 
 
 def scrub_markdown_data_images(text: str) -> str:
@@ -252,6 +271,39 @@ class BrightDataScrapeBatchAdapter(BrightDataAdapterBase):
         return result
 
 
+class BrightDataAmazonProductSearchAdapter(BrightDataAdapterBase):
+    """Limit Bright Data Amazon product search results."""
+
+    server_name = "brightdata"
+    tool_name = "web_data_amazon_product_search"
+
+    def adapt(self, result: Any) -> Any:
+        try:
+            settings = get_tool_settings_for_owner(_RESULT_OWNER_CONTEXT.get())
+        except DatabaseError:
+            logger.error("Failed to load tool settings for Bright Data result limit.", exc_info=True)
+            return result
+
+        limit = getattr(settings, "brightdata_amazon_product_search_limit", None)
+        if not isinstance(limit, int) or limit <= 0:
+            return result
+
+        if isinstance(getattr(result, "data", None), list):
+            if len(result.data) > limit:
+                result.data = result.data[:limit]
+            return result
+
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            return result
+
+        first_block, payload = parsed
+        if isinstance(payload, list) and len(payload) > limit:
+            first_block.text = json.dumps(payload[:limit])
+
+        return result
+
+
 class MCPResultAdapterRegistry:
     """Registry of adapters keyed by provider/tool."""
 
@@ -268,6 +320,7 @@ class MCPResultAdapterRegistry:
                 BrightDataSearchEngineBatchAdapter(),
                 BrightDataScrapeAsMarkdownAdapter(),
                 BrightDataScrapeBatchAdapter(),
+                BrightDataAmazonProductSearchAdapter(),
             ]
         )
 
