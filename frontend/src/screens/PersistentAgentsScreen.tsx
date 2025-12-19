@@ -1,7 +1,6 @@
-import {type ReactElement, useEffect, useMemo, useState} from 'react'
-import { createPortal } from 'react-dom'
+import { useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Copy, Mail, MessageCircle, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -57,13 +56,6 @@ export type PersistentAgentsScreenProps = {
   initialData: AgentListPayload
 }
 
-type TalkToAgentTarget = {
-  name: string
-  email: string | null
-  phone: string | null
-  chatUrl: string | null
-}
-
 type NormalizedAgent = AgentSummary & {
   searchBlob: string
   gradientStyle: CSSProperties
@@ -79,7 +71,6 @@ function formatCreditBurn(value: number | null): string {
 
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
   const [query, setQuery] = useState('')
-  const [modalAgent, setModalAgent] = useState<TalkToAgentTarget | null>(null)
 
   const normalizedAgents = useMemo<NormalizedAgent[]>(() => {
     return initialData.agents.map((agent) => ({
@@ -121,14 +112,6 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
               <AgentCard
                 key={agent.id}
                 agent={agent}
-                onTalkToAgent={() =>
-                  setModalAgent({
-                    name: agent.name,
-                    email: agent.primaryEmail,
-                    phone: agent.primarySms,
-                    chatUrl: agent.chatUrl,
-                  })
-                }
               />
             ))}
           </div>
@@ -145,12 +128,6 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
         </>
       )}
 
-      {modalAgent && (
-        <TalkToAgentModal
-          target={modalAgent}
-          onClose={() => setModalAgent(null)}
-        />
-      )}
     </div>
   )
 }
@@ -230,12 +207,15 @@ function AgentListHeader({ query, onSearchChange, canSpawnAgents, spawnUrl, show
 
 type AgentCardProps = {
   agent: NormalizedAgent
-  onTalkToAgent: () => void
 }
 
-function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
+function AgentCard({ agent }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
+  const canSms = Boolean(agent.primarySms)
+  const canEmail = Boolean(agent.primaryEmail)
+  const canChat = Boolean(agent.chatUrl)
+  const hasChannels = canSms || canEmail || canChat
 
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
@@ -258,15 +238,6 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>{agent.name}</h3>
 
-        {agent.primaryEmail && (
-          <div className={`relative z-10 mt-1 flex items-center gap-1.5 text-xs ${agent.headerSubtextClass}`}>
-            <Mail className="h-4 w-4" aria-hidden="true" />
-            <a href={`mailto:${agent.primaryEmail}`} className={`font-light transition-colors ${agent.headerLinkHoverClass}`}>
-              {agent.primaryEmail}
-            </a>
-          </div>
-        )}
-
         <div className={`relative z-10 mt-2 flex flex-wrap items-center gap-2 ${agent.headerStatusClass}`}>
           <span className={`size-2 rounded-full ${agent.isActive ? 'bg-green-300' : 'bg-gray-300'}`} />
           <span className="text-xs font-medium uppercase tracking-wide">{agent.isActive ? 'Active' : 'Paused'}</span>
@@ -282,6 +253,14 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
             <span>Transfer Pending</span>
           </div>
         )}
+
+        <a
+          href={agent.detailUrl}
+          className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
+        >
+          <Settings className="h-4 w-4" aria-hidden="true" />
+          Configure
+        </a>
 
         {agent.auditUrl ? (
           <a
@@ -331,25 +310,41 @@ function AgentCard({ agent, onTalkToAgent }: AgentCardProps) {
           </div>
         )}
 
-        <div className="mt-4 pt-4">
-          <div className="flex gap-2">
-            <a
-              href={agent.detailUrl}
-              className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm hover:bg-gray-50"
-            >
-              <Settings className="h-4 w-4" aria-hidden="true" />
-              Configure
-            </a>
-            <button
-              type="button"
-              onClick={onTalkToAgent}
-              className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg border border-transparent bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
-            >
-              <MessageCircle className="h-4 w-4" aria-hidden="true" />
-              Talk to Agent
-            </button>
+        {hasChannels && (
+          <div className="mt-4 pt-4">
+            <div className="flex flex-wrap gap-2">
+              {canSms && (
+                <a
+                  href={`sms:${agent.primarySms ?? ''}`}
+                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                >
+                  <Phone className="h-4 w-4" aria-hidden="true" />
+                  SMS
+                </a>
+              )}
+              {canEmail && (
+                <a
+                  href={`mailto:${agent.primaryEmail ?? ''}`}
+                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+                >
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  Email
+                </a>
+              )}
+              {canChat && (
+                <a
+                  href={agent.chatUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                >
+                  <MessageSquare className="h-4 w-4" aria-hidden="true" />
+                  Chat
+                </a>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )
@@ -387,181 +382,6 @@ function AgentEmptyState({ spawnUrl, analyticsEvent }: AgentEmptyStateProps) {
             Create Your First Agent
           </a>
         </div>
-      </div>
-    </div>
-  )
-}
-
-type TalkToAgentModalProps = {
-  target: TalkToAgentTarget
-  onClose: () => void
-}
-
-function TalkToAgentModal({ target, onClose }: TalkToAgentModalProps) {
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = originalOverflow
-    }
-  }, [onClose])
-
-  const channel = target.phone ? 'sms' : 'email'
-  const canEmail = Boolean(target.email)
-  const canText = Boolean(target.phone)
-
-  return createPortal(
-    <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true" aria-labelledby="talk-to-agent-title">
-      <div className="fixed inset-0 bg-gray-500/75 backdrop-blur-sm" aria-hidden="true" onClick={onClose} />
-      <div className="flex min-h-screen items-center justify-center px-4 py-10 text-center sm:block sm:p-0">
-        <span className="hidden sm:inline-block sm:h-screen sm:align-middle" aria-hidden="true">
-          &#8203;
-        </span>
-        <div className="inline-block w-full max-w-lg transform overflow-hidden rounded-lg bg-white text-left align-middle shadow-xl transition-all">
-          <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-            <h3 id="talk-to-agent-title" className="text-lg font-medium text-gray-900">
-              Talk to Your Agent
-            </h3>
-            <button type="button" onClick={onClose} className="text-gray-400 transition hover:text-gray-500" aria-label="Close dialog">
-              <svg className="h-6 w-6" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" fill="none" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M6 18L18 6" />
-              </svg>
-            </button>
-          </div>
-
-          <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
-            <div className="sm:flex sm:items-start">
-              <div className="mx-auto flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-full bg-indigo-100 sm:mx-0 sm:h-10 sm:w-10">
-                {channel === 'email' ? <Mail className="h-6 w-6 text-indigo-600" aria-hidden="true" /> : <Phone className="h-6 w-6 text-indigo-600" aria-hidden="true" />}
-              </div>
-              <div className="mt-3 flex-1 text-center sm:mt-0 sm:ml-4 sm:text-left">
-                {channel === 'email' && (
-                  <div>
-                    <p className="mb-4 text-sm text-gray-600">
-                      Your agent <strong>{target.name}</strong> is ready to assist you via email. Simply send an email to communicate directly.
-                    </p>
-                    <ContactCard
-                      label="Agent Email"
-                      value={target.email ?? ''}
-                      href={`mailto:${target.email ?? ''}`}
-                      icon={<Mail className="h-5 w-5" aria-hidden="true" />}
-                    />
-                    <p className="mt-4 text-xs text-gray-500">
-                      💡 <strong>Tip:</strong> Your agent responds from that address. Each agent has its own unique email.
-                    </p>
-                  </div>
-                )}
-
-                {channel === 'sms' && (
-                  <div>
-                    <p className="mb-4 text-sm text-gray-600">
-                      Your agent <strong>{target.name}</strong> is ready to chat over SMS. Send a text message to the number below to start the conversation.
-                    </p>
-                    <ContactCard
-                      label="Agent Number"
-                      value={target.phone ?? ''}
-                      href={`sms:${target.phone ?? ''}`}
-                      icon={<Phone className="h-5 w-5" aria-hidden="true" />}
-                      valueClassName="phone-number-to-format"
-                    />
-                    <p className="mt-4 text-xs text-gray-500">
-                      💡 <strong>Tip:</strong> Text like you would with a friend—your agent understands natural language.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3 bg-gray-50 px-4 py-3 sm:flex sm:flex-row-reverse sm:space-y-0 sm:px-6">
-            {target.chatUrl && (
-              <a
-                href={target.chatUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm"
-              >
-                <MessageSquare className="h-4 w-4" aria-hidden="true" />
-                Open Web Chat
-              </a>
-            )}
-            {canEmail && (
-              <a
-                href={`mailto:${target.email ?? ''}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm"
-              >
-                <Mail className="h-4 w-4" aria-hidden="true" />
-                Send Email
-              </a>
-            )}
-            {canText && (
-              <a
-                href={`sms:${target.phone ?? ''}`}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-md border border-transparent bg-indigo-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:ml-3 sm:w-auto sm:text-sm"
-              >
-                <Phone className="h-4 w-4" aria-hidden="true" />
-                Send Text
-              </a>
-            )}
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 sm:w-auto sm:text-sm"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>,
-    document.body,
-  )
-}
-
-type ContactCardProps = {
-  label: string
-  value: string
-  href: string
-  icon: ReactElement
-  valueClassName?: string
-}
-
-function ContactCard({ label, value, href, icon, valueClassName }: ContactCardProps) {
-  const handleCopy = () => {
-    if (value) {
-      navigator.clipboard.writeText(value).catch(() => {
-        /* no-op */
-      })
-    }
-  }
-
-  return (
-    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-3">
-          <div className="flex-shrink-0 text-gray-400">{icon}</div>
-          <div>
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">{label}</p>
-            <a href={href} className={`text-sm font-medium text-indigo-600 transition hover:text-indigo-800 ${valueClassName ?? ''}`}>
-              {value}
-            </a>
-          </div>
-        </div>
-        <button
-          type="button"
-          onClick={handleCopy}
-          className="rounded-md p-2 text-gray-400 transition hover:bg-gray-100 hover:text-gray-600"
-          title="Copy value"
-        >
-          <Copy className="h-4 w-4" aria-hidden="true" />
-        </button>
       </div>
     </div>
   )
