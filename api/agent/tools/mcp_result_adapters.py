@@ -18,6 +18,17 @@ def scrub_markdown_data_images(text: str) -> str:
     )
 
 
+def _strip_image_fields(entry: dict[str, Any]) -> None:
+    entry.pop("image", None)
+    entry.pop("image_base64", None)
+    images = entry.get("images")
+    if isinstance(images, list):
+        for image_entry in images:
+            if isinstance(image_entry, dict):
+                image_entry.pop("image", None)
+                image_entry.pop("image_base64", None)
+
+
 class MCPToolResultAdapter:
     """Base adapter for normalizing MCP tool responses."""
 
@@ -75,8 +86,7 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
         if isinstance(organic_results, list):
             for item in organic_results:
                 if isinstance(item, dict):
-                    item.pop("image", None)
-                    item.pop("image_base64", None)
+                    _strip_image_fields(item)
 
         first_block.text = json.dumps(payload)
         return result
@@ -182,15 +192,13 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
                     if isinstance(organic_results, list):
                         for entry in organic_results:
                             if isinstance(entry, dict):
-                                entry.pop("image", None)
-                                entry.pop("image_base64", None)
+                                _strip_image_fields(entry)
 
                     related_results = results.get("related")
                     if isinstance(related_results, list):
                         for entry in related_results:
                             if isinstance(entry, dict):
-                                entry.pop("image", None)
-                                entry.pop("image_base64", None)
+                                _strip_image_fields(entry)
 
         first_block.text = json.dumps(payload)
         return result

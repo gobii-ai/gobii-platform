@@ -52,6 +52,32 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image", cleaned["organic"][1])
         self.assertEqual(cleaned["organic"][0]["title"], "Example")
 
+    def test_strips_nested_images_from_organic_results(self):
+        payload = {
+            "organic": [
+                {
+                    "title": "Example",
+                    "images": [
+                        {
+                            "image": "http://example.com/nested.png",
+                            "image_base64": "abc",
+                            "caption": "keep",
+                        }
+                    ],
+                }
+            ]
+        }
+        adapter = BrightDataSearchEngineAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        nested = cleaned["organic"][0]["images"][0]
+        self.assertNotIn("image", nested)
+        self.assertNotIn("image_base64", nested)
+        self.assertEqual(nested["caption"], "keep")
+
     def test_batch_adapter_strips_nested_images(self):
         payload = [
             {
