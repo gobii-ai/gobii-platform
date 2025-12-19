@@ -1175,7 +1175,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               </div>
               <div className="sm:col-span-9">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-                  <div className="relative flex size-16 items-center justify-center overflow-hidden rounded-full border border-gray-200 shadow-sm">
+                  <div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-gray-200 shadow-sm">
                     {(!removeAvatar && (avatarPreviewUrl || savedAvatarUrl)) ? (
                       <img
                         src={(removeAvatar ? null : avatarPreviewUrl || savedAvatarUrl) ?? undefined}
@@ -1186,27 +1186,29 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                       <Zap className="h-7 w-7 text-gray-500" aria-hidden="true" />
                     )}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => avatarInputRef.current?.click()}
-                      className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700"
-                    >
-                      <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
-                      Upload
-                    </button>
-                    {(avatarPreviewUrl || savedAvatarUrl || avatarFile) && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         type="button"
-                        onClick={handleAvatarRemove}
-                        className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300"
+                        onClick={() => avatarInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700"
                       >
-                        <Trash2 className="h-4 w-4" aria-hidden="true" />
-                        Remove
+                        <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
+                        Upload
                       </button>
-                    )}
+                      {(avatarPreviewUrl || savedAvatarUrl || avatarFile) && (
+                        <button
+                          type="button"
+                          onClick={handleAvatarRemove}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300"
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500">Use a square image (PNG, JPG, WebP, or GIF). Max 5 MB.</p>
                   </div>
-                  <p className="text-xs text-gray-500">Use a square image (PNG, JPG, WebP, or GIF). Max 5 MB.</p>
                 </div>
               </div>
 
