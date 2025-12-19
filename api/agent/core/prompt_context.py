@@ -10,50 +10,36 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import zstandard as zstd
-from litellm import token_counter
-from opentelemetry import trace
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.db.models import Q, Prefetch, Sum
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
+from litellm import token_counter
+from opentelemetry import trace
 
+from billing.addons import AddonEntitlementService
 from config import settings
+from config.plans import PLAN_CONFIG
+from tasks.services import TaskCreditService
+from util.constants.task_constants import TASKS_UNLIMITED
+from util.subscription_helper import get_owner_plan
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
+
 from api.services import mcp_servers as mcp_server_service
+from api.services.dedicated_proxy_service import DedicatedProxyService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.prompt_settings import get_prompt_settings
 
-from ..files.filesystem_prompt import get_agent_filesystem_prompt
-from ..tools.charter_updater import get_update_charter_tool
-from ..tools.database_enabler import get_enable_database_tool
-from ..tools.email_sender import get_send_email_tool
-from ..tools.peer_dm import get_send_agent_message_tool
-from ..tools.request_contact_permission import get_request_contact_permission_tool
-from ..tools.schedule_updater import get_update_schedule_tool
-from ..tools.search_tools import get_search_tools_tool
-from ..tools.secure_credentials_request import get_secure_credentials_request_tool
-from ..tools.sms_sender import get_send_sms_tool
-from ..tools.spawn_web_task import (
-    get_browser_daily_task_limit,
-    get_spawn_web_task_tool,
-)
-from ..tools.sqlite_state import get_sqlite_schema_prompt
-from ..tools.tool_manager import (
-    ensure_default_tools_enabled,
-    get_enabled_tool_definitions,
-    is_sqlite_enabled_for_agent,
-    SQLITE_TOOL_NAME,
-)
-from ..tools.web_chat_sender import get_send_chat_tool
-from ..tools.webhook_sender import get_send_webhook_tool
-
 from ...models import (
+    AgentAllowlistInvite,
     AgentCommPeerState,
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    CommsAllowlistEntry,
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -72,15 +58,39 @@ from .budget import AgentBudgetManager, get_current_context as get_budget_contex
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
 from .llm_config import (
     AgentLLMTier,
+    LLMNotConfiguredError,
+    REFERENCE_TOKENIZER_MODEL,
     apply_tier_credit_multiplier,
     get_agent_llm_tier,
     get_llm_config,
     get_llm_config_with_failover,
-    REFERENCE_TOKENIZER_MODEL,
-    LLMNotConfiguredError,
 )
 from .promptree import Prompt
 from .step_compaction import llm_summarise_steps
+
+from ..files.filesystem_prompt import get_agent_filesystem_prompt
+from ..tools.charter_updater import get_update_charter_tool
+from ..tools.database_enabler import get_enable_database_tool
+from ..tools.email_sender import get_send_email_tool
+from ..tools.peer_dm import get_send_agent_message_tool
+from ..tools.request_contact_permission import get_request_contact_permission_tool
+from ..tools.schedule_updater import get_update_schedule_tool
+from ..tools.search_tools import get_search_tools_tool
+from ..tools.secure_credentials_request import get_secure_credentials_request_tool
+from ..tools.sms_sender import get_send_sms_tool
+from ..tools.spawn_web_task import (
+    get_browser_daily_task_limit,
+    get_spawn_web_task_tool,
+)
+from ..tools.sqlite_state import get_sqlite_schema_prompt
+from ..tools.tool_manager import (
+    SQLITE_TOOL_NAME,
+    ensure_default_tools_enabled,
+    get_enabled_tool_definitions,
+    is_sqlite_enabled_for_agent,
+)
+from ..tools.web_chat_sender import get_send_chat_tool
+from ..tools.webhook_sender import get_send_webhook_tool
 
 
 logger = logging.getLogger(__name__)
@@ -440,6 +450,183 @@ def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
     context.setdefault("step_id", str(system_step.step_id))
     return context
 
+def _build_console_url(route_name: str, **kwargs) -> str:
+    """Return a console URL, preferring absolute when PUBLIC_SITE_URL is set."""
+    try:
+        path = reverse(route_name, kwargs=kwargs or None)
+    except NoReverseMatch:
+        logger.debug("Failed to reverse URL for %s", route_name, exc_info=True)
+        path = ""
+
+    base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").rstrip("/")
+    if base_url and path:
+        return f"{base_url}{path}"
+    return path or ""
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+def _get_plan_details(owner) -> tuple[dict[str, int | str], str, str, int, str]:
+    try:
+        plan = get_owner_plan(owner) or {}
+    except DatabaseError:
+        logger.warning("Failed to load plan for owner %s", getattr(owner, "id", None) or owner, exc_info=True)
+        plan = {}
+
+    plan_id = str(plan.get("id") or "").lower()
+    plan_name = (plan.get("name") or plan_id or "unknown").strip()
+    base_contact_cap = _safe_int(plan.get("max_contacts_per_agent"))
+    available_plans = ", ".join(cfg.get("name") or name for name, cfg in PLAN_CONFIG.items())
+    return plan, plan_id, plan_name, base_contact_cap, available_plans
+
+def _get_addon_details(owner) -> tuple[int, int]:
+    try:
+        addon_uplift = AddonEntitlementService.get_uplift(owner)
+    except DatabaseError:
+        logger.warning(
+            "Failed to load add-on uplift for owner %s", getattr(owner, "id", None) or owner, exc_info=True
+        )
+        addon_uplift = None
+
+    task_uplift = _safe_int(getattr(addon_uplift, "task_credits", 0)) if addon_uplift else 0
+    contact_uplift = _safe_int(getattr(addon_uplift, "contact_cap", 0)) if addon_uplift else 0
+    return task_uplift, contact_uplift
+
+def _get_contact_usage(agent: PersistentAgent) -> int | None:
+    try:
+        active_contacts = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).count()
+        pending_contacts = AgentAllowlistInvite.objects.filter(
+            agent=agent,
+            status=AgentAllowlistInvite.InviteStatus.PENDING,
+        ).count()
+        return active_contacts + pending_contacts
+    except DatabaseError:
+        logger.warning(
+            "Failed to compute contact usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True
+        )
+        return None
+
+def _get_dedicated_ip_count(owner) -> int:
+    try:
+        return DedicatedProxyService.allocated_count(owner)
+    except DatabaseError:
+        logger.warning(
+            "Failed to fetch dedicated IP count for owner %s", getattr(owner, "id", None) or owner, exc_info=True
+        )
+        return 0
+
+def _build_agent_capabilities_block(agent: PersistentAgent) -> str:
+    """Deprecated: kept for backward compatibility; returns only plan_info text."""
+    sections = _build_agent_capabilities_sections(agent)
+    return sections.get("plan_info", "")
+
+
+def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]:
+    """Return structured capability text for plan/plan_info, settings, and email settings."""
+
+    owner = agent.organization or agent.user
+    _plan, plan_id, plan_name, base_contact_cap, available_plans = _get_plan_details(owner)
+    task_uplift, contact_uplift = _get_addon_details(owner)
+    effective_contact_cap = base_contact_cap + contact_uplift
+
+    dedicated_total = _get_dedicated_ip_count(owner)
+
+    billing_url = _build_console_url("billing")
+    pricing_url = _build_console_url("pricing")
+    capabilities_note = (
+        "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
+    )
+
+    lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
+    if plan_id and plan_id != "free":
+        lines.append(
+            "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
+        )
+    else:
+        lines.append(
+            f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+        )
+
+    addon_parts: list[str] = []
+    if task_uplift:
+        addon_parts.append(f"+{task_uplift} credits")
+    if contact_uplift:
+        addon_parts.append(f"+{contact_uplift} contacts")
+    lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
+
+    if effective_contact_cap or contact_uplift:
+        lines.append(
+            f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
+        )
+
+    contact_usage = _get_contact_usage(agent)
+    if contact_usage is not None and effective_contact_cap:
+        lines.append(f"Contact usage: {contact_usage}/{effective_contact_cap}.")
+
+    lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
+    lines.append(f"Billing page: {billing_url}.")
+
+    return {
+        "agent_capabilities_note": capabilities_note,
+        "plan_info": "\n".join(lines),
+        "agent_settings": _build_agent_settings_section(agent),
+        "agent_email_settings": _build_agent_email_settings_section(agent),
+    }
+
+
+def _build_agent_settings_section(agent: PersistentAgent) -> str:
+    """Return a bullet-style list of configurable settings for the agent."""
+    agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+    settings_lines: list[str] = [
+        "Agent name.",
+        "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
+        "Active status: Activate or deactivate this agent.",
+        ("Daily task credit target: User can adjust this if the agent is using too many task credits per day,"
+        " or if they want to remove the task credit limit."),
+        "Dedicated IP assignment.",
+        "Custom email settings.",
+        "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
+        "MCP servers to connect the agent to external services.",
+        "Peer links to communicate with other agents.",
+        "Outbound webhooks to send data to external services.",
+        "Agent transfer: Transfer this agent to another user or organization.",
+        "Agent deletion: delete this agent forever.",
+        f"Agent settings page: {agent_config_url}",
+    ]
+
+    try:
+        owner = agent.organization or agent.user
+        plan = get_owner_plan(owner) or {}
+        plan_id = str(plan.get("id") or "").lower()
+        if plan_id and plan_id != "free":
+            settings_lines.append(
+                "Intelligence level: Options are Standard (1x credits), Smarter (2x credits), and Smartest (5x credits). Higher intelligence uses more task credits but yields better results."
+            )
+    except DatabaseError:
+        logger.debug(
+            "Failed to append intelligence setting note for agent %s",
+            getattr(agent, "id", "unknown"),
+            exc_info=True,
+        )
+
+    return "Agent settings:\n- " + "\n- ".join(settings_lines)
+
+
+def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
+    """Return a short description of email settings fields."""
+    email_settings_url = _build_console_url("agent_email_settings", pk=agent.id)
+    lines: list[str] = [
+        "Agent email address/endpoints: create or update the agent's email address (endpoint).",
+        "SMTP (outbound): host/port, security (SSL or STARTTLS), auth mode, username/password, outbound enable toggle.",
+        "IMAP (inbound): host/port, security (SSL or STARTTLS), username/password, folder, inbound enable toggle, IDLE enable, poll interval seconds.",
+        "Utilities: Test SMTP, Test IMAP, Poll now for inbound mail (after saving credentials).",
+        f"Manage agent email settings: {email_settings_url}",
+    ]
+    return "Agent email settings:\n- " + "\n- ".join(lines)
+
 @tracer.start_as_current_span("Build Prompt Context")
 def build_prompt_context(
     agent: PersistentAgent,
@@ -545,6 +732,27 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
+
+    capabilities_sections = _build_agent_capabilities_sections(agent)
+    if capabilities_sections:
+        cap_group = important_group.group("agent_capabilities", weight=2)
+        capabilities_note = capabilities_sections.get("agent_capabilities_note")
+        if capabilities_note:
+            cap_group.section_text(
+                "agent_capabilities_note",
+                capabilities_note,
+                weight=2,
+                non_shrinkable=True,
+            )
+        plan_info_text = capabilities_sections.get("plan_info")
+        if plan_info_text:
+            cap_group.section_text("plan_info", plan_info_text, weight=2, non_shrinkable=True)
+        settings_text = capabilities_sections.get("agent_settings")
+        if settings_text:
+            cap_group.section_text("agent_settings", settings_text, weight=1, non_shrinkable=True)
+        email_settings_text = capabilities_sections.get("agent_email_settings")
+        if email_settings_text:
+            cap_group.section_text("agent_email_settings", email_settings_text, weight=1, non_shrinkable=True)
 
     # Contacts block - use promptree natively
     recent_contacts_text = _build_contacts_block(agent, important_group, span)
