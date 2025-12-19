@@ -13,6 +13,7 @@ declare global {
 type AgentSummary = {
   id: string
   name: string
+  avatarUrl: string | null
   listingDescription: string
   listingDescriptionSource: string | null
   miniDescription: string
@@ -245,6 +246,7 @@ function AgentCard({ agent }: AgentCardProps) {
       }
     }
   }, [])
+  const hasAvatar = Boolean(agent.avatarUrl)
 
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
@@ -263,6 +265,11 @@ function AgentCard({ agent }: AgentCardProps) {
           style={{ backgroundColor: agent.iconBackgroundHex, borderColor: agent.iconBorderHex }}
         >
           <Zap className={`h-7 w-7 ${agent.headerIconClass}`} aria-hidden="true" />
+          {hasAvatar ? (
+            <img src={agent.avatarUrl ?? undefined} alt={`${agent.name} avatar`} className="h-full w-full object-cover" />
+          ) : (
+            <Zap className={`h-8 w-8 ${agent.headerIconClass}`} aria-hidden="true" />
+          )}
         </div>
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>

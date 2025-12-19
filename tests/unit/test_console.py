@@ -1,6 +1,8 @@
 import json
 from decimal import Decimal
 from datetime import timedelta
+import shutil
+import tempfile
 
 from django.utils import timezone
 
@@ -12,6 +14,7 @@ from unittest.mock import patch
 from bs4 import BeautifulSoup
 from api.services.daily_credit_settings import get_daily_credit_settings_for_plan
 from constants.plans import PlanNames
+from django.core.files.uploadedfile import SimpleUploadedFile
 
 
 @tag("batch_console_agents")
@@ -402,6 +405,98 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(response.status_code, 302)
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
+
+    @tag("batch_console_agents")
+    def test_agent_detail_uploads_avatar_and_surfaces_urls(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        tmp_media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_media, ignore_errors=True)
+
+        with override_settings(MEDIA_ROOT=tmp_media, MEDIA_URL='/media/'):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Avatar Browser')
+            agent = PersistentAgent.objects.create(
+                user=self.user,
+                name='Avatar Agent',
+                charter='Show my face',
+                browser_use_agent=browser_agent,
+            )
+
+            url = reverse('agent_detail', kwargs={'pk': agent.id})
+            png_bytes = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDAT\x08\xd7c\xf8\x0f"
+                b"\x00\x01\x01\x01\x00\x18\xdd\x8d\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            upload = SimpleUploadedFile('avatar.png', png_bytes, content_type='image/png')
+
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'avatar': upload,
+            })
+            self.assertEqual(response.status_code, 302)
+
+            agent.refresh_from_db()
+            self.assertTrue(agent.avatar)
+            detail_resp = self.client.get(url)
+            self.assertEqual(detail_resp.status_code, 200)
+            detail_props = detail_resp.context.get('agent_detail_props') or {}
+            avatar_url = (detail_props.get('agent') or {}).get('avatarUrl')
+            self.assertTrue(avatar_url)
+
+            list_resp = self.client.get(reverse('agents'))
+            self.assertEqual(list_resp.status_code, 200)
+            list_payload = self._get_agent_list_payload(list_resp)
+            first_agent = list_payload.get('agents', [])[0]
+            self.assertTrue(first_agent.get('avatarUrl'))
+
+    @tag("batch_console_agents")
+    def test_agent_detail_can_clear_avatar(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        tmp_media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp_media, ignore_errors=True)
+
+        with override_settings(MEDIA_ROOT=tmp_media, MEDIA_URL='/media/'):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Avatar Browser Clear')
+            agent = PersistentAgent.objects.create(
+                user=self.user,
+                name='Avatar Clear Agent',
+                charter='Remove avatar',
+                browser_use_agent=browser_agent,
+            )
+
+            png_bytes = (
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+                b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\x0bIDAT\x08\xd7c\xf8\x0f"
+                b"\x00\x01\x01\x01\x00\x18\xdd\x8d\x1d\x00\x00\x00\x00IEND\xaeB`\x82"
+            )
+            agent.avatar.save('seed.png', SimpleUploadedFile('seed.png', png_bytes, content_type='image/png'), save=True)
+            existing_path = agent.avatar.name
+
+            url = reverse('agent_detail', kwargs={'pk': agent.id})
+            response = self.client.post(url, {
+                'name': agent.name,
+                'charter': agent.charter,
+                'is_active': 'on',
+                'clear_avatar': 'true',
+            })
+            self.assertEqual(response.status_code, 302)
+
+            agent.refresh_from_db()
+            self.assertFalse(agent.avatar)
+
+            detail_resp = self.client.get(url)
+            detail_props = detail_resp.context.get('agent_detail_props') or {}
+            avatar_url = (detail_props.get('agent') or {}).get('avatarUrl')
+            self.assertIsNone(avatar_url)
+
+            list_resp = self.client.get(reverse('agents'))
+            payload = self._get_agent_list_payload(list_resp)
+            first_agent = payload.get('agents', [])[0]
+            self.assertIsNone(first_agent.get('avatarUrl'))
 
     @tag("batch_console_agents")
     def test_agent_list_shows_daily_credit_warning(self):

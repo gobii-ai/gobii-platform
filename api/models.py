@@ -3869,6 +3869,12 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending short description generation.",
     )
+    avatar = models.FileField(
+        upload_to="agent_avatars/%Y/%m/%d/",
+        blank=True,
+        null=True,
+        help_text="Optional avatar image displayed for this agent.",
+    )
     mini_description = models.CharField(
         max_length=80,
         blank=True,
@@ -4109,6 +4115,16 @@ class PersistentAgent(models.Model):
             except AgentColor.DoesNotExist:
                 pass
         return AgentColor.get_default_hex()
+
+    def get_avatar_url(self) -> str | None:
+        """Return a usable URL for the agent avatar, if set."""
+        file_field = getattr(self, "avatar", None)
+        if not file_field:
+            return None
+        try:
+            return file_field.url
+        except Exception:
+            return None
 
     def _validate_org_seats(self):
         billing = getattr(self.organization, "billing", None)
