@@ -9,6 +9,8 @@ from api.agent.tools.mcp_result_adapters import (
     BrightDataSearchEngineAdapter,
     BrightDataSearchEngineBatchAdapter,
     BrightDataLinkedInPersonProfileAdapter,
+    BrightDataScrapeAsMarkdownAdapter,
+    BrightDataScrapeBatchAdapter,
 )
 from api.models import (
     BrowserUseAgent,
@@ -141,6 +143,44 @@ class BrightDataLinkedInPersonProfileAdapterTests(SimpleTestCase):
         self.assertNotIn("image", cleaned)
         self.assertNotIn("image_url", cleaned)
         self.assertNotIn("people_also_viewed", cleaned)
+
+
+@tag("batch_mcp_tools")
+class BrightDataScrapeAsMarkdownAdapterTests(SimpleTestCase):
+    def test_scrubs_data_image_markdown(self):
+        payload = (
+            "Intro ![logo](data:image/png;base64,AAA) "
+            "more ![icon](data:image/svg+xml;base64,BBB) "
+            "keep ![ok](https://example.com/a.png)"
+        )
+        adapter = BrightDataScrapeAsMarkdownAdapter()
+        result = DummyResult(payload)
+
+        adapted = adapter.adapt(result)
+
+        self.assertEqual(
+            adapted.content[0].text,
+            "Intro ![logo]() more ![icon]() keep ![ok](https://example.com/a.png)",
+        )
+
+
+@tag("batch_mcp_tools")
+class BrightDataScrapeBatchAdapterTests(SimpleTestCase):
+    def test_scrubs_data_images_inside_batch_payload(self):
+        payload = [
+            {"url": "https://example.com", "content": "![hero](data:image/jpeg;base64,CCC) text"},
+            {"url": "https://example.com/2", "content": "No images here"},
+            {"url": "https://example.com/3", "content": None},
+        ]
+        adapter = BrightDataScrapeBatchAdapter()
+        result = DummyResult(json.dumps(payload))
+
+        adapted = adapter.adapt(result)
+        cleaned = json.loads(adapted.content[0].text)
+
+        self.assertEqual(cleaned[0]["content"], "![hero]() text")
+        self.assertEqual(cleaned[1]["content"], "No images here")
+        self.assertIsNone(cleaned[2]["content"])
 
 
 @tag("batch_mcp_tools")

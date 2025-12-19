@@ -1,9 +1,21 @@
 import json
 import logging
+import re
 from typing import Any, List, Optional, Tuple
 
 
 logger = logging.getLogger(__name__)
+_DATA_IMAGE_MARKDOWN_RE = re.compile(
+    r"!\[([^\]]*)\]\(\s*data:image\/[a-z0-9.+-]+;base64,[^)]+?\s*\)",
+    re.IGNORECASE,
+)
+
+
+def scrub_markdown_data_images(text: str) -> str:
+    return _DATA_IMAGE_MARKDOWN_RE.sub(
+        lambda match: f"![{match.group(1)}]()",
+        text,
+    )
 
 
 class MCPToolResultAdapter:
@@ -184,6 +196,54 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
         return result
 
 
+class BrightDataScrapeAsMarkdownAdapter(BrightDataAdapterBase):
+    """Strip embedded data images from markdown snapshots."""
+
+    server_name = "brightdata"
+    tool_name = "scrape_as_markdown"
+
+    def adapt(self, result: Any) -> Any:
+        content_blocks = getattr(result, "content", None)
+        if not content_blocks or not isinstance(content_blocks, (list, tuple)):
+            return result
+
+        try:
+            first_block = content_blocks[0]
+        except IndexError:
+            return result
+
+        raw_text = getattr(first_block, "text", None)
+        if not raw_text or not isinstance(raw_text, str):
+            return result
+
+        first_block.text = scrub_markdown_data_images(raw_text)
+        return result
+
+
+class BrightDataScrapeBatchAdapter(BrightDataAdapterBase):
+    """Strip embedded data images from batched markdown snapshots."""
+
+    server_name = "brightdata"
+    tool_name = "scrape_batch"
+
+    def adapt(self, result: Any) -> Any:
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            return result
+
+        first_block, payload = parsed
+        if isinstance(payload, list):
+            for entry in payload:
+                if not isinstance(entry, dict):
+                    continue
+                content = entry.get("content")
+                if isinstance(content, str):
+                    entry["content"] = scrub_markdown_data_images(content)
+
+        first_block.text = json.dumps(payload)
+        return result
+
+
 class MCPResultAdapterRegistry:
     """Registry of adapters keyed by provider/tool."""
 
@@ -198,6 +258,8 @@ class MCPResultAdapterRegistry:
                 BrightDataLinkedInCompanyProfileAdapter(),
                 BrightDataLinkedInPersonProfileAdapter(),
                 BrightDataSearchEngineBatchAdapter(),
+                BrightDataScrapeAsMarkdownAdapter(),
+                BrightDataScrapeBatchAdapter(),
             ]
         )
 
