@@ -29,6 +29,7 @@ API_AGENT_ID = "api"
 API_AGENT_NAME = "API"
 API_CREDIT_DECIMAL = Decimal("1")
 DECIMAL_ZERO = Decimal("0")
+EVAL_ENVIRONMENT = "eval"
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,18 @@ def _format_period_label(start_date: date, end_date: date) -> str:
     return f"{start_label} – {end_label}"
 
 
+def _exclude_eval_browser_tasks(qs):
+    return qs.exclude(agent__persistent_agent__execution_environment=EVAL_ENVIRONMENT)
+
+
+def _exclude_eval_persistent_steps(qs):
+    return qs.exclude(agent__execution_environment=EVAL_ENVIRONMENT)
+
+
+def _exclude_eval_tool_calls(qs):
+    return qs.exclude(step__agent__execution_environment=EVAL_ENVIRONMENT)
+
+
 def _get_accessible_agents(request: HttpRequest, organization: Organization | None) -> list[UsageAgentDescriptor]:
     if organization is not None:
         qs = BrowserUseAgent.objects.filter(
@@ -74,6 +87,7 @@ def _get_accessible_agents(request: HttpRequest, organization: Organization | No
         qs = BrowserUseAgent.objects.filter(user=request.user).filter(
             Q(persistent_agent__organization__isnull=True) | Q(persistent_agent__isnull=True)
         )
+    qs = qs.exclude(persistent_agent__execution_environment=EVAL_ENVIRONMENT)
 
     descriptors: list[UsageAgentDescriptor] = [
         UsageAgentDescriptor(
@@ -224,7 +238,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             persistent_agent_ids,
         ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
 
-        tasks_qs = BrowserUseAgentTask.objects.filter(**filters)
+        tasks_qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**filters))
         agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
         if agent_filter_q is not None:
             tasks_qs = tasks_qs.filter(agent_filter_q)
@@ -252,7 +266,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             persistent_filters["agent__user"] = request.user
             persistent_filters["agent__organization__isnull"] = True
 
-        persistent_steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+        persistent_steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
         if persistent_agent_ids:
             persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_ids)
         elif filtered_agent_ids:
@@ -462,7 +476,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
             }
-            qs = BrowserUseAgentTask.objects.filter(**filters)
+            qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**filters))
             if agent_filter_q is not None:
                 qs = qs.filter(agent_filter_q)
             rows = (
@@ -484,7 +498,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__lt": end_dt,
             }
 
-            steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+            steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
             if persistent_agent_ids:
                 steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
             elif filtered_agent_ids:
@@ -510,7 +524,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__gte": start_dt,
                 "created_at__lt": end_dt,
             }
-            qs = BrowserUseAgentTask.objects.filter(**filters)
+            qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**filters))
             if agent_filter_q is not None:
                 qs = qs.filter(agent_filter_q)
             rows = (
@@ -535,7 +549,7 @@ class UsageTrendAPIView(LoginRequiredMixin, View):
                 "created_at__lt": end_dt,
             }
 
-            steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+            steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
             if persistent_agent_ids:
                 steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
             elif filtered_agent_ids:
@@ -654,7 +668,7 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
 
         zero_decimal = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
 
-        persistent_qs = PersistentAgentToolCall.objects.filter(**filters)
+        persistent_qs = _exclude_eval_tool_calls(PersistentAgentToolCall.objects.filter(**filters))
         if filtered_agent_ids:
             if actual_agent_ids:
                 persistent_q_filter = Q(step__agent__browser_use_agent_id__in=actual_agent_ids)
@@ -693,7 +707,7 @@ class UsageToolBreakdownAPIView(LoginRequiredMixin, View):
             step_filters["agent__user"] = request.user
             step_filters["agent__organization__isnull"] = True
 
-        steps_qs = PersistentAgentStep.objects.filter(**step_filters)
+        steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**step_filters))
         if filtered_agent_ids:
             if actual_agent_ids:
                 steps_qs = steps_qs.filter(agent__browser_use_agent_id__in=actual_agent_ids)
@@ -826,7 +840,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
 
         agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
 
-        tasks_qs = BrowserUseAgentTask.objects.filter(**task_filters)
+        tasks_qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**task_filters))
         if agent_filter_q is not None:
             tasks_qs = tasks_qs.filter(agent_filter_q)
 
@@ -869,7 +883,7 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
             persistent_filters["agent__user"] = request.user
             persistent_filters["agent__organization__isnull"] = True
 
-        steps_qs = PersistentAgentStep.objects.filter(**persistent_filters)
+        steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
         if persistent_agent_ids:
             steps_qs = steps_qs.filter(agent_id__in=persistent_agent_ids)
         elif filtered_agent_ids:

@@ -3172,9 +3172,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         linked_agent_ids.discard(str(agent.id))
 
         if agent.organization_id:
-            candidate_qs = PersistentAgent.objects.filter(organization_id=agent.organization_id)
+            candidate_qs = PersistentAgent.objects.non_eval().filter(organization_id=agent.organization_id)
         else:
-            candidate_qs = PersistentAgent.objects.filter(user=agent.user, organization__isnull=True)
+            candidate_qs = PersistentAgent.objects.non_eval().filter(user=agent.user, organization__isnull=True)
 
         if linked_agent_ids:
             candidate_qs = candidate_qs.exclude(id__in=linked_agent_ids)

@@ -6,6 +6,7 @@ from unittest.mock import patch, MagicMock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from api.models import BrowserUseAgent, PersistentAgent
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -26,6 +27,40 @@ class HomePageTests(TestCase):
             response,
             '<meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">',
         )
+
+    @tag("batch_pages")
+    def test_home_page_excludes_eval_agents(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="homeuser@example.com",
+            email="homeuser@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        visible_browser = BrowserUseAgent.objects.create(user=user, name="Visible Browser")
+        PersistentAgent.objects.create(
+            user=user,
+            name="Visible Agent",
+            charter="Visible charter",
+            browser_use_agent=visible_browser,
+        )
+
+        eval_browser = BrowserUseAgent.objects.create(user=user, name="Eval Browser")
+        PersistentAgent.objects.create(
+            user=user,
+            name="Eval Agent",
+            charter="Eval charter",
+            browser_use_agent=eval_browser,
+            execution_environment="eval",
+        )
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        recent_agents = response.context.get("recent_agents") or []
+        names = {agent.name for agent in recent_agents}
+        self.assertIn("Visible Agent", names)
+        self.assertNotIn("Eval Agent", names)
 
     @tag("batch_pages")
     def test_home_page_exposes_all_pretrained_workers(self):
