@@ -30,7 +30,7 @@
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.4) 30%, rgba(255, 255, 255, 0.85) 100%);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.1) 30%, rgba(255, 255, 255, 0.5) 100%);
       pointer-events: none;
       z-index: 2;
       mix-blend-mode: lighten;
@@ -177,7 +177,7 @@
     <div class="relative max-w-5xl mx-auto px-6 pt-36 pb-0">
       
       <!-- Ambient Glow centered on hero + input -->
-      <div class="absolute top-20 left-1/2 -translate-x-1/2 w-[1200px] h-[800px] bg-white blur-[120px] opacity-60 rounded-full pointer-events-none -z-10 mix-blend-soft-light"></div>
+      <div class="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[900px] bg-[radial-gradient(closest-side,rgba(255,255,255,0.8)_0%,rgba(255,255,255,0)_100%)] blur-[80px] pointer-events-none -z-10"></div>
 
       <!-- Main Headline -->
       {% include "home/_hero.html" %}
