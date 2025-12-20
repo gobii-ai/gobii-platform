@@ -15,7 +15,7 @@
     .game-of-life-panel::before {
       content: "";
       position: absolute;
-      inset: -20%;
+      inset: 0;
       background:
         radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
         radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
@@ -158,18 +158,20 @@
   </style>
 {% endblock %}
 {% block content %}
-<div class="relative">
-  <!-- Decorative blobs removed for cleaner background -->
+<div class="relative game-of-life-panel -mt-16 min-h-[800px]">
+  <div class="game-of-life-bg" aria-hidden="true">
+    <canvas class="game-of-life-canvas"></canvas>
+  </div>
   
   <!-- Grid pattern overlay -->
   <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
   
   <!-- ========================================================= -->
   <!-- Agent Spawn Hero -->
-  <section class="relative pb-0">
+  <section class="relative pb-0 game-of-life-content">
     
     <!-- Content container with enhanced styling -->
-    <div class="relative max-w-5xl mx-auto px-6 pt-16 pb-0">
+    <div class="relative max-w-5xl mx-auto px-6 pt-36 pb-0">
 
       <!-- Main Headline -->
       {% include "home/_hero.html" %}
@@ -183,18 +185,15 @@
 
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="gobii-card-base game-of-life-panel max-w-4xl mx-auto">
-        <div class="game-of-life-bg" aria-hidden="true">
-          <canvas class="game-of-life-canvas"></canvas>
-        </div>
-        <div class="game-of-life-content p-2 sm:p-4 lg:p-6">
+      <div class="gobii-card-base max-w-4xl mx-auto bg-white/60 backdrop-blur-xl border border-white/40 shadow-2xl rounded-2xl">
+        <div class="p-2 sm:p-4 lg:p-6">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
             {% csrf_token %}
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200 relative">
+              <div class="border-2 border-white/50 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white/80 transition-colors duration-200 relative shadow-sm">
                 <!-- Typing prompt overlay -->
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
