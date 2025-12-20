@@ -3,7 +3,11 @@
 {% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
-<header class="sticky top-0 z-50 bg-transparent backdrop-blur-md border-b border-white/20 hs-header transition-colors duration-300">
+<header class="sticky top-0 z-50 bg-transparent hs-header transition-all duration-300"
+        x-data="{ scrolled: window.scrollY > 10 }"
+        x-init="scrolled = window.scrollY > 10"
+        @scroll.window.passive="scrolled = window.scrollY > 10"
+        :class="{ 'backdrop-blur-md border-b border-white/20': scrolled }">
   <!-- Fluid Background Tint Layer -->
   <div class="absolute inset-0 bg-white/75 z-[-1]"
        x-data
