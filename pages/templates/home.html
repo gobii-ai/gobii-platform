@@ -36,6 +36,16 @@
       mix-blend-mode: lighten;
     }
 
+    .game-of-life-gradient-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
+      background: linear-gradient(180deg, rgba(99, 102, 241, 0.55) 0%, rgba(129, 140, 248, 0.65) 32%, rgba(59, 130, 246, 0.65) 75%, rgba(15, 23, 42, 0.78) 100%);
+      -webkit-mask-image: radial-gradient(circle at 50% 55%, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 60%, rgba(0, 0, 0, 0) 100%);
+      mask-image: radial-gradient(circle at 50% 55%, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 60%, rgba(0, 0, 0, 0) 100%);
+    }
+
     .game-of-life-content {
       position: relative;
       z-index: 3;
@@ -141,6 +151,7 @@
 {% endblock %}
 {% block content %}
 <div class="relative game-of-life-panel -mt-16 min-h-[850px]">
+  <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
   
   <!-- Grid pattern overlay -->
   <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
