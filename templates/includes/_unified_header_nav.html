@@ -47,44 +47,44 @@
             <!-- Dropdown panel -->
             <div x-cloak
                  x-show="open"
-                 x-transition:enter="transition ease-out duration-200"
-                 x-transition:enter-start="opacity-0 translate-y-1 scale-[0.98]"
-                 x-transition:enter-end="opacity-100 translate-y-0 scale-100"
-                 x-transition:leave="transition ease-in duration-150"
-                 x-transition:leave-start="opacity-100 translate-y-0 scale-100"
-                 x-transition:leave-end="opacity-0 translate-y-1 scale-[0.98]"
+                 x-transition:enter="transition ease-out duration-150"
+                 x-transition:enter-start="opacity-0 -translate-y-1"
+                 x-transition:enter-end="opacity-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-100"
+                 x-transition:leave-start="opacity-100 translate-y-0"
+                 x-transition:leave-end="opacity-0 -translate-y-1"
                  class="absolute left-1/2 -translate-x-1/2 top-full pt-3 w-56 z-50">
               <div class="bg-white/95 backdrop-blur-xl rounded-2xl shadow-lg shadow-slate-200/50 ring-1 ring-slate-900/[0.04] p-1.5 overflow-hidden">
                 <div class="flex flex-col">
-                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gradient-to-r hover:from-violet-500 hover:to-indigo-500 transition-all duration-200">
-                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white transition-all duration-200">
+                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="users" class="h-[18px] w-[18px]"></i>
                     </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white transition-colors duration-200">Recruiting</span>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Recruiting</span>
                   </a>
-                  <a href="{% url 'pages:solution' slug='sales' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gradient-to-r hover:from-violet-500 hover:to-indigo-500 transition-all duration-200">
-                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white transition-all duration-200">
+                  <a href="{% url 'pages:solution' slug='sales' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="briefcase" class="h-[18px] w-[18px]"></i>
                     </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white transition-colors duration-200">Sales</span>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Sales</span>
                   </a>
-                  <a href="{% url 'pages:solution' slug='health-care' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gradient-to-r hover:from-violet-500 hover:to-indigo-500 transition-all duration-200">
-                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white transition-all duration-200">
+                  <a href="{% url 'pages:solution' slug='health-care' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="activity" class="h-[18px] w-[18px]"></i>
                     </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white transition-colors duration-200">Health Care</span>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Health Care</span>
                   </a>
-                  <a href="{% url 'pages:solution' slug='defense' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gradient-to-r hover:from-violet-500 hover:to-indigo-500 transition-all duration-200">
-                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white transition-all duration-200">
+                  <a href="{% url 'pages:solution' slug='defense' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="shield" class="h-[18px] w-[18px]"></i>
                     </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white transition-colors duration-200">Defense</span>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Defense</span>
                   </a>
-                  <a href="{% url 'pages:solution' slug='engineering' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-gradient-to-r hover:from-violet-500 hover:to-indigo-500 transition-all duration-200">
-                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white transition-all duration-200">
+                  <a href="{% url 'pages:solution' slug='engineering' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-100 text-slate-500 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="cpu" class="h-[18px] w-[18px]"></i>
                     </div>
-                    <span class="text-sm font-medium text-slate-700 group-hover:text-white transition-colors duration-200">Engineering</span>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">Engineering</span>
                   </a>
                 </div>
               </div>
