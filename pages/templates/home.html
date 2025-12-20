@@ -188,15 +188,14 @@
 
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="gobii-card-base max-w-4xl mx-auto">
-        <div class="p-2 sm:p-4 lg:p-6">
+      <div class="max-w-4xl mx-auto">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
             {% csrf_token %}
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-white/60 focus-within:border-indigo-500 rounded-2xl overflow-hidden bg-white/90 backdrop-blur-sm transition-colors duration-200 relative shadow-xl">
+              <div class="border-2 border-white/60 focus-within:border-indigo-500 rounded-2xl overflow-hidden bg-white/90 backdrop-blur-sm transition-colors duration-200 relative shadow-2xl">
                 <!-- Typing prompt overlay -->
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
@@ -250,7 +249,6 @@
 
             </div>
           </form>
-        </div>
       </div>
 
       {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}
