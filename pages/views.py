@@ -222,7 +222,7 @@ class HomePage(TemplateView):
                 hero_text = escape(hero_text)  # Escape HTML to prevent XSS
                 hero_text = hero_text.replace(
                     "{blue}",
-                    '<span class="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">'
+                    '<span class="bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">'
                 ).replace(
                     "{/blue}",
                     '</span>'
@@ -325,7 +325,7 @@ class HomePage(TemplateView):
         )
 
         if self.request.user.is_authenticated:
-            recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
+            recent_agents_qs = PersistentAgent.objects.non_eval().filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
             recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
 
