@@ -39,13 +39,15 @@
                  x-transition:leave="transition ease-in duration-100"
                  x-transition:leave-start="opacity-100 scale-100"
                  x-transition:leave-end="opacity-0 scale-95"
-                 class="absolute left-0 top-full mt-2 w-48 bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200 z-50">
-              <div class="py-2">
-                <a href="{% url 'pages:solution' slug='recruiting' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Recruiting</a>
-                <a href="{% url 'pages:solution' slug='sales' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Sales</a>
-                <a href="{% url 'pages:solution' slug='health-care' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Health Care</a>
-                <a href="{% url 'pages:solution' slug='defense' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Defense</a>
-                <a href="{% url 'pages:solution' slug='engineering' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Engineering</a>
+                 class="absolute left-0 top-full pt-2 w-48 z-50">
+              <div class="bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
+                <div class="py-2">
+                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Recruiting</a>
+                  <a href="{% url 'pages:solution' slug='sales' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Sales</a>
+                  <a href="{% url 'pages:solution' slug='health-care' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Health Care</a>
+                  <a href="{% url 'pages:solution' slug='defense' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Defense</a>
+                  <a href="{% url 'pages:solution' slug='engineering' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Engineering</a>
+                </div>
               </div>
             </div>
         </div>
