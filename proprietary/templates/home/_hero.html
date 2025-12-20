@@ -2,6 +2,7 @@
   <h1 class="text-3xl sm:text-4xl lg:text-5xl font-medium text-gray-900 leading-tight max-w-3xl mx-auto">
     {%  if landing_hero_text %}
       <span class="font-semibold">{{ landing_hero_text|safe }}</span>
+    {% else %}
       <span class="font-normal">Start</span>
       <span class="font-semibold bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">saving time</span>
       <i data-lucide="clock" class="inline-block w-[0.9em] h-[0.9em] ml-1 text-purple-600 align-top mt-[0.1em]"></i>
