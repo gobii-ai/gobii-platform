@@ -177,7 +177,10 @@
     <div class="relative max-w-5xl mx-auto px-6 pt-36 pb-0">
 
       <!-- Main Headline -->
-      {% include "home/_hero.html" %}
+      <div class="relative">
+        <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-white blur-[100px] opacity-90 rounded-full pointer-events-none -z-10"></div>
+        {% include "home/_hero.html" %}
+      </div>
 
       <!-- Task Usage Warning for logged in users -->
       {% if user.is_authenticated %}
