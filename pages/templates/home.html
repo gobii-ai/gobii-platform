@@ -628,9 +628,7 @@
         };
 
         const palette = [
-          { top: '#4338ca', bottom: '#6366f1' },
-          { top: '#2563eb', bottom: '#7c3aed' },
-          { top: '#0ea5e9', bottom: '#6366f1' },
+          { top: 'rgba(255, 255, 255, 0.4)', bottom: 'rgba(255, 255, 255, 0)' },
         ];
 
         function initWaves() {
@@ -725,10 +723,9 @@
         function drawColorWash(time) {
           const shift = Math.sin(time * 0.00018) * state.width * 0.25;
           const gradient = ctx.createLinearGradient(shift, 0, state.width + shift, state.height);
-          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.16)');
-          gradient.addColorStop(0.35, 'rgba(129, 140, 248, 0.24)');
-          gradient.addColorStop(0.7, 'rgba(244, 114, 182, 0.18)');
-          gradient.addColorStop(1, 'rgba(124, 58, 237, 0.24)');
+          gradient.addColorStop(0, 'rgba(255, 255, 255, 0.05)');
+          gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.12)');
+          gradient.addColorStop(1, 'rgba(255, 255, 255, 0.05)');
           ctx.save();
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = 0.85;
