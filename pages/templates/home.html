@@ -9,7 +9,31 @@
     .game-of-life-panel {
       position: relative;
       overflow: hidden;
-      background: radial-gradient(circle at 50% 50%, rgba(248, 250, 252, 1) 0%, rgba(241, 245, 249, 1) 100%);
+      isolation: isolate;
+    }
+
+    .game-of-life-panel::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
+        radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
+        radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
+      opacity: 0.8;
+      filter: blur(40px);
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    .game-of-life-panel::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
+      pointer-events: none;
+      z-index: 2;
+      mix-blend-mode: lighten;
     }
 
     .game-of-life-content {
