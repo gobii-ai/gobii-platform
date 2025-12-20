@@ -3,7 +3,7 @@
 {% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
-<header class="sticky top-0 z-30 bg-white/80 backdrop-blur hs-header">
+<header class="sticky top-0 z-30 bg-white shadow-sm hs-header">
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex items-center justify-between h-16">
       <!-- Brand -->
@@ -40,13 +40,28 @@
                  x-transition:leave-start="opacity-100 scale-100"
                  x-transition:leave-end="opacity-0 scale-95"
                  class="absolute left-0 top-full pt-2 w-48 z-50">
-              <div class="bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
+              <div class="bg-white shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200">
                 <div class="py-2">
-                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Recruiting</a>
-                  <a href="{% url 'pages:solution' slug='sales' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Sales</a>
-                  <a href="{% url 'pages:solution' slug='health-care' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Health Care</a>
-                  <a href="{% url 'pages:solution' slug='defense' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Defense</a>
-                  <a href="{% url 'pages:solution' slug='engineering' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Engineering</a>
+                  <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">
+                    <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
+                    Recruiting
+                  </a>
+                  <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">
+                    <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
+                    Sales
+                  </a>
+                  <a href="{% url 'pages:solution' slug='health-care' %}" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">
+                    <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>
+                    Health Care
+                  </a>
+                  <a href="{% url 'pages:solution' slug='defense' %}" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">
+                    <i aria-hidden="true" data-lucide="shield" class="h-4 w-4"></i>
+                    Defense
+                  </a>
+                  <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">
+                    <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
+                    Engineering
+                  </a>
                 </div>
               </div>
             </div>
@@ -218,11 +233,26 @@
                 </svg>
             </button>
             <div x-show="expanded" class="pl-4 space-y-1">
-                <a href="{% url 'pages:solution' slug='recruiting' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Recruiting</a>
-                <a href="{% url 'pages:solution' slug='sales' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Sales</a>
-                <a href="{% url 'pages:solution' slug='health-care' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Health Care</a>
-                <a href="{% url 'pages:solution' slug='defense' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Defense</a>
-                <a href="{% url 'pages:solution' slug='engineering' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Engineering</a>
+                <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
+                    Recruiting
+                </a>
+                <a href="{% url 'pages:solution' slug='sales' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="briefcase" class="h-4 w-4"></i>
+                    Sales
+                </a>
+                <a href="{% url 'pages:solution' slug='health-care' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="activity" class="h-4 w-4"></i>
+                    Health Care
+                </a>
+                <a href="{% url 'pages:solution' slug='defense' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="shield" class="h-4 w-4"></i>
+                    Defense
+                </a>
+                <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="cpu" class="h-4 w-4"></i>
+                    Engineering
+                </a>
             </div>
         </div>
 
