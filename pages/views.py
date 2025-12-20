@@ -1075,3 +1075,51 @@ class ClearSignupTrackingView(View):
                 del request.session[key]
 
         return response
+
+
+class SolutionView(TemplateView):
+    template_name = "solutions/solution.html"
+
+    SOLUTION_DATA = {
+        'recruiting': {
+            'title': 'Recruiting',
+            'tagline': 'Automate candidate sourcing and screening.',
+            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.'
+        },
+        'sales': {
+            'title': 'Sales',
+            'tagline': 'Supercharge your outbound outreach.',
+            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.'
+        },
+        'health-care': {
+            'title': 'Health Care',
+            'tagline': 'Streamline patient intake and administrative tasks.',
+            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.'
+        },
+        'defense': {
+            'title': 'Defense',
+            'tagline': 'Secure, on-premise AI intelligence.',
+            'description': 'Mission-critical automation for national security with strict data governance.'
+        },
+        'engineering': {
+            'title': 'Engineering',
+            'tagline': 'Accelerate development workflows.',
+            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.'
+        },
+    }
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        slug = self.kwargs['slug']
+        data = self.SOLUTION_DATA.get(slug, {
+            'title': slug.replace('-', ' ').title(),
+            'tagline': 'AI Solutions for your industry.',
+            'description': 'Tailored AI agents and automation to help you scale.'
+        })
+        
+        context.update({
+            'solution_title': data['title'],
+            'solution_tagline': data['tagline'],
+            'solution_description': data['description'],
+        })
+        return context

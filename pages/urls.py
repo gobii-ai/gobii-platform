@@ -20,6 +20,7 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    SolutionView,
 )
 
 from djstripe import views as djstripe_views
@@ -53,6 +54,9 @@ urlpatterns = [
 
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
+
+    # Solutions
+    path("solutions/<slug:slug>/", SolutionView.as_view(), name="solution"),
 
     # Stripe webhooks
     path("stripe/", include("djstripe.urls", namespace="djstripe")),

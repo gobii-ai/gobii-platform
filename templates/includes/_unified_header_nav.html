@@ -19,6 +19,37 @@
 
       <!-- Desktop Nav -->
       <nav class="hidden md:flex items-center gap-x-6 text-sm font-medium">
+        <!-- Solutions Dropdown -->
+        <div x-data="{ open: false }" class="relative inline-flex" @mouseleave="open = false">
+            <button @mouseover="open = true" @click="open = !open"
+                    class="inline-flex items-center gap-x-1 text-slate-700 hover:text-blue-600 focus:outline-none"
+                    :class="{ 'text-blue-600': open }">
+              Solutions
+              <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            <!-- Dropdown panel -->
+            <div x-cloak
+                 x-show="open"
+                 x-transition:enter="transition ease-out duration-150 transform"
+                 x-transition:enter-start="opacity-0 scale-95"
+                 x-transition:enter-end="opacity-100 scale-100"
+                 x-transition:leave="transition ease-in duration-100"
+                 x-transition:leave-start="opacity-100 scale-100"
+                 x-transition:leave-end="opacity-0 scale-95"
+                 class="absolute left-0 top-full mt-2 w-48 bg-white/90 backdrop-blur-md shadow-2xl rounded-xl ring-1 ring-slate-200/50 divide-y divide-gray-200 z-50">
+              <div class="py-2">
+                <a href="{% url 'pages:solution' slug='recruiting' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Recruiting</a>
+                <a href="{% url 'pages:solution' slug='sales' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Sales</a>
+                <a href="{% url 'pages:solution' slug='health-care' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Health Care</a>
+                <a href="{% url 'pages:solution' slug='defense' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Defense</a>
+                <a href="{% url 'pages:solution' slug='engineering' %}" class="block px-4 py-2 text-sm text-slate-700 hover:bg-blue-50 hover:text-blue-600">Engineering</a>
+              </div>
+            </div>
+        </div>
+
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="text-slate-700 hover:text-blue-600">Pricing</a>
           <a href="https://docs.gobii.ai/developers/developer-basics" title="Gobii Developers - Agents and browser-use in the Cloud" class="text-slate-700 hover:text-blue-600">Developers</a>
@@ -176,6 +207,23 @@
     
     <div class="py-4">
       <div class="px-4 space-y-3 text-sm font-medium">
+        <!-- Mobile Solutions -->
+        <div x-data="{ expanded: false }">
+            <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+                Solutions
+                <svg class="h-4 w-4 transform transition-transform" :class="{ 'rotate-180': expanded }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+            <div x-show="expanded" class="pl-4 space-y-1">
+                <a href="{% url 'pages:solution' slug='recruiting' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Recruiting</a>
+                <a href="{% url 'pages:solution' slug='sales' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Sales</a>
+                <a href="{% url 'pages:solution' slug='health-care' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Health Care</a>
+                <a href="{% url 'pages:solution' slug='defense' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Defense</a>
+                <a href="{% url 'pages:solution' slug='engineering' %}" class="block py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">Engineering</a>
+            </div>
+        </div>
+
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
           <a href="https://docs.gobii.ai/developers/developer-basics" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors" title="Developers guide to using Gobii API for access to agents and browser-use">Developers</a>
