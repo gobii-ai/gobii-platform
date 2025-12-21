@@ -445,61 +445,69 @@
 </section>
 
 <!-- Benefits Section -->
-<section class="bg-white py-16 lg:py-20">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="grid lg:grid-cols-2 gap-16 lg:gap-24 items-center">
-      <div>
+<section class="relative py-16 lg:py-20 overflow-hidden">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-br from-slate-50/80 via-white to-indigo-50/40 pointer-events-none"></div>
+
+  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
+    <div class="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+      <!-- Left: Benefits -->
+      <div class="lg:pr-4">
         <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
           Why teams choose Gobii
         </h2>
-        <p class="mt-4 text-lg text-gray-500 mb-12">
+        <p class="mt-4 text-lg text-gray-500 mb-10">
           Recruiting tools require constant attention. Gobii agents work autonomously, expanding your capacity without adding headcount.
         </p>
 
-        <div class="space-y-8">
-          <div class="flex gap-5">
-            <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-indigo-100 flex items-center justify-center">
-              <i data-lucide="clock" class="w-5 h-5 text-indigo-600"></i>
+        <div class="space-y-6">
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-200/50">
+              <i data-lucide="clock" class="w-6 h-6 text-white"></i>
             </div>
             <div>
               <h3 class="text-lg font-medium text-gray-900 mb-1">Reclaim your calendar</h3>
-              <p class="text-gray-600">Stop spending hours on repetitive sourcing. Let your agent handle the legwork while you focus on interviewing and closing.</p>
+              <p class="text-gray-600 leading-relaxed">Stop spending hours on repetitive sourcing. Let your agent handle the legwork while you focus on interviewing and closing.</p>
             </div>
           </div>
 
-          <div class="flex gap-5">
-            <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-violet-100 flex items-center justify-center">
-              <i data-lucide="trending-up" class="w-5 h-5 text-violet-600"></i>
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-500 flex items-center justify-center shadow-lg shadow-violet-200/50">
+              <i data-lucide="trending-up" class="w-6 h-6 text-white"></i>
             </div>
             <div>
               <h3 class="text-lg font-medium text-gray-900 mb-1">Scale instantly</h3>
-              <p class="text-gray-600">Hiring for 5 roles or 50? Agents scale without training, ramp time, or burnout.</p>
+              <p class="text-gray-600 leading-relaxed">Hiring for 5 roles or 50? Agents scale without training, ramp time, or burnout.</p>
             </div>
           </div>
 
-          <div class="flex gap-5">
-            <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-emerald-100 flex items-center justify-center">
-              <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600"></i>
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-white/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-500 flex items-center justify-center shadow-lg shadow-emerald-200/50">
+              <i data-lucide="check-circle" class="w-6 h-6 text-white"></i>
             </div>
             <div>
               <h3 class="text-lg font-medium text-gray-900 mb-1">Consistent quality</h3>
-              <p class="text-gray-600">AI evaluates every candidate against your criteria. No fatigue, no shortcuts, no overlooked talent.</p>
+              <p class="text-gray-600 leading-relaxed">AI evaluates every candidate against your criteria. No fatigue, no shortcuts, no overlooked talent.</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div>
-        <div class="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-3xl p-10 lg:p-12">
+      <!-- Right: Testimonial -->
+      <div class="relative">
+        <!-- Decorative gradient orb -->
+        <div class="absolute -top-8 -right-8 w-48 h-48 bg-gradient-to-br from-violet-200/60 to-indigo-200/60 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative bg-gradient-to-br from-indigo-50 via-violet-50/80 to-purple-50/60 rounded-3xl p-8 sm:p-10 lg:p-12 shadow-xl shadow-indigo-100/50 border border-white/60">
           <blockquote>
-            <svg class="w-10 h-10 text-indigo-300 mb-6" fill="currentColor" viewBox="0 0 24 24">
+            <svg class="w-12 h-12 text-violet-300 mb-6" fill="currentColor" viewBox="0 0 24 24">
               <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
             </svg>
             <p class="text-xl text-gray-700 leading-relaxed">
               We went from spending 20+ hours a week on sourcing to letting our Gobii agent handle it overnight. Our pipeline has never been stronger.
             </p>
             <footer class="mt-8 flex items-center gap-4">
-              <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-full flex items-center justify-center text-white font-medium">JM</div>
+              <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold shadow-lg shadow-violet-300/50">JM</div>
               <div>
                 <div class="font-medium text-gray-900">Jessica M.</div>
                 <div class="text-sm text-gray-500">Head of Talent, Series B Startup</div>
