@@ -380,32 +380,64 @@
         How it works
       </h2>
       <p class="mt-4 text-lg text-gray-500">
-        From setup to qualified candidates in three steps.
+        Define what you need. Your agent handles the rest.
       </p>
     </div>
 
-    <div class="grid md:grid-cols-3 gap-12 lg:gap-16">
-      <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xl font-medium mb-6 shadow-lg shadow-indigo-200/50">1</div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Define your criteria</h3>
-        <p class="text-gray-600 leading-relaxed">
-          Tell your agent what you're looking for. Skills, experience, location. Speak naturally, like briefing a colleague.
-        </p>
+    <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
+      <!-- Left: Steps -->
+      <div class="space-y-12">
+        <div class="flex gap-6">
+          <div class="flex-shrink-0">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-indigo-200/50">1</div>
+          </div>
+          <div>
+            <h3 class="text-xl font-medium text-gray-900 mb-3">Define your criteria</h3>
+            <p class="text-gray-600 leading-relaxed">
+              Tell your agent what you're looking for. Skills, experience, location, company backgrounds. Speak naturally, like briefing a colleague.
+            </p>
+          </div>
+        </div>
+
+        <div class="flex gap-6">
+          <div class="flex-shrink-0">
+            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-violet-200/50">2</div>
+          </div>
+          <div>
+            <h3 class="text-xl font-medium text-gray-900 mb-3">Get notified when candidates are found</h3>
+            <p class="text-gray-600 leading-relaxed">
+              Your agent works 24/7, searching across platforms and evaluating candidates against your criteria. When a match is found, you're notified instantly.
+            </p>
+            <!-- 24/7 badge -->
+            <div class="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-violet-50 text-violet-700 text-sm font-medium">
+              <span class="w-2 h-2 rounded-full bg-violet-500 animate-pulse"></span>
+              Always on, always searching
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white text-xl font-medium mb-6 shadow-lg shadow-violet-200/50">2</div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Set the schedule</h3>
-        <p class="text-gray-600 leading-relaxed">
-          Run continuously, daily, or on specific days. Adjust frequency based on urgency and hiring volume.
-        </p>
-      </div>
+      <!-- Right: Image -->
+      <div class="relative">
+        <!-- Decorative gradient orb -->
+        <div class="absolute -top-8 -right-8 w-72 h-72 bg-gradient-to-br from-indigo-200/50 via-violet-200/30 to-purple-200/50 rounded-full blur-3xl pointer-events-none"></div>
+        <div class="absolute -bottom-8 -left-8 w-48 h-48 bg-gradient-to-br from-violet-200/40 to-indigo-200/40 rounded-full blur-2xl pointer-events-none"></div>
 
-      <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xl font-medium mb-6 shadow-lg shadow-purple-200/50">3</div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Review and hire</h3>
-        <p class="text-gray-600 leading-relaxed">
-          Qualified candidates delivered to your inbox or ATS. Review the shortlist, reach out, make great hires.
+        <!-- Image container -->
+        <div class="relative rounded-3xl overflow-hidden shadow-2xl shadow-violet-200/40 border border-white/60">
+          <img
+            src="{% static 'images/solutions/candidate-found.jpg' %}"
+            alt="Gobii AI agent sending a Candidate Found notification to your phone"
+            class="w-full h-auto"
+            loading="lazy"
+          >
+          <!-- Subtle overlay gradient for polish -->
+          <div class="absolute inset-0 bg-gradient-to-t from-violet-900/10 via-transparent to-white/10 pointer-events-none"></div>
+        </div>
+
+        <!-- Caption -->
+        <p class="mt-4 text-center text-sm text-gray-500">
+          Your agent notifies you the moment a qualified candidate is found
         </p>
       </div>
     </div>
