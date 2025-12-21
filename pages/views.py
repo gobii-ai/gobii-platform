@@ -1080,6 +1080,11 @@ class ClearSignupTrackingView(View):
 class SolutionView(TemplateView):
     template_name = "solutions/solution.html"
 
+    # Solutions with dedicated landing page templates
+    DEDICATED_TEMPLATES = {
+        'recruiting': 'solutions/recruiting.html',
+    }
+
     SOLUTION_DATA = {
         'recruiting': {
             'title': 'Recruiting',
@@ -1108,6 +1113,12 @@ class SolutionView(TemplateView):
         },
     }
 
+    def get_template_names(self):
+        slug = self.kwargs.get('slug', '')
+        if slug in self.DEDICATED_TEMPLATES:
+            return [self.DEDICATED_TEMPLATES[slug]]
+        return [self.template_name]
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
@@ -1116,7 +1127,7 @@ class SolutionView(TemplateView):
             'tagline': 'AI Solutions for your industry.',
             'description': 'Tailored AI agents and automation to help you scale.'
         })
-        
+
         context.update({
             'solution_title': data['title'],
             'solution_tagline': data['tagline'],
