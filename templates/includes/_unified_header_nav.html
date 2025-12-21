@@ -97,7 +97,10 @@
           {% endif %}
 
           {% if request.user.is_authenticated %}
-            <a href="{% url 'agents' %}" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">My Agents</a>
+            <a href="{% url 'agents' %}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">
+              <i data-lucide="bot" class="h-4 w-4"></i>
+              My Agents
+            </a>
           {% else %}
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">
