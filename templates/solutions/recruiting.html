@@ -147,12 +147,17 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-            Get started
-            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-          </a>
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="recruiting_hero" />
+            <input type="hidden" name="flow" value="pro" />
+            <button type="submit" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+              Get started
+              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
           <a href="#how-it-works" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
             See how it works
           </a>
@@ -240,12 +245,17 @@
                   Scheduled runs
                 </li>
               </ul>
-              <a href="{% url 'pages:home' %}" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-                Deploy Talent Scout
-                <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                </svg>
-              </a>
+              <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex">
+                {% csrf_token %}
+                <input type="hidden" name="source_page" value="recruiting_talent_scout" />
+                <input type="hidden" name="flow" value="pro" />
+                <button type="submit" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+                  Deploy Talent Scout
+                  <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                  </svg>
+                </button>
+              </form>
             </div>
             <!-- Right: Visual -->
             <div class="hidden lg:block">
@@ -314,12 +324,17 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
-            Deploy agent
-            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-          </a>
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'candidate-researcher' %}" class="inline-flex">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="recruiting_candidate_researcher" />
+            <input type="hidden" name="flow" value="pro" />
+            <button type="submit" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
+              Deploy agent
+              <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
         </div>
       </div>
 
@@ -357,12 +372,17 @@
           </li>
         </ul>
         <div class="pl-[4.75rem]">
-          <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
-            Deploy agent
-            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-          </a>
+          <form method="post" action="{% url 'pages:pretrained_worker_hire' 'outreach-agent' %}" class="inline-flex">
+            {% csrf_token %}
+            <input type="hidden" name="source_page" value="recruiting_outreach_agent" />
+            <input type="hidden" name="flow" value="pro" />
+            <button type="submit" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
+              Deploy agent
+              <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
         </div>
       </div>
     </div>
@@ -609,12 +629,17 @@
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
-        Get started
-        <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-        </svg>
-      </a>
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' 'talent-scout' %}" class="inline-flex">
+        {% csrf_token %}
+        <input type="hidden" name="source_page" value="recruiting_final_cta" />
+        <input type="hidden" name="flow" value="pro" />
+        <button type="submit" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+          Get started
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
       <a href="#how-it-works" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
         See how it works
       </a>

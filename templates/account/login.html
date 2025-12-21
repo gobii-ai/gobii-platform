@@ -5,7 +5,6 @@
 {% block title %}Sign in{% endblock %}
 
 {% block body_inner %}
-{% url 'account_signup' as account_signup_url %}
 <div class="bg-white max-w-md w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs mb-20">
   <div class="p-8">
 
@@ -14,7 +13,11 @@
     <p class="mt-2 text-center text-sm text-gray-500">
       Don't have an account yet?
       {% with request.session.utm_querystring as utm_qs %}
-      <a href="{{ account_signup_url }}{% if utm_qs %}{% if '?' in account_signup_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% if utm_qs or redirect_field_value %}
+      <a href="{% url 'account_signup' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% else %}
+      <a href="{% url 'account_signup' %}" class="text-blue-600 hover:underline">Sign up here</a>
+      {% endif %}
       {% endwith %}
     </p>
 

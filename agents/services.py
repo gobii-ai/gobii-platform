@@ -211,6 +211,9 @@ class PretrainedWorkerTemplateService:
     """Utilities for working with curated pretrained worker templates."""
 
     TEMPLATE_SESSION_KEY = "pretrained_worker_template_code"
+    CODE_ALIASES = {
+        "talent-sourcer": "talent-scout",
+    }
     _CRON_MACRO_MAP = {
         "@yearly": "0 0 1 1 *",
         "@annually": "0 0 1 1 *",
@@ -238,8 +241,10 @@ class PretrainedWorkerTemplateService:
     def get_template_by_code(cls, code: str):
         if not code:
             return None
+        normalized = code.strip().lower()
+        normalized = cls.CODE_ALIASES.get(normalized, normalized)
         for template in cls._all_templates():
-            if template.code == code and getattr(template, "is_active", True):
+            if template.code == normalized and getattr(template, "is_active", True):
                 return template
         return None
 

@@ -1,5 +1,6 @@
 
 from urllib.parse import parse_qs, urlparse
+import re
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
@@ -309,6 +310,84 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
         self.assertEqual(params.get("utm_medium"), ["ads"])
 
+    @tag("batch_pages")
+    def test_hire_redirects_to_login_for_pro_flow(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+            {"flow": "pro"},
+        )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("next"), [reverse("proprietary:pro_checkout")])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertEqual(
+            session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
+            reverse("agent_create_contact"),
+        )
+
+
+@tag("batch_pages")
+class CheckoutRedirectTests(TestCase):
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_uses_session_redirect(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        mock_ensure,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="pro@test.com",
+            password="pw",
+            username="pro_user",
+        )
+        self.client.force_login(user)
+
+        session = self.client.session
+        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("agent_create_contact")
+        session.save()
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_pro")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
+        mock_existing_subs.return_value = []
+
+        resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        self.assertEqual(parsed.path, reverse("agent_create_contact"))
+
+        session = self.client.session
+        self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
+
 
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
@@ -322,11 +401,19 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_signup"), {"next": next_url})
         self.assertEqual(response.status_code, 200)
 
-        self.assertIn(
-            f'{reverse("account_login")}?utm_source=newsletter',
-            response.content.decode(),
+        content = response.content.decode()
+        match = re.search(
+            r"Already have an account\\?.*?href=\"([^\"]+)\"[^>]*>Sign in</a>",
+            content,
+            re.S,
         )
-        self.assertNotIn(f'{reverse("account_login")}?next=', response.content.decode())
+        self.assertIsNotNone(match)
+        href = match.group(1)
+        parsed = urlparse(href)
+        params = parse_qs(parsed.query)
+        self.assertEqual(parsed.path, reverse("account_login"))
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("next"), [next_url])
 
     @tag("batch_pages")
     def test_login_page_signup_link_includes_utms(self):
@@ -338,11 +425,19 @@ class AuthLinkTests(TestCase):
         response = self.client.get(reverse("account_login"), {"next": next_url})
         self.assertEqual(response.status_code, 200)
 
-        self.assertIn(
-            f'{reverse("account_signup")}?utm_campaign=fall',
-            response.content.decode(),
+        content = response.content.decode()
+        match = re.search(
+            r"Don't have an account yet\\?.*?href=\"([^\"]+)\"[^>]*>Sign up here</a>",
+            content,
+            re.S,
         )
-        self.assertNotIn(f'{reverse("account_signup")}?next=', response.content.decode())
+        self.assertIsNotNone(match)
+        href = match.group(1)
+        parsed = urlparse(href)
+        params = parse_qs(parsed.query)
+        self.assertEqual(parsed.path, reverse("account_signup"))
+        self.assertEqual(params.get("utm_campaign"), ["fall"])
+        self.assertEqual(params.get("next"), [next_url])
 
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):

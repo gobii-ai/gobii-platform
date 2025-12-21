@@ -12,6 +12,7 @@ from django.http import HttpResponseRedirect
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.utils.http import url_has_allowed_host_and_scheme
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
@@ -140,6 +141,24 @@ def _login_url_with_utms(request) -> str:
     return base_url
 
 
+POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
+
+
+def _pop_post_checkout_redirect(request) -> str | None:
+    raw_value = (request.session.pop(POST_CHECKOUT_REDIRECT_SESSION_KEY, "") or "").strip()
+    if not raw_value:
+        return None
+
+    request.session.modified = True
+    if url_has_allowed_host_and_scheme(
+        raw_value,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return raw_value
+    return None
+
+
 def _prepare_stripe_or_404() -> None:
     status = stripe_status()
     if not status.enabled:
@@ -148,6 +167,19 @@ def _prepare_stripe_or_404() -> None:
     if not key:
         raise Http404("Stripe billing is not configured.")
     stripe.api_key = key
+
+
+def _build_checkout_success_url(request, *, event_id: str, price: float) -> str:
+    success_params = {
+        "subscribe_success": 1,
+        "p": f"{price:.2f}",
+        "eid": event_id,
+    }
+    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+    redirect_path = _pop_post_checkout_redirect(request)
+    if redirect_path:
+        return request.build_absolute_uri(redirect_path)
+    return default_url
 
 
 def _emit_checkout_initiated_event(
@@ -487,6 +519,7 @@ class PretrainedWorkerHireView(View):
         request.session.modified = True
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
+        flow = (request.POST.get("flow") or "").strip().lower()
 
         if request.user.is_authenticated:
             Analytics.track_event(
@@ -499,6 +532,12 @@ class PretrainedWorkerHireView(View):
                 },
             )
             return redirect('agent_create_contact')
+
+        next_url = reverse('agent_create_contact')
+        if flow == "pro":
+            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = next_url
+            request.session.modified = True
+            next_url = reverse('proprietary:pro_checkout')
 
         # Track anonymous interest
         session_key = request.session.session_key
@@ -518,7 +557,7 @@ class PretrainedWorkerHireView(View):
         from django.contrib.auth.views import redirect_to_login
 
         return redirect_to_login(
-            next=reverse('agent_create_contact'),
+            next=next_url,
             login_url=_login_url_with_utms(request),
         )
 
@@ -779,12 +818,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"sub-{uuid.uuid4()}"
 
-        success_params = {
-            "subscribe_success": 1,
-            "p": f"{price:.2f}",
-            "eid": event_id,
-        }
-        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+        success_url = _build_checkout_success_url(
+            request,
+            event_id=event_id,
+            price=price,
+        )
 
         line_items = [
             {
@@ -910,12 +948,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"scale-sub-{uuid.uuid4()}"
 
-        success_params = {
-            "subscribe_success": 1,
-            "p": f"{price:.2f}",
-            "eid": event_id,
-        }
-        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+        success_url = _build_checkout_success_url(
+            request,
+            event_id=event_id,
+            price=price,
+        )
 
         line_items = [
             {

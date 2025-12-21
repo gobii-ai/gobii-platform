@@ -1,6 +1,5 @@
 {% extends "allauth/layouts/entrance.html" %}
 {% load i18n form_extras socialaccount social_extras %}
-{% url 'account_login' as account_login_url %}
 {% block title %}{% trans "Create your account" %}{% endblock %}
 
 {% block body_inner %}
@@ -11,7 +10,11 @@
       <p class="mt-2 text-sm text-slate-600">
         {% trans "Already have an account?" %}
         {% with request.session.utm_querystring as utm_qs %}
-        <a href="{{ account_login_url }}{% if utm_qs %}?{{ utm_qs }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        {% if utm_qs or redirect_field_value %}
+        <a href="{% url 'account_login' %}?{% if utm_qs %}{{ utm_qs }}{% endif %}{% if utm_qs and redirect_field_value %}&{% endif %}{% if redirect_field_value %}{{ redirect_field_name }}={{ redirect_field_value|urlencode }}{% endif %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        {% else %}
+        <a href="{% url 'account_login' %}" class="font-medium text-blue-600 hover:text-blue-500">{% trans "Sign in" %}</a>
+        {% endif %}
         {% endwith %}
       </p>
     </div>
@@ -41,6 +44,9 @@
 
     <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
       {% csrf_token %}
+      {% if redirect_field_value %}
+        <input type="hidden" name="{{ redirect_field_name }}" value="{{ redirect_field_value }}">
+      {% endif %}
       {{ form.non_field_errors }}
 
       {% for field in form.visible_fields %}

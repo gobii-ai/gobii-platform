@@ -203,16 +203,16 @@ TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
         show_on_homepage=True,
     ),
     PretrainedWorkerTemplateDefinition(
-        code="talent-sourcer",
-        display_name="Talent Sourcer",
-        tagline="Builds outreach lists and keeps recruiters in sync",
+        code="talent-scout",
+        display_name="Talent Scout",
+        tagline="Finds and qualifies candidates across LinkedIn, GitHub, and job boards",
         description=(
-            "Finds candidates across public networks, drafts tailored outreach, and maintains a shared"
-            " tracker with response rates for recruiting pods."
+            "Your 24/7 recruiting partner that searches LinkedIn, GitHub, and job boards to discover"
+            " and qualify candidates matching your exact requirements."
         ),
         charter=(
-            "Build and maintain a prospect list for priority roles, draft outreach sequences,"
-            " and summarize weekly funnel metrics for the recruiting team."
+            "Search LinkedIn, GitHub, and job boards for candidates matching the criteria we provide."
+            " Qualify matches, summarize fit, and keep a shared tracker updated for the recruiting team."
         ),
         base_schedule="30 14 * * TUE",
         schedule_jitter_minutes=22,
@@ -232,6 +232,41 @@ TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
         category="People",
         hero_image_path="images/ai-directory/talent.svg",
         priority=60,
+    ),
+    PretrainedWorkerTemplateDefinition(
+        code="candidate-researcher",
+        display_name="Candidate Researcher",
+        tagline="Enriches candidate profiles with background research and work history",
+        description=(
+            "Enriches candidate profiles with background research, work history, and online presence"
+            " to give you the full picture."
+        ),
+        charter=(
+            "Gather background research, work history, and online presence details for target candidates."
+            " Summarize key findings and deliver an at-a-glance profile for each candidate."
+        ),
+        base_schedule="0 10 * * MON-FRI",
+        schedule_jitter_minutes=18,
+        recommended_contact_channel="email",
+        category="People",
+        priority=65,
+    ),
+    PretrainedWorkerTemplateDefinition(
+        code="outreach-agent",
+        display_name="Outreach Agent",
+        tagline="Crafts personalized outreach and keeps your pipeline warm",
+        description=(
+            "Crafts personalized outreach and keeps your talent pipeline warm with automated follow-ups."
+        ),
+        charter=(
+            "Draft personalized outreach for target candidates, schedule follow-ups, and keep a running"
+            " log of outreach status for the recruiting team."
+        ),
+        base_schedule="30 10 * * MON-FRI",
+        schedule_jitter_minutes=18,
+        recommended_contact_channel="email",
+        category="People",
+        priority=70,
     ),
     PretrainedWorkerTemplateDefinition(
         code="employee-onboarding-concierge",
