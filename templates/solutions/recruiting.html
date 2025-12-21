@@ -179,9 +179,12 @@
 </div>
 
 <!-- Agents Section -->
-<section class="relative bg-white py-24 lg:py-32">
-  <div class="max-w-6xl mx-auto px-6">
-    <div class="text-center mb-14">
+<section class="relative py-24 lg:py-32 overflow-hidden">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-white via-indigo-50/30 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-6xl mx-auto px-6">
+    <div class="text-center mb-16">
       <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
         Deploy in minutes
       </h2>
@@ -190,91 +193,153 @@
       </p>
     </div>
 
-    <div class="grid md:grid-cols-3 gap-8">
-      <!-- Agent 1: Talent Sourcer -->
-      <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-200/50">
-          <i data-lucide="search" class="w-6 h-6 text-white"></i>
+    <!-- Featured Agent: Talent Sourcer -->
+    <div class="mb-10">
+      <div class="agent-card group relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 via-violet-600 to-purple-600 p-1">
+        <div class="absolute inset-0 bg-gradient-to-br from-indigo-400/20 via-transparent to-purple-400/20 pointer-events-none"></div>
+        <div class="relative bg-white rounded-[1.35rem] p-8 lg:p-10">
+          <div class="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
+            <!-- Left: Content -->
+            <div>
+              <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-600 text-xs font-semibold tracking-wide uppercase mb-6">
+                <span class="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse"></span>
+                Most Popular
+              </div>
+              <h3 class="text-2xl lg:text-3xl font-medium text-gray-900 mb-4">Talent Sourcer</h3>
+              <p class="text-gray-600 text-lg leading-relaxed mb-8">
+                Your 24/7 recruiting partner that searches LinkedIn, GitHub, and job boards to discover and qualify candidates matching your exact requirements.
+              </p>
+              <ul class="grid sm:grid-cols-2 gap-x-8 gap-y-3 text-sm text-gray-600 mb-8">
+                <li class="flex items-center gap-3">
+                  <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </div>
+                  Multi-platform discovery
+                </li>
+                <li class="flex items-center gap-3">
+                  <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </div>
+                  Skills & experience matching
+                </li>
+                <li class="flex items-center gap-3">
+                  <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </div>
+                  ATS integration
+                </li>
+                <li class="flex items-center gap-3">
+                  <div class="w-5 h-5 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                    <svg class="w-3 h-3 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                  </div>
+                  Scheduled runs
+                </li>
+              </ul>
+              <a href="{% url 'pages:home' %}" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+                Deploy Talent Sourcer
+                <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                </svg>
+              </a>
+            </div>
+            <!-- Right: Visual -->
+            <div class="hidden lg:block">
+              <div class="relative">
+                <!-- Decorative gradient orb -->
+                <div class="absolute -top-8 -right-8 w-64 h-64 bg-gradient-to-br from-indigo-200/60 via-violet-200/40 to-purple-200/60 rounded-full blur-3xl pointer-events-none"></div>
+                <!-- Icon cluster -->
+                <div class="relative flex items-center justify-center py-8">
+                  <div class="relative">
+                    <!-- Main icon -->
+                    <div class="w-28 h-28 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-indigo-300/50 rotate-3">
+                      <i data-lucide="search" class="w-14 h-14 text-white"></i>
+                    </div>
+                    <!-- Floating badges -->
+                    <div class="absolute -top-4 -right-6 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
+                      <i data-lucide="linkedin" class="w-6 h-6 text-[#0A66C2]"></i>
+                    </div>
+                    <div class="absolute -bottom-3 -left-8 w-12 h-12 bg-white rounded-xl shadow-lg flex items-center justify-center border border-slate-100">
+                      <i data-lucide="github" class="w-6 h-6 text-gray-900"></i>
+                    </div>
+                    <div class="absolute top-1/2 -right-10 -translate-y-1/2 w-10 h-10 bg-white rounded-lg shadow-lg flex items-center justify-center border border-slate-100">
+                      <i data-lucide="users" class="w-5 h-5 text-violet-600"></i>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Talent Sourcer</h3>
-        <p class="text-gray-600 leading-relaxed mb-6">
-          Searches LinkedIn, GitHub, and job boards to find candidates matching your profile.
-        </p>
-        <ul class="space-y-2.5 text-sm text-gray-500 mb-8">
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Multi-platform discovery
-          </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Skills & experience matching
-          </li>
-          <li class="flex items-center gap-2.5">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            ATS integration
-          </li>
-        </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
-          Deploy agent
-          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </a>
       </div>
+    </div>
 
-      <!-- Agent 2: Resume Screener -->
+    <!-- Supporting Agents -->
+    <div class="grid md:grid-cols-2 gap-6">
+      <!-- Agent 2: Candidate Researcher -->
       <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-violet-200/50">
-          <i data-lucide="file-check" class="w-6 h-6 text-white"></i>
+        <div class="flex items-start gap-5">
+          <div class="w-14 h-14 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-200/50 flex-shrink-0">
+            <i data-lucide="sparkles" class="w-7 h-7 text-white"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-xl font-medium text-gray-900 mb-2">Candidate Researcher</h3>
+            <p class="text-gray-600 leading-relaxed mb-5">
+              Enriches candidate profiles with background research, work history, and online presence to give you the full picture.
+            </p>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Resume Screener</h3>
-        <p class="text-gray-600 leading-relaxed mb-6">
-          Analyzes applications against your requirements. Ranks and flags top talent automatically.
-        </p>
-        <ul class="space-y-2.5 text-sm text-gray-500 mb-8">
+        <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
           <li class="flex items-center gap-2.5">
             <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            Intelligent parsing
+            Profile enrichment
           </li>
           <li class="flex items-center gap-2.5">
             <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            Custom scoring criteria
+            Background research
           </li>
           <li class="flex items-center gap-2.5">
             <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
             </svg>
-            Bias-reduced evaluation
+            Social & portfolio analysis
           </li>
         </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
-          Deploy agent
-          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </a>
+        <div class="pl-[4.75rem]">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
+            Deploy agent
+            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+        </div>
       </div>
 
       <!-- Agent 3: Candidate Engager -->
       <div class="agent-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-emerald-200/50">
-          <i data-lucide="message-circle" class="w-6 h-6 text-white"></i>
+        <div class="flex items-start gap-5">
+          <div class="w-14 h-14 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-200/50 flex-shrink-0">
+            <i data-lucide="message-circle" class="w-7 h-7 text-white"></i>
+          </div>
+          <div class="flex-1 min-w-0">
+            <h3 class="text-xl font-medium text-gray-900 mb-2">Candidate Engager</h3>
+            <p class="text-gray-600 leading-relaxed mb-5">
+              Crafts personalized outreach and keeps your talent pipeline warm with automated follow-ups.
+            </p>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Candidate Engager</h3>
-        <p class="text-gray-600 leading-relaxed mb-6">
-          Crafts personalized outreach and keeps your talent pipeline warm automatically.
-        </p>
-        <ul class="space-y-2.5 text-sm text-gray-500 mb-8">
+        <ul class="space-y-2.5 text-sm text-gray-500 mb-6 mt-5 pl-[4.75rem]">
           <li class="flex items-center gap-2.5">
             <svg class="w-4 h-4 text-emerald-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -294,12 +359,14 @@
             Pipeline nurturing
           </li>
         </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
-          Deploy agent
-          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </a>
+        <div class="pl-[4.75rem]">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
+            Deploy agent
+            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+        </div>
       </div>
     </div>
   </div>
