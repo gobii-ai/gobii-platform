@@ -20,7 +20,7 @@
     <div class="flex items-center justify-between h-16">
       <!-- Brand -->
       <a href="{% url 'pages:home' %}" class="text-lg font-bold text-slate-900 flex items-center h-10">
-        <img src="{% static 'images/noBgBlue.png' %}"
+        <img src="{% static 'images/noBgIndigo600.png' %}"
              alt="Gobii Logo"
              class="h-10 w-auto"
              width="120"
@@ -31,15 +31,15 @@
 
       <!-- Desktop Nav - Floating pill style -->
       <nav class="hidden md:flex items-center">
-        <!-- Main nav links in a glass pill -->
-        <div class="flex items-center gap-x-0.5 pl-1 pr-1.5 py-1 rounded-xl bg-white shadow-sm shadow-violet-500/10">
+        <!-- Main nav links in a colored pill -->
+        <div class="flex items-center gap-x-0.5 p-1 rounded-xl bg-indigo-800/90 shadow-lg shadow-indigo-900/20">
           <!-- Solutions Dropdown -->
           <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
             <button @mouseover="open = true" @click="open = !open"
-                    class="inline-flex items-center gap-x-1 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 focus:outline-none transition-all"
-                    :class="{ 'text-violet-700 bg-violet-50/80': open }">
+                    class="inline-flex items-center gap-x-1 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 focus:outline-none transition-all"
+                    :class="{ 'text-white bg-white/10': open }">
               Solutions
-              <svg class="h-3.5 w-3.5 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg class="h-3 w-3 transform transition-transform duration-200" :class="{ 'rotate-180': open }" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
               </svg>
             </button>
@@ -92,19 +92,19 @@
         </div>
 
           {% if settings.GOBII_PROPRIETARY_MODE %}
-            <a href="{% url 'proprietary:pricing' %}" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">Pricing</a>
-            <a href="https://docs.gobii.ai/developers/developer-basics" title="Gobii Developers - Agents and browser-use in the Cloud" class="px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">Developers</a>
+            <a href="{% url 'proprietary:pricing' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Pricing</a>
+            <a href="https://docs.gobii.ai/developers/developer-basics" title="Gobii Developers - Agents and browser-use in the Cloud" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Developers</a>
           {% endif %}
 
           {% if request.user.is_authenticated %}
-            <a href="{% url 'agents' %}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">
-              <i data-lucide="bot" class="h-4 w-4"></i>
+            <a href="{% url 'agents' %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+              <i data-lucide="bot" class="h-3.5 w-3.5"></i>
               My Agents
             </a>
           {% else %}
             {% with request.session.utm_querystring as utm_qs %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50/80 transition-all">
-              <i data-lucide="log-in" class="h-4 w-4"></i>
+            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+              <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
               Login
             </a>
             {% endwith %}
@@ -194,13 +194,13 @@
         {% endif %}
 
           <!-- Social Icons -->
-          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="p-2 rounded-full text-violet-400 hover:text-[#5865F2] hover:bg-violet-50 transition-colors">
-            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+          <a href="https://discord.gg/yyDB8GwxtE" target="_blank" rel="noopener" aria-label="Join our Discord server" class="p-2 rounded-full text-slate-800 hover:text-[#5865F2] transition-colors">
+            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
               <path d="M13.545 2.907a13.227 13.227 0 0 0-3.257-1.011.05.05 0 0 0-.052.025c-.141.25-.297.577-.406.833a12.19 12.19 0 0 0-3.658 0 8.258 8.258 0 0 0-.412-.833.051.051 0 0 0-.052-.025c-1.125.194-2.22.534-3.257 1.011a.041.041 0 0 0-.021.018C.356 6.024-.213 9.047.066 12.032c.001.014.01.028.021.037a13.276 13.276 0 0 0 3.995 2.02.05.05 0 0 0 .056-.019c.308-.42.582-.863.818-1.329a.05.05 0 0 0-.01-.059.051.051 0 0 0-.018-.011 8.875 8.875 0 0 1-1.248-.595.05.05 0 0 1-.02-.066.051.051 0 0 1 .015-.019c.084-.063.168-.129.248-.195a.05.05 0 0 1 .051-.007c2.619 1.196 5.454 1.196 8.041 0a.052.052 0 0 1 .053.007c.08.066.164.132.248.195a.051.051 0 0 1-.004.085 8.254 8.254 0 0 1-1.249.594.05.05 0 0 0-.03.03.052.052 0 0 0 .003.041c.24.465.515.909.817 1.329a.05.05 0 0 0 .056.019 13.235 13.235 0 0 0 4.001-2.02.049.049 0 0 0 .021-.037c.334-3.451-.559-6.449-2.366-9.106a.034.034 0 0 0-.02-.019Zm-8.198 7.307c-.789 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.45.73 1.438 1.613 0 .888-.637 1.612-1.438 1.612Zm5.316 0c-.788 0-1.438-.724-1.438-1.612 0-.889.637-1.613 1.438-1.613.807 0 1.451.73 1.438 1.613 0 .888-.631 1.612-1.438 1.612Z"/>
             </svg>
           </a>
-          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="p-2 rounded-full text-violet-400 hover:text-violet-900 hover:bg-violet-50 transition-colors">
-            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
+          <a href="https://x.com/gobii_ai" target="_blank" rel="noopener" aria-label="Follow us on X (Twitter)" class="p-2 rounded-full text-slate-800 hover:text-black transition-colors">
+            <svg class="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16">
               <path d="M12.6.75h2.454l-5.36 6.142L16 15.25h-4.937l-3.867-5.07-4.425 5.07H.316l5.733-6.57L0 .75h5.063l3.495 4.633L12.601.75Zm-.86 13.028h1.36L4.323 2.145H2.865z"/>
             </svg>
           </a>
