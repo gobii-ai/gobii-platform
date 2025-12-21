@@ -169,7 +169,7 @@ def _prepare_stripe_or_404() -> None:
     stripe.api_key = key
 
 
-def _build_checkout_success_url(request, *, event_id: str, price: float) -> str:
+def _build_checkout_success_url(request, *, event_id: str, price: float) -> tuple[str, bool]:
     success_params = {
         "subscribe_success": 1,
         "p": f"{price:.2f}",
@@ -178,8 +178,8 @@ def _build_checkout_success_url(request, *, event_id: str, price: float) -> str:
     default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     redirect_path = _pop_post_checkout_redirect(request)
     if redirect_path:
-        return request.build_absolute_uri(redirect_path)
-    return default_url
+        return request.build_absolute_uri(redirect_path), True
+    return default_url, False
 
 
 def _emit_checkout_initiated_event(
@@ -192,6 +192,7 @@ def _emit_checkout_initiated_event(
     currency: str | None,
     event_id: str,
     event_name: str = "InitiateCheckout",
+    post_checkout_redirect_used: bool | None = None,
 ) -> None:
     """
     Fan out checkout events to CAPI providers with plan metadata.
@@ -204,6 +205,8 @@ def _emit_checkout_initiated_event(
     }
     if value is not None:
         properties["value"] = value
+    if post_checkout_redirect_used is not None:
+        properties["post_checkout_redirect_used"] = post_checkout_redirect_used
     if currency:
         properties["currency"] = currency.upper()
     else:
@@ -520,16 +523,19 @@ class PretrainedWorkerHireView(View):
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
         flow = (request.POST.get("flow") or "").strip().lower()
+        analytics_properties = {
+            "source_page": source_page,
+            "template_code": template.code,
+        }
+        if flow:
+            analytics_properties["flow"] = flow
 
         if request.user.is_authenticated:
             Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                 source=AnalyticsSource.WEB,
-                properties={
-                    "source_page": source_page,
-                    "template_code": template.code,
-                },
+                properties=analytics_properties,
             )
             return redirect('agent_create_contact')
 
@@ -548,10 +554,7 @@ class PretrainedWorkerHireView(View):
             anonymous_id=str(session_key),
             event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
             source=AnalyticsSource.WEB,
-            properties={
-                "source_page": source_page,
-                "template_code": template.code,
-            },
+            properties=analytics_properties,
         )
 
         from django.contrib.auth.views import redirect_to_login
@@ -818,7 +821,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"sub-{uuid.uuid4()}"
 
-        success_url = _build_checkout_success_url(
+        success_url, post_checkout_redirect_used = _build_checkout_success_url(
             request,
             event_id=event_id,
             price=price,
@@ -847,6 +850,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             event_id=event_id,
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         try:
@@ -909,6 +913,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             currency=price_currency,
             event_id=event_id,
             event_name="AddPaymentInfo",
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         # 3️⃣  No need to sync anything here.  The webhook events
@@ -948,7 +953,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"scale-sub-{uuid.uuid4()}"
 
-        success_url = _build_checkout_success_url(
+        success_url, post_checkout_redirect_used = _build_checkout_success_url(
             request,
             event_id=event_id,
             price=price,
@@ -977,6 +982,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             event_id=event_id,
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         _, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
@@ -1039,6 +1045,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             currency=price_currency,
             event_id=event_id,
             event_name="AddPaymentInfo",
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         return redirect(session.url)
