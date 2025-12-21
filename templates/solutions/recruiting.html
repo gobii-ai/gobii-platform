@@ -7,23 +7,88 @@
 {{ block.super }}
 <meta name="description" content="Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.">
 <style>
-  .hero-image-mask {
-    -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,0) 100%);
-    mask-image: linear-gradient(to left, rgba(0,0,0,1) 0%, rgba(0,0,0,0.8) 40%, rgba(0,0,0,0) 100%);
+  .recruiting-panel {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .recruiting-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
+      radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
+      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
+    opacity: 0.8;
+    filter: blur(40px);
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  .recruiting-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
+    pointer-events: none;
+    z-index: 2;
+    mix-blend-mode: lighten;
+  }
+
+  .recruiting-gradient-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.35) 0%, rgba(129, 140, 248, 0.4) 40%, rgba(59, 130, 246, 0.3) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+  }
+
+  .recruiting-content {
+    position: relative;
+    z-index: 3;
+  }
+
+  .hero-image-wrapper {
+    position: absolute;
+    right: -5%;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 55%;
+    max-width: 700px;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .hero-image-wrapper img {
+    width: 100%;
+    height: auto;
+    object-fit: cover;
+    border-radius: 1.5rem;
+    -webkit-mask-image: linear-gradient(to left, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 100%);
+    mask-image: linear-gradient(to left, rgba(0,0,0,0.7) 0%, rgba(0,0,0,0.4) 50%, rgba(0,0,0,0) 100%);
+    opacity: 0.5;
   }
 
   @media (max-width: 1023px) {
-    .hero-image-mask {
-      -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,0) 100%);
-      mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.6) 60%, rgba(0,0,0,0) 100%);
+    .hero-image-wrapper {
+      position: relative;
+      right: auto;
+      top: auto;
+      transform: none;
+      width: 100%;
+      max-width: none;
+      margin-top: 3rem;
     }
-  }
-
-  .text-gradient {
-    background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #6366f1 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+    .hero-image-wrapper img {
+      -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.3) 100%);
+      mask-image: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.3) 100%);
+      opacity: 0.4;
+      max-height: 300px;
+    }
   }
 
   .agent-card {
@@ -32,108 +97,128 @@
 
   .agent-card:hover {
     transform: translateY(-2px);
+    border-color: rgba(79, 70, 229, 0.26);
+    box-shadow: 0 24px 48px -28px rgba(79, 70, 229, 0.35);
+  }
+
+  .section-fade-top {
+    background: linear-gradient(180deg, transparent 0%, white 100%);
   }
 </style>
 {% endblock %}
 
 {% block content %}
 <!-- Hero Section -->
-<section class="relative min-h-[90vh] lg:min-h-[85vh] flex items-center overflow-hidden bg-slate-950">
-  <!-- Background image -->
-  <div class="absolute inset-0 lg:left-1/3">
-    <img
-      src="{% static 'images/solutions/recruiting-hero.jpg' %}"
-      alt=""
-      class="w-full h-full object-cover hero-image-mask opacity-60 lg:opacity-50"
-      loading="eager"
-    >
-  </div>
+<div class="relative recruiting-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
+  <div class="recruiting-gradient-bg" aria-hidden="true"></div>
 
-  <!-- Subtle gradient overlay -->
-  <div class="absolute inset-0 bg-gradient-to-r from-slate-950 via-slate-950/95 to-transparent"></div>
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
 
-  <!-- Grain texture -->
-  <div class="absolute inset-0 opacity-[0.015]" style="background-image: url('data:image/svg+xml,%3Csvg viewBox=%220 0 200 200%22 xmlns=%22http://www.w3.org/2000/svg%22%3E%3Cfilter id=%22noise%22%3E%3CfeTurbulence type=%22fractalNoise%22 baseFrequency=%220.65%22 numOctaves=%223%22 stitchTiles=%22stitch%22/%3E%3C/filter%3E%3Crect width=%22100%25%22 height=%22100%25%22 filter=%22url(%23noise)%22/%3E%3C/svg%3E');"></div>
+  <!-- Seamless Gradient Fade to white -->
+  <div class="absolute bottom-0 left-0 right-0 h-48 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-10"></div>
 
-  <div class="relative z-10 max-w-7xl mx-auto px-6 py-24 lg:py-32 w-full">
-    <div class="max-w-2xl">
-      <p class="text-indigo-400 font-mono text-sm tracking-wide mb-6">AI-POWERED RECRUITING</p>
+  <section class="relative recruiting-content">
+    <div class="relative max-w-7xl mx-auto px-6 pt-32 lg:pt-40 pb-24">
 
-      <h1 class="text-5xl sm:text-6xl lg:text-7xl font-semibold text-white leading-[1.05] tracking-tight">
-        Your recruiting team,
-        <span class="text-gradient">working 24/7</span>
-      </h1>
+      <!-- Ambient Glow -->
+      <div class="absolute top-24 left-1/4 w-[600px] lg:w-[800px] h-[500px] lg:h-[600px] bg-white blur-[80px] lg:blur-[100px] opacity-80 rounded-full pointer-events-none -z-10"></div>
 
-      <p class="mt-8 text-lg sm:text-xl text-slate-300 leading-relaxed max-w-xl">
-        Deploy AI agents that source candidates, screen resumes, and nurture talent pipelines around the clock.
-      </p>
-
-      <div class="mt-10 flex flex-col sm:flex-row gap-4">
-        <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white hover:bg-slate-100 text-slate-900 font-semibold rounded-lg transition-all duration-200">
-          Get started
-          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
-          </svg>
-        </a>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 text-white font-semibold rounded-lg border border-white/20 hover:bg-white/5 transition-all duration-200">
-          See how it works
-        </a>
+      <!-- Hero Image (positioned right, fades into gradient) -->
+      <div class="hero-image-wrapper hidden lg:block">
+        <img
+          src="{% static 'images/solutions/recruiting-hero.jpg' %}"
+          alt=""
+          loading="eager"
+        >
       </div>
 
-      <!-- Inline stats -->
-      <div class="mt-16 pt-10 border-t border-white/10">
-        <div class="flex flex-wrap gap-x-12 gap-y-6">
+      <!-- Hero Content -->
+      <div class="relative z-10 max-w-2xl">
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
+          Your recruiting team,
+          <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">working 24/7</span>
+          <i data-lucide="users" class="inline-block w-[0.8em] h-[0.8em] ml-2 text-purple-600 align-top mt-[0.15em]"></i>
+        </h1>
+
+        <p class="mt-6 text-lg text-gray-600 leading-relaxed max-w-xl">
+          Deploy AI agents that source candidates, screen resumes, and nurture talent pipelines around the clock.
+        </p>
+
+        <div class="mt-10 flex flex-col sm:flex-row gap-4">
+          <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-semibold rounded-xl shadow-lg shadow-violet-200 hover:shadow-xl transition-all duration-200">
+            Get started
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-semibold rounded-xl border border-gray-200 hover:border-indigo-300 transition-all duration-200">
+            See how it works
+          </a>
+        </div>
+
+        <!-- Inline stats -->
+        <div class="mt-16 flex flex-wrap gap-x-10 gap-y-4">
           <div>
-            <div class="text-3xl font-semibold text-white">10x</div>
-            <p class="text-sm text-slate-400 mt-1">Faster sourcing</p>
+            <div class="text-2xl font-semibold text-gray-900">10x</div>
+            <p class="text-sm text-gray-500 mt-0.5">Faster sourcing</p>
           </div>
           <div>
-            <div class="text-3xl font-semibold text-white">80%</div>
-            <p class="text-sm text-slate-400 mt-1">Time saved</p>
+            <div class="text-2xl font-semibold text-gray-900">80%</div>
+            <p class="text-sm text-gray-500 mt-0.5">Time saved</p>
           </div>
           <div>
-            <div class="text-3xl font-semibold text-white">24/7</div>
-            <p class="text-sm text-slate-400 mt-1">Always on</p>
+            <div class="text-2xl font-semibold text-gray-900">24/7</div>
+            <p class="text-sm text-gray-500 mt-0.5">Always on</p>
           </div>
         </div>
       </div>
+
+      <!-- Mobile hero image -->
+      <div class="hero-image-wrapper lg:hidden">
+        <img
+          src="{% static 'images/solutions/recruiting-hero.jpg' %}"
+          alt=""
+          loading="eager"
+        >
+      </div>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 
 <!-- Agents Section -->
-<section class="bg-white py-24 lg:py-32">
+<section class="relative bg-white py-20 lg:py-28">
   <div class="max-w-7xl mx-auto px-6">
-    <div class="max-w-2xl mb-16">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 tracking-tight">
+    <div class="max-w-2xl mb-14">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
         Deploy in minutes
       </h2>
-      <p class="mt-4 text-lg text-slate-600">
+      <p class="mt-4 text-lg text-gray-500">
         Pre-built agents for every stage of your recruiting workflow.
       </p>
     </div>
 
     <div class="grid md:grid-cols-3 gap-6">
       <!-- Agent 1: Talent Sourcer -->
-      <div class="agent-card group relative bg-slate-50 rounded-xl p-8 hover:bg-slate-100/80">
-        <div class="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center mb-5">
+      <div class="agent-card group relative backdrop-blur-xl bg-white/70 border border-white/60 rounded-2xl p-7 shadow-xl shadow-slate-200/50">
+        <div class="w-11 h-11 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center mb-5 shadow-lg shadow-indigo-200">
           <i data-lucide="search" class="w-5 h-5 text-white"></i>
         </div>
-        <h3 class="text-lg font-semibold text-slate-900 mb-2">Talent Sourcer</h3>
-        <p class="text-slate-600 text-sm leading-relaxed mb-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">Talent Sourcer</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-5">
           Searches LinkedIn, GitHub, and job boards to find candidates matching your profile. Builds targeted lists around the clock.
         </p>
-        <ul class="space-y-2 text-sm text-slate-500 mb-8">
+        <ul class="space-y-2 text-sm text-gray-500 mb-6">
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-indigo-400 rounded-full"></span>
             Multi-platform discovery
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-indigo-400 rounded-full"></span>
             Skills & experience matching
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-indigo-400 rounded-full"></span>
             ATS integration
           </li>
         </ul>
@@ -146,25 +231,25 @@
       </div>
 
       <!-- Agent 2: Resume Screener -->
-      <div class="agent-card group relative bg-slate-50 rounded-xl p-8 hover:bg-slate-100/80">
-        <div class="w-10 h-10 bg-violet-600 rounded-lg flex items-center justify-center mb-5">
+      <div class="agent-card group relative backdrop-blur-xl bg-white/70 border border-white/60 rounded-2xl p-7 shadow-xl shadow-slate-200/50">
+        <div class="w-11 h-11 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center mb-5 shadow-lg shadow-violet-200">
           <i data-lucide="file-check" class="w-5 h-5 text-white"></i>
         </div>
-        <h3 class="text-lg font-semibold text-slate-900 mb-2">Resume Screener</h3>
-        <p class="text-slate-600 text-sm leading-relaxed mb-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">Resume Screener</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-5">
           Analyzes applications against your requirements. Ranks candidates, flags top talent, and surfaces concerns automatically.
         </p>
-        <ul class="space-y-2 text-sm text-slate-500 mb-8">
+        <ul class="space-y-2 text-sm text-gray-500 mb-6">
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-violet-400 rounded-full"></span>
             Intelligent parsing
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-violet-400 rounded-full"></span>
             Custom scoring
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-violet-400 rounded-full"></span>
             Bias-reduced evaluation
           </li>
         </ul>
@@ -177,25 +262,25 @@
       </div>
 
       <!-- Agent 3: Candidate Engager -->
-      <div class="agent-card group relative bg-slate-50 rounded-xl p-8 hover:bg-slate-100/80">
-        <div class="w-10 h-10 bg-emerald-600 rounded-lg flex items-center justify-center mb-5">
+      <div class="agent-card group relative backdrop-blur-xl bg-white/70 border border-white/60 rounded-2xl p-7 shadow-xl shadow-slate-200/50">
+        <div class="w-11 h-11 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center mb-5 shadow-lg shadow-emerald-200">
           <i data-lucide="message-circle" class="w-5 h-5 text-white"></i>
         </div>
-        <h3 class="text-lg font-semibold text-slate-900 mb-2">Candidate Engager</h3>
-        <p class="text-slate-600 text-sm leading-relaxed mb-6">
+        <h3 class="text-lg font-semibold text-gray-900 mb-2">Candidate Engager</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-5">
           Crafts personalized outreach, follows up with passive candidates, and keeps your pipeline warm automatically.
         </p>
-        <ul class="space-y-2 text-sm text-slate-500 mb-8">
+        <ul class="space-y-2 text-sm text-gray-500 mb-6">
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-emerald-400 rounded-full"></span>
             Personalized messaging
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-emerald-400 rounded-full"></span>
             Automated follow-ups
           </li>
           <li class="flex items-center gap-2">
-            <span class="w-1 h-1 bg-slate-400 rounded-full"></span>
+            <span class="w-1 h-1 bg-emerald-400 rounded-full"></span>
             Pipeline nurturing
           </li>
         </ul>
@@ -211,38 +296,41 @@
 </section>
 
 <!-- How It Works -->
-<section class="bg-slate-950 py-24 lg:py-32">
-  <div class="max-w-7xl mx-auto px-6">
-    <div class="max-w-2xl mb-20">
-      <h2 class="text-3xl sm:text-4xl font-semibold text-white tracking-tight">
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-white via-indigo-50/30 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-7xl mx-auto px-6">
+    <div class="max-w-2xl mb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
         How it works
       </h2>
-      <p class="mt-4 text-lg text-slate-400">
+      <p class="mt-4 text-lg text-gray-500">
         From setup to qualified candidates in three steps.
       </p>
     </div>
 
-    <div class="grid md:grid-cols-3 gap-12 lg:gap-16">
+    <div class="grid md:grid-cols-3 gap-10 lg:gap-14">
       <div>
-        <div class="text-5xl font-light text-slate-700 mb-6">01</div>
-        <h3 class="text-xl font-semibold text-white mb-3">Define your criteria</h3>
-        <p class="text-slate-400 leading-relaxed">
+        <div class="text-5xl font-extralight text-indigo-200 mb-5">01</div>
+        <h3 class="text-xl font-semibold text-gray-900 mb-3">Define your criteria</h3>
+        <p class="text-gray-600 leading-relaxed">
           Tell your agent what you're looking for. Skills, experience, location. Speak naturally, like briefing a colleague.
         </p>
       </div>
 
       <div>
-        <div class="text-5xl font-light text-slate-700 mb-6">02</div>
-        <h3 class="text-xl font-semibold text-white mb-3">Set the schedule</h3>
-        <p class="text-slate-400 leading-relaxed">
+        <div class="text-5xl font-extralight text-indigo-200 mb-5">02</div>
+        <h3 class="text-xl font-semibold text-gray-900 mb-3">Set the schedule</h3>
+        <p class="text-gray-600 leading-relaxed">
           Run continuously, daily, or on specific days. Adjust frequency based on urgency and hiring volume.
         </p>
       </div>
 
       <div>
-        <div class="text-5xl font-light text-slate-700 mb-6">03</div>
-        <h3 class="text-xl font-semibold text-white mb-3">Review and hire</h3>
-        <p class="text-slate-400 leading-relaxed">
+        <div class="text-5xl font-extralight text-indigo-200 mb-5">03</div>
+        <h3 class="text-xl font-semibold text-gray-900 mb-3">Review and hire</h3>
+        <p class="text-gray-600 leading-relaxed">
           Qualified candidates delivered to your inbox or ATS. Review the shortlist, reach out, make great hires.
         </p>
       </div>
@@ -251,102 +339,110 @@
 </section>
 
 <!-- Benefits Section -->
-<section class="bg-white py-24 lg:py-32">
+<section class="bg-white py-20 lg:py-28">
   <div class="max-w-7xl mx-auto px-6">
-    <div class="grid lg:grid-cols-2 gap-16 lg:gap-24 items-start">
+    <div class="grid lg:grid-cols-2 gap-14 lg:gap-20 items-start">
       <div>
-        <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 tracking-tight">
+        <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
           Why teams choose Gobii
         </h2>
-        <p class="mt-4 text-lg text-slate-600 mb-12">
+        <p class="mt-4 text-lg text-gray-500 mb-12">
           Recruiting tools require constant attention. Gobii agents work autonomously, expanding your capacity without adding headcount.
         </p>
 
         <div class="space-y-10">
           <div>
-            <h3 class="text-lg font-semibold text-slate-900 mb-2">Reclaim your calendar</h3>
-            <p class="text-slate-600">Stop spending hours on repetitive sourcing. Let your agent handle the legwork while you focus on interviewing and closing.</p>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Reclaim your calendar</h3>
+            <p class="text-gray-600">Stop spending hours on repetitive sourcing. Let your agent handle the legwork while you focus on interviewing and closing.</p>
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-slate-900 mb-2">Scale instantly</h3>
-            <p class="text-slate-600">Hiring for 5 roles or 50? Agents scale without training, ramp time, or burnout.</p>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Scale instantly</h3>
+            <p class="text-gray-600">Hiring for 5 roles or 50? Agents scale without training, ramp time, or burnout.</p>
           </div>
 
           <div>
-            <h3 class="text-lg font-semibold text-slate-900 mb-2">Consistent quality</h3>
-            <p class="text-slate-600">AI evaluates every candidate against your criteria. No fatigue, no shortcuts, no overlooked talent.</p>
+            <h3 class="text-lg font-semibold text-gray-900 mb-2">Consistent quality</h3>
+            <p class="text-gray-600">AI evaluates every candidate against your criteria. No fatigue, no shortcuts, no overlooked talent.</p>
           </div>
         </div>
       </div>
 
-      <div class="lg:mt-16">
-        <blockquote class="border-l-2 border-indigo-600 pl-6">
-          <p class="text-xl text-slate-700 leading-relaxed">
-            "We went from spending 20+ hours a week on sourcing to letting our Gobii agent handle it overnight. Our pipeline has never been stronger."
-          </p>
-          <footer class="mt-6">
-            <div class="font-semibold text-slate-900">Jessica M.</div>
-            <div class="text-sm text-slate-500">Head of Talent, Series B Startup</div>
-          </footer>
-        </blockquote>
+      <div class="lg:mt-8">
+        <div class="backdrop-blur-xl bg-gradient-to-br from-white/80 to-indigo-50/50 border border-white/60 rounded-2xl p-8 shadow-xl shadow-indigo-100/50">
+          <blockquote>
+            <p class="text-xl text-gray-700 leading-relaxed">
+              "We went from spending 20+ hours a week on sourcing to letting our Gobii agent handle it overnight. Our pipeline has never been stronger."
+            </p>
+            <footer class="mt-6 flex items-center gap-4">
+              <div class="w-11 h-11 bg-gradient-to-br from-violet-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold text-sm">JM</div>
+              <div>
+                <div class="font-semibold text-gray-900">Jessica M.</div>
+                <div class="text-sm text-gray-500">Head of Talent, Series B Startup</div>
+              </div>
+            </footer>
+          </blockquote>
+        </div>
       </div>
     </div>
   </div>
 </section>
 
 <!-- FAQ Section -->
-<section class="bg-slate-50 py-24 lg:py-32">
-  <div class="max-w-3xl mx-auto px-6">
-    <h2 class="text-3xl sm:text-4xl font-semibold text-slate-900 tracking-tight mb-12">
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-white via-indigo-50/20 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-3xl mx-auto px-6">
+    <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight mb-12">
       Questions
     </h2>
 
-    <div class="space-y-0 divide-y divide-slate-200">
+    <div class="space-y-0 divide-y divide-gray-200">
       <details class="group py-6">
         <summary class="flex items-center justify-between cursor-pointer list-none">
-          <span class="text-lg font-medium text-slate-900 pr-8">How do Gobii recruiting agents work?</span>
-          <svg class="w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span class="text-lg font-medium text-gray-900 pr-8">How do Gobii recruiting agents work?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
           </svg>
         </summary>
-        <p class="mt-4 text-slate-600 leading-relaxed">
+        <p class="mt-4 text-gray-600 leading-relaxed">
           Gobii agents are AI-powered workers that browse the web and complete tasks like a human would. For recruiting, they search job boards, LinkedIn, GitHub, and other platforms to find candidates matching your criteria, then deliver organized results to your preferred destination.
         </p>
       </details>
 
       <details class="group py-6">
         <summary class="flex items-center justify-between cursor-pointer list-none">
-          <span class="text-lg font-medium text-slate-900 pr-8">Can I customize the search criteria?</span>
-          <svg class="w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span class="text-lg font-medium text-gray-900 pr-8">Can I customize the search criteria?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
           </svg>
         </summary>
-        <p class="mt-4 text-slate-600 leading-relaxed">
+        <p class="mt-4 text-gray-600 leading-relaxed">
           Yes. Define your ideal candidate profile in plain language. Specify skills, experience, location, company backgrounds, education, or any other criteria. Your agent adapts to your exact requirements.
         </p>
       </details>
 
       <details class="group py-6">
         <summary class="flex items-center justify-between cursor-pointer list-none">
-          <span class="text-lg font-medium text-slate-900 pr-8">Does this integrate with my ATS?</span>
-          <svg class="w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span class="text-lg font-medium text-gray-900 pr-8">Does this integrate with my ATS?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
           </svg>
         </summary>
-        <p class="mt-4 text-slate-600 leading-relaxed">
+        <p class="mt-4 text-gray-600 leading-relaxed">
           Gobii agents export to Google Sheets, CSV, or push data via webhooks. Direct integrations with popular ATS platforms are available on Scale plans.
         </p>
       </details>
 
       <details class="group py-6">
         <summary class="flex items-center justify-between cursor-pointer list-none">
-          <span class="text-lg font-medium text-slate-900 pr-8">What's the difference between Pro and Scale?</span>
-          <svg class="w-5 h-5 text-slate-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <span class="text-lg font-medium text-gray-900 pr-8">What's the difference between Pro and Scale?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
           </svg>
         </summary>
-        <p class="mt-4 text-slate-600 leading-relaxed">
+        <p class="mt-4 text-gray-600 leading-relaxed">
           Pro works well for growing teams hiring across multiple roles. Scale is for high-volume operations needing more agents, higher limits, priority support, and custom integrations.
         </p>
       </details>
@@ -355,19 +451,22 @@
 </section>
 
 <!-- Final CTA -->
-<section class="bg-slate-950 py-24 lg:py-32">
-  <div class="max-w-4xl mx-auto px-6 text-center">
-    <h2 class="text-3xl sm:text-4xl font-semibold text-white tracking-tight">
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Gradient background matching home -->
+  <div class="absolute inset-0 bg-gradient-to-b from-indigo-50/50 via-violet-50/30 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-4xl mx-auto px-6 text-center">
+    <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
       Start hiring smarter
     </h2>
-    <p class="mt-4 text-lg text-slate-400 max-w-xl mx-auto">
+    <p class="mt-4 text-lg text-gray-500 max-w-xl mx-auto">
       Deploy your first recruiting agent today.
     </p>
     <div class="mt-10">
-      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white hover:bg-slate-100 text-slate-900 font-semibold rounded-lg transition-all duration-200">
+      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-semibold rounded-xl shadow-lg shadow-violet-200 hover:shadow-xl transition-all duration-200">
         View pricing
         <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
         </svg>
       </a>
     </div>
