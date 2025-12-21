@@ -63,35 +63,40 @@
 
   .hero-image-bg img {
     position: absolute;
-    right: 0;
+    right: -5%;
     top: 0;
-    width: 75%;
+    width: 70%;
     height: 100%;
     object-fit: cover;
-    object-position: 55% 78%;
-    opacity: 0.82;
+    object-position: 50% 75%;
+    opacity: 0.92;
     -webkit-mask-image:
-      linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 12%, rgba(0,0,0,0.85) 28%, black 42%, black 100%),
-      linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.5) 8%, black 16%, black 90%, transparent 100%);
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
     -webkit-mask-composite: source-in;
     mask-image:
-      linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.35) 12%, rgba(0,0,0,0.85) 28%, black 42%, black 100%),
-      linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.5) 8%, black 16%, black 90%, transparent 100%);
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
     mask-composite: intersect;
   }
 
   @media (max-width: 1023px) {
     .hero-image-bg img {
       right: -10%;
-      width: 110%;
-      object-position: 65% 70%;
-      opacity: 0.7;
+      width: 100%;
+      object-position: 65% 72%;
+      opacity: 0.45;
       -webkit-mask-image:
-        linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.4) 15%, black 40%, black 100%),
-        linear-gradient(180deg, transparent 0%, black 12%, black 85%, transparent 100%);
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
       mask-image:
-        linear-gradient(90deg, transparent 0%, rgba(0,0,0,0.4) 15%, black 40%, black 100%),
-        linear-gradient(180deg, transparent 0%, black 12%, black 85%, transparent 100%);
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
+    }
+
+    .recruiting-panel::after {
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
+                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
     }
   }
 
@@ -130,14 +135,11 @@
   <section class="relative recruiting-content">
     <div class="relative max-w-7xl mx-auto px-6 pt-32 lg:pt-44 pb-28">
 
-      <!-- Ambient Glow behind text for readability -->
-      <div class="absolute top-24 -left-20 w-[600px] lg:w-[800px] h-[500px] lg:h-[600px] bg-white blur-[80px] lg:blur-[100px] opacity-85 rounded-full pointer-events-none -z-10"></div>
-
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
           Your recruiting team,
-          <span class="font-normal bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">working 24/7</span>
+          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">working 24/7</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-600 leading-relaxed max-w-xl">
