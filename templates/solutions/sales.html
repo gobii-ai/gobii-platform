@@ -18,9 +18,9 @@
     position: absolute;
     inset: 0;
     background:
-      radial-gradient(circle at 20% 25%, rgba(59, 130, 246, 0.14) 0%, rgba(59, 130, 246, 0) 55%),
-      radial-gradient(circle at 75% 35%, rgba(99, 102, 241, 0.10) 0%, rgba(99, 102, 241, 0) 60%),
-      radial-gradient(circle at 55% 80%, rgba(147, 197, 253, 0.08) 0%, rgba(147, 197, 253, 0) 70%);
+      radial-gradient(circle at 20% 25%, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 55%),
+      radial-gradient(circle at 75% 35%, rgba(79, 70, 229, 0.10) 0%, rgba(79, 70, 229, 0) 60%),
+      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.08) 0%, rgba(129, 140, 248, 0) 70%);
     opacity: 0.8;
     filter: blur(40px);
     pointer-events: none;
@@ -42,7 +42,7 @@
     inset: 0;
     pointer-events: none;
     z-index: 0;
-    background: linear-gradient(180deg, rgba(59, 130, 246, 0.28) 0%, rgba(147, 197, 253, 0.32) 40%, rgba(99, 102, 241, 0.22) 100%);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.32) 40%, rgba(79, 70, 229, 0.22) 100%);
     -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
     mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
   }
@@ -106,8 +106,8 @@
 
   .agent-card:hover {
     transform: translateY(-2px);
-    border-color: rgba(59, 130, 246, 0.26);
-    box-shadow: 0 24px 48px -28px rgba(59, 130, 246, 0.35);
+    border-color: rgba(99, 102, 241, 0.26);
+    box-shadow: 0 24px 48px -28px rgba(99, 102, 241, 0.35);
   }
 </style>
 {% endblock %}
@@ -139,7 +139,7 @@
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
           Your pipeline,
-          <span class="font-normal bg-gradient-to-r from-blue-700 to-indigo-600 bg-clip-text text-transparent">always full</span>
+          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">always full</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
