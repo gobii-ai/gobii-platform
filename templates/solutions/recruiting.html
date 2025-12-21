@@ -69,7 +69,7 @@
     height: 100%;
     object-fit: cover;
     object-position: 50% 75%;
-    opacity: 0.92;
+    opacity: 1;
     -webkit-mask-image:
       linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
       linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
@@ -133,27 +133,27 @@
   <div class="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-[11]"></div>
 
   <section class="relative recruiting-content">
-    <div class="relative max-w-7xl mx-auto px-6 pt-32 lg:pt-44 pb-28">
+    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
 
       <!-- Hero Content -->
-      <div class="relative z-10 max-w-2xl">
+      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 xl:ml-12 2xl:ml-16">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
           Your recruiting team,
           <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">working 24/7</span>
         </h1>
 
-        <p class="mt-6 text-lg text-gray-600 leading-relaxed max-w-xl">
+        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
           Deploy AI agents that source candidates, screen resumes, and nurture talent pipelines around the clock.
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-semibold rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+          <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
             Get started
             <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
           </a>
-          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-700 font-semibold rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+          <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
             See how it works
           </a>
         </div>
@@ -162,15 +162,15 @@
         <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
           <div>
             <div class="text-3xl font-light text-gray-900">10x</div>
-            <p class="text-sm text-gray-700 mt-1">Faster sourcing</p>
+            <p class="text-sm text-gray-800 mt-1">Faster sourcing</p>
           </div>
           <div>
             <div class="text-3xl font-light text-gray-900">80%</div>
-            <p class="text-sm text-gray-700 mt-1">Time saved</p>
+            <p class="text-sm text-gray-800 mt-1">Time saved</p>
           </div>
           <div>
             <div class="text-3xl font-light text-gray-900">24/7</div>
-            <p class="text-sm text-gray-700 mt-1">Always on</p>
+            <p class="text-sm text-gray-800 mt-1">Always on</p>
           </div>
         </div>
       </div>
@@ -196,7 +196,7 @@
         <div class="w-12 h-12 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-indigo-200/50">
           <i data-lucide="search" class="w-6 h-6 text-white"></i>
         </div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Talent Sourcer</h3>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Talent Sourcer</h3>
         <p class="text-gray-600 leading-relaxed mb-6">
           Searches LinkedIn, GitHub, and job boards to find candidates matching your profile.
         </p>
@@ -220,7 +220,7 @@
             ATS integration
           </li>
         </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
           Deploy agent
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -233,7 +233,7 @@
         <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-violet-200/50">
           <i data-lucide="file-check" class="w-6 h-6 text-white"></i>
         </div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Resume Screener</h3>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Resume Screener</h3>
         <p class="text-gray-600 leading-relaxed mb-6">
           Analyzes applications against your requirements. Ranks and flags top talent automatically.
         </p>
@@ -257,7 +257,7 @@
             Bias-reduced evaluation
           </li>
         </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
           Deploy agent
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -270,7 +270,7 @@
         <div class="w-12 h-12 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-xl flex items-center justify-center mb-6 shadow-lg shadow-emerald-200/50">
           <i data-lucide="message-circle" class="w-6 h-6 text-white"></i>
         </div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Candidate Engager</h3>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Candidate Engager</h3>
         <p class="text-gray-600 leading-relaxed mb-6">
           Crafts personalized outreach and keeps your talent pipeline warm automatically.
         </p>
@@ -294,7 +294,7 @@
             Pipeline nurturing
           </li>
         </ul>
-        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-semibold text-indigo-600 hover:text-indigo-700">
+        <a href="{% url 'pages:home' %}" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
           Deploy agent
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -322,24 +322,24 @@
 
     <div class="grid md:grid-cols-3 gap-12 lg:gap-16">
       <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xl font-semibold mb-6 shadow-lg shadow-indigo-200/50">1</div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Define your criteria</h3>
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xl font-medium mb-6 shadow-lg shadow-indigo-200/50">1</div>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Define your criteria</h3>
         <p class="text-gray-600 leading-relaxed">
           Tell your agent what you're looking for. Skills, experience, location. Speak naturally, like briefing a colleague.
         </p>
       </div>
 
       <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white text-xl font-semibold mb-6 shadow-lg shadow-violet-200/50">2</div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Set the schedule</h3>
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 text-white text-xl font-medium mb-6 shadow-lg shadow-violet-200/50">2</div>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Set the schedule</h3>
         <p class="text-gray-600 leading-relaxed">
           Run continuously, daily, or on specific days. Adjust frequency based on urgency and hiring volume.
         </p>
       </div>
 
       <div class="text-center">
-        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xl font-semibold mb-6 shadow-lg shadow-purple-200/50">3</div>
-        <h3 class="text-xl font-semibold text-gray-900 mb-3">Review and hire</h3>
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-purple-500 to-pink-500 text-white text-xl font-medium mb-6 shadow-lg shadow-purple-200/50">3</div>
+        <h3 class="text-xl font-medium text-gray-900 mb-3">Review and hire</h3>
         <p class="text-gray-600 leading-relaxed">
           Qualified candidates delivered to your inbox or ATS. Review the shortlist, reach out, make great hires.
         </p>
@@ -366,7 +366,7 @@
               <i data-lucide="clock" class="w-5 h-5 text-indigo-600"></i>
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-1">Reclaim your calendar</h3>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Reclaim your calendar</h3>
               <p class="text-gray-600">Stop spending hours on repetitive sourcing. Let your agent handle the legwork while you focus on interviewing and closing.</p>
             </div>
           </div>
@@ -376,7 +376,7 @@
               <i data-lucide="trending-up" class="w-5 h-5 text-violet-600"></i>
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-1">Scale instantly</h3>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Scale instantly</h3>
               <p class="text-gray-600">Hiring for 5 roles or 50? Agents scale without training, ramp time, or burnout.</p>
             </div>
           </div>
@@ -386,7 +386,7 @@
               <i data-lucide="check-circle" class="w-5 h-5 text-emerald-600"></i>
             </div>
             <div>
-              <h3 class="text-lg font-semibold text-gray-900 mb-1">Consistent quality</h3>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Consistent quality</h3>
               <p class="text-gray-600">AI evaluates every candidate against your criteria. No fatigue, no shortcuts, no overlooked talent.</p>
             </div>
           </div>
@@ -403,9 +403,9 @@
               We went from spending 20+ hours a week on sourcing to letting our Gobii agent handle it overnight. Our pipeline has never been stronger.
             </p>
             <footer class="mt-8 flex items-center gap-4">
-              <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-full flex items-center justify-center text-white font-semibold">JM</div>
+              <div class="w-12 h-12 bg-gradient-to-br from-violet-500 to-purple-600 rounded-full flex items-center justify-center text-white font-medium">JM</div>
               <div>
-                <div class="font-semibold text-gray-900">Jessica M.</div>
+                <div class="font-medium text-gray-900">Jessica M.</div>
                 <div class="text-sm text-gray-500">Head of Talent, Series B Startup</div>
               </div>
             </footer>
@@ -496,7 +496,7 @@
       Deploy your first recruiting agent today.
     </p>
     <div class="mt-10">
-      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-semibold rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
         View pricing
         <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
