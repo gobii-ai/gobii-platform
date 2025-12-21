@@ -1127,6 +1127,7 @@ class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
         'recruiting': 'solutions/recruiting.html',
+        'sales': 'solutions/sales.html',
     }
 
     SOLUTION_DATA = {
