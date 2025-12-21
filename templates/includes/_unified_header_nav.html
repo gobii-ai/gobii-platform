@@ -3,11 +3,11 @@
 {% url 'account_login' as account_login_url %}
 
 <!-- Unified Header -->
-<header class="sticky top-0 z-50 bg-transparent hs-header transition-all duration-300"
+<header class="sticky top-0 z-50 bg-transparent hs-header transition-all duration-300 !border-none"
         x-data="{ scrolled: window.scrollY > 10 }"
         x-init="scrolled = window.scrollY > 10"
         @scroll.window.passive="scrolled = window.scrollY > 10"
-        :class="{ 'backdrop-blur-md border-b border-white/20': scrolled }">
+        :class="{ 'backdrop-blur-md': scrolled }">
   <!-- Fluid Background Tint Layer -->
   <div class="absolute inset-0 bg-white/75 z-[-1]"
        x-data
@@ -17,7 +17,7 @@
   </div>
 
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-    <div class="flex items-center justify-between h-16">
+    <div class="flex items-center justify-between h-16 !border-none">
       <!-- Brand -->
       <a href="{% url 'pages:home' %}" class="text-lg font-bold text-slate-900 flex items-center h-10">
         <img src="{% static 'images/noBgIndigo600.png' %}"

@@ -583,27 +583,66 @@
 </section>
 
 <!-- Final CTA -->
-<section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden">
-  <!-- Gradient background matching home -->
+<section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate">
+  <!-- Rich gradient background -->
   <div class="absolute inset-0 pointer-events-none">
-    <div class="absolute inset-0 bg-gradient-to-b from-white via-indigo-50/40 to-violet-50/30"></div>
-    <div class="absolute inset-0 bg-gradient-to-t from-white via-transparent to-transparent"></div>
+    <div class="absolute inset-0 bg-gradient-to-br from-indigo-50 via-violet-50/80 to-purple-50/60"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.15),transparent)]"></div>
   </div>
 
+  <!-- Floating gradient orbs -->
+  <div class="absolute top-1/4 left-1/4 w-72 h-72 bg-gradient-to-br from-violet-300/30 to-indigo-300/30 rounded-full blur-3xl pointer-events-none"></div>
+  <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-gradient-to-br from-purple-300/25 to-violet-300/25 rounded-full blur-3xl pointer-events-none"></div>
+
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:32px_32px] [mask-image:radial-gradient(ellipse_60%_60%_at_50%_50%,black_20%,transparent_100%)] opacity-30 pointer-events-none"></div>
+
   <div class="relative max-w-4xl mx-auto px-6 text-center">
-    <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+    <!-- Decorative badge -->
+    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-violet-200/50 shadow-sm mb-8">
+      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-500 animate-pulse"></span>
+      <span class="text-sm font-medium text-violet-700">Ready to deploy</span>
+    </div>
+
+    <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
       Start hiring smarter
     </h2>
-    <p class="mt-4 text-lg text-gray-500 max-w-xl mx-auto">
-      Deploy your first recruiting agent today.
+    <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
+      Deploy your first recruiting agent today and watch your pipeline grow.
     </p>
-    <div class="mt-10">
-      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-        View pricing
+
+    <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+      <a href="{% url 'proprietary:pricing' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+        Get started
         <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
         </svg>
       </a>
+      <a href="{% url 'pages:home' %}" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+        See how it works
+      </a>
+    </div>
+
+    <!-- Trust indicators -->
+    <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        No credit card required
+      </div>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Deploy in minutes
+      </div>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Cancel anytime
+      </div>
     </div>
   </div>
 </section>
