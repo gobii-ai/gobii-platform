@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -215,6 +215,7 @@ function AgentCard({ agent }: AgentCardProps) {
   const smsValue = agent.primarySms
   const emailValue = agent.primaryEmail
   const chatValue = agent.chatUrl
+  const hasTags = agent.displayTags.length > 0
   const hasChannels = Boolean(smsValue || emailValue || chatValue)
   const [copiedField, setCopiedField] = useState<null | 'sms' | 'email'>(null)
   const copyResetTimeout = useRef<number | null>(null)
@@ -317,7 +318,7 @@ function AgentCard({ agent }: AgentCardProps) {
           </div>
         )}
 
-        <div className="flex-1">
+        <div className={hasTags ? '' : 'flex-1'}>
           {agent.miniDescription && agent.miniDescriptionSource !== 'placeholder' ? (
             <p className="text-sm font-semibold text-gray-600">{agent.miniDescription}</p>
           ) : agent.listingDescriptionSource === 'placeholder' ? (
@@ -332,8 +333,8 @@ function AgentCard({ agent }: AgentCardProps) {
           )}
         </div>
 
-        {agent.displayTags.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-2">
+        {hasTags && (
+          <div className="mt-4 flex flex-1 flex-wrap content-start gap-2">
             {agent.displayTags.map((tag) => (
               <span
                 key={tag}
@@ -365,7 +366,7 @@ function AgentCard({ agent }: AgentCardProps) {
                     aria-label="Copy SMS number"
                     className="group relative inline-flex w-8 flex-none shrink-0 items-center justify-center border-l border-emerald-500/70 bg-emerald-600 px-2.5 py-2 text-white/80 transition hover:bg-emerald-700 hover:text-white data-[copied=true]:bg-emerald-700 data-[copied=true]:text-white"
                   >
-                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    {copiedField === 'sms' ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
                     <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white opacity-0 transition group-data-[copied=true]:opacity-100">
                       Copied
                     </span>
@@ -389,7 +390,7 @@ function AgentCard({ agent }: AgentCardProps) {
                     aria-label="Copy email address"
                     className="group relative inline-flex w-8 flex-none shrink-0 items-center justify-center border-l border-sky-500/70 bg-sky-600 px-2.5 py-2 text-white/80 transition hover:bg-sky-700 hover:text-white data-[copied=true]:bg-sky-700 data-[copied=true]:text-white"
                   >
-                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    {copiedField === 'email' ? <Check className="h-4 w-4" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
                     <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white opacity-0 transition group-data-[copied=true]:opacity-100">
                       Copied
                     </span>
