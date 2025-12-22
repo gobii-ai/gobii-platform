@@ -1,4 +1,5 @@
 from django import forms
+from django.conf import settings
 
 
 class MarketingContactForm(forms.Form):
@@ -18,3 +19,11 @@ class MarketingContactForm(forms.Form):
     organization = forms.CharField(max_length=200, required=False)
     inquiry_type = forms.ChoiceField(choices=INQUIRY_CHOICES, required=False)
     message = forms.CharField(required=False, widget=forms.Textarea)
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        if settings.TURNSTILE_ENABLED:
+            from turnstile.fields import TurnstileField  # type: ignore[import]
+
+            self.fields["turnstile"] = TurnstileField(label="")

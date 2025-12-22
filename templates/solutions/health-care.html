@@ -648,6 +648,11 @@
             class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900 placeholder-gray-400"
           >
         </div>
+        {% if settings.TURNSTILE_ENABLED and marketing_contact_form %}
+        <div class="flex justify-center">
+          {{ marketing_contact_form.turnstile }}
+        </div>
+        {% endif %}
         <button
           type="submit"
           class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:shadow-indigo-300/60 transition-all duration-200 hover:-translate-y-0.5"

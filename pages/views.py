@@ -1279,4 +1279,6 @@ class SolutionView(TemplateView):
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],
         })
+        if slug in {"health-care", "defense"}:
+            context["marketing_contact_form"] = MarketingContactForm()
         return context
