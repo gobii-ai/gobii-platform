@@ -254,14 +254,6 @@ function AgentCard({ agent }: AgentCardProps) {
           </div>
         )}
 
-        <a
-          href={agent.detailUrl}
-          className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
-        >
-          <Settings className="h-4 w-4" aria-hidden="true" />
-          Configure
-        </a>
-
         {agent.auditUrl ? (
           <a
             href={agent.auditUrl}
@@ -310,8 +302,16 @@ function AgentCard({ agent }: AgentCardProps) {
           </div>
         )}
 
-        {hasChannels && (
-          <div className="mt-4 pt-4">
+        <div className="mt-auto flex flex-col gap-3 pt-4">
+          <a
+            href={agent.detailUrl}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200/80 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
+          >
+            <Settings className="h-4 w-4" aria-hidden="true" />
+            Configure
+          </a>
+
+          {hasChannels && (
             <div className="flex flex-wrap gap-2">
               {canSms && (
                 <a
@@ -343,8 +343,8 @@ function AgentCard({ agent }: AgentCardProps) {
                 </a>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   )
