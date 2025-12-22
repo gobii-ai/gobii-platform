@@ -23,6 +23,7 @@ from .views import (
     EngineeringProSignupView,
     SolutionView,
     MarketingContactRequestView,
+    SolutionsSitemap,
 )
 
 from djstripe import views as djstripe_views
@@ -39,6 +40,7 @@ if GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
+sitemaps['solutions'] = SolutionsSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),

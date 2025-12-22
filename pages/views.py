@@ -1132,6 +1132,17 @@ class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
         return getattr(template, "updated_at", None)
 
 
+class SolutionsSitemap(sitemaps.Sitemap):
+    changefreq = "monthly"
+    priority = 0.5
+
+    def items(self):
+        return list(SolutionView.SOLUTION_DATA.keys())
+
+    def location(self, slug):
+        return reverse('pages:solution', kwargs={'slug': slug})
+
+
 class SupportView(TemplateView):
     pass
 
