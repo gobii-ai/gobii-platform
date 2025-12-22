@@ -172,14 +172,14 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <a href="https://docs.gobii.ai/developers/developer-basics" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-            Read the docs
+          <a href="{% url 'account_login' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+            Get API key
             <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
           </a>
-          <a href="{% url 'account_login' %}" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
-            Get API key
+          <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+            Read the docs
           </a>
         </div>
 
@@ -493,16 +493,33 @@ agent = response.<span class="function">json</span>()
     </div>
 
     <div class="grid md:grid-cols-3 gap-8">
+      <!-- Console / Get Started - Primary -->
+      <a href="{% url 'account_login' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
+        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
+          <i data-lucide="key" class="w-6 h-6 text-white"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Get API Key</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-4">
+          Create an account and generate your API key in seconds.
+        </p>
+        <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
+          Sign up free
+          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </span>
+      </a>
+
       <!-- Docs -->
-      <a href="https://docs.gobii.ai/developers/developer-basics" class="group block p-8 rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 hover:border-indigo-200 transition-all hover:shadow-lg hover:shadow-indigo-100/50">
-        <div class="w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center mb-5 group-hover:bg-indigo-200 transition-colors">
-          <i data-lucide="book-open" class="w-6 h-6 text-indigo-600"></i>
+      <a href="https://docs.gobii.ai/developers/developer-basics" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
+        <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
+          <i data-lucide="book-open" class="w-6 h-6 text-slate-600"></i>
         </div>
         <h3 class="text-lg font-medium text-gray-900 mb-2">Documentation</h3>
         <p class="text-gray-600 text-sm leading-relaxed mb-4">
           API reference, guides, and tutorials to help you build with Gobii.
         </p>
-        <span class="inline-flex items-center text-sm font-medium text-indigo-600 group-hover:text-indigo-700">
+        <span class="inline-flex items-center text-sm font-medium text-slate-600 group-hover:text-slate-700">
           Read the docs
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
@@ -521,23 +538,6 @@ agent = response.<span class="function">json</span>()
         </p>
         <span class="inline-flex items-center text-sm font-medium text-slate-700 group-hover:text-slate-900">
           View on GitHub
-          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </span>
-      </a>
-
-      <!-- Console / API Keys -->
-      <a href="{% url 'account_login' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-50 to-purple-50 border border-violet-100 hover:border-violet-200 transition-all hover:shadow-lg hover:shadow-violet-100/50">
-        <div class="w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center mb-5 group-hover:bg-violet-200 transition-colors">
-          <i data-lucide="key" class="w-6 h-6 text-violet-600"></i>
-        </div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">API Keys</h3>
-        <p class="text-gray-600 text-sm leading-relaxed mb-4">
-          Sign up and generate API keys in the console. Start building in minutes.
-        </p>
-        <span class="inline-flex items-center text-sm font-medium text-violet-600 group-hover:text-violet-700">
-          Get started
           <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
@@ -645,7 +645,7 @@ agent = response.<span class="function">json</span>()
         </svg>
       </a>
       <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
-        Read docs
+        Read the docs
       </a>
     </div>
 
