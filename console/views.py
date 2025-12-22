@@ -8374,28 +8374,26 @@ def _update_addon_quantity(
             messages.success(request, success_message)
             return redirect(_billing_redirect(owner, owner_type))
 
-        if desired_qty <= 0:
-            if item:
-                stripe.SubscriptionItem.delete(item.get("id"))
-                updated_items = [
-                    entry for entry in updated_items if (entry.get("price") or {}).get("id") != price_id
-                ]
-            messages.success(request, success_message)
-        elif item:
-            stripe.SubscriptionItem.modify(item.get("id"), quantity=desired_qty)
-            for entry in updated_items:
-                price = entry.get("price") or {}
-                if price.get("id") == price_id:
-                    entry["quantity"] = desired_qty
-                    break
+        if desired_qty <= 0 and not item:
             messages.success(request, success_message)
         else:
-            stripe.SubscriptionItem.create(
-                subscription=subscription.id,
-                price=price_id,
-                quantity=desired_qty,
+            if desired_qty <= 0:
+                items_payload = [{"id": item.get("id"), "deleted": True}]
+            elif item:
+                items_payload = [{"id": item.get("id"), "quantity": desired_qty}]
+            else:
+                items_payload = [{"price": price_id, "quantity": desired_qty}]
+
+            updated_subscription = stripe.Subscription.modify(
+                subscription.id,
+                items=items_payload,
+                proration_behavior="always_invoice",
+                payment_behavior="pending_if_incomplete",
+                expand=["items.data.price"],
             )
-            updated_items.append({"price": {"id": price_id}, "quantity": desired_qty})
+            updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
+            if not isinstance(updated_items, list):
+                updated_items = []
             messages.success(request, success_message)
 
         try:
@@ -8572,7 +8570,6 @@ def update_addons(request, owner, owner_type):
             return redirect(_billing_redirect(owner, owner_type))
 
         items_data = (stripe_subscription.get("items") or {}).get("data", []) if isinstance(stripe_subscription, Mapping) else []
-        updated_items = list(items_data) if isinstance(items_data, list) else []
 
         # Build existing quantities map
         existing_qty: dict[str, int] = {}
@@ -8589,6 +8586,7 @@ def update_addons(request, owner, owner_type):
                 existing_qty[pid] = 0
 
         changes_made = False
+        items_payload: list[dict[str, Any]] = []
         for price_id, desired_qty in desired_quantities.items():
             current_qty = existing_qty.get(price_id, 0)
             if desired_qty == current_qty:
@@ -8596,28 +8594,26 @@ def update_addons(request, owner, owner_type):
 
             if desired_qty > 0:
                 if price_id in item_id_by_price:
-                    stripe.SubscriptionItem.modify(item_id_by_price[price_id], quantity=desired_qty)
-                    for entry in updated_items:
-                        price = entry.get("price") or {}
-                        if price.get("id") == price_id:
-                            entry["quantity"] = desired_qty
-                            break
+                    items_payload.append({"id": item_id_by_price[price_id], "quantity": desired_qty})
                 else:
-                    stripe.SubscriptionItem.create(
-                        subscription=subscription.id,
-                        price=price_id,
-                        quantity=desired_qty,
-                    )
-                    updated_items.append({"price": {"id": price_id}, "quantity": desired_qty})
+                    items_payload.append({"price": price_id, "quantity": desired_qty})
             else:
                 if price_id in item_id_by_price:
-                    stripe.SubscriptionItem.delete(item_id_by_price[price_id])
-                    updated_items = [
-                        entry for entry in updated_items if (entry.get("price") or {}).get("id") != price_id
-                    ]
+                    items_payload.append({"id": item_id_by_price[price_id], "deleted": True})
             changes_made = True
 
         if changes_made:
+            updated_subscription = stripe.Subscription.modify(
+                subscription.id,
+                items=items_payload,
+                proration_behavior="always_invoice",
+                payment_behavior="pending_if_incomplete",
+                expand=["items.data.price"],
+            )
+            updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
+            if not isinstance(updated_items, list):
+                updated_items = []
+
             try:
                 period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
                 tz = timezone.get_current_timezone()
