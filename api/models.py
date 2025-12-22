@@ -4123,7 +4123,7 @@ class PersistentAgent(models.Model):
             return None
         try:
             return file_field.url
-        except Exception:
+        except ValueError:
             return None
 
     def _validate_org_seats(self):

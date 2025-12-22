@@ -3974,7 +3974,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             try:
                 head = file_obj.read(16)
                 file_obj.seek(0)
-            except Exception:
+            except (OSError, ValueError):
                 head = b""
 
             is_image_signature = (
@@ -3984,7 +3984,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 or (len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP")
             )
 
-            if not is_image_signature and not allowed_by_content_type:
+            if not is_image_signature:
                 return "Avatar must be a valid image file."
 
             return None

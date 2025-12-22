@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.test import TestCase, Client, tag, override_settings
 from django.contrib.messages import get_messages
 from django.contrib.auth import get_user_model
+from django.core.files.storage import default_storage
 from django.urls import reverse
 from unittest.mock import patch
 from bs4 import BeautifulSoup
@@ -475,18 +476,22 @@ class ConsoleViewsTest(TestCase):
             )
             agent.avatar.save('seed.png', SimpleUploadedFile('seed.png', png_bytes, content_type='image/png'), save=True)
             existing_path = agent.avatar.name
+            self.assertTrue(default_storage.exists(existing_path))
 
             url = reverse('agent_detail', kwargs={'pk': agent.id})
-            response = self.client.post(url, {
-                'name': agent.name,
-                'charter': agent.charter,
-                'is_active': 'on',
-                'clear_avatar': 'true',
-            })
+            with self.captureOnCommitCallbacks(execute=True) as callbacks:
+                response = self.client.post(url, {
+                    'name': agent.name,
+                    'charter': agent.charter,
+                    'is_active': 'on',
+                    'clear_avatar': 'true',
+                })
             self.assertEqual(response.status_code, 302)
+            self.assertEqual(len(callbacks), 1)
 
             agent.refresh_from_db()
             self.assertFalse(agent.avatar)
+            self.assertFalse(default_storage.exists(existing_path))
 
             detail_resp = self.client.get(url)
             detail_props = detail_resp.context.get('agent_detail_props') or {}

@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0236_toolconfig_brightdata_amazon_product_search_limit"),
+        ("api", "0237_addon_entitlement_browser_task_daily_delta"),
     ]
 
     operations = [
