@@ -125,7 +125,31 @@ def get_browser_settings_for_owner(owner) -> BrowserPlanSettings:
         except Exception as e:
             logger.warning("Failed to get owner plan for owner %s: %s", owner, e, exc_info=True)
             plan_name = None
-    return get_browser_settings_for_plan(plan_name)
+    plan_settings = get_browser_settings_for_plan(plan_name)
+    max_browser_tasks = _apply_browser_task_daily_uplift(plan_settings.max_browser_tasks, owner)
+
+    return BrowserPlanSettings(
+        max_browser_steps=plan_settings.max_browser_steps,
+        max_browser_tasks=max_browser_tasks,
+        max_active_browser_tasks=plan_settings.max_active_browser_tasks,
+        vision_detail_level=plan_settings.vision_detail_level,
+    )
+
+
+def _apply_browser_task_daily_uplift(base_limit: Optional[int], owner) -> Optional[int]:
+    if base_limit is None or not owner:
+        return base_limit
+    try:
+        from billing.addons import AddonEntitlementService
+
+        uplift = AddonEntitlementService.get_browser_task_daily_uplift(owner)
+    except Exception as exc:
+        logger.warning("Failed to load browser task daily uplift for owner %s: %s", owner, exc, exc_info=True)
+        return base_limit
+
+    if uplift <= 0:
+        return base_limit
+    return base_limit + uplift
 
 
 def invalidate_browser_settings_cache() -> None:

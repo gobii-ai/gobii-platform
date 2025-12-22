@@ -2817,6 +2817,10 @@ class AddonEntitlement(models.Model):
         default=0,
         help_text="Per-unit increase to max contacts per agent.",
     )
+    browser_task_daily_delta = models.PositiveIntegerField(
+        default=0,
+        help_text="Per-unit increase to per-agent daily browser task limit.",
+    )
     starts_at = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField(null=True, blank=True)
     is_recurring = models.BooleanField(default=False)
@@ -3232,14 +3236,6 @@ class StripeConfig(models.Model):
         self.set_value("startup_task_pack_product_id", value)
 
     @property
-    def startup_task_pack_price_id(self) -> str:
-        return self.get_value("startup_task_pack_price_id")
-
-    @startup_task_pack_price_id.setter
-    def startup_task_pack_price_id(self, value: str | None) -> None:
-        self.set_value("startup_task_pack_price_id", value)
-
-    @property
     def startup_task_pack_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("startup_task_pack_price_ids"))
 
@@ -3256,20 +3252,28 @@ class StripeConfig(models.Model):
         self.set_value("startup_contact_cap_product_id", value)
 
     @property
-    def startup_contact_cap_price_id(self) -> str:
-        return self.get_value("startup_contact_cap_price_id")
-
-    @startup_contact_cap_price_id.setter
-    def startup_contact_cap_price_id(self, value: str | None) -> None:
-        self.set_value("startup_contact_cap_price_id", value)
-
-    @property
     def startup_contact_cap_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("startup_contact_cap_price_ids"))
 
     @startup_contact_cap_price_ids.setter
     def startup_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("startup_contact_cap_price_ids", value)
+
+    @property
+    def startup_browser_task_limit_product_id(self) -> str:
+        return self.get_value("startup_browser_task_limit_product_id")
+
+    @startup_browser_task_limit_product_id.setter
+    def startup_browser_task_limit_product_id(self, value: str | None) -> None:
+        self.set_value("startup_browser_task_limit_product_id", value)
+
+    @property
+    def startup_browser_task_limit_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("startup_browser_task_limit_price_ids"))
+
+    @startup_browser_task_limit_price_ids.setter
+    def startup_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("startup_browser_task_limit_price_ids", value)
 
     @property
     def startup_product_id(self) -> str:
@@ -3304,14 +3308,6 @@ class StripeConfig(models.Model):
         self.set_value("scale_task_pack_product_id", value)
 
     @property
-    def scale_task_pack_price_id(self) -> str:
-        return self.get_value("scale_task_pack_price_id")
-
-    @scale_task_pack_price_id.setter
-    def scale_task_pack_price_id(self, value: str | None) -> None:
-        self.set_value("scale_task_pack_price_id", value)
-
-    @property
     def scale_task_pack_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("scale_task_pack_price_ids"))
 
@@ -3328,20 +3324,28 @@ class StripeConfig(models.Model):
         self.set_value("scale_contact_cap_product_id", value)
 
     @property
-    def scale_contact_cap_price_id(self) -> str:
-        return self.get_value("scale_contact_cap_price_id")
-
-    @scale_contact_cap_price_id.setter
-    def scale_contact_cap_price_id(self, value: str | None) -> None:
-        self.set_value("scale_contact_cap_price_id", value)
-
-    @property
     def scale_contact_cap_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("scale_contact_cap_price_ids"))
 
     @scale_contact_cap_price_ids.setter
     def scale_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("scale_contact_cap_price_ids", value)
+
+    @property
+    def scale_browser_task_limit_product_id(self) -> str:
+        return self.get_value("scale_browser_task_limit_product_id")
+
+    @scale_browser_task_limit_product_id.setter
+    def scale_browser_task_limit_product_id(self, value: str | None) -> None:
+        self.set_value("scale_browser_task_limit_product_id", value)
+
+    @property
+    def scale_browser_task_limit_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("scale_browser_task_limit_price_ids"))
+
+    @scale_browser_task_limit_price_ids.setter
+    def scale_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("scale_browser_task_limit_price_ids", value)
 
     @property
     def scale_product_id(self) -> str:
@@ -3392,86 +3396,12 @@ class StripeConfig(models.Model):
         self.set_value("org_team_task_pack_product_id", value)
 
     @property
-    def org_team_task_pack_price_id(self) -> str:
-        return self.get_value("org_team_task_pack_price_id")
-
-    @org_team_task_pack_price_id.setter
-    def org_team_task_pack_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_task_pack_price_id", value)
-
-    @property
     def org_team_task_pack_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("org_team_task_pack_price_ids"))
 
     @org_team_task_pack_price_ids.setter
     def org_team_task_pack_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("org_team_task_pack_price_ids", value)
-
-    @property
-    def task_pack_delta_startup(self) -> int:
-        try:
-            return int(self.get_value("task_pack_delta_startup", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @task_pack_delta_startup.setter
-    def task_pack_delta_startup(self, value: int | None) -> None:
-        self.set_value("task_pack_delta_startup", str(value) if value is not None else None)
-
-    @property
-    def task_pack_delta_scale(self) -> int:
-        try:
-            return int(self.get_value("task_pack_delta_scale", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @task_pack_delta_scale.setter
-    def task_pack_delta_scale(self, value: int | None) -> None:
-        self.set_value("task_pack_delta_scale", str(value) if value is not None else None)
-
-    @property
-    def task_pack_delta_org_team(self) -> int:
-        try:
-            return int(self.get_value("task_pack_delta_org_team", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @task_pack_delta_org_team.setter
-    def task_pack_delta_org_team(self, value: int | None) -> None:
-        self.set_value("task_pack_delta_org_team", str(value) if value is not None else None)
-
-    @property
-    def contact_pack_delta_startup(self) -> int:
-        try:
-            return int(self.get_value("contact_pack_delta_startup", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @contact_pack_delta_startup.setter
-    def contact_pack_delta_startup(self, value: int | None) -> None:
-        self.set_value("contact_pack_delta_startup", str(value) if value is not None else None)
-
-    @property
-    def contact_pack_delta_scale(self) -> int:
-        try:
-            return int(self.get_value("contact_pack_delta_scale", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @contact_pack_delta_scale.setter
-    def contact_pack_delta_scale(self, value: int | None) -> None:
-        self.set_value("contact_pack_delta_scale", str(value) if value is not None else None)
-
-    @property
-    def contact_pack_delta_org_team(self) -> int:
-        try:
-            return int(self.get_value("contact_pack_delta_org_team", "0") or 0)
-        except (TypeError, ValueError):
-            return 0
-
-    @contact_pack_delta_org_team.setter
-    def contact_pack_delta_org_team(self, value: int | None) -> None:
-        self.set_value("contact_pack_delta_org_team", str(value) if value is not None else None)
 
     @property
     def org_team_contact_cap_product_id(self) -> str:
@@ -3482,20 +3412,28 @@ class StripeConfig(models.Model):
         self.set_value("org_team_contact_cap_product_id", value)
 
     @property
-    def org_team_contact_cap_price_id(self) -> str:
-        return self.get_value("org_team_contact_cap_price_id")
-
-    @org_team_contact_cap_price_id.setter
-    def org_team_contact_cap_price_id(self, value: str | None) -> None:
-        self.set_value("org_team_contact_cap_price_id", value)
-
-    @property
     def org_team_contact_cap_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("org_team_contact_cap_price_ids"))
 
     @org_team_contact_cap_price_ids.setter
     def org_team_contact_cap_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("org_team_contact_cap_price_ids", value)
+
+    @property
+    def org_team_browser_task_limit_product_id(self) -> str:
+        return self.get_value("org_team_browser_task_limit_product_id")
+
+    @org_team_browser_task_limit_product_id.setter
+    def org_team_browser_task_limit_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_browser_task_limit_product_id", value)
+
+    @property
+    def org_team_browser_task_limit_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("org_team_browser_task_limit_price_ids"))
+
+    @org_team_browser_task_limit_price_ids.setter
+    def org_team_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("org_team_browser_task_limit_price_ids", value)
 
     @property
     def startup_dedicated_ip_product_id(self) -> str:

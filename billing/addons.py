@@ -17,6 +17,7 @@ from constants.plans import PlanNames
 class AddonUplift:
     task_credits: int = 0
     contact_cap: int = 0
+    browser_task_daily: int = 0
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,7 @@ class AddonPriceConfig:
     product_id: str
     task_credits_delta: int = 0
     contact_cap_delta: int = 0
+    browser_task_daily_delta: int = 0
     unit_amount: int | None = None
     currency: str = ""
 
@@ -59,11 +61,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "org_team_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "org_team_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "org_team_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
+                ),
+                "browser_task_limit": _normalize_price_list(
+                    getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
                 ),
             }
 
@@ -71,11 +74,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "startup_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "startup_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "startup_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "startup_contact_cap_price_id", ""),
+                ),
+                "browser_task_limit": _normalize_price_list(
+                    getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
                 ),
             }
 
@@ -83,11 +87,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "scale_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "scale_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "scale_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "scale_contact_cap_price_id", ""),
+                ),
+                "browser_task_limit": _normalize_price_list(
+                    getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
                 ),
             }
 
@@ -151,8 +156,11 @@ class AddonEntitlementService:
             or metadata.get("contact_cap")
             or metadata.get("contacts_delta")
         )
+        browser_task_daily_delta = AddonEntitlementService._safe_int(
+            metadata.get("browser_task_daily_delta")
+        )
 
-        if task_delta == 0 and contact_delta == 0:
+        if task_delta == 0 and contact_delta == 0 and browser_task_daily_delta == 0:
             return None
 
         return AddonPriceConfig(
@@ -160,6 +168,7 @@ class AddonEntitlementService:
             product_id=str(product_id or ""),
             task_credits_delta=task_delta,
             contact_cap_delta=contact_delta,
+            browser_task_daily_delta=browser_task_daily_delta,
             unit_amount=unit_amount,
             currency=currency or "",
         )
@@ -190,11 +199,19 @@ class AddonEntitlementService:
                 ),
                 0,
             ),
+            browser_task_daily=Coalesce(
+                Sum(
+                    F("browser_task_daily_delta") * F("quantity"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            ),
         )
 
         return AddonUplift(
             task_credits=int(aggregates.get("task_credits", 0) or 0),
             contact_cap=int(aggregates.get("contact_cap", 0) or 0),
+            browser_task_daily=int(aggregates.get("browser_task_daily", 0) or 0),
         )
 
     @staticmethod
@@ -204,6 +221,10 @@ class AddonEntitlementService:
     @staticmethod
     def get_contact_cap_uplift(owner, at_time=None) -> int:
         return AddonEntitlementService.get_uplift(owner, at_time).contact_cap
+
+    @staticmethod
+    def get_browser_task_daily_uplift(owner, at_time=None) -> int:
+        return AddonEntitlementService.get_uplift(owner, at_time).browser_task_daily
 
     @staticmethod
     def get_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
@@ -253,7 +274,6 @@ class AddonEntitlementService:
     @staticmethod
     def _build_price_map(plan_id: str | None, owner_type: str) -> dict[str, AddonPriceConfig]:
         """Return relevant add-on price configs for the owner/plan."""
-        stripe_settings = get_stripe_settings()
         price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
         price_ids: list[str] = []
         for ids in price_lists.values():
@@ -270,38 +290,10 @@ class AddonEntitlementService:
                 product_id="",
                 task_credits_delta=0,
                 contact_cap_delta=0,
+                browser_task_daily_delta=0,
                 unit_amount=None,
                 currency="",
             )
-
-            # Override task pack delta per plan when using a shared price
-            if owner_type == "organization":
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_org_team if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_org_team if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
-            elif plan_id == PlanNames.STARTUP:
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_startup if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_startup if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
-            elif plan_id == PlanNames.SCALE:
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_scale if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_scale if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
             price_map[pid] = cfg
         return price_map
 
@@ -317,6 +309,7 @@ class AddonEntitlementService:
 
         total_task = 0
         total_contact = 0
+        total_browser_task_daily = 0
         total_amount = 0
         currency = ""
 
@@ -329,6 +322,14 @@ class AddonEntitlementService:
                 cfg = price_map.get(price_id)
                 if not cfg:
                     continue
+                if kind == "task_pack":
+                    delta_value = cfg.task_credits_delta
+                elif kind == "contact_pack":
+                    delta_value = cfg.contact_cap_delta
+                elif kind == "browser_task_limit":
+                    delta_value = cfg.browser_task_daily_delta
+                else:
+                    delta_value = 0
                 entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
                 expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
                 display_price = ""
@@ -346,6 +347,8 @@ class AddonEntitlementService:
                     total_task += cfg.task_credits_delta * qty
                 if cfg.contact_cap_delta:
                     total_contact += cfg.contact_cap_delta * qty
+                if cfg.browser_task_daily_delta:
+                    total_browser_task_daily += cfg.browser_task_daily_delta * qty
                 if cfg.unit_amount is not None:
                     total_amount += cfg.unit_amount * qty
                 currency = currency or (cfg.currency or "").upper()
@@ -354,8 +357,10 @@ class AddonEntitlementService:
                         "price_id": price_id,
                         "product_id": cfg.product_id,
                         "quantity": qty,
+                        "delta_value": delta_value,
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
+                        "browser_task_daily_delta": cfg.browser_task_daily_delta,
                         "expires_at": expires_at,
                         "unit_amount": cfg.unit_amount,
                         "currency": cfg.currency,
@@ -381,6 +386,7 @@ class AddonEntitlementService:
         addon_context["totals"] = {
             "task_credits": total_task,
             "contact_cap": total_contact,
+            "browser_task_daily": total_browser_task_daily,
             "amount_cents": total_amount,
             "currency": currency,
             "amount_display": amount_display,
@@ -507,6 +513,9 @@ class AddonEntitlementService:
                 if ent.contact_cap_delta != cfg.contact_cap_delta:
                     ent.contact_cap_delta = cfg.contact_cap_delta
                     updates.append("contact_cap_delta")
+                if ent.browser_task_daily_delta != cfg.browser_task_daily_delta:
+                    ent.browser_task_daily_delta = cfg.browser_task_daily_delta
+                    updates.append("browser_task_daily_delta")
                 if ent.starts_at != starts_at:
                     ent.starts_at = starts_at
                     updates.append("starts_at")
@@ -528,6 +537,7 @@ class AddonEntitlementService:
                     quantity=quantity,
                     task_credits_delta=cfg.task_credits_delta,
                     contact_cap_delta=cfg.contact_cap_delta,
+                    browser_task_daily_delta=cfg.browser_task_daily_delta,
                     starts_at=starts_at,
                     expires_at=ent_expires_at,
                     is_recurring=True,
