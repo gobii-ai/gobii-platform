@@ -1137,7 +1137,11 @@ class SolutionsSitemap(sitemaps.Sitemap):
     priority = 0.5
 
     def items(self):
-        return list(SolutionView.SOLUTION_DATA.keys())
+        try:
+            return list(SolutionView.SOLUTION_DATA.keys())
+        except Exception as e:
+            logger.error("Failed to generate SolutionsSitemap items: %s", e, exc_info=True)
+            return []
 
     def location(self, slug):
         return reverse('pages:solution', kwargs={'slug': slug})
