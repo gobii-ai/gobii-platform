@@ -4119,12 +4119,16 @@ class PersistentAgent(models.Model):
     def get_avatar_url(self) -> str | None:
         """Return a usable URL for the agent avatar, if set."""
         file_field = getattr(self, "avatar", None)
-        if not file_field:
+        if not file_field or not getattr(file_field, "name", None) or not self.pk:
             return None
         try:
-            return file_field.url
-        except ValueError:
-            return None
+            from django.urls import reverse, NoReverseMatch
+            return reverse("agent_avatar", kwargs={"pk": self.pk})
+        except NoReverseMatch:
+            try:
+                return file_field.url
+            except ValueError:
+                return None
 
     def _validate_org_seats(self):
         billing = getattr(self.organization, "billing", None)

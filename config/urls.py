@@ -102,6 +102,7 @@ from console.views import (
     MCPServerManagementView,
     MCPOAuthCallbackPageView,
     PersistentAgentChatShellView,
+    AgentAvatarProxyView,
     AgentCreateContactView,
     AgentDetailView,
     AgentEnableSmsView,
@@ -197,6 +198,7 @@ urlpatterns = [
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
     path("console/agents/<uuid:pk>/chat/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell"),
+    path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),

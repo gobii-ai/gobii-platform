@@ -1,4 +1,5 @@
 import json
+import mimetypes
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from typing import Any
 
@@ -17,7 +18,15 @@ from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
 from django.db import transaction, models, IntegrityError
 from django.db.models import Q, Sum
-from django.http import HttpResponseForbidden, HttpResponseNotAllowed, HttpResponse, JsonResponse, Http404, HttpRequest
+from django.http import (
+    FileResponse,
+    HttpResponseForbidden,
+    HttpResponseNotAllowed,
+    HttpResponse,
+    JsonResponse,
+    Http404,
+    HttpRequest,
+)
 from django.core.exceptions import ValidationError, PermissionDenied, ImproperlyConfigured
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -4752,6 +4761,33 @@ class PersistentAgentChatShellView(AgentDetailView):
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
         return HttpResponseNotAllowed(['GET'])
+
+
+class AgentAvatarProxyView(AgentDetailView):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        agent = self.get_object()
+        file_field = getattr(agent, "avatar", None)
+        if not file_field or not getattr(file_field, "name", None):
+            raise Http404("Avatar not found.")
+
+        storage = file_field.storage
+        name = file_field.name
+        if hasattr(storage, "exists") and not storage.exists(name):
+            raise Http404("Avatar not found.")
+
+        try:
+            file_handle = storage.open(name, "rb")
+        except (FileNotFoundError, OSError):
+            raise Http404("Avatar not found.")
+
+        content_type, encoding = mimetypes.guess_type(name)
+        response = FileResponse(file_handle, content_type=content_type or "application/octet-stream")
+        response["Cache-Control"] = "private, max-age=300"
+        if encoding:
+            response["Content-Encoding"] = encoding
+        return response
 
 
 class AgentAllowlistView(LoginRequiredMixin, TemplateView):
