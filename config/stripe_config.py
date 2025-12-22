@@ -28,25 +28,19 @@ class StripeSettings:
     startup_price_id: str
     startup_additional_task_price_id: str
     startup_task_pack_product_id: str
-    startup_task_pack_price_id: str
     startup_task_pack_price_ids: tuple[str, ...]
     startup_contact_cap_product_id: str
-    startup_contact_cap_price_id: str
     startup_contact_cap_price_ids: tuple[str, ...]
     startup_browser_task_limit_product_id: str
-    startup_browser_task_limit_price_id: str
     startup_browser_task_limit_price_ids: tuple[str, ...]
     startup_product_id: str
     scale_price_id: str
     scale_additional_task_price_id: str
     scale_task_pack_product_id: str
-    scale_task_pack_price_id: str
     scale_task_pack_price_ids: tuple[str, ...]
     scale_contact_cap_product_id: str
-    scale_contact_cap_price_id: str
     scale_contact_cap_price_ids: tuple[str, ...]
     scale_browser_task_limit_product_id: str
-    scale_browser_task_limit_price_id: str
     scale_browser_task_limit_price_ids: tuple[str, ...]
     scale_product_id: str
     org_team_product_id: str
@@ -54,23 +48,11 @@ class StripeSettings:
     org_team_additional_task_product_id: str
     org_team_additional_task_price_id: str
     org_team_task_pack_product_id: str
-    org_team_task_pack_price_id: str
     org_team_task_pack_price_ids: tuple[str, ...]
     org_team_contact_cap_product_id: str
-    org_team_contact_cap_price_id: str
     org_team_contact_cap_price_ids: tuple[str, ...]
     org_team_browser_task_limit_product_id: str
-    org_team_browser_task_limit_price_id: str
     org_team_browser_task_limit_price_ids: tuple[str, ...]
-    task_pack_delta_startup: int
-    task_pack_delta_scale: int
-    task_pack_delta_org_team: int
-    contact_pack_delta_startup: int
-    contact_pack_delta_scale: int
-    contact_pack_delta_org_team: int
-    browser_task_daily_delta_startup: int
-    browser_task_daily_delta_scale: int
-    browser_task_daily_delta_org_team: int
     startup_dedicated_ip_product_id: str
     startup_dedicated_ip_price_id: str
     scale_dedicated_ip_product_id: str
@@ -120,19 +102,13 @@ def _env_defaults() -> StripeSettings:
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
         startup_task_pack_product_id=env("STRIPE_STARTUP_TASK_PACK_PRODUCT_ID", default="prod_dummy_startup_task_pack_product"),
-        startup_task_pack_price_id=env("STRIPE_STARTUP_TASK_PACK_PRICE_ID", default="prod_dummy_startup_task_pack_price"),
         startup_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_STARTUP_TASK_PACK_PRICE_IDS", default=[])),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
         startup_contact_cap_product_id=env("STRIPE_STARTUP_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_startup_contact_cap"),
-        startup_contact_cap_price_id=env("STRIPE_STARTUP_CONTACT_CAP_PRICE_ID", default="price_dummy_startup_contact_cap"),
         startup_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_STARTUP_CONTACT_CAP_PRICE_IDS", default=[])),
         startup_browser_task_limit_product_id=env(
             "STRIPE_STARTUP_BROWSER_TASK_LIMIT_PRODUCT_ID",
             default="prod_dummy_startup_browser_task_limit",
-        ),
-        startup_browser_task_limit_price_id=env(
-            "STRIPE_STARTUP_BROWSER_TASK_LIMIT_PRICE_ID",
-            default="price_dummy_startup_browser_task_limit",
         ),
         startup_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_STARTUP_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
@@ -140,33 +116,18 @@ def _env_defaults() -> StripeSettings:
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
         scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
         scale_task_pack_product_id=env("STRIPE_SCALE_TASK_PACK_PRODUCT_ID", default="prod_dummy_scale_task_pack_product"),
-        scale_task_pack_price_id=env("STRIPE_SCALE_TASK_PACK_PRICE_ID", default="prod_dummy_scale_task_pack_price"),
         scale_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_SCALE_TASK_PACK_PRICE_IDS", default=[])),
         scale_additional_task_price_id=env("STRIPE_SCALE_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_scale_additional_task"),
         scale_contact_cap_product_id=env("STRIPE_SCALE_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_scale_contact_cap"),
-        scale_contact_cap_price_id=env("STRIPE_SCALE_CONTACT_CAP_PRICE_ID", default="price_dummy_scale_contact_cap"),
         scale_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_SCALE_CONTACT_CAP_PRICE_IDS", default=[])),
         scale_browser_task_limit_product_id=env(
             "STRIPE_SCALE_BROWSER_TASK_LIMIT_PRODUCT_ID",
             default="prod_dummy_scale_browser_task_limit",
         ),
-        scale_browser_task_limit_price_id=env(
-            "STRIPE_SCALE_BROWSER_TASK_LIMIT_PRICE_ID",
-            default="price_dummy_scale_browser_task_limit",
-        ),
         scale_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_SCALE_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
         ),
         scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
-        task_pack_delta_startup=env.int("STRIPE_TASK_PACK_DELTA_STARTUP", default=0),
-        task_pack_delta_scale=env.int("STRIPE_TASK_PACK_DELTA_SCALE", default=0),
-        task_pack_delta_org_team=env.int("STRIPE_TASK_PACK_DELTA_ORG_TEAM", default=0),
-        contact_pack_delta_startup=env.int("STRIPE_CONTACT_PACK_DELTA_STARTUP", default=0),
-        contact_pack_delta_scale=env.int("STRIPE_CONTACT_PACK_DELTA_SCALE", default=0),
-        contact_pack_delta_org_team=env.int("STRIPE_CONTACT_PACK_DELTA_ORG_TEAM", default=0),
-        browser_task_daily_delta_startup=env.int("STRIPE_BROWSER_TASK_DAILY_DELTA_STARTUP", default=0),
-        browser_task_daily_delta_scale=env.int("STRIPE_BROWSER_TASK_DAILY_DELTA_SCALE", default=0),
-        browser_task_daily_delta_org_team=env.int("STRIPE_BROWSER_TASK_DAILY_DELTA_ORG_TEAM", default=0),
         startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
         startup_dedicated_ip_price_id=env("STRIPE_STARTUP_DEDICATED_IP_PRICE_ID", default="price_dummy_startup_dedicated_ip"),
         scale_dedicated_ip_product_id=env("STRIPE_SCALE_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_scale_dedicated_ip"),
@@ -175,19 +136,13 @@ def _env_defaults() -> StripeSettings:
         org_team_price_id=env("STRIPE_ORG_TEAM_PRICE_ID", default="price_dummy_org_team"),
         org_team_additional_task_product_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRODUCT_ID", default="prod_dummy_org_team_additional_task"),
         org_team_task_pack_product_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRODUCT_ID", default="prod_dummy_org_team_task_pack_product"),
-        org_team_task_pack_price_id=env("STRIPE_ORG_TEAM_TASK_PACK_PRICE_ID", default="prod_dummy_org_team_task_pack_price"),
         org_team_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_ORG_TEAM_TASK_PACK_PRICE_IDS", default=[])),
         org_team_additional_task_price_id=env("STRIPE_ORG_TEAM_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_org_team_additional_task"),
         org_team_contact_cap_product_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRODUCT_ID", default="prod_dummy_org_team_contact_cap"),
-        org_team_contact_cap_price_id=env("STRIPE_ORG_TEAM_CONTACT_CAP_PRICE_ID", default="price_dummy_org_team_contact_cap"),
         org_team_contact_cap_price_ids=_parse_price_id_list(env.list("STRIPE_ORG_TEAM_CONTACT_CAP_PRICE_IDS", default=[])),
         org_team_browser_task_limit_product_id=env(
             "STRIPE_ORG_TEAM_BROWSER_TASK_LIMIT_PRODUCT_ID",
             default="prod_dummy_org_team_browser_task_limit",
-        ),
-        org_team_browser_task_limit_price_id=env(
-            "STRIPE_ORG_TEAM_BROWSER_TASK_LIMIT_PRICE_ID",
-            default="price_dummy_org_team_browser_task_limit",
         ),
         org_team_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_ORG_TEAM_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
@@ -236,10 +191,8 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_price = ""
     try:
         org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
-        org_team_contact_cap_price_id = config.org_team_contact_cap_price_id or ""
     except Exception:
         org_team_contact_cap_product_id = ""
-        org_team_contact_cap_price_id = ""
     try:
         startup_task_pack_price_ids = _parse_price_id_list(getattr(config, "startup_task_pack_price_ids", None))
     except Exception:
@@ -290,28 +243,22 @@ def _load_from_database() -> Optional[StripeSettings]:
         webhook_secret=webhook_secret,
         startup_price_id=config.startup_price_id or "",
         startup_task_pack_product_id=config.startup_task_pack_product_id or "",
-        startup_task_pack_price_id=config.startup_task_pack_price_id or "",
         startup_task_pack_price_ids=startup_task_pack_price_ids or env_defaults.startup_task_pack_price_ids,
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
         startup_contact_cap_product_id=config.startup_contact_cap_product_id or "",
-        startup_contact_cap_price_id=config.startup_contact_cap_price_id or "",
         startup_contact_cap_price_ids=startup_contact_cap_price_ids or env_defaults.startup_contact_cap_price_ids,
         startup_browser_task_limit_product_id=config.startup_browser_task_limit_product_id or "",
-        startup_browser_task_limit_price_id=config.startup_browser_task_limit_price_id or "",
         startup_browser_task_limit_price_ids=(
             startup_browser_task_limit_price_ids or env_defaults.startup_browser_task_limit_price_ids
         ),
         startup_product_id=config.startup_product_id or "",
         scale_price_id=config.scale_price_id or "",
         scale_task_pack_product_id=config.scale_task_pack_product_id or "",
-        scale_task_pack_price_id=config.scale_task_pack_price_id or "",
         scale_task_pack_price_ids=scale_task_pack_price_ids or env_defaults.scale_task_pack_price_ids,
         scale_additional_task_price_id=config.scale_additional_task_price_id or "",
         scale_contact_cap_product_id=config.scale_contact_cap_product_id or "",
-        scale_contact_cap_price_id=config.scale_contact_cap_price_id or "",
         scale_contact_cap_price_ids=scale_contact_cap_price_ids or env_defaults.scale_contact_cap_price_ids,
         scale_browser_task_limit_product_id=config.scale_browser_task_limit_product_id or "",
-        scale_browser_task_limit_price_id=config.scale_browser_task_limit_price_id or "",
         scale_browser_task_limit_price_ids=(
             scale_browser_task_limit_price_ids or env_defaults.scale_browser_task_limit_price_ids
         ),
@@ -324,29 +271,11 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_price_id=config.org_team_price_id or "",
         org_team_additional_task_product_id=getattr(config, "org_team_additional_task_product_id", "") or "",
         org_team_task_pack_product_id=config.org_team_task_pack_product_id or "",
-        org_team_task_pack_price_id=config.org_team_task_pack_price_id or "",
         org_team_task_pack_price_ids=org_team_task_pack_price_ids or env_defaults.org_team_task_pack_price_ids,
-        task_pack_delta_startup=getattr(config, "task_pack_delta_startup", env_defaults.task_pack_delta_startup),
-        task_pack_delta_scale=getattr(config, "task_pack_delta_scale", env_defaults.task_pack_delta_scale),
-        task_pack_delta_org_team=getattr(config, "task_pack_delta_org_team", env_defaults.task_pack_delta_org_team),
-        contact_pack_delta_startup=getattr(config, "contact_pack_delta_startup", env_defaults.contact_pack_delta_startup),
-        contact_pack_delta_scale=getattr(config, "contact_pack_delta_scale", env_defaults.contact_pack_delta_scale),
-        contact_pack_delta_org_team=getattr(config, "contact_pack_delta_org_team", env_defaults.contact_pack_delta_org_team),
-        browser_task_daily_delta_startup=getattr(
-            config, "browser_task_daily_delta_startup", env_defaults.browser_task_daily_delta_startup
-        ),
-        browser_task_daily_delta_scale=getattr(
-            config, "browser_task_daily_delta_scale", env_defaults.browser_task_daily_delta_scale
-        ),
-        browser_task_daily_delta_org_team=getattr(
-            config, "browser_task_daily_delta_org_team", env_defaults.browser_task_daily_delta_org_team
-        ),
         org_team_additional_task_price_id=org_team_additional_price,
         org_team_contact_cap_product_id=org_team_contact_cap_product_id,
-        org_team_contact_cap_price_id=org_team_contact_cap_price_id,
         org_team_contact_cap_price_ids=org_team_contact_cap_price_ids or env_defaults.org_team_contact_cap_price_ids,
         org_team_browser_task_limit_product_id=config.org_team_browser_task_limit_product_id or "",
-        org_team_browser_task_limit_price_id=config.org_team_browser_task_limit_price_id or "",
         org_team_browser_task_limit_price_ids=(
             org_team_browser_task_limit_price_ids or env_defaults.org_team_browser_task_limit_price_ids
         ),

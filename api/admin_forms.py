@@ -400,11 +400,6 @@ class StripeConfigForm(ModelForm):
         label="Startup task pack product ID",
         required=False,
     )
-
-    startup_task_pack_price_id = forms.CharField(
-        label="Startup task pack price ID",
-        required=False,
-    )
     startup_task_pack_price_ids = forms.CharField(
         label="Startup task pack price IDs",
         required=False,
@@ -415,10 +410,6 @@ class StripeConfigForm(ModelForm):
         label="Startup contact cap product ID",
         required=False,
     )
-    startup_contact_cap_price_id = forms.CharField(
-        label="Startup contact cap price ID",
-        required=False,
-    )
     startup_contact_cap_price_ids = forms.CharField(
         label="Startup contact cap price IDs",
         required=False,
@@ -426,10 +417,6 @@ class StripeConfigForm(ModelForm):
     )
     startup_browser_task_limit_product_id = forms.CharField(
         label="Startup browser task limit product ID",
-        required=False,
-    )
-    startup_browser_task_limit_price_id = forms.CharField(
-        label="Startup browser task limit price ID",
         required=False,
     )
     startup_browser_task_limit_price_ids = forms.CharField(
@@ -449,10 +436,6 @@ class StripeConfigForm(ModelForm):
         label="Scale task pack product ID",
         required=False,
     )
-    scale_task_pack_price_id = forms.CharField(
-        label="Scale task pack price ID",
-        required=False,
-    )
     scale_task_pack_price_ids = forms.CharField(
         label="Scale task pack price IDs",
         required=False,
@@ -466,10 +449,6 @@ class StripeConfigForm(ModelForm):
         label="Scale contact cap product ID",
         required=False,
     )
-    scale_contact_cap_price_id = forms.CharField(
-        label="Scale contact cap price ID",
-        required=False,
-    )
     scale_contact_cap_price_ids = forms.CharField(
         label="Scale contact cap price IDs",
         required=False,
@@ -477,10 +456,6 @@ class StripeConfigForm(ModelForm):
     )
     scale_browser_task_limit_product_id = forms.CharField(
         label="Scale browser task limit product ID",
-        required=False,
-    )
-    scale_browser_task_limit_price_id = forms.CharField(
-        label="Scale browser task limit price ID",
         required=False,
     )
     scale_browser_task_limit_price_ids = forms.CharField(
@@ -524,76 +499,13 @@ class StripeConfigForm(ModelForm):
         label="Org/Team task pack product ID",
         required=False,
     )
-
-    org_team_task_pack_price_id = forms.CharField(
-        label="Org/Team task pack price ID",
-        required=False,
-    )
     org_team_task_pack_price_ids = forms.CharField(
         label="Org/Team task pack price IDs",
         required=False,
         help_text="Comma-separated list of Stripe price IDs for task pack tiers.",
     )
-    task_pack_delta_startup = forms.IntegerField(
-        label="Task pack credits per unit (Startup/Pro)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    task_pack_delta_scale = forms.IntegerField(
-        label="Task pack credits per unit (Scale)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    task_pack_delta_org_team = forms.IntegerField(
-        label="Task pack credits per unit (Org Team)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    contact_pack_delta_startup = forms.IntegerField(
-        label="Contact pack per-unit delta (Startup/Pro)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    contact_pack_delta_scale = forms.IntegerField(
-        label="Contact pack per-unit delta (Scale)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    contact_pack_delta_org_team = forms.IntegerField(
-        label="Contact pack per-unit delta (Org Team)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    browser_task_daily_delta_startup = forms.IntegerField(
-        label="Browser task daily delta per unit (Startup/Pro)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    browser_task_daily_delta_scale = forms.IntegerField(
-        label="Browser task daily delta per unit (Scale)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
-    browser_task_daily_delta_org_team = forms.IntegerField(
-        label="Browser task daily delta per unit (Org Team)",
-        required=False,
-        min_value=0,
-        initial=0,
-    )
     org_team_contact_cap_product_id = forms.CharField(
         label="Org/Team contact cap product ID",
-        required=False,
-    )
-    org_team_contact_cap_price_id = forms.CharField(
-        label="Org/Team contact cap price ID",
         required=False,
     )
     org_team_contact_cap_price_ids = forms.CharField(
@@ -603,10 +515,6 @@ class StripeConfigForm(ModelForm):
     )
     org_team_browser_task_limit_product_id = forms.CharField(
         label="Org/Team browser task limit product ID",
-        required=False,
-    )
-    org_team_browser_task_limit_price_id = forms.CharField(
-        label="Org/Team browser task limit price ID",
         required=False,
     )
     org_team_browser_task_limit_price_ids = forms.CharField(
@@ -659,15 +567,12 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
 
             self.fields["startup_task_pack_product_id"].initial = instance.startup_task_pack_product_id
-            self.fields["startup_task_pack_price_id"].initial = instance.startup_task_pack_price_id
             self.fields["startup_task_pack_price_ids"].initial = ",".join(instance.startup_task_pack_price_ids or [])
 
 
             self.fields["startup_contact_cap_product_id"].initial = instance.startup_contact_cap_product_id
-            self.fields["startup_contact_cap_price_id"].initial = instance.startup_contact_cap_price_id
             self.fields["startup_contact_cap_price_ids"].initial = ",".join(instance.startup_contact_cap_price_ids or [])
             self.fields["startup_browser_task_limit_product_id"].initial = instance.startup_browser_task_limit_product_id
-            self.fields["startup_browser_task_limit_price_id"].initial = instance.startup_browser_task_limit_price_id
             self.fields["startup_browser_task_limit_price_ids"].initial = ",".join(
                 instance.startup_browser_task_limit_price_ids or []
             )
@@ -677,31 +582,13 @@ class StripeConfigForm(ModelForm):
             self.fields["scale_product_id"].initial = instance.scale_product_id
 
             self.fields["scale_task_pack_product_id"].initial = instance.scale_task_pack_product_id
-            self.fields["scale_task_pack_price_id"].initial = instance.scale_task_pack_price_id
             self.fields["scale_task_pack_price_ids"].initial = ",".join(instance.scale_task_pack_price_ids or [])
 
             self.fields["scale_contact_cap_product_id"].initial = instance.scale_contact_cap_product_id
-            self.fields["scale_contact_cap_price_id"].initial = instance.scale_contact_cap_price_id
             self.fields["scale_contact_cap_price_ids"].initial = ",".join(instance.scale_contact_cap_price_ids or [])
             self.fields["scale_browser_task_limit_product_id"].initial = instance.scale_browser_task_limit_product_id
-            self.fields["scale_browser_task_limit_price_id"].initial = instance.scale_browser_task_limit_price_id
             self.fields["scale_browser_task_limit_price_ids"].initial = ",".join(
                 instance.scale_browser_task_limit_price_ids or []
-            )
-            self.fields["task_pack_delta_startup"].initial = getattr(instance, "task_pack_delta_startup", 0)
-            self.fields["task_pack_delta_scale"].initial = getattr(instance, "task_pack_delta_scale", 0)
-            self.fields["task_pack_delta_org_team"].initial = getattr(instance, "task_pack_delta_org_team", 0)
-            self.fields["contact_pack_delta_startup"].initial = getattr(instance, "contact_pack_delta_startup", 0)
-            self.fields["contact_pack_delta_scale"].initial = getattr(instance, "contact_pack_delta_scale", 0)
-            self.fields["contact_pack_delta_org_team"].initial = getattr(instance, "contact_pack_delta_org_team", 0)
-            self.fields["browser_task_daily_delta_startup"].initial = getattr(
-                instance, "browser_task_daily_delta_startup", 0
-            )
-            self.fields["browser_task_daily_delta_scale"].initial = getattr(
-                instance, "browser_task_daily_delta_scale", 0
-            )
-            self.fields["browser_task_daily_delta_org_team"].initial = getattr(
-                instance, "browser_task_daily_delta_org_team", 0
             )
 
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
@@ -716,16 +603,13 @@ class StripeConfigForm(ModelForm):
             self.fields["org_team_additional_task_price_id"].initial = instance.org_team_additional_task_price_id
 
             self.fields["org_team_task_pack_product_id"].initial = instance.org_team_task_pack_product_id
-            self.fields["org_team_task_pack_price_id"].initial = instance.org_team_task_pack_price_id
             self.fields["org_team_task_pack_price_ids"].initial = ",".join(instance.org_team_task_pack_price_ids or [])
 
             self.fields["org_team_contact_cap_product_id"].initial = instance.org_team_contact_cap_product_id
-            self.fields["org_team_contact_cap_price_id"].initial = instance.org_team_contact_cap_price_id
             self.fields["org_team_contact_cap_price_ids"].initial = ",".join(instance.org_team_contact_cap_price_ids or [])
             self.fields["org_team_browser_task_limit_product_id"].initial = (
                 instance.org_team_browser_task_limit_product_id
             )
-            self.fields["org_team_browser_task_limit_price_id"].initial = instance.org_team_browser_task_limit_price_id
             self.fields["org_team_browser_task_limit_price_ids"].initial = ",".join(
                 instance.org_team_browser_task_limit_price_ids or []
             )
@@ -765,15 +649,12 @@ class StripeConfigForm(ModelForm):
             "startup_additional_task_price_id",
 
             "startup_task_pack_product_id",
-            "startup_task_pack_price_id",
             "startup_task_pack_price_ids",
 
 
             "startup_contact_cap_product_id",
-            "startup_contact_cap_price_id",
             "startup_contact_cap_price_ids",
             "startup_browser_task_limit_product_id",
-            "startup_browser_task_limit_price_id",
             "startup_browser_task_limit_price_ids",
 
             "scale_product_id",
@@ -781,24 +662,12 @@ class StripeConfigForm(ModelForm):
             "scale_additional_task_price_id",
 
             "scale_task_pack_product_id",
-            "scale_task_pack_price_id",
             "scale_task_pack_price_ids",
 
             "scale_contact_cap_product_id",
-            "scale_contact_cap_price_id",
             "scale_contact_cap_price_ids",
             "scale_browser_task_limit_product_id",
-            "scale_browser_task_limit_price_id",
             "scale_browser_task_limit_price_ids",
-            "task_pack_delta_startup",
-            "task_pack_delta_scale",
-            "task_pack_delta_org_team",
-            "contact_pack_delta_startup",
-            "contact_pack_delta_scale",
-            "contact_pack_delta_org_team",
-            "browser_task_daily_delta_startup",
-            "browser_task_daily_delta_scale",
-            "browser_task_daily_delta_org_team",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
             "scale_dedicated_ip_product_id",
@@ -809,13 +678,10 @@ class StripeConfigForm(ModelForm):
             "org_team_additional_task_product_id",
             "org_team_additional_task_price_id",
             "org_team_task_pack_product_id",
-            "org_team_task_pack_price_id",
             "org_team_task_pack_price_ids",
             "org_team_contact_cap_product_id",
-            "org_team_contact_cap_price_id",
             "org_team_contact_cap_price_ids",
             "org_team_browser_task_limit_product_id",
-            "org_team_browser_task_limit_price_id",
             "org_team_browser_task_limit_price_ids",
             "org_team_dedicated_ip_product_id",
             "org_team_dedicated_ip_price_id",

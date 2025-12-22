@@ -61,15 +61,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "org_team_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "org_team_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "org_team_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "org_team_contact_cap_price_id", ""),
                 ),
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
-                    getattr(stripe_settings, "org_team_browser_task_limit_price_id", ""),
                 ),
             }
 
@@ -77,15 +74,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "startup_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "startup_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "startup_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "startup_contact_cap_price_id", ""),
                 ),
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
-                    getattr(stripe_settings, "startup_browser_task_limit_price_id", ""),
                 ),
             }
 
@@ -93,15 +87,12 @@ class AddonEntitlementService:
             return {
                 "task_pack": _normalize_price_list(
                     getattr(stripe_settings, "scale_task_pack_price_ids", ()),
-                    getattr(stripe_settings, "scale_task_pack_price_id", ""),
                 ),
                 "contact_pack": _normalize_price_list(
                     getattr(stripe_settings, "scale_contact_cap_price_ids", ()),
-                    getattr(stripe_settings, "scale_contact_cap_price_id", ""),
                 ),
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
-                    getattr(stripe_settings, "scale_browser_task_limit_price_id", ""),
                 ),
             }
 
@@ -283,7 +274,6 @@ class AddonEntitlementService:
     @staticmethod
     def _build_price_map(plan_id: str | None, owner_type: str) -> dict[str, AddonPriceConfig]:
         """Return relevant add-on price configs for the owner/plan."""
-        stripe_settings = get_stripe_settings()
         price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
         price_ids: list[str] = []
         for ids in price_lists.values():
@@ -304,50 +294,6 @@ class AddonEntitlementService:
                 unit_amount=None,
                 currency="",
             )
-
-            # Override task pack delta per plan when using a shared price
-            if owner_type == "organization":
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_org_team if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_org_team if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    browser_task_daily_delta=(
-                        getattr(stripe_settings, "browser_task_daily_delta_org_team", 0)
-                        if cfg.browser_task_daily_delta == 0
-                        else cfg.browser_task_daily_delta
-                    ),
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
-            elif plan_id == PlanNames.STARTUP:
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_startup if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_startup if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    browser_task_daily_delta=(
-                        getattr(stripe_settings, "browser_task_daily_delta_startup", 0)
-                        if cfg.browser_task_daily_delta == 0
-                        else cfg.browser_task_daily_delta
-                    ),
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
-            elif plan_id == PlanNames.SCALE:
-                cfg = AddonPriceConfig(
-                    price_id=cfg.price_id,
-                    product_id=cfg.product_id,
-                    task_credits_delta=stripe_settings.task_pack_delta_scale if cfg.task_credits_delta == 0 else cfg.task_credits_delta,
-                    contact_cap_delta=stripe_settings.contact_pack_delta_scale if cfg.contact_cap_delta == 0 else cfg.contact_cap_delta,
-                    browser_task_daily_delta=(
-                        getattr(stripe_settings, "browser_task_daily_delta_scale", 0)
-                        if cfg.browser_task_daily_delta == 0
-                        else cfg.browser_task_daily_delta
-                    ),
-                    unit_amount=cfg.unit_amount,
-                    currency=cfg.currency,
-                )
             price_map[pid] = cfg
         return price_map
 

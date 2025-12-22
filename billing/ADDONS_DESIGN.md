@@ -10,7 +10,7 @@ This note summarizes a minimal way to support Pro add-ons (prepaid task credit p
 ## Recommended approach
 
 ### 1) Model add-ons as distinct Stripe prices + entitlements table
-- Keep base plans unchanged in `PLAN_CONFIG`; introduce Stripe products/prices for each add-on (e.g., `task_pack_1k`, `contact_cap_plus_50`). Store the per-environment product/price IDs on `StripeConfig` (and propagate them through `StripeSettings`) just like existing plan and dedicated IP entries so they can be edited in admin without redeploys.【api/models.py†L2875-L3074】【config/stripe_config.py†L20-L137】
+- Keep base plans unchanged in `PLAN_CONFIG`; introduce Stripe products/prices for each add-on (e.g., `task_pack_1k`, `contact_cap_plus_50`). Store the per-environment product IDs and comma-separated price ID lists on `StripeConfig` (and propagate them through `StripeSettings`) just like existing plan and dedicated IP entries so they can be edited in admin without redeploys.【api/models.py†L2875-L3074】【config/stripe_config.py†L20-L137】
 - Add an `AddonEntitlement` model (user- or org-scoped) that records the purchased quantity, price ID, effective period, and applied dimensions (task credits added, contact cap override). This preserves purchase history instead of collapsing state into a single integer.
 - On subscription renewal, grant/refresh entitlements that are marked recurring; for one-off purchases tied to the current cycle, set `expires_at` to the billing period end.
 
@@ -34,7 +34,7 @@ This note summarizes a minimal way to support Pro add-ons (prepaid task credit p
 
 ## Minimal implementation steps
 1) Create `billing.models.AddonEntitlement` (fields: `owner_type`, `owner_id`, `price_id`, `quantity`, `task_credits`, `contact_cap`, `starts_at`, `expires_at`, `is_recurring`, `created_via`). Add simple manager methods to fetch active entitlements.
-2) Add new product/price fields for each add-on on `StripeConfig` + `StripeSettings` (e.g., `startup_contact_cap_product_id`, `startup_contact_cap_price_id`, plus Scale and org-team equivalents) and surface them in the admin form so billing settings can render Checkout buttons with the right IDs.【api/admin_forms.py†L365-L458】【api/models.py†L2955-L3097】【config/stripe_config.py†L20-L137】
+2) Add new product fields and price ID list fields for each add-on on `StripeConfig` + `StripeSettings` (e.g., `startup_contact_cap_product_id`, `startup_contact_cap_price_ids`, plus Scale and org-team equivalents) and surface them in the admin form so billing settings can render Checkout buttons with the right IDs.【api/admin_forms.py†L365-L458】【api/models.py†L2955-L3097】【config/stripe_config.py†L20-L137】
 3) Add a service that, given a user or org, returns effective task credits and contact caps by combining plan defaults, active entitlements (respecting quantity to scale the uplift), and the existing billing overrides. Wire it into existing helper functions.
 4) Extend Stripe webhook/checkout handlers to create entitlements when an add-on price is purchased and to refresh entitlements on subscription renewal. Persist the Stripe line item quantity and multiply the unit benefit when creating entitlements.
 5) Add UI exposure in billing settings to show active add-ons, expiration, and renewal behavior; reuse existing Pro plan surfaces to avoid new container styles.

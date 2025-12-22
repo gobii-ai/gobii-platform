@@ -23,18 +23,8 @@ class AddonEntitlementSyncTests(TestCase):
     @patch("billing.addons.get_stripe_settings")
     def test_sync_creates_entitlements_and_task_credits(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_task_pack_price_id="price_task",
-            startup_contact_cap_price_id="price_contact",
-            scale_task_pack_price_id="",
-            scale_contact_cap_price_id="",
-            org_team_task_pack_price_id="",
-            org_team_contact_cap_price_id="",
-            task_pack_delta_startup=250,
-            task_pack_delta_scale=0,
-            task_pack_delta_org_team=0,
-            contact_pack_delta_startup=0,
-            contact_pack_delta_scale=0,
-            contact_pack_delta_org_team=0,
+            startup_task_pack_price_ids=("price_task",),
+            startup_contact_cap_price_ids=("price_contact",),
         )
 
         items = [
@@ -100,20 +90,9 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertLessEqual(contact_entitlement.expires_at, timezone.now())
 
     @patch("billing.addons.get_stripe_settings")
-    def test_contact_pack_delta_overridden_per_plan(self, mock_settings):
+    def test_contact_pack_delta_defaults_to_zero_without_metadata(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_task_pack_price_id="",
-            startup_contact_cap_price_id="price_contact",
-            scale_task_pack_price_id="",
-            scale_contact_cap_price_id="",
-            org_team_task_pack_price_id="",
-            org_team_contact_cap_price_id="",
-            task_pack_delta_startup=0,
-            task_pack_delta_scale=0,
-            task_pack_delta_org_team=0,
-            contact_pack_delta_startup=9,
-            contact_pack_delta_scale=0,
-            contact_pack_delta_org_team=0,
+            startup_contact_cap_price_ids=("price_contact",),
         )
 
         items = [
@@ -121,7 +100,7 @@ class AddonEntitlementSyncTests(TestCase):
                 "price": {
                     "id": "price_contact",
                     "product": "prod_contact",
-                    "metadata": {},  # no contact_cap_delta; rely on per-plan override
+                    "metadata": {},
                 },
                 "quantity": 2,
             },
@@ -139,26 +118,14 @@ class AddonEntitlementSyncTests(TestCase):
 
         ent = AddonEntitlementService.get_active_entitlements(self.user, "price_contact").first()
         self.assertIsNotNone(ent)
-        self.assertEqual(ent.contact_cap_delta, 9)
+        self.assertEqual(ent.contact_cap_delta, 0)
         self.assertEqual(ent.quantity, 2)
 
     @patch("billing.addons.get_stripe_settings")
     def test_sync_handles_multiple_contact_pack_prices(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_task_pack_price_id="",
             startup_task_pack_price_ids=(),
-            startup_contact_cap_price_id="",
             startup_contact_cap_price_ids=("price_contact_small", "price_contact_large"),
-            scale_task_pack_price_id="",
-            scale_contact_cap_price_id="",
-            org_team_task_pack_price_id="",
-            org_team_contact_cap_price_id="",
-            task_pack_delta_startup=0,
-            task_pack_delta_scale=0,
-            task_pack_delta_org_team=0,
-            contact_pack_delta_startup=0,
-            contact_pack_delta_scale=0,
-            contact_pack_delta_org_team=0,
         )
 
         items = [
@@ -204,24 +171,7 @@ class AddonEntitlementSyncTests(TestCase):
     @patch("billing.addons.get_stripe_settings")
     def test_sync_sets_browser_task_daily_delta(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_task_pack_price_id="",
-            startup_contact_cap_price_id="",
-            startup_browser_task_limit_price_id="price_browser",
-            scale_task_pack_price_id="",
-            scale_contact_cap_price_id="",
-            scale_browser_task_limit_price_id="",
-            org_team_task_pack_price_id="",
-            org_team_contact_cap_price_id="",
-            org_team_browser_task_limit_price_id="",
-            task_pack_delta_startup=0,
-            task_pack_delta_scale=0,
-            task_pack_delta_org_team=0,
-            contact_pack_delta_startup=0,
-            contact_pack_delta_scale=0,
-            contact_pack_delta_org_team=0,
-            browser_task_daily_delta_startup=0,
-            browser_task_daily_delta_scale=0,
-            browser_task_daily_delta_org_team=0,
+            startup_browser_task_limit_price_ids=("price_browser",),
         )
 
         items = [
@@ -254,18 +204,9 @@ class AddonEntitlementSyncTests(TestCase):
     @patch("billing.addons.get_stripe_settings")
     def test_sync_expires_entitlements_when_prices_missing(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_task_pack_price_id="",
-            startup_contact_cap_price_id="",
-            scale_task_pack_price_id="",
-            scale_contact_cap_price_id="",
-            org_team_task_pack_price_id="",
-            org_team_contact_cap_price_id="",
-            task_pack_delta_startup=0,
-            task_pack_delta_scale=0,
-            task_pack_delta_org_team=0,
-            contact_pack_delta_startup=0,
-            contact_pack_delta_scale=0,
-            contact_pack_delta_org_team=0,
+            startup_task_pack_price_ids=(),
+            startup_contact_cap_price_ids=(),
+            startup_browser_task_limit_price_ids=(),
         )
 
         AddonEntitlement = apps.get_model("api", "AddonEntitlement")
