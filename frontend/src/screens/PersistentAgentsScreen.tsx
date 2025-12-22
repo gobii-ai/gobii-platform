@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 
 declare global {
   interface Window {
@@ -212,10 +212,38 @@ type AgentCardProps = {
 function AgentCard({ agent }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
-  const canSms = Boolean(agent.primarySms)
-  const canEmail = Boolean(agent.primaryEmail)
-  const canChat = Boolean(agent.chatUrl)
-  const hasChannels = canSms || canEmail || canChat
+  const smsValue = agent.primarySms
+  const emailValue = agent.primaryEmail
+  const chatValue = agent.chatUrl
+  const hasChannels = Boolean(smsValue || emailValue || chatValue)
+  const [copiedField, setCopiedField] = useState<null | 'sms' | 'email'>(null)
+  const copyResetTimeout = useRef<number | null>(null)
+
+  const handleCopy = async (value: string, field: 'sms' | 'email') => {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(value)
+      setCopiedField(field)
+      if (copyResetTimeout.current !== null) {
+        window.clearTimeout(copyResetTimeout.current)
+      }
+      copyResetTimeout.current = window.setTimeout(() => {
+        setCopiedField(null)
+      }, 1600)
+    } catch (err) {
+      console.error('Copy failed', err)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeout.current !== null) {
+        window.clearTimeout(copyResetTimeout.current)
+      }
+    }
+  }, [])
 
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
@@ -319,31 +347,61 @@ function AgentCard({ agent }: AgentCardProps) {
 
         {hasChannels && (
           <div className="mt-4 pt-4">
-            <div className="flex flex-wrap gap-2">
-              {canSms && (
-                <a
-                  href={`sms:${agent.primarySms}`}
-                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
-                >
-                  <Phone className="h-4 w-4" aria-hidden="true" />
-                  SMS
-                </a>
+            <div className="flex flex-wrap items-stretch gap-2">
+              {smsValue && (
+                <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-emerald-600/80">
+                  <a
+                    href={`sms:${smsValue}`}
+                    className="inline-flex flex-1 items-center justify-center gap-x-2 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                  >
+                    <Phone className="h-4 w-4" aria-hidden="true" />
+                    SMS
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(smsValue, 'sms')}
+                    data-copied={copiedField === 'sms'}
+                    title={copiedField === 'sms' ? 'Copied!' : 'Copy SMS number'}
+                    aria-label="Copy SMS number"
+                    className="group relative inline-flex w-8 flex-none shrink-0 items-center justify-center border-l border-emerald-500/70 bg-emerald-600 px-2.5 py-2 text-white/80 transition hover:bg-emerald-700 hover:text-white data-[copied=true]:bg-emerald-700 data-[copied=true]:text-white"
+                  >
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white opacity-0 transition group-data-[copied=true]:opacity-100">
+                      Copied
+                    </span>
+                  </button>
+                </div>
               )}
-              {canEmail && (
-                <a
-                  href={`mailto:${agent.primaryEmail}`}
-                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
-                >
-                  <Mail className="h-4 w-4" aria-hidden="true" />
-                  Email
-                </a>
+              {emailValue && (
+                <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-sky-600/80">
+                  <a
+                    href={`mailto:${emailValue}`}
+                    className="inline-flex flex-1 items-center justify-center gap-x-2 bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
+                  >
+                    <Mail className="h-4 w-4" aria-hidden="true" />
+                    Email
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => handleCopy(emailValue, 'email')}
+                    data-copied={copiedField === 'email'}
+                    title={copiedField === 'email' ? 'Copied!' : 'Copy email address'}
+                    aria-label="Copy email address"
+                    className="group relative inline-flex w-8 flex-none shrink-0 items-center justify-center border-l border-sky-500/70 bg-sky-600 px-2.5 py-2 text-white/80 transition hover:bg-sky-700 hover:text-white data-[copied=true]:bg-sky-700 data-[copied=true]:text-white"
+                  >
+                    <Copy className="h-4 w-4" aria-hidden="true" />
+                    <span className="pointer-events-none absolute -top-7 left-1/2 -translate-x-1/2 rounded-md bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-white opacity-0 transition group-data-[copied=true]:opacity-100">
+                      Copied
+                    </span>
+                  </button>
+                </div>
               )}
-              {canChat && (
+              {chatValue && (
                 <a
-                  href={agent.chatUrl}
+                  href={chatValue}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
+                  className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-x-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
                 >
                   <MessageSquare className="h-4 w-4" aria-hidden="true" />
                   Chat
