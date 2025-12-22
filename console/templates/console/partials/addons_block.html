@@ -1,5 +1,5 @@
-{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack %}
-{% if task_pack.options or contact_pack.options %}
+{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack browser_task_limit=addon_context.browser_task_limit %}
+{% if task_pack.options or contact_pack.options or browser_task_limit.options %}
 <form method="post" action="{% url 'update_addons' %}">
   {% csrf_token %}
   <div class="{{ card_class|default:'gobii-card-base p-6' }}">
@@ -10,7 +10,7 @@
       </div>
     </div>
 
-    <div class="mt-4 grid gap-4 md:grid-cols-2">
+    <div class="mt-4 grid gap-4 md:grid-cols-3">
       <div class="space-y-3">
         <div class="flex items-center justify-between">
           <div>
@@ -110,19 +110,73 @@
           {% endfor %}
         {% endif %}
       </div>
+
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-semibold text-slate-900">Browser task packs</p>
+            <p class="text-xs text-slate-500">Increase the per-agent daily browser task limit.</p>
+          </div>
+        </div>
+        {% if browser_task_limit.options %}
+          {% for option in browser_task_limit.options %}
+          <div class="border border-slate-100 rounded-lg p-3 bg-white shadow-sm flex items-center justify-between gap-3">
+            <div class="space-y-1">
+              <p class="text-sm font-semibold text-slate-900">
+                {% if browser_task_limit.options|length > 1 %}{{ option.browser_task_daily_delta|default:"0" }} tasks/day{% else %}Browser task pack{% endif %}
+              </p>
+              {% if option.price_display %}
+              <p class="text-xs text-slate-600 font-medium">{{ option.price_display }}</p>
+              {% endif %}
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Decrease browser task pack quantity" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14" />
+                </svg>
+              </button>
+              <input
+                type="hidden"
+                id="quantity__{{ option.price_id }}"
+                name="quantity__{{ option.price_id }}"
+                min="0"
+                value="{{ option.quantity|default:0 }}"
+                data-addon-kind="browser_task"
+                data-delta="{{ option.browser_task_daily_delta|default:'0' }}"
+                data-price-cents="{{ option.unit_amount|default:'' }}"
+                data-currency="{{ option.currency|upper }}"
+                {% if addons_disabled %}disabled{% endif %}
+              >
+              <span id="display__{{ option.price_id }}" class="w-10 text-center text-sm font-semibold text-slate-900">{{ option.quantity|default:0 }}</span>
+              <button type="button" class="h-9 w-9 inline-flex items-center justify-center rounded-md border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      data-qty-target="quantity__{{ option.price_id }}" data-qty-display="display__{{ option.price_id }}" aria-label="Increase browser task pack quantity" data-direction="up" {% if addons_disabled %}disabled{% endif %}>
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+            </div>
+          </div>
+          {% endfor %}
+        {% endif %}
+      </div>
     </div>
 
     <div class="mt-6 flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-3 text-xs text-slate-700">
-        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total task credits</span>
           <span id="addons-total-tasks" class="font-semibold text-slate-900">{{ addon_context.totals.task_credits|default:"0" }}</span>
         </span>
-        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total contact uplift</span>
           <span id="addons-total-contacts" class="font-semibold text-slate-900">{{ addon_context.totals.contact_cap|default:"0" }}</span>
         </span>
-        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-slate-50 border border-slate-200">
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
+          <span class="text-slate-500">Total browser tasks/day</span>
+          <span id="addons-total-browser-tasks" class="font-semibold text-slate-900">{{ addon_context.totals.browser_task_daily|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total add-on price</span>
           <span id="addons-total-price" class="font-semibold text-slate-900">
             {% if addon_context.totals.amount_display %}
@@ -150,6 +204,7 @@
     const adjustButtons = document.querySelectorAll("button[data-qty-target]");
     const totalTasksEl = document.getElementById("addons-total-tasks");
     const totalContactsEl = document.getElementById("addons-total-contacts");
+    const totalBrowserTasksEl = document.getElementById("addons-total-browser-tasks");
     const totalPriceEl = document.getElementById("addons-total-price");
 
     const formatMoney = (cents, currency) => {
@@ -166,6 +221,7 @@
     const recalcTotals = () => {
       let taskTotal = 0;
       let contactTotal = 0;
+      let browserTaskTotal = 0;
       let priceCents = 0;
       let currency = "";
 
@@ -184,12 +240,15 @@
           taskTotal += delta * qty;
         } else if (kind === "contact") {
           contactTotal += delta * qty;
+        } else if (kind === "browser_task") {
+          browserTaskTotal += delta * qty;
         }
         priceCents += cents * qty;
       });
 
       if (totalTasksEl) totalTasksEl.textContent = taskTotal;
       if (totalContactsEl) totalContactsEl.textContent = contactTotal;
+      if (totalBrowserTasksEl) totalBrowserTasksEl.textContent = browserTaskTotal;
       if (totalPriceEl) totalPriceEl.textContent = priceCents > 0 ? formatMoney(priceCents, currency || "USD") : "—";
     };
 

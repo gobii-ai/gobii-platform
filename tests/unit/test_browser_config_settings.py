@@ -1,8 +1,11 @@
 import uuid
+from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 from api.models import BrowserConfig, Organization
 from api.services.browser_settings import get_browser_settings_for_owner, invalidate_browser_settings_cache
@@ -88,3 +91,32 @@ class BrowserConfigSettingsTests(TestCase):
         self.assertEqual(_normalize_vision_detail_level("HIGH", True), "high")
         self.assertIsNone(_normalize_vision_detail_level("unsupported", True))
         self.assertIsNone(_normalize_vision_detail_level("low", False))
+
+    def test_browser_task_limit_addon_applies_daily_uplift(self):
+        UserBilling = apps.get_model("api", "UserBilling")
+        UserBilling.objects.update_or_create(
+            user=self.user,
+            defaults={"subscription": PlanNames.STARTUP},
+        )
+
+        startup_config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.STARTUP)
+        startup_config.max_browser_tasks = 10
+        startup_config.max_active_browser_tasks = 3
+        startup_config.max_browser_steps = 50
+        startup_config.save()
+
+        AddonEntitlement = apps.get_model("api", "AddonEntitlement")
+        AddonEntitlement.objects.create(
+            user=self.user,
+            price_id="price_browser_limit",
+            quantity=2,
+            browser_task_daily_delta=5,
+            starts_at=timezone.now() - timedelta(days=1),
+            expires_at=timezone.now() + timedelta(days=10),
+            is_recurring=True,
+        )
+
+        invalidate_browser_settings_cache()
+        settings = get_browser_settings_for_owner(self.user)
+
+        self.assertEqual(settings.max_browser_tasks, 20)

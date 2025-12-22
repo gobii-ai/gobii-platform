@@ -202,6 +202,56 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertEqual(large.quantity, 2)
 
     @patch("billing.addons.get_stripe_settings")
+    def test_sync_sets_browser_task_daily_delta(self, mock_settings):
+        mock_settings.return_value = SimpleNamespace(
+            startup_task_pack_price_id="",
+            startup_contact_cap_price_id="",
+            startup_browser_task_limit_price_id="price_browser",
+            scale_task_pack_price_id="",
+            scale_contact_cap_price_id="",
+            scale_browser_task_limit_price_id="",
+            org_team_task_pack_price_id="",
+            org_team_contact_cap_price_id="",
+            org_team_browser_task_limit_price_id="",
+            task_pack_delta_startup=0,
+            task_pack_delta_scale=0,
+            task_pack_delta_org_team=0,
+            contact_pack_delta_startup=0,
+            contact_pack_delta_scale=0,
+            contact_pack_delta_org_team=0,
+            browser_task_daily_delta_startup=0,
+            browser_task_daily_delta_scale=0,
+            browser_task_daily_delta_org_team=0,
+        )
+
+        items = [
+            {
+                "price": {
+                    "id": "price_browser",
+                    "product": "prod_browser",
+                    "metadata": {"browser_task_daily_delta": "4"},
+                },
+                "quantity": 3,
+            },
+        ]
+
+        AddonEntitlementService.sync_subscription_entitlements(
+            owner=self.user,
+            owner_type="user",
+            plan_id=PlanNames.STARTUP,
+            subscription_items=items,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            created_via="test_sync",
+        )
+
+        ent = AddonEntitlementService.get_active_entitlements(self.user, "price_browser").first()
+        self.assertIsNotNone(ent)
+        self.assertEqual(ent.browser_task_daily_delta, 4)
+        self.assertEqual(ent.quantity, 3)
+        self.assertEqual(AddonEntitlementService.get_browser_task_daily_uplift(self.user), 12)
+
+    @patch("billing.addons.get_stripe_settings")
     def test_sync_expires_entitlements_when_prices_missing(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
             startup_task_pack_price_id="",

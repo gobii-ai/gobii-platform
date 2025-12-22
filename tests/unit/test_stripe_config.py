@@ -182,12 +182,21 @@ class StripeConfigHelperTests(TestCase):
             "clear_webhook_secret": "",
             "startup_task_pack_product_id": "prod_startup_task_pack_form",
             "startup_task_pack_price_id": "price_startup_task_pack_form",
+            "startup_browser_task_limit_product_id": "prod_startup_browser_task_limit_form",
+            "startup_browser_task_limit_price_id": "price_startup_browser_task_limit_form",
+            "startup_browser_task_limit_price_ids": "price_startup_browser_task_limit_a,price_startup_browser_task_limit_b",
             "scale_task_pack_product_id": "prod_scale_task_pack_form",
             "scale_task_pack_price_id": "price_scale_task_pack_form",
+            "scale_browser_task_limit_product_id": "prod_scale_browser_task_limit_form",
+            "scale_browser_task_limit_price_id": "price_scale_browser_task_limit_form",
+            "scale_browser_task_limit_price_ids": "price_scale_browser_task_limit_a",
             "org_team_additional_task_product_id": "prod_org_additional_form",
             "org_team_additional_task_price_id": "price_org_additional_form",
             "org_team_task_pack_product_id": "prod_org_task_pack_form",
             "org_team_task_pack_price_id": "price_org_task_pack_form",
+            "org_team_browser_task_limit_product_id": "prod_org_browser_task_limit_form",
+            "org_team_browser_task_limit_price_id": "price_org_browser_task_limit_form",
+            "org_team_browser_task_limit_price_ids": "price_org_browser_task_limit_a,price_org_browser_task_limit_b",
         }
 
         form = StripeConfigForm(data=form_data, instance=config)
@@ -197,9 +206,24 @@ class StripeConfigHelperTests(TestCase):
         config.refresh_from_db()
         self.assertEqual(config.startup_task_pack_product_id, "prod_startup_task_pack_form")
         self.assertEqual(config.startup_task_pack_price_id, "price_startup_task_pack_form")
+        self.assertEqual(config.startup_browser_task_limit_product_id, "prod_startup_browser_task_limit_form")
+        self.assertEqual(config.startup_browser_task_limit_price_id, "price_startup_browser_task_limit_form")
+        self.assertEqual(
+            config.startup_browser_task_limit_price_ids,
+            ["price_startup_browser_task_limit_a", "price_startup_browser_task_limit_b"],
+        )
         self.assertEqual(config.scale_task_pack_product_id, "prod_scale_task_pack_form")
         self.assertEqual(config.scale_task_pack_price_id, "price_scale_task_pack_form")
+        self.assertEqual(config.scale_browser_task_limit_product_id, "prod_scale_browser_task_limit_form")
+        self.assertEqual(config.scale_browser_task_limit_price_id, "price_scale_browser_task_limit_form")
+        self.assertEqual(config.scale_browser_task_limit_price_ids, ["price_scale_browser_task_limit_a"])
         self.assertEqual(config.org_team_additional_task_product_id, "prod_org_additional_form")
         self.assertEqual(config.org_team_additional_task_price_id, "price_org_additional_form")
         self.assertEqual(config.org_team_task_pack_product_id, "prod_org_task_pack_form")
         self.assertEqual(config.org_team_task_pack_price_id, "price_org_task_pack_form")
+        self.assertEqual(config.org_team_browser_task_limit_product_id, "prod_org_browser_task_limit_form")
+        self.assertEqual(config.org_team_browser_task_limit_price_id, "price_org_browser_task_limit_form")
+        self.assertEqual(
+            config.org_team_browser_task_limit_price_ids,
+            ["price_org_browser_task_limit_a", "price_org_browser_task_limit_b"],
+        )
