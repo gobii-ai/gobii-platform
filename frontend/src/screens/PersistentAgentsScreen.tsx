@@ -237,7 +237,10 @@ function AgentCard({ agent }: AgentCardProps) {
         </div>
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>
-          <a href={agent.detailUrl} className="focus-visible:underline focus-visible:outline-none hover:underline">
+          <a
+            href={agent.detailUrl}
+            className="transition duration-200 hover:drop-shadow-[0_0_10px_rgba(255,255,255,0.45)] focus-visible:underline focus-visible:outline-none"
+          >
             {agent.name}
           </a>
         </h3>
@@ -319,7 +322,7 @@ function AgentCard({ agent }: AgentCardProps) {
             <div className="flex flex-wrap gap-2">
               {canSms && (
                 <a
-                  href={`sms:${agent.primarySms ?? ''}`}
+                  href={`sms:${agent.primarySms}`}
                   className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                 >
                   <Phone className="h-4 w-4" aria-hidden="true" />
@@ -328,7 +331,7 @@ function AgentCard({ agent }: AgentCardProps) {
               )}
               {canEmail && (
                 <a
-                  href={`mailto:${agent.primaryEmail ?? ''}`}
+                  href={`mailto:${agent.primaryEmail}`}
                   className="inline-flex flex-1 items-center justify-center gap-x-2 rounded-lg bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
                 >
                   <Mail className="h-4 w-4" aria-hidden="true" />
