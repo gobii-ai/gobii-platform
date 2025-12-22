@@ -209,12 +209,18 @@
 
     const formatMoney = (cents, currency) => {
       if (!cents) return "—";
+      const major = (parseInt(cents, 10) || 0) / 100;
+      const code = (currency || "USD").toUpperCase();
       try {
-        const major = (parseInt(cents, 10) || 0) / 100;
-        const symbol = "$";
-        return `${symbol}${major.toFixed(2)}`;
+        return new Intl.NumberFormat(undefined, {
+          style: "currency",
+          currency: code,
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(major);
       } catch (e) {
-        return "—";
+        const prefix = code === "USD" ? "$" : `${code} `;
+        return `${prefix}${major.toFixed(2)}`;
       }
     };
 
