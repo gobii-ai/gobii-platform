@@ -1925,6 +1925,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
             'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
             'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
+            'displayColorHex': getattr(agent, 'display_color_hex', None) or agent.get_display_color(),
             'headerTextClass': getattr(agent, 'header_text_class', '') or '',
             'headerSubtextClass': getattr(agent, 'header_subtext_class', '') or '',
             'headerStatusClass': getattr(agent, 'header_status_class', '') or '',

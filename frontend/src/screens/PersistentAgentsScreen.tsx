@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 import { AgentAvatarBadge } from '../components/common/AgentAvatarBadge'
+import { normalizeHexColor } from '../util/color'
 
 declare global {
   interface Window {
@@ -30,6 +31,7 @@ type AgentSummary = {
   cardGradientStyle: string
   iconBackgroundHex: string
   iconBorderHex: string
+  displayColorHex: string | null
   headerTextClass: string
   headerSubtextClass: string
   headerStatusClass: string
@@ -247,6 +249,7 @@ function AgentCard({ agent }: AgentCardProps) {
       }
     }
   }, [])
+  const accentColor = normalizeHexColor(agent.displayColorHex || agent.iconBorderHex || agent.iconBackgroundHex)
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
       <div className="relative flex h-44 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
@@ -262,10 +265,11 @@ function AgentCard({ agent }: AgentCardProps) {
         <AgentAvatarBadge
           name={agent.name}
           avatarUrl={agent.avatarUrl}
-          className="relative z-10 mb-3 flex size-14 items-center justify-center rounded-full border backdrop-blur-sm"
+          className="relative z-10 mb-3 flex size-14 items-center justify-center overflow-hidden rounded-full border backdrop-blur-sm"
           imageClassName="h-full w-full object-cover"
-          textClassName={`text-xl font-semibold uppercase ${agent.headerIconClass}`}
+          textClassName={`flex h-full w-full items-center justify-center text-xl font-semibold uppercase ${agent.headerIconClass} text-white`}
           style={{ backgroundColor: agent.iconBackgroundHex, borderColor: agent.iconBorderHex }}
+          fallbackStyle={{ background: `linear-gradient(135deg, ${accentColor}, #0f172a)` }}
         />
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>
