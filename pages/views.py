@@ -1128,6 +1128,7 @@ class SolutionView(TemplateView):
     DEDICATED_TEMPLATES = {
         'recruiting': 'solutions/recruiting.html',
         'sales': 'solutions/sales.html',
+        'health-care': 'solutions/health-care.html',
     }
 
     SOLUTION_DATA = {
