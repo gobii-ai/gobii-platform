@@ -38,7 +38,6 @@ const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
 const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
-const agentDetailUrl = mountNode.dataset.agentDetailUrl || null
 
 let screen: ReactElement
 
@@ -64,7 +63,6 @@ switch (appName) {
         agentName={agentName}
         agentColor={agentColor}
         agentAvatarUrl={agentAvatarUrl}
-        agentDetailUrl={agentDetailUrl}
       />
     )
     break

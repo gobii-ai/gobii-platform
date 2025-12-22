@@ -1,5 +1,6 @@
 import type { FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowUp } from 'lucide-react'
 
 type AgentComposerProps = {
   onSubmit?: (message: string) => void | Promise<void>
@@ -101,12 +102,12 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     <div className="composer-shell" id="agent-composer-shell" ref={shellRef}>
       <div className="composer-surface">
         <form className="flex flex-col" onSubmit={handleSubmit}>
-          <div className="composer-input-surface flex flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
+          <div className="composer-input-surface flex items-center gap-3 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
             <textarea
               name="body"
               rows={1}
               required
-              className="block w-full resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0 min-h-[1.8rem]"
+              className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
               placeholder="Send a message..."
               value={body}
               onChange={(event) => setBody(event.target.value)}
@@ -114,25 +115,28 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
               disabled={disabled}
               ref={textareaRef}
             />
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-              <button
-                type="submit"
-                className="composer-send-button"
-                disabled={disabled || isSending || !body.trim()}
-              >
-                {isSending ? (
-                  <span className="inline-flex items-center gap-2 text-sm">
-                    <span
-                      className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
-                      aria-hidden="true"
-                    />
-                    Sending…
-                  </span>
-                ) : (
-                  'Send'
-                )}
-              </button>
-            </div>
+            <button
+              type="submit"
+              className="composer-send-button"
+              disabled={disabled || isSending || !body.trim()}
+              title={isSending ? 'Sending' : 'Send'}
+              aria-label={isSending ? 'Sending message' : 'Send message'}
+            >
+              {isSending ? (
+                <span className="inline-flex items-center justify-center">
+                  <span
+                    className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
+                    aria-hidden="true"
+                  />
+                  <span className="sr-only">Sending</span>
+                </span>
+              ) : (
+                <>
+                  <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                  <span className="sr-only">Send</span>
+                </>
+              )}
+            </button>
           </div>
         </form>
       </div>

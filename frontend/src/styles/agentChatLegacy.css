@@ -331,8 +331,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.9rem;
-  padding: 0.6rem 1.65rem;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 9999px;
+  padding: 0;
   font-size: 0.95rem;
   font-weight: 600;
   color: #ffffff;

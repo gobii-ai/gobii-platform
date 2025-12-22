@@ -1,16 +1,14 @@
 import { useEffect, useRef } from 'react'
-import { Settings } from 'lucide-react'
 
 import { normalizeHexColor } from '../../util/color'
 
 type AgentChatBannerProps = {
   agentName: string
   agentAvatarUrl?: string | null
-  agentDetailUrl?: string | null
   agentColorHex?: string | null
 }
 
-export function AgentChatBanner({ agentName, agentAvatarUrl, agentDetailUrl, agentColorHex }: AgentChatBannerProps) {
+export function AgentChatBanner({ agentName, agentAvatarUrl, agentColorHex }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const nameParts = trimmedName.split(/\s+/).filter(Boolean)
   const firstInitial = nameParts[0]?.charAt(0).toUpperCase() || 'A'
@@ -64,15 +62,6 @@ export function AgentChatBanner({ agentName, agentAvatarUrl, agentDetailUrl, age
               <div className="text-lg font-semibold text-slate-900">{trimmedName}</div>
             </div>
           </div>
-          {agentDetailUrl ? (
-            <a
-              href={agentDetailUrl}
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
-            >
-              <Settings className="h-4 w-4" aria-hidden />
-              Configure
-            </a>
-          ) : null}
         </div>
       </div>
     </div>

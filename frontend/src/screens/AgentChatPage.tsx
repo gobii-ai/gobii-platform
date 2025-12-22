@@ -17,10 +17,9 @@ export type AgentChatPageProps = {
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
-  agentDetailUrl?: string | null
 }
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, agentDetailUrl }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
@@ -188,7 +187,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
           <AgentChatBanner
             agentName={agentName || 'Agent'}
             agentAvatarUrl={agentAvatarUrl}
-            agentDetailUrl={agentDetailUrl}
             agentColorHex={agentColorHex || agentColor || undefined}
           />
         }
