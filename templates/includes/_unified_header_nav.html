@@ -93,7 +93,7 @@
 
           {% if settings.GOBII_PROPRIETARY_MODE %}
             <a href="{% url 'proprietary:pricing' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Pricing</a>
-            <a href="https://docs.gobii.ai/developers/developer-basics" title="Gobii Developers - Agents and browser-use in the Cloud" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Developers</a>
+            <a href="{% url 'pages:solution' slug='engineering' %}" title="Gobii Developers - Build AI Agents on our Platform" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Developers</a>
           {% endif %}
 
           {% if request.user.is_authenticated %}
@@ -291,7 +291,7 @@
 
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>
-          <a href="https://docs.gobii.ai/developers/developer-basics" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors" title="Developers guide to using Gobii API for access to agents and browser-use">Developers</a>
+          <a href="{% url 'pages:solution' slug='engineering' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors" title="Build AI Agents on our Platform">Developers</a>
           <a href="{% url 'proprietary:support' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Support</a>
         {% endif %}
         
