@@ -95,3 +95,33 @@ class PricingCheckoutCapiEventTests(SimpleTestCase):
             },
             request=request,
         )
+
+    def test_emit_checkout_event_includes_post_checkout_redirect_flag(self):
+        request = self.factory.get("/pricing/")
+        user = SimpleNamespace(id="user-4")
+
+        with patch("pages.views.capi") as mock_capi:
+            _emit_checkout_initiated_event(
+                request=request,
+                user=user,
+                plan_code=PlanNames.STARTUP,
+                plan_label="Pro",
+                value=20,
+                currency="usd",
+                event_id="evt-101",
+                post_checkout_redirect_used=True,
+            )
+
+        mock_capi.assert_called_once_with(
+            user=user,
+            event_name="InitiateCheckout",
+            properties={
+                "plan": PlanNames.STARTUP,
+                "plan_label": "Pro",
+                "event_id": "evt-101",
+                "value": 20,
+                "post_checkout_redirect_used": True,
+                "currency": "USD",
+            },
+            request=request,
+        )

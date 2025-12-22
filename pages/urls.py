@@ -20,6 +20,9 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    EngineeringProSignupView,
+    SolutionView,
+    MarketingContactRequestView,
 )
 
 from djstripe import views as djstripe_views
@@ -43,6 +46,8 @@ urlpatterns = [
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
+    path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
+    path("contact/request/", MarketingContactRequestView.as_view(), name="marketing_contact_request"),
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig
     path("healthz/", health_check, name="health_check_k8s"),
@@ -53,6 +58,9 @@ urlpatterns = [
 
     # Short landing page redirects
     path("g/<slug:code>/", LandingRedirectView.as_view(), name="landing_redirect"),
+
+    # Solutions
+    path("solutions/<slug:slug>/", SolutionView.as_view(), name="solution"),
 
     # Stripe webhooks
     path("stripe/", include("djstripe.urls", namespace="djstripe")),

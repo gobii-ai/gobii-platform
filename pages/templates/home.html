@@ -15,7 +15,7 @@
     .game-of-life-panel::before {
       content: "";
       position: absolute;
-      inset: -20%;
+      inset: 0;
       background:
         radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
         radial-gradient(circle at 80% 18%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
@@ -30,28 +30,20 @@
       content: "";
       position: absolute;
       inset: 0;
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0.4) 30%, rgba(255, 255, 255, 0.85) 100%);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
       pointer-events: none;
       z-index: 2;
       mix-blend-mode: lighten;
     }
 
-    .game-of-life-bg {
+    .game-of-life-gradient-bg {
       position: absolute;
       inset: 0;
       pointer-events: none;
       z-index: 0;
-      -webkit-mask-image: radial-gradient(circle at 50% 55%, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 60%, rgba(0, 0, 0, 0) 100%);
-      mask-image: radial-gradient(circle at 50% 55%, rgba(0, 0, 0, 0.9) 0%, rgba(0, 0, 0, 0.6) 60%, rgba(0, 0, 0, 0) 100%);
-    }
-
-    .game-of-life-bg canvas {
-      width: 100%;
-      height: 100%;
-      display: block;
-      mix-blend-mode: screen;
-      filter: saturate(1.25);
-      opacity: 0.95;
+      background: linear-gradient(180deg, rgba(99, 102, 241, 0.45) 0%, rgba(129, 140, 248, 0.5) 40%, rgba(59, 130, 246, 0.4) 100%);
+      -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+      mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
     }
 
     .game-of-life-content {
@@ -158,18 +150,24 @@
   </style>
 {% endblock %}
 {% block content %}
-<div class="relative">
-  <!-- Decorative blobs removed for cleaner background -->
+<div class="relative game-of-life-panel -mt-16 min-h-[500px] sm:min-h-[700px]">
+  <div class="game-of-life-gradient-bg" aria-hidden="true"></div>
   
   <!-- Grid pattern overlay -->
   <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[-1]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
   
+  <!-- Seamless Gradient Fade -->
+  <div class="absolute bottom-0 left-0 right-0 h-64 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-10"></div>
+
   <!-- ========================================================= -->
   <!-- Agent Spawn Hero -->
-  <section class="relative pb-0">
+  <section class="relative pb-0 game-of-life-content z-20">
     
     <!-- Content container with enhanced styling -->
-    <div class="relative max-w-5xl mx-auto px-6 pt-16 pb-0">
+    <div class="relative max-w-5xl mx-auto px-6 pt-24 sm:pt-40 pb-0">
+      
+      <!-- Ambient Glow centered on hero + input -->
+      <div class="absolute top-16 sm:top-24 left-1/2 -translate-x-1/2 w-[600px] sm:w-[1000px] h-[500px] sm:h-[800px] bg-white blur-[80px] sm:blur-[100px] opacity-90 rounded-full pointer-events-none -z-10"></div>
 
       <!-- Main Headline -->
       {% include "home/_hero.html" %}
@@ -183,18 +181,14 @@
 
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="gobii-card-base game-of-life-panel max-w-4xl mx-auto">
-        <div class="game-of-life-bg" aria-hidden="true">
-          <canvas class="game-of-life-canvas"></canvas>
-        </div>
-        <div class="game-of-life-content p-2 sm:p-4 lg:p-6">
+      <div class="max-w-4xl mx-auto">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
             {% csrf_token %}
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="border-2 border-gray-200 focus-within:border-indigo-500 rounded-xl overflow-hidden bg-white transition-colors duration-200 relative">
+              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-3xl overflow-hidden relative shadow-2xl transition-all duration-300">
                 <!-- Typing prompt overlay -->
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
@@ -212,7 +206,7 @@
                     {% load waffle_tags %}
                     {% flag "persistent_agents" %}
                       {% if account.usage.agents_in_use > 0 %}
-                        <a href="{% url 'agents' %}" class="py-3 px-4 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-lg border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 focus:outline-none focus:bg-blue-50 transition-colors duration-200">
+                        <a href="{% url 'agents' %}" class="py-3 px-4 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-xl border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 focus:outline-none focus:bg-blue-50 transition-colors duration-200">
                           <span class="hidden sm:inline">Manage your {{ account.usage.agents_in_use }} always-on agent{{ account.usage.agents_in_use|pluralize }}</span>
                           <span class="sm:hidden">Manage {{ account.usage.agents_in_use }} agent{{ account.usage.agents_in_use|pluralize }}</span>
                           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -225,7 +219,7 @@
                   
                   <button
                     type="submit"
-                    class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
+                    class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
                     Create Your Worker
@@ -248,53 +242,58 @@
 
             </div>
           </form>
-        </div>
       </div>
 
       {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}
-      <div class="max-w-4xl mx-auto mt-10">
-        <div class="gobii-card-base">
-          <div class="px-6 py-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div class="max-w-4xl mx-auto mt-16 pb-0">
+        <div class="backdrop-blur-2xl bg-white/50 border border-white/60 shadow-sm rounded-3xl overflow-hidden">
+          <div class="px-8 py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
             <div class="text-left">
-              <span class="inline-flex items-center text-xs font-semibold tracking-[0.25em] uppercase text-indigo-400">Your agents</span>
-              <h3 class="mt-3 text-xl font-light text-slate-900">Pick up where you left off</h3>
-              <p class="mt-2 text-sm text-slate-500 max-w-xl">Quickly jump into the agents already running for you. Manage schedules, messages, and integrations from the console.</p>
+              <span class="inline-flex items-center text-xs font-bold tracking-[0.25em] uppercase text-indigo-500">Your agents</span>
+              <h3 class="mt-2 text-2xl font-medium text-slate-900 tracking-tight">Pick up where you left off</h3>
+              <p class="mt-3 text-base text-slate-600 max-w-xl leading-relaxed">Quickly jump into the agents already running for you. Manage schedules, messages, and integrations from the console.</p>
             </div>
-            <a href="{% url 'agents' %}" class="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-full border border-indigo-200 text-indigo-600 font-semibold hover:bg-indigo-50 transition">
+            <a href="{% url 'agents' %}" class="group inline-flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-700 font-semibold hover:border-indigo-300 hover:text-indigo-600 hover:shadow-sm transition-all duration-200">
               View all
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5l7 7-7 7" />
+              <svg class="w-4 h-4 text-slate-400 group-hover:text-indigo-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
               </svg>
             </a>
           </div>
-          <div class="px-6 pb-6">
-            <div class="grid gap-4 sm:grid-cols-3">
+          <div class="px-8 pb-8">
+            <div class="grid gap-5 sm:grid-cols-3">
               {% if recent_agents %}
                 {% for agent in recent_agents %}
-                <a href="{% url 'agent_detail' agent.id %}" class="gobii-card-hoverable block p-4 text-left cursor-pointer">
-                  <div class="flex items-center justify-between">
-                    <p class="text-sm font-medium text-slate-900 truncate">{{ agent.name }}</p>
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium {{ agent.status_class }}">{{ agent.status_label }}</span>
+                <a href="{% url 'agent_detail' agent.id %}" class="group relative bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-300 hover:-translate-y-0.5 block text-left">
+                  <div class="flex items-center justify-between mb-3">
+                    <p class="text-base font-semibold text-slate-900 truncate pr-2">{{ agent.name }}</p>
+                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider {{ agent.status_class }} ring-1 ring-inset ring-current/10">{{ agent.status_label }}</span>
                   </div>
                   {% if agent.display_schedule %}
-                  <p class="mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-indigo-400">Cadence</p>
-                  <p class="text-sm text-slate-500">{{ agent.display_schedule }}</p>
+                  <div class="flex items-center gap-2 mb-2">
+                    <svg class="w-3.5 h-3.5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <p class="text-xs font-medium text-slate-500">{{ agent.display_schedule }}</p>
+                  </div>
                   {% endif %}
                   {% if agent.listing_description_source == "placeholder" %}
-                  <p class="mt-3 text-sm text-slate-400 italic">{{ agent.listing_description }}</p>
+                  <p class="text-sm text-slate-400 italic line-clamp-2 leading-relaxed">{{ agent.listing_description }}</p>
                   {% else %}
-                  <p class="mt-3 text-sm text-slate-500">{{ agent.listing_description }}</p>
+                  <p class="text-sm text-slate-600 line-clamp-2 leading-relaxed">{{ agent.listing_description }}</p>
                   {% endif %}
+                  
+                  <div class="absolute inset-0 rounded-2xl ring-1 ring-inset ring-black/0 group-hover:ring-indigo-500/10 transition-all duration-300"></div>
                 </a>
                 {% endfor %}
               {% else %}
-                <div class="rounded-xl border border-slate-100 bg-white/90 p-6 shadow-sm text-left sm:col-span-3">
-                  <p class="text-sm text-slate-500">Your agents are active in the console. Jump in to review their schedules and conversations.</p>
+                <div class="rounded-2xl border border-dashed border-slate-300 bg-white/50 p-8 text-center sm:col-span-3">
+                  <p class="text-sm text-slate-500 font-medium">Your agents are active in the console. Jump in to review their schedules and conversations.</p>
                 </div>
               {% endif %}
             </div>
             {% if recent_agents_remaining > 0 %}
-              <p class="mt-4 text-xs text-slate-500">+{{ recent_agents_remaining }} more agent{{ recent_agents_remaining|pluralize }} available in the console.</p>
+              <div class="mt-6 text-center border-t border-slate-200/50 pt-4">
+                <p class="text-xs font-medium text-slate-500">+{{ recent_agents_remaining }} more agent{{ recent_agents_remaining|pluralize }} available in the console.</p>
+              </div>
             {% endif %}
           </div>
         </div>
@@ -313,7 +312,7 @@
           </div>
 
           <!-- Header -->
-          <h3 class="text-2xl font-bold text-gray-900 mb-3">No Agents Available</h3>
+          <h3 class="text-2xl font-medium text-gray-900 mb-3">No Agents Available</h3>
 
           <!-- Description -->
           <p class="text-gray-600 mb-6 max-w-2xl mx-auto">
@@ -379,6 +378,13 @@
         </div>
       </div>
       {% endif %}
+
+      <!-- OR Divider -->
+      <div class="relative flex items-center justify-center pt-20 pb-12 sm:pt-24 sm:pb-16">
+        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
+        <span class="flex-shrink-0 mx-6 text-xs font-bold tracking-[0.25em] uppercase text-indigo-400">OR</span>
+        <div class="h-px bg-gradient-to-r from-transparent via-indigo-200 to-transparent w-full max-w-xs"></div>
+      </div>
     </div>
   </section>
 
@@ -500,12 +506,11 @@
   </script>
 
   <!-- Employee Directory Section -->
-  <section id="pretrained-workers" class="relative pt-12 pb-16 scroll-mt-32">
+  <section id="pretrained-workers" class="relative pt-0 pb-16 scroll-mt-32">
     <div class="max-w-6xl mx-auto px-6">
-      <div class="text-center mb-10">
-        <span class="inline-flex items-center text-xs font-medium tracking-[0.2em] uppercase text-indigo-400">OR</span>
-        <h2 class="mt-3 text-3xl sm:text-4xl font-light text-gray-900">Spawn a Pretrained Worker</h2>
-        <p class="mt-4 text-sm sm:text-base text-gray-500">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
+      <div class="text-center mb-8 sm:mb-12">
+        <h2 class="text-3xl sm:text-4xl font-light text-slate-900 tracking-tight">Spawn a Pretrained Worker</h2>
+        <p class="mt-4 text-base text-slate-500 max-w-2xl mx-auto leading-relaxed">Deploy a proven worker in minutes &mdash; built for research, ops &amp; intelligence.</p>
       </div>
 
       <div class="space-y-6 mt-12">
@@ -530,7 +535,7 @@
           {% endif %}
         </div>
 
-        <form method="get" action="{% url 'pages:home' %}#pretrained-workers" class="flex flex-col gap-4 lg:flex-row lg:items-end bg-white/70 backdrop-blur rounded-2xl shadow-lg p-6 border-0 ring-0">
+        <form method="get" action="{% url 'pages:home' %}#pretrained-workers" class="flex flex-col gap-4 lg:flex-row lg:items-end bg-white rounded-2xl shadow-xl shadow-slate-200/50 p-6 border border-slate-100 ring-1 ring-slate-200/50">
           <div class="w-full lg:flex-1 text-left">
             <label for="homepage-directory-search" class="block text-sm font-medium text-slate-500">Search</label>
             <div class="mt-2 relative">
@@ -584,408 +589,69 @@
 
 
 
-  <script>
-    (function () {
-      function initGameOfLife(panel) {
-        if (!panel || panel.dataset.golReady === 'true') {
-          return;
-        }
-
-        const canvas = panel.querySelector('.game-of-life-canvas');
-        if (!canvas) {
-          return;
-        }
-
-        const ctx = canvas.getContext('2d', { alpha: true });
-        if (!ctx) {
-          return;
-        }
-
-        panel.dataset.golReady = 'true';
-
-        const state = {
-          panel,
-          canvas,
-          ctx,
-          width: 0,
-          height: 0,
-          dpr: 1,
-          running: true,
-          raf: null,
-          lastFrame: 0,
-          waveLayers: [],
-          shimmer: [],
-          ripples: [],
-          resizeTimer: null,
-          ro: null,
-          io: null,
-          pointerCooldown: 0,
-          lastAutoRipple: 0,
-          autoRippleDelay: 2600,
-        };
-
-        const palette = [
-          { top: '#4338ca', bottom: '#6366f1' },
-          { top: '#2563eb', bottom: '#7c3aed' },
-          { top: '#0ea5e9', bottom: '#6366f1' },
-        ];
-
-        function initWaves() {
-          const depth = palette.length;
-          state.waveLayers = palette.map((colors, index) => {
-            const layerIndex = index + 1;
-            const depthFactor = layerIndex / depth;
-            return {
-              base: 0.5 + depthFactor * 0.18,
-              amplitude: 18 + depthFactor * 18,
-              frequency: 0.8 + depthFactor * 0.9,
-              phase: Math.random() * Math.PI * 2,
-              speed: 0.45 + depthFactor * 0.24,
-              opacity: 0.28 + depthFactor * 0.22,
-              colorTop: colors.top,
-              colorBottom: colors.bottom,
-            };
-          });
-        }
-
-        function initShimmer() {
-          const glintCount = Math.max(8, Math.round(state.width / 120));
-          state.shimmer = Array.from({ length: glintCount }, () => ({
-            position: Math.random() * 1.4 - 0.2,
-            y: 0.28 + Math.random() * 0.46,
-            speed: 0.16 + Math.random() * 0.14,
-            alpha: 0.15 + Math.random() * 0.12,
-            width: 0.05 + Math.random() * 0.09,
-            phase: Math.random() * Math.PI * 2,
-          }));
-        }
-
-        function resize() {
-          const rect = panel.getBoundingClientRect();
-          state.width = Math.max(1, Math.floor(rect.width || panel.offsetWidth || 1));
-          state.height = Math.max(1, Math.floor(rect.height || panel.offsetHeight || 1));
-          const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-          canvas.width = Math.round(state.width * dpr);
-          canvas.height = Math.round(state.height * dpr);
-          canvas.style.width = `${state.width}px`;
-          canvas.style.height = `${state.height}px`;
-          ctx.setTransform(1, 0, 0, 1, 0, 0);
-          ctx.scale(dpr, dpr);
-          ctx.imageSmoothingEnabled = true;
-          state.dpr = dpr;
-          initWaves();
-          initShimmer();
-        }
-
-        function ease(t) {
-          return 1 - Math.pow(1 - t, 3);
-        }
-
-        function updateRipples(delta) {
-          state.ripples = state.ripples
-            .map((ripple) => {
-              const age = ripple.age + delta;
-              const radius = ripple.radius + delta * ripple.growthRate;
-              const strength = ripple.strength * Math.exp(-delta * ripple.damping);
-              return { ...ripple, age, radius, strength };
-            })
-            .filter((ripple) => ripple.strength > 0.018);
-        }
-
-        function rippleOffset(x, baseY) {
-          let offset = 0;
-          state.ripples.forEach((ripple) => {
-            const dx = x - ripple.x;
-            const dy = baseY - ripple.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            if (distance > ripple.radius) {
-              return;
-            }
-            const influence = 1 - distance / ripple.radius;
-            const wave = Math.sin(distance / ripple.wavelength - ripple.age * ripple.waveSpeed);
-            offset += wave * ripple.strength * ease(influence);
-          });
-          return offset;
-        }
-
-        function drawBackground(time) {
-          const t = time * 0.0003;
-          const gradient = ctx.createLinearGradient(0, 0, 0, state.height);
-          gradient.addColorStop(0, `rgba(99, 102, 241, ${0.55 + Math.sin(t) * 0.08})`);
-          gradient.addColorStop(0.32, 'rgba(129, 140, 248, 0.65)');
-          gradient.addColorStop(0.75, 'rgba(59, 130, 246, 0.65)');
-          gradient.addColorStop(1, `rgba(15, 23, 42, ${0.78 - Math.cos(t * 0.8) * 0.06})`);
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, state.width, state.height);
-        }
-
-        function drawColorWash(time) {
-          const shift = Math.sin(time * 0.00018) * state.width * 0.25;
-          const gradient = ctx.createLinearGradient(shift, 0, state.width + shift, state.height);
-          gradient.addColorStop(0, 'rgba(14, 165, 233, 0.16)');
-          gradient.addColorStop(0.35, 'rgba(129, 140, 248, 0.24)');
-          gradient.addColorStop(0.7, 'rgba(244, 114, 182, 0.18)');
-          gradient.addColorStop(1, 'rgba(124, 58, 237, 0.24)');
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.globalAlpha = 0.85;
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, state.width, state.height);
-          ctx.restore();
-        }
-
-        function drawWaves(time, delta) {
-          const seconds = delta;
-          state.waveLayers.forEach((layer, index) => {
-            layer.phase += layer.speed * seconds;
-            const gradientDrift = Math.sin(time * 0.00022 + index) * 0.12;
-            const baseY = state.height * (layer.base + gradientDrift * 0.1);
-            const amplitude = layer.amplitude * (0.75 + Math.sin(time * 0.0004 + index) * 0.32);
-            const step = Math.max(1.5, state.width / 180);
-            ctx.beginPath();
-            ctx.moveTo(0, state.height);
-            ctx.lineTo(0, baseY);
-            for (let x = 0; x <= state.width; x += step) {
-              const progress = x / state.width;
-              const multiphase = layer.frequency * (1 + Math.sin(time * 0.00025 + progress * 2) * 0.12);
-              const wave = Math.sin(progress * Math.PI * 2 * multiphase + layer.phase);
-              let y = baseY + wave * amplitude;
-              y += rippleOffset(x, y);
-              ctx.lineTo(x, y);
-            }
-            ctx.lineTo(state.width, state.height);
-            ctx.closePath();
-            const fill = ctx.createLinearGradient(0, baseY - amplitude * 1.6, 0, state.height + 20);
-            fill.addColorStop(0, layer.colorTop);
-            fill.addColorStop(1, layer.colorBottom);
-            ctx.save();
-            ctx.globalAlpha = layer.opacity;
-            ctx.fillStyle = fill;
-            ctx.fill();
-            ctx.restore();
-          });
-        }
-
-        function drawShimmer(time, delta) {
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          state.shimmer.forEach((glint) => {
-            glint.position += glint.speed * delta * 0.24;
-            if (glint.position > 1.4) {
-              glint.position = -0.2;
-              glint.y = 0.26 + Math.random() * 0.48;
-              glint.alpha = 0.14 + Math.random() * 0.12;
-              glint.width = 0.05 + Math.random() * 0.12;
-              glint.phase = Math.random() * Math.PI * 2;
-            }
-            const x = glint.position * state.width;
-            const y = glint.y * state.height + Math.sin(time * 0.001 + glint.phase) * 5;
-            const half = state.width * glint.width;
-            const gradient = ctx.createLinearGradient(x - half, y, x + half, y);
-            gradient.addColorStop(0, 'rgba(255,255,255,0)');
-            gradient.addColorStop(0.45, `rgba(255,255,255,${glint.alpha})`);
-            gradient.addColorStop(1, 'rgba(255,255,255,0)');
-            ctx.fillStyle = gradient;
-            ctx.fillRect(x - half, y - 1.5, half * 2, 3);
-          });
-          ctx.restore();
-        }
-
-        function autoRipple(time) {
-          if (!state.lastAutoRipple) {
-            state.lastAutoRipple = time;
-            return;
-          }
-          if (time - state.lastAutoRipple < state.autoRippleDelay) {
-            return;
-          }
-          state.lastAutoRipple = time + Math.random() * 800;
-          const x = state.width * (0.2 + Math.random() * 0.6);
-          const y = state.height * (0.35 + Math.random() * 0.4);
-          addRipple(x, y, 3.6 + Math.random() * 2);
-        }
-
-        function addRipple(x, y, strength) {
-          state.ripples.push({
-            x,
-            y,
-            age: 0,
-            radius: 28,
-            strength,
-            growthRate: 58,
-            damping: 1.8,
-            wavelength: 24,
-            waveSpeed: 6.4,
-          });
-          if (state.ripples.length > 12) {
-            state.ripples.shift();
-          }
-        }
-
-        function pointerPosition(evt) {
-          const rect = canvas.getBoundingClientRect();
-          if (evt.touches && evt.touches.length) {
-            return {
-              x: evt.touches[0].clientX - rect.left,
-              y: evt.touches[0].clientY - rect.top,
-            };
-          }
-          return {
-            x: evt.clientX - rect.left,
-            y: evt.clientY - rect.top,
-          };
-        }
-
-        function seedRipple(event) {
-          const now = performance.now();
-          if (now - state.pointerCooldown < 140) {
-            return;
-          }
-          state.pointerCooldown = now;
-          const { x, y } = pointerPosition(event);
-          addRipple(x, y, 5.4);
-        }
-
-        function frame(now) {
-          if (!state.running) {
-            state.raf = requestAnimationFrame(frame);
-            return;
-          }
-          if (!state.lastFrame) {
-            state.lastFrame = now;
-          }
-          const deltaMs = now - state.lastFrame;
-          const delta = deltaMs / 1000;
-          state.lastFrame = now;
-
-          autoRipple(now);
-          updateRipples(delta);
-          ctx.clearRect(0, 0, state.width, state.height);
-          drawBackground(now);
-          drawColorWash(now);
-          drawWaves(now, delta);
-          drawShimmer(now, delta);
-
-          state.raf = requestAnimationFrame(frame);
-        }
-
-        function scheduleResize() {
-          if (state.resizeTimer) {
-            clearTimeout(state.resizeTimer);
-          }
-          state.resizeTimer = setTimeout(() => {
-            cancelAnimationFrame(state.raf);
-            resize();
-            state.lastFrame = 0;
-            if (!state.running) {
-              state.running = true;
-            }
-            state.raf = requestAnimationFrame(frame);
-          }, 80);
-        }
-
-        resize();
-        state.raf = requestAnimationFrame(frame);
-
-        if (window.ResizeObserver) {
-          state.ro = new ResizeObserver(scheduleResize);
-          state.ro.observe(panel);
-        } else {
-          window.addEventListener('resize', scheduleResize);
-        }
-
-        if (window.IntersectionObserver) {
-          state.io = new IntersectionObserver((entries) => {
-            entries.forEach((entry) => {
-              if (entry.target !== panel) return;
-              if (entry.isIntersecting) {
-                if (!state.running) {
-                  state.running = true;
-                  state.lastFrame = 0;
-                  state.raf = requestAnimationFrame(frame);
-                }
-              } else {
-                state.running = false;
-                cancelAnimationFrame(state.raf);
-              }
-            });
-          }, { threshold: 0.1 });
-          state.io.observe(panel);
-        }
-
-        const pointerOptions = { passive: true };
-        panel.addEventListener('mousemove', seedRipple, pointerOptions);
-        panel.addEventListener('touchmove', seedRipple, pointerOptions);
-      }
-      document.addEventListener('DOMContentLoaded', () => {
-        document.querySelectorAll('.game-of-life-panel').forEach(initGameOfLife);
-      });
-    })();
-  </script>
-
-      <script>
-        function setPrompt(promptText) {
-            const textarea = document.querySelector('textarea[name="charter"]');
-            if (textarea) {
-                textarea.value = promptText;
-                textarea.focus();
-            textareaAutoResize(textarea);
+    <script>
+      function setPrompt(promptText) {
+        const textarea = document.querySelector('textarea[name="charter"]');
+        if (textarea) {
+          textarea.value = promptText;
+          textarea.focus();
+          textareaAutoResize(textarea);
         }
 
         // Analytics CTA
         if (window.analytics && analytics.track) {
-          var properties = {
+          const properties = {
             {% if user.is_authenticated %}user_id: "{{ user }}", {% endif %}
             charter: promptText,
             medium: 'Web',
-          }
+          };
           analytics.track('{{ analytics.cta.CTA_EXAMPLE_AGENT_CLICKED.value }}', properties);
         }
-    }
+      }
 
-    // Auto-focus the textarea when page loads
-    document.addEventListener('DOMContentLoaded', function() {
+      // Auto-focus the textarea when page loads
+      document.addEventListener('DOMContentLoaded', function() {
         const textarea = document.querySelector('textarea[name="charter"]');
         if (textarea) {
-            textarea.focus();
-            // Move cursor to the end of the text
-            const length = textarea.value.length;
-            textarea.setSelectionRange(length, length);
-            textareaAutoResize(textarea);
+          textarea.focus();
+          // Move cursor to the end of the text
+          const length = textarea.value.length;
+          textarea.setSelectionRange(length, length);
+          textareaAutoResize(textarea);
         }
-    });
+      });
 
-    function textareaAutoResize(el) {
+      function textareaAutoResize(el) {
         const maxHeight = parseInt(el.dataset.maxHeight || 400);
         el.style.height = 'auto';
         if (el.scrollHeight <= maxHeight) {
-            el.style.height = el.scrollHeight + 'px';
-            el.style.overflowY = 'hidden';
+          el.style.height = el.scrollHeight + 'px';
+          el.style.overflowY = 'hidden';
         } else {
-            el.style.height = maxHeight + 'px';
-            el.style.overflowY = 'auto';
+          el.style.height = maxHeight + 'px';
+          el.style.overflowY = 'auto';
         }
-    }
-  </script>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', function () {
-      const form = document.getElementById('create-agent-form');
-      if (form) {
-        form.addEventListener('submit', function (e) {
-          // Optional: fire analytics before submit
-          if (window.analytics && analytics.track) {
-            var properties = {
-              {% if user.is_authenticated %}user_id: "{{ user.id }}", {% endif %}
-              charter: document.querySelector('textarea[name="charter"]').value,
-              medium: 'Web'
-            };
-
-            analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
-          }
-        });
       }
-    });
-  </script>
+    </script>
+
+    <script>
+      document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('create-agent-form');
+        if (form) {
+          form.addEventListener('submit', function (e) {
+            // Optional: fire analytics before submit
+            if (window.analytics && analytics.track) {
+              const properties = {
+                {% if user.is_authenticated %}user_id: "{{ user.id }}", {% endif %}
+                charter: document.querySelector('textarea[name="charter"]').value,
+                medium: 'Web'
+              };
+
+              analytics.track('{{ analytics.cta.CTA_CREATE_AGENT_CLICKED.value }}', properties);
+            }
+          });
+        }
+      });
+    </script>
 </div> <!-- New closing div for the main wrapper -->
 {% endblock %}

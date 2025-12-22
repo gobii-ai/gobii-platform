@@ -636,6 +636,22 @@ class UsageAgentsAPITests(TestCase):
         self.assertIn("Agent B", agent_names)
         self.assertNotIn("Org Agent", agent_names)
 
+    def test_agent_list_excludes_eval_agents(self):
+        eval_browser = BrowserUseAgent.objects.create(user=self.user, name="Eval Browser")
+        PersistentAgent.objects.create(
+            user=self.user,
+            name="Eval Agent",
+            charter="Eval charter",
+            browser_use_agent=eval_browser,
+            execution_environment="eval",
+        )
+
+        response = self.client.get(reverse("console_usage_agents"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        agent_names = {agent["name"] for agent in payload.get("agents", [])}
+        self.assertNotIn("Eval Browser", agent_names)
+
     def test_user_context_excludes_org_agents(self):
         response = self.client.get(reverse("console_usage_agents"))
         payload = response.json()
@@ -661,6 +677,7 @@ class UsageAgentsAPITests(TestCase):
         reset_session["context_id"] = str(self.user.id)
         reset_session["context_name"] = self.user.username
         reset_session.save()
+
 
 @tag("batch_usage_api")
 @override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
@@ -724,6 +741,41 @@ class UsageSummaryAPITests(TestCase):
             "to": now.date().isoformat(),
             "agent": str(self.agent_primary.id),
           },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertAlmostEqual(payload["metrics"]["tasks"]["count"], 1.0)
+
+    def test_summary_excludes_eval_agents(self):
+        now = timezone.now()
+        BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("1"),
+        )
+
+        eval_browser = BrowserUseAgent.objects.create(user=self.user, name="Eval Browser")
+        eval_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Eval Agent",
+            charter="Eval charter",
+            browser_use_agent=eval_browser,
+            execution_environment="eval",
+        )
+        PersistentAgentStep.objects.create(
+            agent=eval_agent,
+            description="Eval step",
+            credits_cost=Decimal("2"),
+        )
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            {
+                "from": (now - timedelta(days=1)).date().isoformat(),
+                "to": now.date().isoformat(),
+            },
         )
 
         self.assertEqual(response.status_code, 200)

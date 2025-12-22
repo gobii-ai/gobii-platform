@@ -1,0 +1,682 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}AI Agents for Developers - Build on Gobii's Platform | Gobii{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.">
+<style>
+  .engineering-panel {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .engineering-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 25%, rgba(79, 70, 229, 0.16) 0%, rgba(79, 70, 229, 0) 55%),
+      radial-gradient(circle at 75% 35%, rgba(14, 165, 233, 0.12) 0%, rgba(14, 165, 233, 0) 60%),
+      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.1) 0%, rgba(129, 140, 248, 0) 70%);
+    opacity: 0.8;
+    filter: blur(40px);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .engineering-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
+    pointer-events: none;
+    z-index: 3;
+    mix-blend-mode: lighten;
+  }
+
+  .engineering-gradient-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.35) 0%, rgba(129, 140, 248, 0.4) 40%, rgba(59, 130, 246, 0.3) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+  }
+
+  .engineering-content {
+    position: relative;
+    z-index: 10;
+  }
+
+  /* Hero image as atmospheric background element */
+  .hero-image-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .hero-image-bg img {
+    position: absolute;
+    right: -5%;
+    top: 0;
+    width: 70%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 75%;
+    opacity: 1;
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
+    mask-composite: intersect;
+  }
+
+  @media (max-width: 1023px) {
+    .hero-image-bg img {
+      right: -10%;
+      width: 100%;
+      object-position: 65% 72%;
+      opacity: 0.45;
+      -webkit-mask-image:
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
+      mask-image:
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
+    }
+
+    .engineering-panel::after {
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
+                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
+    }
+  }
+
+  .feature-card {
+    transition: all 0.2s ease;
+  }
+
+  .feature-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(79, 70, 229, 0.26);
+    box-shadow: 0 24px 48px -28px rgba(79, 70, 229, 0.35);
+  }
+
+  .code-block {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+    border-radius: 0.75rem;
+    overflow: hidden;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, monospace;
+  }
+
+  .code-block pre {
+    margin: 0;
+    padding: 1.5rem;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.6;
+  }
+
+  .code-block code {
+    color: #e2e8f0;
+  }
+
+  .code-block .comment { color: #64748b; }
+  .code-block .keyword { color: #c084fc; }
+  .code-block .string { color: #34d399; }
+  .code-block .function { color: #60a5fa; }
+  .code-block .variable { color: #f472b6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="relative engineering-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
+  <div class="engineering-gradient-bg" aria-hidden="true"></div>
+
+  <!-- Hero image as atmospheric background -->
+  <div class="hero-image-bg" aria-hidden="true">
+    <img
+      src="{% static 'images/solutions/engineering-hero.jpg' %}"
+      alt=""
+      loading="eager"
+    >
+  </div>
+
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+
+  <!-- Seamless Gradient Fade to white -->
+  <div class="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-[11]"></div>
+
+  <section class="relative engineering-content">
+    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
+
+      <!-- Hero Content -->
+      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
+          The platform for
+          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">AI agents</span>
+        </h1>
+
+        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
+          Create, deploy, and control always-on AI agents via API. Build on Gobii's platform or self-host with our open-source codebase.
+        </p>
+
+        <div class="mt-10 flex flex-col sm:flex-row gap-4">
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+            {% csrf_token %}
+            <button type="submit" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+              Get API key
+              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
+          <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+            Read the docs
+          </a>
+        </div>
+
+        <!-- Inline stats -->
+        <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
+          <div>
+            <div class="text-3xl font-light text-gray-900">REST</div>
+            <p class="text-sm text-gray-800 mt-1">Simple API</p>
+          </div>
+          <div>
+            <div class="text-3xl font-light text-gray-900">Flexible</div>
+            <p class="text-sm text-gray-800 mt-1">Self-host or cloud</p>
+          </div>
+          <div>
+            <div class="text-3xl font-light text-gray-900">24/7</div>
+            <p class="text-sm text-gray-800 mt-1">Always-on agents</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Code Example Section -->
+<section class="relative bg-white pb-12">
+  <div class="max-w-6xl mx-auto px-6">
+    <div class="text-center pt-4 pb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Get started in seconds
+      </h2>
+      <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
+        Create and control AI agents with a few lines of code.
+      </p>
+    </div>
+
+    <!-- Code Example -->
+    <div class="mb-16">
+      <div class="code-block shadow-2xl shadow-slate-300/50 border border-slate-200/50">
+        <div class="flex items-center gap-2 px-4 py-3 bg-slate-800/50 border-b border-slate-700/50">
+          <div class="flex gap-1.5">
+            <div class="w-3 h-3 rounded-full bg-red-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-yellow-500/80"></div>
+            <div class="w-3 h-3 rounded-full bg-green-500/80"></div>
+          </div>
+          <span class="text-slate-400 text-sm ml-2">create_agent.py</span>
+        </div>
+        <pre><code><span class="keyword">import</span> requests
+
+<span class="comment"># Create an always-on agent</span>
+response = requests.<span class="function">post</span>(
+    <span class="string">"https://api.gobii.ai/v1/persistent-agents/"</span>,
+    headers={<span class="string">"Authorization"</span>: <span class="string">f"Bearer </span><span class="variable">{API_KEY}</span><span class="string">"</span>},
+    json={
+        <span class="string">"name"</span>: <span class="string">"Data Collector"</span>,
+        <span class="string">"system_prompt"</span>: <span class="string">"You are a web research agent..."</span>,
+        <span class="string">"schedule"</span>: <span class="string">"every day at 9am"</span>
+    }
+)
+
+agent = response.<span class="function">json</span>()
+<span class="keyword">print</span>(<span class="string">f"Agent created: </span><span class="variable">{agent['id']}</span><span class="string">"</span>)</code></pre>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<!-- Platform Capabilities Section -->
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950"></div>
+  <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.3),transparent)]"></div>
+
+  <!-- Grid pattern -->
+  <div class="absolute inset-0 opacity-[0.03]" style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E&quot;);"></div>
+
+  <div class="relative max-w-7xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl lg:text-5xl font-light text-white tracking-tight">
+        Everything you need to build
+      </h2>
+      <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">
+        A complete platform with production-grade infrastructure, so you can focus on your product.
+      </p>
+    </div>
+
+    <!-- Bento Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+
+      <!-- Cloud Browsers - Large -->
+      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="flex items-start justify-between mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
+            </div>
+            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Fully Headed</span>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Cloud Browsers</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Real Chrome browsers running in the cloud with full rendering, JavaScript execution, and visual output. Headed or headless modes available.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Screenshots</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">DOM Access</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">File Downloads</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Session Persistence</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Proxy & Anti-Bot -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-indigo-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-indigo-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 mb-6">
+            <i data-lucide="shield-check" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Proxy & Anti-Bot</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Managed rotating proxies with health monitoring. Bypass bot detection automatically.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-rotation</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Health Checks</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- MCP Servers -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-purple-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-500/25 mb-6">
+            <i data-lucide="plug" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">MCP Servers</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Connect agents to external tools via Model Context Protocol. Platform, org, or user-scoped.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Extensible</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Multi-scope</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Embedded Database - Large -->
+      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-fuchsia-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 right-0 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-fuchsia-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="flex items-start justify-between mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-pink-600 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
+              <i data-lucide="database" class="w-6 h-6 text-white"></i>
+            </div>
+            <span class="px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-xs font-medium border border-fuchsia-500/20">Per-Agent</span>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Embedded SQLite Database</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Each agent gets its own SQLite database for structured data storage. Persisted automatically to cloud storage with compression. Query with full SQL.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Full SQL</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-persist</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Compressed Storage</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cross-session</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhooks -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-cyan-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 mb-6">
+            <i data-lucide="webhook" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Webhooks</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Get notified when tasks complete. Push results directly to your endpoints.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Real-time</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Retries</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Persistent Sessions -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-emerald-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-emerald-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-6">
+            <i data-lucide="repeat" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Persistent Sessions</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Agents maintain state across runs. Cookies, auth tokens, and context preserved.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cookies</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auth State</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Filespace -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-amber-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-amber-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 mb-6">
+            <i data-lucide="folder-tree" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Agent Filespace</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Persistent file storage for each agent. Upload, download, and share files across sessions.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cloud Storage</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Shareable</span>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- Use Cases Section -->
+<section id="use-cases" class="relative pt-0 pb-16 lg:pb-20 overflow-hidden scroll-mt-20">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/50 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-6xl mx-auto px-6">
+    <div class="text-center pt-12 pb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        What developers build
+      </h2>
+      <p class="mt-4 text-lg text-gray-500">
+        From data pipelines to customer automation.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8">
+      <!-- Use Case 1 -->
+      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-indigo-100 flex items-center justify-center">
+          <i data-lucide="database" class="w-6 h-6 text-indigo-600"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Data Collection Pipelines</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">
+            Schedule agents to collect data from websites, APIs, and documents. Output to your database or warehouse with structured schemas.
+          </p>
+        </div>
+      </div>
+
+      <!-- Use Case 2 -->
+      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-violet-100 flex items-center justify-center">
+          <i data-lucide="mail" class="w-6 h-6 text-violet-600"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Customer Communication</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">
+            Build agents that respond to customer inquiries via email, SMS, or chat. Integrate with your existing support stack.
+          </p>
+        </div>
+      </div>
+
+      <!-- Use Case 3 -->
+      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-purple-100 flex items-center justify-center">
+          <i data-lucide="refresh-cw" class="w-6 h-6 text-purple-600"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Workflow Automation</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">
+            Automate repetitive browser tasks: form submissions, data entry, report generation, and multi-step web workflows.
+          </p>
+        </div>
+      </div>
+
+      <!-- Use Case 4 -->
+      <div class="flex gap-5 p-6 rounded-2xl bg-white border border-slate-100 shadow-lg shadow-slate-100/50">
+        <div class="flex-shrink-0 w-12 h-12 rounded-xl bg-fuchsia-100 flex items-center justify-center">
+          <i data-lucide="eye" class="w-6 h-6 text-fuchsia-600"></i>
+        </div>
+        <div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Monitoring & Alerts</h3>
+          <p class="text-gray-600 text-sm leading-relaxed">
+            Deploy agents that monitor websites, track changes, and send alerts when specific conditions are met.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Resources Section -->
+<section class="relative pt-8 pb-20 lg:pt-10 lg:pb-24 overflow-hidden bg-white">
+  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Developer resources
+      </h2>
+      <p class="mt-4 text-lg text-gray-500">
+        Everything you need to get started.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+      <!-- Console / Get Started - Primary -->
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
+        {% csrf_token %}
+        <button type="submit" class="text-left w-full">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
+            <i data-lucide="key" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Get API Key</h3>
+          <p class="text-gray-600 text-sm leading-relaxed mb-4">
+            Create an account and generate your API key in seconds.
+          </p>
+          <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
+            Start Pro
+            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </span>
+        </button>
+      </form>
+
+      <!-- Docs -->
+      <a href="https://docs.gobii.ai/developers/developer-basics" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
+        <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
+          <i data-lucide="book-open" class="w-6 h-6 text-slate-600"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Documentation</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-4">
+          API reference, guides, and tutorials to help you build with Gobii.
+        </p>
+        <span class="inline-flex items-center text-sm font-medium text-slate-600 group-hover:text-slate-700">
+          Read the docs
+          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </span>
+      </a>
+
+      <!-- GitHub -->
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
+        <div class="w-12 h-12 rounded-xl bg-slate-100 flex items-center justify-center mb-5 group-hover:bg-slate-200 transition-colors">
+          <i data-lucide="github" class="w-6 h-6 text-slate-700"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Open Source</h3>
+        <p class="text-gray-600 text-sm leading-relaxed mb-4">
+          Self-host Gobii with our open-source codebase. Full control, your infrastructure.
+        </p>
+        <span class="inline-flex items-center text-sm font-medium text-slate-700 group-hover:text-slate-900">
+          View on GitHub
+          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </span>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ Section -->
+<section class="relative pt-8 pb-16 lg:pt-10 lg:pb-20 overflow-hidden">
+  <!-- Subtle gradient background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/30 to-white pointer-events-none"></div>
+
+  <div class="relative max-w-3xl mx-auto px-6">
+    <div class="text-center mb-14">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Questions
+      </h2>
+    </div>
+
+    <div class="space-y-0 divide-y divide-gray-200">
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">What can I build with the Gobii API?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Anything that requires AI agents to browse the web, collect data, or automate workflows. Common use cases include data pipelines, lead generation, content monitoring, customer support automation, and any multi-step web task you'd otherwise do manually.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">How do I get started?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Sign up for a free account, generate an API key in the console, and start making requests. Check out our <a href="https://docs.gobii.ai/developers/developer-basics" class="text-violet-600 hover:text-violet-700 underline">developer documentation</a> for quickstart guides and API reference.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">Can I self-host Gobii?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Yes. Gobii is open source and available on <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="text-violet-600 hover:text-violet-700 underline">GitHub</a>. You can deploy it on your own infrastructure for full control over data and compliance requirements.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">What's the difference between cloud and self-hosted?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Cloud API is the fastest way to get started. We handle infrastructure, scaling, and browser sessions. Self-hosted gives you full control over data residency, compliance, and customization, but requires managing your own infrastructure.
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Final CTA -->
+<section class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate">
+  <!-- Centered radial gradient that fades to transparent on all edges -->
+  <div class="absolute inset-0 pointer-events-none">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(139,92,246,0.15),transparent_70%)]"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(99,102,241,0.08),transparent_60%)]"></div>
+  </div>
+
+  <!-- Soft floating orbs with heavy blur -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[450px] h-[450px] bg-violet-300/20 rounded-full blur-[120px] pointer-events-none"></div>
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[350px] h-[350px] bg-indigo-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+
+  <div class="relative max-w-4xl mx-auto px-6 text-center">
+    <!-- Decorative badge -->
+    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-violet-200/50 shadow-sm mb-8">
+      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-violet-500 to-purple-500 animate-pulse"></span>
+      <span class="text-sm font-medium text-violet-700">Start building today</span>
+    </div>
+
+    <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
+      Ready to build?
+    </h2>
+    <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
+      Get your API key and start deploying AI agents in minutes.
+    </p>
+
+    <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+        {% csrf_token %}
+        <button type="submit" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+          Get API key
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+      <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+        Read the docs
+      </a>
+    </div>
+
+    <!-- Trust indicators -->
+    <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
+      <a href="https://github.com/gobii-ai/gobii-platform" target="_blank" rel="noopener" class="flex items-center gap-2 hover:text-gray-700 transition-colors">
+        <i data-lucide="github" class="w-5 h-5"></i>
+        Open source
+      </a>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Free tier available
+      </div>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        No credit card required
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}

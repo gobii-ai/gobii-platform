@@ -5,6 +5,7 @@ import uuid
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
+from django.core.mail import send_mail
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
@@ -12,6 +13,8 @@ from django.http import HttpResponseRedirect
 from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.utils.http import url_has_allowed_host_and_scheme
+from django.template.loader import render_to_string
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
@@ -26,6 +29,7 @@ from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
+    get_user_plan,
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
@@ -35,10 +39,11 @@ from .utils_markdown import (
     get_all_doc_pages,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
+from .forms import MarketingContactForm
 from django.contrib import sitemaps
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
-from django.utils.html import escape
+from django.utils.html import escape, strip_tags
 from opentelemetry import trace
 from marketing_events.api import capi
 import logging
@@ -140,6 +145,24 @@ def _login_url_with_utms(request) -> str:
     return base_url
 
 
+POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
+
+
+def _pop_post_checkout_redirect(request) -> str | None:
+    raw_value = (request.session.pop(POST_CHECKOUT_REDIRECT_SESSION_KEY, "") or "").strip()
+    if not raw_value:
+        return None
+
+    request.session.modified = True
+    if url_has_allowed_host_and_scheme(
+        raw_value,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return raw_value
+    return None
+
+
 def _prepare_stripe_or_404() -> None:
     status = stripe_status()
     if not status.enabled:
@@ -148,6 +171,19 @@ def _prepare_stripe_or_404() -> None:
     if not key:
         raise Http404("Stripe billing is not configured.")
     stripe.api_key = key
+
+
+def _build_checkout_success_url(request, *, event_id: str, price: float) -> tuple[str, bool]:
+    success_params = {
+        "subscribe_success": 1,
+        "p": f"{price:.2f}",
+        "eid": event_id,
+    }
+    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+    redirect_path = _pop_post_checkout_redirect(request)
+    if redirect_path:
+        return request.build_absolute_uri(redirect_path), True
+    return default_url, False
 
 
 def _emit_checkout_initiated_event(
@@ -160,6 +196,7 @@ def _emit_checkout_initiated_event(
     currency: str | None,
     event_id: str,
     event_name: str = "InitiateCheckout",
+    post_checkout_redirect_used: bool | None = None,
 ) -> None:
     """
     Fan out checkout events to CAPI providers with plan metadata.
@@ -172,6 +209,8 @@ def _emit_checkout_initiated_event(
     }
     if value is not None:
         properties["value"] = value
+    if post_checkout_redirect_used is not None:
+        properties["post_checkout_redirect_used"] = post_checkout_redirect_used
     if currency:
         properties["currency"] = currency.upper()
     else:
@@ -222,7 +261,7 @@ class HomePage(TemplateView):
                 hero_text = escape(hero_text)  # Escape HTML to prevent XSS
                 hero_text = hero_text.replace(
                     "{blue}",
-                    '<span class="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">'
+                    '<span class="bg-gradient-to-r from-violet-700 to-purple-600 bg-clip-text text-transparent">'
                 ).replace(
                     "{/blue}",
                     '</span>'
@@ -325,7 +364,7 @@ class HomePage(TemplateView):
         )
 
         if self.request.user.is_authenticated:
-            recent_agents_qs = PersistentAgent.objects.filter(user_id=self.request.user.id)
+            recent_agents_qs = PersistentAgent.objects.non_eval().filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
             recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
 
@@ -487,18 +526,28 @@ class PretrainedWorkerHireView(View):
         request.session.modified = True
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
+        flow = (request.POST.get("flow") or "").strip().lower()
+        analytics_properties = {
+            "source_page": source_page,
+            "template_code": template.code,
+        }
+        if flow:
+            analytics_properties["flow"] = flow
 
         if request.user.is_authenticated:
             Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
                 source=AnalyticsSource.WEB,
-                properties={
-                    "source_page": source_page,
-                    "template_code": template.code,
-                },
+                properties=analytics_properties,
             )
             return redirect('agent_create_contact')
+
+        next_url = reverse('agent_create_contact')
+        if flow == "pro":
+            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = next_url
+            request.session.modified = True
+            next_url = reverse('proprietary:pro_checkout')
 
         # Track anonymous interest
         session_key = request.session.session_key
@@ -509,16 +558,36 @@ class PretrainedWorkerHireView(View):
             anonymous_id=str(session_key),
             event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
             source=AnalyticsSource.WEB,
-            properties={
-                "source_page": source_page,
-                "template_code": template.code,
-            },
+            properties=analytics_properties,
         )
 
         from django.contrib.auth.views import redirect_to_login
 
         return redirect_to_login(
-            next=reverse('agent_create_contact'),
+            next=next_url,
+            login_url=_login_url_with_utms(request),
+        )
+
+
+class EngineeringProSignupView(View):
+    def get(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def post(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def _handle(self, request):
+        next_url = reverse("proprietary:pro_checkout")
+        request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
+        request.session.modified = True
+
+        if request.user.is_authenticated:
+            return redirect(next_url)
+
+        from django.contrib.auth.views import redirect_to_login
+
+        return redirect_to_login(
+            next=next_url,
             login_url=_login_url_with_utms(request),
         )
 
@@ -752,10 +821,15 @@ class StartupCheckoutView(LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Startup subscription plan."""
 
     def get(self, request, *args, **kwargs):
+        user = request.user
+        plan = get_user_plan(user) or {}
+        plan_id = str(plan.get("id") or "").lower()
+        if plan_id and plan_id != PlanNames.FREE:
+            redirect_path = _pop_post_checkout_redirect(request) or reverse("billing")
+            return redirect(redirect_path)
+
         _prepare_stripe_or_404()
         stripe_settings = get_stripe_settings()
-
-        user = request.user
 
         # 1️⃣  Get (or lazily create) the Stripe customer linked to this user
         customer = get_or_create_stripe_customer(user)
@@ -779,12 +853,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"sub-{uuid.uuid4()}"
 
-        success_params = {
-            "subscribe_success": 1,
-            "p": f"{price:.2f}",
-            "eid": event_id,
-        }
-        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+        success_url, post_checkout_redirect_used = _build_checkout_success_url(
+            request,
+            event_id=event_id,
+            price=price,
+        )
 
         line_items = [
             {
@@ -809,6 +882,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             event_id=event_id,
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         try:
@@ -871,6 +945,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             currency=price_currency,
             event_id=event_id,
             event_name="AddPaymentInfo",
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         # 3️⃣  No need to sync anything here.  The webhook events
@@ -910,12 +985,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
 
         event_id = f"scale-sub-{uuid.uuid4()}"
 
-        success_params = {
-            "subscribe_success": 1,
-            "p": f"{price:.2f}",
-            "eid": event_id,
-        }
-        success_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+        success_url, post_checkout_redirect_used = _build_checkout_success_url(
+            request,
+            event_id=event_id,
+            price=price,
+        )
 
         line_items = [
             {
@@ -940,6 +1014,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             event_id=event_id,
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         _, existing_subs = _customer_has_price_subscription_with_cache(str(customer.id), price_id)
@@ -1002,6 +1077,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             currency=price_currency,
             event_id=event_id,
             event_name="AddPaymentInfo",
+            post_checkout_redirect_used=post_checkout_redirect_used,
         )
 
         return redirect(session.url)
@@ -1060,6 +1136,101 @@ class SupportView(TemplateView):
     pass
 
 
+class MarketingContactRequestView(View):
+    SOURCE_CONFIG = {
+        "healthcare_landing_page": {
+            "subject": "Healthcare Demo Request",
+            "label": "Healthcare demo request",
+        },
+        "defense_landing_page": {
+            "subject": "Defense Contact Request",
+            "label": "Defense contact request",
+        },
+    }
+
+    @staticmethod
+    def _render_form_errors(form: MarketingContactForm) -> HttpResponse:
+        errors = []
+        for field_errors in form.errors.values():
+            errors.extend(field_errors)
+
+        error_items = "".join(f"<li>{escape(message)}</li>" for message in errors)
+        error_html = (
+            '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+            'Please correct the following errors:'
+            f'<ul class="mt-2 list-disc list-inside">{error_items}</ul>'
+            "</div>"
+        )
+        return HttpResponse(error_html, status=400)
+
+    def post(self, request, *args, **kwargs):
+        form = MarketingContactForm(request.POST)
+        if not form.is_valid():
+            return self._render_form_errors(form)
+
+        cleaned = form.cleaned_data
+        source = cleaned.get("source")
+        source_config = self.SOURCE_CONFIG.get(source)
+        if not source_config:
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Invalid request source."
+                "</div>",
+                status=400,
+            )
+
+        recipient_email = settings.PUBLIC_CONTACT_EMAIL or settings.SUPPORT_EMAIL
+        if not recipient_email:
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Contact email is not configured."
+                "</div>",
+                status=500,
+            )
+
+        inquiry_label = ""
+        inquiry_value = cleaned.get("inquiry_type") or ""
+        if inquiry_value:
+            inquiry_choices = dict(MarketingContactForm.INQUIRY_CHOICES)
+            inquiry_label = inquiry_choices.get(inquiry_value, inquiry_value)
+
+        context = {
+            "source_label": source_config["label"],
+            "email": cleaned.get("email"),
+            "organization": cleaned.get("organization"),
+            "inquiry_type": inquiry_label,
+            "message": cleaned.get("message"),
+            "referrer": request.META.get("HTTP_REFERER", ""),
+        }
+
+        html_message = render_to_string("emails/marketing_contact_request.html", context)
+        plain_message = strip_tags(html_message)
+
+        try:
+            send_mail(
+                source_config["subject"],
+                plain_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [recipient_email],
+                html_message=html_message,
+                fail_silently=False,
+            )
+        except Exception:
+            logger.exception("Error sending marketing contact request email.")
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Sorry, there was an error sending your message. Please try again later."
+                "</div>",
+                status=500,
+            )
+
+        return HttpResponse(
+            '<div class="rounded-xl border border-emerald-200 bg-white/90 px-4 py-3 text-sm text-emerald-700" role="status">'
+            "Thanks for reaching out. We will follow up shortly."
+            "</div>"
+        )
+
+
 class ClearSignupTrackingView(View):
     """Clear the signup tracking cookie."""
 
@@ -1075,3 +1246,68 @@ class ClearSignupTrackingView(View):
                 del request.session[key]
 
         return response
+
+
+class SolutionView(TemplateView):
+    template_name = "solutions/solution.html"
+
+    # Solutions with dedicated landing page templates
+    DEDICATED_TEMPLATES = {
+        'recruiting': 'solutions/recruiting.html',
+        'sales': 'solutions/sales.html',
+        'health-care': 'solutions/health-care.html',
+        'defense': 'solutions/defense.html',
+        'engineering': 'solutions/engineering.html',
+    }
+
+    SOLUTION_DATA = {
+        'recruiting': {
+            'title': 'Recruiting',
+            'tagline': 'Automate candidate sourcing and screening.',
+            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.'
+        },
+        'sales': {
+            'title': 'Sales',
+            'tagline': 'Supercharge your outbound outreach.',
+            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.'
+        },
+        'health-care': {
+            'title': 'Health Care',
+            'tagline': 'Streamline patient intake and administrative tasks.',
+            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.'
+        },
+        'defense': {
+            'title': 'Defense',
+            'tagline': 'Secure, on-premise AI intelligence.',
+            'description': 'Mission-critical automation for national security with strict data governance.'
+        },
+        'engineering': {
+            'title': 'Engineering',
+            'tagline': 'Accelerate development workflows.',
+            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.'
+        },
+    }
+
+    def get_template_names(self):
+        slug = self.kwargs.get('slug', '')
+        if slug in self.DEDICATED_TEMPLATES:
+            return [self.DEDICATED_TEMPLATES[slug]]
+        return [self.template_name]
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        slug = self.kwargs['slug']
+        data = self.SOLUTION_DATA.get(slug, {
+            'title': slug.replace('-', ' ').title(),
+            'tagline': 'AI Solutions for your industry.',
+            'description': 'Tailored AI agents and automation to help you scale.'
+        })
+
+        context.update({
+            'solution_title': data['title'],
+            'solution_tagline': data['tagline'],
+            'solution_description': data['description'],
+        })
+        if slug in {"health-care", "defense"}:
+            context["marketing_contact_form"] = MarketingContactForm()
+        return context
