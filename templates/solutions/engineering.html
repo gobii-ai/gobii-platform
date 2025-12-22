@@ -172,12 +172,15 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <a href="{% url 'account_login' %}" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-            Get API key
-            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-            </svg>
-          </a>
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+            {% csrf_token %}
+            <button type="submit" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+              Get API key
+              <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+              </svg>
+            </button>
+          </form>
           <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
             Read the docs
           </a>
@@ -494,21 +497,24 @@ agent = response.<span class="function">json</span>()
 
     <div class="grid md:grid-cols-3 gap-8">
       <!-- Console / Get Started - Primary -->
-      <a href="{% url 'account_login' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
-        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
-          <i data-lucide="key" class="w-6 h-6 text-white"></i>
-        </div>
-        <h3 class="text-lg font-medium text-gray-900 mb-2">Get API Key</h3>
-        <p class="text-gray-600 text-sm leading-relaxed mb-4">
-          Create an account and generate your API key in seconds.
-        </p>
-        <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
-          Sign up free
-          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-          </svg>
-        </span>
-      </a>
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
+        {% csrf_token %}
+        <button type="submit" class="text-left w-full">
+          <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
+            <i data-lucide="key" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Get API Key</h3>
+          <p class="text-gray-600 text-sm leading-relaxed mb-4">
+            Create an account and generate your API key in seconds.
+          </p>
+          <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
+            Start Pro
+            <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </span>
+        </button>
+      </form>
 
       <!-- Docs -->
       <a href="https://docs.gobii.ai/developers/developer-basics" class="group block p-8 rounded-2xl bg-gradient-to-br from-slate-50 to-gray-50 border border-slate-100 hover:border-slate-200 transition-all hover:shadow-lg hover:shadow-slate-100/50">
@@ -638,12 +644,15 @@ agent = response.<span class="function">json</span>()
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <a href="{% url 'account_login' %}" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
-        Get API key
-        <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-        </svg>
-      </a>
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+        {% csrf_token %}
+        <button type="submit" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+          Get API key
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
       <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
         Read the docs
       </a>

@@ -20,6 +20,7 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    EngineeringProSignupView,
     SolutionView,
     MarketingContactRequestView,
 )
@@ -45,6 +46,7 @@ urlpatterns = [
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
+    path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
     path("contact/request/", MarketingContactRequestView.as_view(), name="marketing_contact_request"),
     path("health/", health_check, name="health_check"),
     # Kubernetes health check endpoint - matches /healthz/ in BackendConfig

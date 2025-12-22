@@ -568,6 +568,29 @@ class PretrainedWorkerHireView(View):
         )
 
 
+class EngineeringProSignupView(View):
+    def get(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def post(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def _handle(self, request):
+        next_url = reverse("proprietary:pro_checkout")
+        request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
+        request.session.modified = True
+
+        if request.user.is_authenticated:
+            return redirect(next_url)
+
+        from django.contrib.auth.views import redirect_to_login
+
+        return redirect_to_login(
+            next=next_url,
+            login_url=_login_url_with_utms(request),
+        )
+
+
 def health_check(request):
     """Basic health endpoint used by Kubernetes readiness/liveness probes.
 
