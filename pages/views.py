@@ -1132,6 +1132,21 @@ class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
         return getattr(template, "updated_at", None)
 
 
+class SolutionsSitemap(sitemaps.Sitemap):
+    changefreq = "monthly"
+    priority = 0.5
+
+    def items(self):
+        try:
+            return list(SolutionView.SOLUTION_DATA.keys())
+        except Exception as e:
+            logger.error("Failed to generate SolutionsSitemap items: %s", e, exc_info=True)
+            return []
+
+    def location(self, slug):
+        return reverse('pages:solution', kwargs={'slug': slug})
+
+
 class SupportView(TemplateView):
     pass
 
