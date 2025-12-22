@@ -264,7 +264,6 @@ function AgentCard({ agent }: AgentCardProps) {
           className="relative z-10 mb-3 flex size-14 items-center justify-center rounded-full border backdrop-blur-sm"
           style={{ backgroundColor: agent.iconBackgroundHex, borderColor: agent.iconBorderHex }}
         >
-          <Zap className={`h-7 w-7 ${agent.headerIconClass}`} aria-hidden="true" />
           {hasAvatar ? (
             <img src={agent.avatarUrl ?? undefined} alt={`${agent.name} avatar`} className="h-full w-full object-cover" />
           ) : (

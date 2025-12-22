@@ -37,6 +37,8 @@ const isStaff = mountNode.dataset.isStaff === 'true'
 const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
+const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
+const agentDetailUrl = mountNode.dataset.agentDetailUrl || null
 
 let screen: ReactElement
 
@@ -56,7 +58,15 @@ switch (appName) {
     if (!agentId) {
       throw new Error('Agent identifier is required for the chat experience')
     }
-    screen = <AgentChatPage agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    screen = (
+      <AgentChatPage
+        agentId={agentId}
+        agentName={agentName}
+        agentColor={agentColor}
+        agentAvatarUrl={agentAvatarUrl}
+        agentDetailUrl={agentDetailUrl}
+      />
+    )
     break
   case 'agent-detail':
     const propsId = mountNode.dataset.propsJsonId

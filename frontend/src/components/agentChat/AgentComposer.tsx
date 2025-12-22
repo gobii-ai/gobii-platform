@@ -2,12 +2,11 @@ import type { FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 type AgentComposerProps = {
-  agentName: string
   onSubmit?: (message: string) => void | Promise<void>
   disabled?: boolean
 }
 
-export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentComposerProps) {
+export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [isSending, setIsSending] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -115,13 +114,7 @@ export function AgentComposer({ agentName, onSubmit, disabled = false }: AgentCo
               disabled={disabled}
               ref={textareaRef}
             />
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-col gap-1.5 text-xs text-slate-500 sm:flex-row sm:items-center sm:gap-3.5">
-                <div className="text-[0.75rem] text-slate-500 sm:text-sm">
-                  <span className="text-slate-400">To:</span>
-                  <span className="ml-1 font-medium text-slate-900">{agentName}</span>
-                </div>
-              </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
               <button
                 type="submit"
                 className="composer-send-button"

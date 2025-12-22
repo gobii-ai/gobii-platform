@@ -10,7 +10,9 @@
        data-app="agent-chat"
        data-agent-id="{{ agent.id }}"
        data-agent-name="{{ agent.name|default:'' }}"
-       data-agent-color="{{ agent.get_display_color|default_if_none:'' }}">
+       data-agent-color="{{ agent.get_display_color|default_if_none:'' }}"
+       data-agent-avatar-url="{{ agent.get_avatar_url|default_if_none:'' }}"
+       data-agent-detail-url="{% url 'agent_detail' pk=agent.id %}">
   </div>
 </div>
 {% endblock %}

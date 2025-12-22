@@ -7,7 +7,6 @@ import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask } from '../../types/agentChat'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
-  agentName: string
   agentColorHex?: string | null
   header?: ReactNode
   footer?: ReactNode
@@ -26,10 +25,11 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 }
 
 export function AgentChatLayout({
-  agentName,
   agentFirstName,
   events,
   agentColorHex,
+  header,
+  footer,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -53,9 +53,14 @@ export function AgentChatLayout({
 
   const showJumpButton = hasMoreNewer || hasUnseenActivity || !autoScrollPinned
 
+  const containerStyle = header
+    ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 1.5rem)' }
+    : undefined
+
   return (
     <main className="min-h-screen">
-      <div className="mx-auto flex min-h-screen w-full flex-col px-4 pb-0 sm:px-6 lg:px-10">
+      <div className="mx-auto flex min-h-screen w-full flex-col px-4 pb-0 pt-6 sm:px-6 lg:px-10" style={containerStyle}>
+        {header ? <div className="relative z-30">{header}</div> : null}
         <div
           id="agent-workspace-root"
           className="relative flex flex-1 flex-col gap-2"
@@ -126,8 +131,9 @@ export function AgentChatLayout({
             </div>
           </div>
 
-          <AgentComposer agentName={agentName} onSubmit={onSendMessage} />
+          <AgentComposer onSubmit={onSendMessage} />
         </div>
+        {footer ? <div className="mt-6">{footer}</div> : null}
       </div>
 
       <button
