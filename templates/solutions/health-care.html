@@ -370,112 +370,52 @@
 </section>
 
 <!-- How It Works -->
-<section id="how-it-works" class="relative pt-0 pb-16 lg:pb-20 overflow-hidden scroll-mt-20">
-  <!-- Subtle gradient background -->
-  <div class="absolute inset-0 bg-gradient-to-b from-white via-slate-50/50 to-white pointer-events-none"></div>
+<section id="how-it-works" class="relative py-20 lg:py-28 overflow-hidden scroll-mt-20">
+  <!-- Subtle centered gradient orb -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-gradient-to-r from-indigo-100/40 via-violet-100/50 to-indigo-100/40 rounded-full blur-[100px] pointer-events-none"></div>
 
-  <div class="relative max-w-6xl mx-auto px-6">
-    <div class="text-center pt-12 pb-24">
+  <div class="relative max-w-5xl mx-auto px-6">
+    <div class="text-center mb-16">
       <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
         How it works
       </h2>
       <p class="mt-4 text-lg text-gray-500">
-        Open source and self-hosted, designed to support HIPAA compliance.
+        From first call to full deployment in weeks, not months.
       </p>
     </div>
 
-    <div class="grid lg:grid-cols-2 gap-16 lg:gap-20 items-center">
-      <!-- Left: Steps -->
-      <div class="space-y-12">
-        <div class="flex gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-indigo-200/50">1</div>
-          </div>
-          <div>
-            <h3 class="text-xl font-medium text-gray-900 mb-3">Configure your workflows</h3>
-            <p class="text-gray-600 leading-relaxed">
-              Work with our team to map your existing processes. We configure agents to match your EHR, payer requirements, and compliance needs.
-            </p>
-          </div>
+    <!-- Horizontal steps with connecting line -->
+    <div class="relative">
+      <!-- Connecting line (desktop) -->
+      <div class="hidden md:block absolute top-5 left-[calc(16.67%+20px)] right-[calc(16.67%+20px)] h-px bg-gradient-to-r from-indigo-200 via-violet-200 to-indigo-200"></div>
+
+      <div class="grid md:grid-cols-3 gap-10 lg:gap-16">
+        <!-- Step 1 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-lg font-medium shadow-lg shadow-indigo-200/50 mb-5">1</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Audit the code</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            Review our open source codebase. Your security team verifies every line before deployment.
+          </p>
         </div>
 
-        <div class="flex gap-6">
-          <div class="flex-shrink-0">
-            <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-xl font-medium flex items-center justify-center shadow-lg shadow-violet-200/50">2</div>
-          </div>
-          <div>
-            <h3 class="text-xl font-medium text-gray-900 mb-3">Deploy with confidence</h3>
-            <p class="text-gray-600 leading-relaxed">
-              Open source means your security team can audit every line. Self-hosted means patient data never leaves your infrastructure.
-            </p>
-            <!-- Security badge -->
-            <div class="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-indigo-50 text-indigo-700 text-sm font-medium">
-              <i data-lucide="code" class="w-4 h-4"></i>
-              Open source
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Right: Security Visual -->
-      <div class="relative">
-        <!-- Decorative gradient orb -->
-        <div class="absolute -top-8 -right-8 w-72 h-72 bg-gradient-to-br from-indigo-200/50 via-violet-200/30 to-purple-200/50 rounded-full blur-3xl pointer-events-none"></div>
-        <div class="absolute -bottom-8 -left-8 w-48 h-48 bg-gradient-to-br from-violet-200/40 to-indigo-200/40 rounded-full blur-2xl pointer-events-none"></div>
-
-        <!-- Security card -->
-        <div class="relative rounded-3xl overflow-hidden shadow-2xl shadow-indigo-200/40 border border-white/60 bg-gradient-to-br from-indigo-50 to-violet-50 p-8 lg:p-12">
-          <div class="space-y-6">
-            <!-- Deployment badges -->
-            <div class="flex flex-wrap gap-3">
-              <div class="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-sm border border-indigo-100">
-                <i data-lucide="code" class="w-5 h-5 text-indigo-600"></i>
-                <span class="text-sm font-medium text-gray-700">Open source</span>
-              </div>
-              <div class="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-sm border border-indigo-100">
-                <i data-lucide="server" class="w-5 h-5 text-indigo-600"></i>
-                <span class="text-sm font-medium text-gray-700">Self-hosted</span>
-              </div>
-              <div class="inline-flex items-center gap-2 px-4 py-2 bg-white rounded-xl shadow-sm border border-indigo-100">
-                <i data-lucide="search" class="w-5 h-5 text-indigo-600"></i>
-                <span class="text-sm font-medium text-gray-700">Fully auditable</span>
-              </div>
-            </div>
-
-            <!-- Security features -->
-            <div class="space-y-3">
-              <div class="flex items-center gap-3 text-sm text-gray-600">
-                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
-                End-to-end encryption
-              </div>
-              <div class="flex items-center gap-3 text-sm text-gray-600">
-                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
-                Complete audit trails
-              </div>
-              <div class="flex items-center gap-3 text-sm text-gray-600">
-                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
-                Role-based access control
-              </div>
-              <div class="flex items-center gap-3 text-sm text-gray-600">
-                <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
-                On-premise deployment available
-              </div>
-            </div>
-          </div>
+        <!-- Step 2 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-violet-600 text-white text-lg font-medium shadow-lg shadow-violet-200/50 mb-5">2</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Deploy in your environment</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            Self-host on your infrastructure. We configure for your EHR and compliance needs.
+          </p>
         </div>
 
-        <!-- Caption -->
-        <p class="mt-4 text-center text-sm text-gray-500">
-          Audit the code. Own the deployment. Control the data.
-        </p>
+        <!-- Step 3 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-lg font-medium shadow-lg shadow-indigo-200/50 mb-5">3</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Go live with support</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            Launch with our team standing by. Ongoing updates as your needs evolve.
+          </p>
+        </div>
       </div>
     </div>
   </div>

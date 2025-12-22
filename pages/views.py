@@ -1129,6 +1129,7 @@ class SolutionView(TemplateView):
         'recruiting': 'solutions/recruiting.html',
         'sales': 'solutions/sales.html',
         'health-care': 'solutions/health-care.html',
+        'defense': 'solutions/defense.html',
     }
 
     SOLUTION_DATA = {

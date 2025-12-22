@@ -1,0 +1,634 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}AI Agents for Defense - Open Source, Airgapped, Fully Auditable | Gobii{% endblock %}
+
+{% block head_extras %}
+{{ block.super }}
+<meta name="description" content="Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.">
+<style>
+  .defense-panel {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
+
+  .defense-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(circle at 20% 25%, rgba(99, 102, 241, 0.14) 0%, rgba(99, 102, 241, 0) 55%),
+      radial-gradient(circle at 75% 35%, rgba(79, 70, 229, 0.10) 0%, rgba(79, 70, 229, 0) 60%),
+      radial-gradient(circle at 55% 80%, rgba(129, 140, 248, 0.08) 0%, rgba(129, 140, 248, 0) 70%);
+    opacity: 0.8;
+    filter: blur(40px);
+    pointer-events: none;
+    z-index: 2;
+  }
+
+  .defense-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.65) 100%);
+    pointer-events: none;
+    z-index: 3;
+    mix-blend-mode: lighten;
+  }
+
+  .defense-gradient-bg {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.28) 0%, rgba(129, 140, 248, 0.32) 40%, rgba(79, 70, 229, 0.22) 100%);
+    -webkit-mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+    mask-image: radial-gradient(ellipse 130% 100% at 50% 0%, black 40%, transparent 100%);
+  }
+
+  .defense-content {
+    position: relative;
+    z-index: 10;
+  }
+
+  .hero-image-bg {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    overflow: hidden;
+  }
+
+  .hero-image-bg img {
+    position: absolute;
+    right: -5%;
+    top: 0;
+    width: 80%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 30%;
+    opacity: 1;
+    -webkit-mask-image:
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-image:
+      linear-gradient(90deg, transparent 0%, transparent 5%, rgba(0,0,0,0.08) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.5) 45%, rgba(0,0,0,0.8) 60%, black 80%),
+      linear-gradient(180deg, rgba(0,0,0,0.3) 0%, rgba(0,0,0,0.6) 8%, black 18%, black 85%, transparent 100%);
+    mask-composite: intersect;
+  }
+
+  @media (max-width: 1023px) {
+    .hero-image-bg img {
+      right: -10%;
+      width: 110%;
+      object-position: 50% 30%;
+      opacity: 0.45;
+      -webkit-mask-image:
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
+      mask-image:
+        linear-gradient(90deg, transparent 0%, transparent 15%, rgba(0,0,0,0.15) 35%, rgba(0,0,0,0.4) 55%, rgba(0,0,0,0.75) 75%, black 90%),
+        linear-gradient(180deg, rgba(0,0,0,0.4) 0%, rgba(0,0,0,0.7) 10%, black 20%, black 80%, transparent 100%);
+    }
+
+    .defense-panel::after {
+      background: linear-gradient(90deg, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.6) 40%, rgba(255, 255, 255, 0.3) 70%, transparent 100%),
+                  linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.6) 100%);
+    }
+  }
+
+  .audience-card {
+    transition: all 0.2s ease;
+  }
+
+  .audience-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(99, 102, 241, 0.26);
+    box-shadow: 0 24px 48px -28px rgba(99, 102, 241, 0.35);
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Hero Section -->
+<div class="relative defense-panel -mt-16 min-h-[600px] lg:min-h-[700px]">
+  <div class="defense-gradient-bg" aria-hidden="true"></div>
+
+  <!-- Hero image as atmospheric background -->
+  <div class="hero-image-bg" aria-hidden="true">
+    <img
+      src="{% static 'images/solutions/defense-hero.jpg' %}"
+      alt=""
+      loading="eager"
+    >
+  </div>
+
+  <!-- Grid pattern overlay -->
+  <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
+
+  <!-- Seamless Gradient Fade to white -->
+  <div class="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-[11]"></div>
+
+  <section class="relative defense-content">
+    <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
+
+      <!-- Hero Content -->
+      <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
+        <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
+          AI automation for
+          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">defense</span>
+        </h1>
+
+        <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
+          Open source AI agents designed for the most secure environments. Fully auditable, self-hosted, and capable of running in airgapped networks.
+        </p>
+
+        <div class="mt-10 flex flex-col sm:flex-row gap-4">
+          <a href="#for-agencies" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
+            For defense agencies
+            <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+            </svg>
+          </a>
+          <a href="#for-partners" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+            For integration partners
+          </a>
+        </div>
+
+        <!-- Inline stats -->
+        <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
+          <div>
+            <div class="text-3xl font-light text-gray-900">Open source</div>
+            <p class="text-sm text-gray-800 mt-1">Fully auditable</p>
+          </div>
+          <div>
+            <div class="text-3xl font-light text-gray-900">Airgapped</div>
+            <p class="text-sm text-gray-800 mt-1">No external connections</p>
+          </div>
+          <div>
+            <div class="text-3xl font-light text-gray-900">Self-hosted</div>
+            <p class="text-sm text-gray-800 mt-1">Your infrastructure</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Two Audiences Section -->
+<section class="relative bg-white pb-16">
+  <div class="max-w-6xl mx-auto px-6">
+    <div class="text-center pt-4 pb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Two ways to work with Gobii
+      </h2>
+      <p class="mt-4 text-lg text-gray-500 max-w-3xl mx-auto">
+        Gobii provides the technology. Our integration partners handle deployment, clearances, and ongoing support within your security requirements.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-8">
+      <!-- For Agencies -->
+      <div id="for-agencies" class="audience-card scroll-mt-24 relative bg-white rounded-2xl p-8 lg:p-10 shadow-xl shadow-slate-200/40 border border-slate-100">
+        <div class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200/50 mb-6">
+          <i data-lucide="building-2" class="w-7 h-7 text-white"></i>
+        </div>
+        <h3 class="text-2xl font-medium text-gray-900 mb-3">For defense agencies</h3>
+        <p class="text-gray-600 leading-relaxed mb-6">
+          Looking for AI automation that meets your security requirements? Work with one of our vetted integration partners who can deploy Gobii within your classified or airgapped environment.
+        </p>
+        <ul class="space-y-3 text-sm text-gray-600 mb-8">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-indigo-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Open source code your security team can audit before deployment</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-indigo-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Runs entirely within your infrastructure, including airgapped networks</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-indigo-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Integration partners hold necessary clearances and certifications</span>
+          </li>
+        </ul>
+        <a href="#contact" class="group inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
+          Find an integration partner
+          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </a>
+      </div>
+
+      <!-- For Partners -->
+      <div id="for-partners" class="audience-card scroll-mt-24 relative bg-white rounded-2xl p-8 lg:p-10 shadow-xl shadow-slate-200/40 border border-slate-100">
+        <div class="w-14 h-14 bg-gradient-to-br from-violet-500 to-indigo-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-200/50 mb-6">
+          <i data-lucide="handshake" class="w-7 h-7 text-white"></i>
+        </div>
+        <h3 class="text-2xl font-medium text-gray-900 mb-3">For integration partners</h3>
+        <p class="text-gray-600 leading-relaxed mb-6">
+          Defense contractors and system integrators: add AI automation to your capabilities. Partner with Gobii for training, enterprise licensing, and ongoing technical support.
+        </p>
+        <ul class="space-y-3 text-sm text-gray-600 mb-8">
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-violet-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Enterprise licensing for commercial deployment to government clients</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-violet-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Technical training and certification for your engineering teams</span>
+          </li>
+          <li class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-violet-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>Priority support, custom development, and integration assistance</span>
+          </li>
+        </ul>
+        <a href="#contact" class="group inline-flex items-center text-sm font-medium text-violet-600 hover:text-violet-700">
+          Become an integration partner
+          <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Why Open Source for Defense -->
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Subtle centered gradient orb -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-gradient-to-r from-indigo-100/40 via-violet-100/50 to-indigo-100/40 rounded-full blur-[100px] pointer-events-none"></div>
+
+  <div class="relative max-w-6xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Why open source matters for defense
+      </h2>
+      <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
+        Closed-source AI is a black box. Open source means complete transparency, auditability, and control.
+      </p>
+    </div>
+
+    <div class="grid md:grid-cols-3 gap-8">
+      <!-- Fully Auditable -->
+      <div class="text-center">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-200/50 mb-5">
+          <i data-lucide="search-code" class="w-7 h-7"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Fully auditable</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">
+          Every line of code is available for security review. No hidden functionality. No backdoors. Your team verifies before deployment.
+        </p>
+      </div>
+
+      <!-- Airgap Ready -->
+      <div class="text-center">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-lg shadow-violet-200/50 mb-5">
+          <i data-lucide="wifi-off" class="w-7 h-7"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">Airgap capable</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">
+          Designed to run without external network connections. Deploy in classified environments where data cannot leave the network.
+        </p>
+      </div>
+
+      <!-- No Vendor Lock-in -->
+      <div class="text-center">
+        <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-indigo-600 text-white shadow-lg shadow-indigo-200/50 mb-5">
+          <i data-lucide="lock-open" class="w-7 h-7"></i>
+        </div>
+        <h3 class="text-lg font-medium text-gray-900 mb-2">No vendor lock-in</h3>
+        <p class="text-gray-500 text-sm leading-relaxed">
+          You own the deployment. The code is yours to modify, extend, and maintain. No dependency on external services.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Capabilities Section -->
+<section class="relative pt-8 pb-20 lg:pt-10 lg:pb-24 overflow-hidden bg-white">
+  <div class="relative max-w-6xl mx-auto px-6 sm:px-8 lg:px-12">
+    <div class="grid lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+      <!-- Left: Capabilities -->
+      <div class="lg:pr-4">
+        <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+          What Gobii agents can do
+        </h2>
+        <p class="mt-4 text-lg text-gray-500 mb-10">
+          Configurable AI agents for document processing, data analysis, and workflow automation.
+        </p>
+
+        <div class="space-y-6">
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-slate-50/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-200/50">
+              <i data-lucide="file-text" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Document processing</h3>
+              <p class="text-gray-600 leading-relaxed">Extract, classify, and analyze documents at scale. Configurable for any document type or format.</p>
+            </div>
+          </div>
+
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-slate-50/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-500 flex items-center justify-center shadow-lg shadow-violet-200/50">
+              <i data-lucide="database" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Data analysis</h3>
+              <p class="text-gray-600 leading-relaxed">Process and analyze structured and unstructured data. Generate reports, identify patterns, surface insights.</p>
+            </div>
+          </div>
+
+          <div class="group flex gap-5 p-4 -ml-4 rounded-2xl hover:bg-slate-50/80 transition-colors">
+            <div class="flex-shrink-0 w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center shadow-lg shadow-indigo-200/50">
+              <i data-lucide="git-branch" class="w-6 h-6 text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-medium text-gray-900 mb-1">Workflow automation</h3>
+              <p class="text-gray-600 leading-relaxed">Automate multi-step processes with human-in-the-loop checkpoints. Integrate with existing systems.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Security Card -->
+      <div class="relative">
+        <!-- Decorative gradient orb -->
+        <div class="absolute -top-8 -right-8 w-48 h-48 bg-gradient-to-br from-indigo-200/60 to-violet-200/60 rounded-full blur-3xl pointer-events-none"></div>
+
+        <div class="relative bg-gradient-to-br from-indigo-50 via-violet-50/80 to-purple-50/60 rounded-3xl p-8 sm:p-10 lg:p-12 shadow-xl shadow-indigo-100/50 border border-white/60">
+          <h3 class="text-lg font-medium text-gray-900 mb-6">Security by design</h3>
+          <ul class="space-y-4">
+            <li class="flex items-start gap-3">
+              <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div>
+                <div class="font-medium text-gray-900">Open source code</div>
+                <p class="text-sm text-gray-500 mt-0.5">Complete visibility into how data is processed</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div>
+                <div class="font-medium text-gray-900">Airgapped deployment</div>
+                <p class="text-sm text-gray-500 mt-0.5">No internet connection required after setup</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div>
+                <div class="font-medium text-gray-900">Complete audit trails</div>
+                <p class="text-sm text-gray-500 mt-0.5">Every action logged for compliance and review</p>
+              </div>
+            </li>
+            <li class="flex items-start gap-3">
+              <div class="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center flex-shrink-0 mt-0.5">
+                <svg class="w-3.5 h-3.5 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                </svg>
+              </div>
+              <div>
+                <div class="font-medium text-gray-900">Role-based access control</div>
+                <p class="text-sm text-gray-500 mt-0.5">Granular permissions aligned with your security model</p>
+              </div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Partnership Model -->
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Subtle centered gradient orb -->
+  <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-gradient-to-r from-indigo-100/40 via-violet-100/50 to-indigo-100/40 rounded-full blur-[100px] pointer-events-none"></div>
+
+  <div class="relative max-w-5xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        How the partnership model works
+      </h2>
+      <p class="mt-4 text-lg text-gray-500">
+        Gobii provides the technology. Integration partners deliver the solution.
+      </p>
+    </div>
+
+    <!-- Horizontal steps with connecting line -->
+    <div class="relative">
+      <!-- Connecting line (desktop) -->
+      <div class="hidden md:block absolute top-5 left-[calc(16.67%+20px)] right-[calc(16.67%+20px)] h-px bg-gradient-to-r from-indigo-200 via-violet-200 to-indigo-200"></div>
+
+      <div class="grid md:grid-cols-3 gap-10 lg:gap-16">
+        <!-- Step 1 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-lg font-medium shadow-lg shadow-indigo-200/50 mb-5">1</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Gobii builds the platform</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            We develop and maintain the open source AI agent platform. Continuous updates, security patches, new capabilities.
+          </p>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-violet-500 to-violet-600 text-white text-lg font-medium shadow-lg shadow-violet-200/50 mb-5">2</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Partners integrate &amp; deploy</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            Integration partners customize, deploy, and maintain Gobii within customer environments. They hold the clearances and contracts.
+          </p>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="relative text-center">
+          <div class="inline-flex items-center justify-center w-10 h-10 rounded-full bg-gradient-to-br from-indigo-500 to-indigo-600 text-white text-lg font-medium shadow-lg shadow-indigo-200/50 mb-5">3</div>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">Agencies get results</h3>
+          <p class="text-gray-500 text-sm leading-relaxed">
+            Defense agencies work with trusted contractors to deploy auditable, secure AI automation without vendor lock-in.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ Section -->
+<section class="relative pt-8 pb-16 lg:pt-10 lg:pb-20 overflow-hidden bg-white">
+  <div class="relative max-w-3xl mx-auto px-6">
+    <div class="text-center mb-14">
+      <h2 class="text-3xl sm:text-4xl font-light text-gray-900 tracking-tight">
+        Questions
+      </h2>
+    </div>
+
+    <div class="space-y-0 divide-y divide-gray-200">
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">Is Gobii a defense contractor?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          No. Gobii is a technology company that develops open source AI software. Defense agencies work with integration partners (existing defense contractors) who deploy and support Gobii within their programs. We provide the technology, training, and enterprise licensing; partners handle implementation, clearances, and contracts.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">Can Gobii run in airgapped environments?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Yes. Gobii is designed to run entirely self-contained with no external network dependencies after initial setup. All models, dependencies, and components can be deployed within classified or airgapped networks.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">How do we become an integration partner?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Contact us to discuss partnership. We work with defense contractors and system integrators of all sizes. Partners receive enterprise licensing, technical training, priority support, and co-marketing opportunities.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">Why open source for defense applications?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          Open source provides complete transparency. Security teams can audit every line of code before deployment. There are no hidden components, no phone-home functionality, and no dependency on external vendors. You control the software completely.
+        </p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- Contact CTA -->
+<section id="contact" class="relative pt-8 pb-24 lg:pt-10 lg:pb-28 overflow-hidden isolate scroll-mt-20">
+  <!-- Centered radial gradient that fades to transparent on all edges -->
+  <div class="absolute inset-0 pointer-events-none">
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_70%_50%_at_50%_50%,rgba(99,102,241,0.08),transparent_70%)]"></div>
+    <div class="absolute inset-0 bg-[radial-gradient(ellipse_90%_60%_at_50%_50%,rgba(139,92,246,0.05),transparent_60%)]"></div>
+  </div>
+
+  <!-- Soft floating orbs with heavy blur -->
+  <div class="absolute top-1/2 left-1/3 -translate-y-1/2 w-[500px] h-[500px] bg-indigo-300/20 rounded-full blur-[100px] pointer-events-none"></div>
+  <div class="absolute top-1/2 right-1/3 -translate-y-1/2 w-[400px] h-[400px] bg-violet-300/15 rounded-full blur-[100px] pointer-events-none"></div>
+
+  <div class="relative max-w-4xl mx-auto px-6 text-center">
+    <!-- Decorative badge -->
+    <div class="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/70 backdrop-blur-sm border border-indigo-200/50 shadow-sm mb-8">
+      <span class="w-2 h-2 rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 animate-pulse"></span>
+      <span class="text-sm font-medium text-indigo-700">Open source &amp; airgap capable</span>
+    </div>
+
+    <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
+      Let's talk
+    </h2>
+    <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
+      Whether you're an agency looking for an integration partner or a contractor interested in partnership, we'd like to hear from you.
+    </p>
+
+    <!-- Contact form -->
+    <div class="mt-10 max-w-md mx-auto">
+      <form action="https://formspree.io/f/mwpovpgw" method="POST" class="space-y-4">
+        <input type="hidden" name="_subject" value="Defense Page - Contact Request">
+        <input type="hidden" name="source" value="defense_landing_page">
+        <div>
+          <input
+            type="email"
+            name="email"
+            required
+            placeholder="Work email"
+            class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900 placeholder-gray-400"
+          >
+        </div>
+        <div>
+          <input
+            type="text"
+            name="organization"
+            placeholder="Organization"
+            class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900 placeholder-gray-400"
+          >
+        </div>
+        <div>
+          <select
+            name="inquiry_type"
+            class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900"
+          >
+            <option value="" class="text-gray-400">I am a...</option>
+            <option value="agency">Defense agency looking for integration partners</option>
+            <option value="contractor">Defense contractor interested in partnership</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
+        <button
+          type="submit"
+          class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:shadow-indigo-300/60 transition-all duration-200 hover:-translate-y-0.5"
+        >
+          Get in touch
+          <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+    <!-- Trust indicators -->
+    <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Open source
+      </div>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Airgap capable
+      </div>
+      <div class="flex items-center gap-2">
+        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+        Fully auditable
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
