@@ -322,6 +322,14 @@ class AddonEntitlementService:
                 cfg = price_map.get(price_id)
                 if not cfg:
                     continue
+                if kind == "task_pack":
+                    delta_value = cfg.task_credits_delta
+                elif kind == "contact_pack":
+                    delta_value = cfg.contact_cap_delta
+                elif kind == "browser_task_limit":
+                    delta_value = cfg.browser_task_daily_delta
+                else:
+                    delta_value = 0
                 entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
                 expires_at = entitlements.order_by("-expires_at").values_list("expires_at", flat=True).first()
                 display_price = ""
@@ -349,6 +357,7 @@ class AddonEntitlementService:
                         "price_id": price_id,
                         "product_id": cfg.product_id,
                         "quantity": qty,
+                        "delta_value": delta_value,
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
                         "browser_task_daily_delta": cfg.browser_task_daily_delta,
