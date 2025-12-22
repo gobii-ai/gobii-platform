@@ -244,100 +244,167 @@ agent = response.<span class="function">json</span>()
       </div>
     </div>
 
-    <!-- Feature Cards -->
-    <div class="grid md:grid-cols-3 gap-6">
-      <!-- API Access -->
-      <div class="feature-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-14 h-14 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-2xl flex items-center justify-center shadow-lg shadow-indigo-200/50 mb-6">
-          <i data-lucide="code-2" class="w-7 h-7 text-white"></i>
+  </div>
+</section>
+
+<!-- Platform Capabilities Section -->
+<section class="relative py-20 lg:py-28 overflow-hidden">
+  <!-- Background -->
+  <div class="absolute inset-0 bg-gradient-to-b from-slate-900 via-slate-900 to-indigo-950"></div>
+  <div class="absolute inset-0 bg-[radial-gradient(ellipse_80%_50%_at_50%_-20%,rgba(120,119,198,0.3),transparent)]"></div>
+
+  <!-- Grid pattern -->
+  <div class="absolute inset-0 opacity-[0.03]" style="background-image: url(&quot;data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23ffffff' fill-opacity='1'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E&quot;);"></div>
+
+  <div class="relative max-w-7xl mx-auto px-6">
+    <div class="text-center mb-16">
+      <h2 class="text-3xl sm:text-4xl lg:text-5xl font-light text-white tracking-tight">
+        Everything you need to build
+      </h2>
+      <p class="mt-4 text-lg text-slate-400 max-w-2xl mx-auto">
+        A complete platform with production-grade infrastructure, so you can focus on your product.
+      </p>
+    </div>
+
+    <!-- Bento Grid -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 lg:gap-5">
+
+      <!-- Cloud Browsers - Large -->
+      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-violet-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-violet-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-violet-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="flex items-start justify-between mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <i data-lucide="monitor" class="w-6 h-6 text-white"></i>
+            </div>
+            <span class="px-3 py-1 rounded-full bg-violet-500/10 text-violet-400 text-xs font-medium border border-violet-500/20">Fully Headed</span>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Cloud Browsers</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Real Chrome browsers running in the cloud with full rendering, JavaScript execution, and visual output. Headed or headless modes available.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Screenshots</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">DOM Access</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">File Downloads</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Session Persistence</span>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Full API Control</h3>
-        <p class="text-gray-600 leading-relaxed mb-5">
-          Create agents, assign tasks, retrieve results, and manage schedules programmatically via REST API.
-        </p>
-        <ul class="space-y-2 text-sm text-gray-500">
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            RESTful endpoints
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Webhook callbacks
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-indigo-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Structured output schemas
-          </li>
-        </ul>
       </div>
 
-      <!-- Always-On Agents -->
-      <div class="feature-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-14 h-14 bg-gradient-to-br from-violet-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-lg shadow-violet-200/50 mb-6">
-          <i data-lucide="bot" class="w-7 h-7 text-white"></i>
+      <!-- Proxy & Anti-Bot -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-indigo-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-indigo-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 mb-6">
+            <i data-lucide="shield-check" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Proxy & Anti-Bot</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Managed rotating proxies with health monitoring. Bypass bot detection automatically.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-rotation</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Health Checks</span>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Always-On Agents</h3>
-        <p class="text-gray-600 leading-relaxed mb-5">
-          Deploy persistent agents that run on schedules, respond to events, and maintain state across sessions.
-        </p>
-        <ul class="space-y-2 text-sm text-gray-500">
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Cron schedules
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Message triggers
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Persistent memory
-          </li>
-        </ul>
       </div>
 
-      <!-- Browser Automation -->
-      <div class="feature-card group relative bg-white rounded-2xl p-8 shadow-xl shadow-slate-200/40 border border-slate-100">
-        <div class="w-14 h-14 bg-gradient-to-br from-purple-500 to-fuchsia-600 rounded-2xl flex items-center justify-center shadow-lg shadow-purple-200/50 mb-6">
-          <i data-lucide="globe" class="w-7 h-7 text-white"></i>
+      <!-- MCP Servers -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-purple-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-purple-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-purple-500 to-fuchsia-600 flex items-center justify-center shadow-lg shadow-purple-500/25 mb-6">
+            <i data-lucide="plug" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">MCP Servers</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Connect agents to external tools via Model Context Protocol. Platform, org, or user-scoped.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Extensible</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Multi-scope</span>
+          </div>
         </div>
-        <h3 class="text-xl font-medium text-gray-900 mb-3">Browser Automation</h3>
-        <p class="text-gray-600 leading-relaxed mb-5">
-          Agents browse the web like humans. Scrape data, fill forms, navigate sites, and extract structured info.
-        </p>
-        <ul class="space-y-2 text-sm text-gray-500">
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-purple-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Cloud browsers
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-purple-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Screenshot & DOM access
-          </li>
-          <li class="flex items-center gap-2">
-            <svg class="w-4 h-4 text-purple-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-            </svg>
-            Proxy support
-          </li>
-        </ul>
       </div>
+
+      <!-- Embedded Database - Large -->
+      <div class="lg:col-span-2 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-fuchsia-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 right-0 w-64 h-64 bg-fuchsia-500/10 rounded-full blur-3xl translate-y-1/2 translate-x-1/2 group-hover:bg-fuchsia-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="flex items-start justify-between mb-6">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-fuchsia-500 to-pink-600 flex items-center justify-center shadow-lg shadow-fuchsia-500/25">
+              <i data-lucide="database" class="w-6 h-6 text-white"></i>
+            </div>
+            <span class="px-3 py-1 rounded-full bg-fuchsia-500/10 text-fuchsia-400 text-xs font-medium border border-fuchsia-500/20">Per-Agent</span>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Embedded SQLite Database</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Each agent gets its own SQLite database for structured data storage. Persisted automatically to cloud storage with compression. Query with full SQL.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Full SQL</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auto-persist</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Compressed Storage</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cross-session</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Webhooks -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-cyan-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-48 h-48 bg-cyan-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-cyan-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500 to-teal-600 flex items-center justify-center shadow-lg shadow-cyan-500/25 mb-6">
+            <i data-lucide="webhook" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Webhooks</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Get notified when tasks complete. Push results directly to your endpoints.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Real-time</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Retries</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Persistent Sessions -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-emerald-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute bottom-0 left-0 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 group-hover:bg-emerald-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-500 to-green-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mb-6">
+            <i data-lucide="repeat" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Persistent Sessions</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Agents maintain state across runs. Cookies, auth tokens, and context preserved.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cookies</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Auth State</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Agent Filespace -->
+      <div class="group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-amber-500/30 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 left-0 w-48 h-48 bg-amber-500/10 rounded-full blur-3xl -translate-y-1/2 -translate-x-1/2 group-hover:bg-amber-500/20 transition-all duration-500"></div>
+        <div class="relative">
+          <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 mb-6">
+            <i data-lucide="folder-tree" class="w-6 h-6 text-white"></i>
+          </div>
+          <h3 class="text-xl font-semibold text-white mb-3">Agent Filespace</h3>
+          <p class="text-slate-400 leading-relaxed mb-6">
+            Persistent file storage for each agent. Upload, download, and share files across sessions.
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Cloud Storage</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Shareable</span>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
