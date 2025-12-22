@@ -13,7 +13,7 @@
     <div class="mt-4 grid gap-4 grid-cols-1 md:[grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr))]">
       {% include "console/partials/_addon_pack.html" with addon=task_pack title="Task packs" description="Add additional task credits for this cycle." single_label="Task pack" delta_unit="credits" addon_kind="task" aria_label="task pack" addons_disabled=addons_disabled %}
       {% include "console/partials/_addon_pack.html" with addon=contact_pack title="Contact packs" description="Increase per-agent contacts for this cycle." single_label="Contact pack" delta_unit="contacts" addon_kind="contact" aria_label="contact pack" addons_disabled=addons_disabled %}
-      {% include "console/partials/_addon_pack.html" with addon=browser_task_limit title="Browser task packs" description="Increase the per-agent daily browser task limit." single_label="Browser task pack" delta_unit="tasks/day" addon_kind="browser_task" aria_label="browser task pack" addons_disabled=addons_disabled %}
+      {% include "console/partials/_addon_pack.html" with addon=browser_task_limit title="Browser task packs" description="Increase the per-agent daily browser task limit for this cycle." single_label="Browser task pack" delta_unit="tasks" addon_kind="browser_task" aria_label="browser task pack" addons_disabled=addons_disabled %}
     </div>
 
     <div class="mt-6 flex flex-col gap-3">
