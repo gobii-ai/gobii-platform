@@ -203,6 +203,54 @@ TEMPLATE_DEFINITIONS: List[PretrainedWorkerTemplateDefinition] = [
         show_on_homepage=True,
     ),
     PretrainedWorkerTemplateDefinition(
+        code="lead-hunter",
+        display_name="Lead Hunter",
+        tagline="Finds and qualifies prospects across LinkedIn and company databases",
+        description=(
+            "Your 24/7 prospecting partner that searches LinkedIn, company databases, and industry sources"
+            " to discover and qualify leads matching your ideal customer profile."
+        ),
+        charter=(
+            "Search LinkedIn, company databases, and industry sources for prospects matching the criteria we provide."
+            " Qualify matches against our ICP, capture contact details, and deliver a daily lead list with"
+            " brief notes on fit and suggested next steps."
+        ),
+        base_schedule="15 9 * * MON-FRI",
+        schedule_jitter_minutes=20,
+        default_tools=[
+            "mcp_brightdata_search_engine",
+            "mcp_brightdata_scrape_as_markdown",
+            "google_sheets-add-single-row",
+        ],
+        recommended_contact_channel="email",
+        category="Revenue",
+        priority=52,
+    ),
+    PretrainedWorkerTemplateDefinition(
+        code="account-researcher",
+        display_name="Account Researcher",
+        tagline="Enriches prospect accounts with company intel and decision-maker context",
+        description=(
+            "Enriches prospect profiles with company intel, tech stack, funding status, and key"
+            " decision-makers to personalize your outreach."
+        ),
+        charter=(
+            "Research target accounts and their key decision-makers. Capture company background,"
+            " tech stack, funding stage, growth signals, and relevant news. Summarize the findings"
+            " in a concise brief that can be used for personalized outreach."
+        ),
+        base_schedule="45 8 * * MON-FRI",
+        schedule_jitter_minutes=18,
+        default_tools=[
+            "mcp_brightdata_search_engine",
+            "mcp_brightdata_scrape_as_markdown",
+            "google_drive-create-doc",
+        ],
+        recommended_contact_channel="email",
+        category="Revenue",
+        priority=54,
+    ),
+    PretrainedWorkerTemplateDefinition(
         code="talent-scout",
         display_name="Talent Scout",
         tagline="Finds and qualifies candidates across LinkedIn, GitHub, and job boards",
