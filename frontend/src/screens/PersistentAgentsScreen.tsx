@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
+import { AgentAvatarBadge } from '../components/common/AgentAvatarBadge'
 
 declare global {
   interface Window {
@@ -246,8 +247,6 @@ function AgentCard({ agent }: AgentCardProps) {
       }
     }
   }, [])
-  const hasAvatar = Boolean(agent.avatarUrl)
-
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
       <div className="relative flex h-44 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
@@ -260,16 +259,14 @@ function AgentCard({ agent }: AgentCardProps) {
           style={{ background: 'radial-gradient(circle at 80% 0%, rgba(255, 255, 255, 0.25), transparent 60%)' }}
         />
 
-        <div
+        <AgentAvatarBadge
+          name={agent.name}
+          avatarUrl={agent.avatarUrl}
           className="relative z-10 mb-3 flex size-14 items-center justify-center rounded-full border backdrop-blur-sm"
+          imageClassName="h-full w-full object-cover"
+          textClassName={`text-xl font-semibold uppercase ${agent.headerIconClass}`}
           style={{ backgroundColor: agent.iconBackgroundHex, borderColor: agent.iconBorderHex }}
-        >
-          {hasAvatar ? (
-            <img src={agent.avatarUrl ?? undefined} alt={`${agent.name} avatar`} className="h-full w-full object-cover" />
-          ) : (
-            <Zap className={`h-8 w-8 ${agent.headerIconClass}`} aria-hidden="true" />
-          )}
-        </div>
+        />
 
         <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>
           <a

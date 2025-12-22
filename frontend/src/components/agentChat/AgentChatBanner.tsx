@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 
+import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { normalizeHexColor } from '../../util/color'
 
 type AgentChatBannerProps = {
@@ -10,12 +11,7 @@ type AgentChatBannerProps = {
 
 export function AgentChatBanner({ agentName, agentAvatarUrl, agentColorHex }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
-  const nameParts = trimmedName.split(/\s+/).filter(Boolean)
-  const firstInitial = nameParts[0]?.charAt(0).toUpperCase() || 'A'
-  const lastInitial = nameParts.length > 1 ? nameParts[nameParts.length - 1]?.charAt(0).toUpperCase() || '' : ''
-  const initials = `${firstInitial}${lastInitial}`.trim()
   const accentColor = normalizeHexColor(agentColorHex)
-  const hasAvatar = Boolean(agentAvatarUrl)
   const bannerRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
@@ -42,21 +38,15 @@ export function AgentChatBanner({ agentName, agentAvatarUrl, agentColorHex }: Ag
       <div className="mx-auto w-full max-w-5xl px-4 pb-3 pt-4 sm:px-6 lg:px-10" ref={bannerRef}>
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-white/90 px-5 py-4 shadow-[0_12px_30px_rgba(15,23,42,0.12)] backdrop-blur">
           <div className="flex items-center gap-4">
-            <div
+            <AgentAvatarBadge
+              name={trimmedName}
+              avatarUrl={agentAvatarUrl}
               className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-full border bg-white"
+              imageClassName="h-full w-full object-cover"
+              textClassName="flex h-full w-full items-center justify-center text-xl font-semibold text-white"
               style={{ borderColor: accentColor }}
-            >
-              {hasAvatar ? (
-                <img src={agentAvatarUrl ?? undefined} alt={`${trimmedName} avatar`} className="h-full w-full object-cover" />
-              ) : (
-                <span
-                  className="flex h-full w-full items-center justify-center text-sm font-semibold text-white"
-                  style={{ background: `linear-gradient(135deg, ${accentColor}, #0f172a)` }}
-                >
-                  {initials || 'A'}
-                </span>
-              )}
-            </div>
+              fallbackStyle={{ background: `linear-gradient(135deg, ${accentColor}, #0f172a)` }}
+            />
             <div>
               <div className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-slate-500">Live chat</div>
               <div className="text-lg font-semibold text-slate-900">{trimmedName}</div>
