@@ -20,6 +20,7 @@ import {
   ShieldAlert,
   Trash2,
   XCircle,
+  Zap,
 } from 'lucide-react'
 import { Checkbox as AriaCheckbox, Slider as AriaSlider, SliderThumb, SliderTrack, Switch as AriaSwitch } from 'react-aria-components'
 import { Modal } from '../components/common/Modal'
@@ -59,6 +60,7 @@ type AgentOrganization = {
 type AgentSummary = {
   id: string
   name: string
+  avatarUrl: string | null
   charter: string
   isActive: boolean
   createdAtDisplay: string
@@ -327,6 +329,12 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
 
   const [savedFormState, setSavedFormState] = useState<FormState>(initialFormState)
   const [formState, setFormState] = useState<FormState>(initialFormState)
+  const [savedAvatarUrl, setSavedAvatarUrl] = useState<string | null>(initialData.agent.avatarUrl ?? null)
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState<string | null>(initialData.agent.avatarUrl ?? null)
+  const avatarPreviewObjectUrlRef = useRef<string | null>(null)
+  const [avatarFile, setAvatarFile] = useState<File | null>(null)
+  const [removeAvatar, setRemoveAvatar] = useState(false)
+  const avatarInputRef = useRef<HTMLInputElement | null>(null)
   const generalFormRef = useRef<HTMLFormElement | null>(null)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -349,6 +357,13 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [peerLinkDefaults, setPeerLinkDefaults] = useState(initialData.peerLinks.defaults)
   const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
 
+  const clearAvatarPreviewUrl = useCallback(() => {
+    if (avatarPreviewObjectUrlRef.current) {
+      URL.revokeObjectURL(avatarPreviewObjectUrlRef.current)
+      avatarPreviewObjectUrlRef.current = null
+    }
+  }, [])
+
   const generalHasChanges = useMemo(() => {
     return (
       formState.name !== savedFormState.name ||
@@ -357,14 +372,27 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
       formState.dailyCreditInput !== savedFormState.dailyCreditInput ||
       formState.sliderValue !== savedFormState.sliderValue ||
       formState.dedicatedProxyId !== savedFormState.dedicatedProxyId ||
-      formState.preferredTier !== savedFormState.preferredTier
+      formState.preferredTier !== savedFormState.preferredTier ||
+      avatarFile !== null ||
+      (removeAvatar && Boolean(savedAvatarUrl))
     )
-  }, [formState, savedFormState])
+  }, [avatarFile, formState, removeAvatar, savedAvatarUrl, savedFormState])
 
   useEffect(() => {
     setSavedFormState(initialFormState)
     setFormState(initialFormState)
   }, [initialFormState])
+
+  useEffect(() => {
+    clearAvatarPreviewUrl()
+    setSavedAvatarUrl(initialData.agent.avatarUrl ?? null)
+    setAvatarPreviewUrl(initialData.agent.avatarUrl ?? null)
+    setAvatarFile(null)
+    setRemoveAvatar(false)
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = ''
+    }
+  }, [avatarInputRef, clearAvatarPreviewUrl, initialData.agent.avatarUrl])
 
 useEffect(() => {
   setSavedWebhooks(initialData.webhooks)
@@ -420,6 +448,51 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     return next
   })
 }, [])
+
+  const handleAvatarChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0]
+      if (!file) {
+        return
+      }
+      clearAvatarPreviewUrl()
+      setAvatarFile(file)
+      setRemoveAvatar(false)
+      const objectUrl = URL.createObjectURL(file)
+      avatarPreviewObjectUrlRef.current = objectUrl
+      setAvatarPreviewUrl(objectUrl)
+    },
+    [clearAvatarPreviewUrl],
+  )
+
+  const handleAvatarRemove = useCallback(() => {
+    clearAvatarPreviewUrl()
+    setAvatarFile(null)
+    setRemoveAvatar(true)
+    setAvatarPreviewUrl(null)
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = ''
+    }
+  }, [avatarInputRef, clearAvatarPreviewUrl])
+
+  const resetAvatarState = useCallback(() => {
+    clearAvatarPreviewUrl()
+    setAvatarFile(null)
+    setRemoveAvatar(false)
+    setAvatarPreviewUrl(savedAvatarUrl)
+    if (avatarInputRef.current) {
+      avatarInputRef.current.value = ''
+    }
+  }, [avatarInputRef, clearAvatarPreviewUrl, savedAvatarUrl])
+
+  useEffect(() => {
+    return () => {
+      if (avatarPreviewObjectUrlRef.current) {
+        URL.revokeObjectURL(avatarPreviewObjectUrlRef.current)
+        avatarPreviewObjectUrlRef.current = null
+      }
+    }
+  }, [])
 
   const submitFormData = useCallback(
     async (formData: FormData) => {
@@ -601,7 +674,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setPeerLinkCandidates(savedPeerLinks.candidates)
     setPeerLinkDefaults(savedPeerLinks.defaults)
     setSaveError(null)
-  }, [resetForm, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
+    resetAvatarState()
+  }, [resetAvatarState, resetForm, savedOrgServers, savedPeerLinks, savedPersonalServers, savedWebhooks])
 
   const handleSaveAll = useCallback(async () => {
     if (!hasAnyChanges) {
@@ -613,8 +687,17 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     let processedPeerActions = 0
     try {
       if (generalHasChanges && generalFormRef.current) {
-        await submitFormData(new FormData(generalFormRef.current))
+        const data = await submitFormData(new FormData(generalFormRef.current))
         setSavedFormState({ ...formState })
+        const nextAvatar = (data?.avatarUrl as string | null | undefined) ?? savedAvatarUrl
+        clearAvatarPreviewUrl()
+        setSavedAvatarUrl(nextAvatar ?? null)
+        setAvatarPreviewUrl(nextAvatar ?? null)
+        setAvatarFile(null)
+        setRemoveAvatar(false)
+        if (avatarInputRef.current) {
+          avatarInputRef.current.value = ''
+        }
       }
 
       if (mcpHasChanges) {
@@ -705,6 +788,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     }
   }, [
     applyPeerLinkPayload,
+    avatarInputRef,
+    clearAvatarPreviewUrl,
     formState,
     generalFormRef,
     generalHasChanges,
@@ -712,6 +797,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     mcpHasChanges,
     pendingPeerActions,
     pendingWebhookActions,
+    savedAvatarUrl,
+    selectedOrgServers,
     selectedPersonalServers,
     submitFormData,
   ])
@@ -1036,15 +1123,25 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         action={initialData.urls.detail}
         id="general-settings-form"
         ref={generalFormRef}
-        onSubmit={(event) => {
-          event.preventDefault()
-          handleSaveAll()
-        }}
-      >
-        <input type="hidden" name="csrfmiddlewaretoken" value={initialData.csrfToken} />
-        {initialData.allowlist.show && (
-          <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
-        )}
+      onSubmit={(event) => {
+        event.preventDefault()
+        handleSaveAll()
+      }}
+      encType="multipart/form-data"
+    >
+      <input type="hidden" name="csrfmiddlewaretoken" value={initialData.csrfToken} />
+      <input type="hidden" name="clear_avatar" value={removeAvatar ? 'true' : ''} />
+      <input
+        ref={avatarInputRef}
+        type="file"
+        name="avatar"
+        accept="image/*"
+        className="sr-only"
+        onChange={handleAvatarChange}
+      />
+      {initialData.allowlist.show && (
+        <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
+      )}
         <details className="gobii-card-base group" id="agent-identity" open>
           <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
             <div>
@@ -1071,6 +1168,48 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                   className="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"
                 />
                 <p className="mt-2 text-xs text-gray-500">Choose a memorable name that describes this agent's purpose.</p>
+              </div>
+
+              <div className="sm:col-span-3">
+                <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Avatar</span>
+              </div>
+              <div className="sm:col-span-9">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-gray-200 shadow-sm">
+                    {(!removeAvatar && (avatarPreviewUrl || savedAvatarUrl)) ? (
+                      <img
+                        src={(removeAvatar ? null : avatarPreviewUrl || savedAvatarUrl) ?? undefined}
+                        alt={`${formState.name || 'Agent'} avatar`}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <Zap className="h-7 w-7 text-gray-500" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => avatarInputRef.current?.click()}
+                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700"
+                      >
+                        <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
+                        Upload
+                      </button>
+                      {(avatarPreviewUrl || savedAvatarUrl || avatarFile) && (
+                        <button
+                          type="button"
+                          onClick={handleAvatarRemove}
+                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300"
+                        >
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-500">Use a square image (PNG, JPG, WebP, or GIF). Max 5 MB.</p>
+                  </div>
+                </div>
               </div>
 
               {initialData.llmIntelligence && (

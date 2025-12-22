@@ -4,6 +4,8 @@ from typing import Any
 
 import stripe
 from django.template.loader import render_to_string
+from django.core.files.storage import default_storage
+from django.core.files.uploadedfile import UploadedFile
 from django.core.mail import send_mail
 from django.utils.html import strip_tags
 from django.utils.html import format_html
@@ -1908,6 +1910,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         return {
             'id': str(agent.id),
             'name': agent.name or '',
+            'avatarUrl': agent.get_avatar_url(),
             'listingDescription': agent.listing_description or '',
             'listingDescriptionSource': getattr(agent, 'listing_description_source', None),
             'miniDescription': agent.mini_description or '',
@@ -1922,6 +1925,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
             'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
             'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
+            'displayColorHex': getattr(agent, 'display_color_hex', None) or agent.get_display_color(),
             'headerTextClass': getattr(agent, 'header_text_class', '') or '',
             'headerSubtextClass': getattr(agent, 'header_subtext_class', '') or '',
             'headerStatusClass': getattr(agent, 'header_status_class', '') or '',
@@ -3424,6 +3428,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'id': str(agent.id),
                 'name': agent.name,
                 'charter': agent.charter,
+                'avatarUrl': agent.get_avatar_url(),
                 'isActive': agent.is_active,
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
                 'pendingTransfer': pending_transfer_payload,
@@ -3949,6 +3954,42 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             messages.error(request, message)
             return redirect('agent_detail', pk=agent.pk)
 
+        def _validate_avatar_file(file_obj: UploadedFile) -> str | None:
+            max_bytes = 5 * 1024 * 1024  # 5 MB limit
+            if file_obj.size and file_obj.size > max_bytes:
+                return "Avatar must be smaller than 5 MB."
+
+            allowed_content_types = {
+                'image/png',
+                'image/jpeg',
+                'image/jpg',
+                'image/webp',
+                'image/gif',
+            }
+            content_type = (file_obj.content_type or "").lower()
+            allowed_by_content_type = bool(content_type and content_type in allowed_content_types)
+            if content_type and not allowed_by_content_type:
+                return "Avatar must be a PNG, JPG, WebP, or GIF image."
+
+            # Lightweight signature check to weed out non-image uploads
+            try:
+                head = file_obj.read(16)
+                file_obj.seek(0)
+            except (OSError, ValueError):
+                head = b""
+
+            is_image_signature = (
+                head.startswith(b"\x89PNG")
+                or head.startswith(b"\xff\xd8")
+                or head.startswith(b"GIF8")
+                or (len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP")
+            )
+
+            if not is_image_signature:
+                return "Avatar must be a valid image file."
+
+            return None
+
         new_name = request.POST.get('name', '').strip()
         new_charter = request.POST.get('charter', '').strip()
         # Checkbox inputs are only present in POST data when checked. Determine the desired
@@ -3957,6 +3998,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
+
+        avatar_file = request.FILES.get('avatar')
+        clear_avatar_flag = (request.POST.get('clear_avatar') or '').strip().lower() in {'1', 'true', 'yes', 'on'}
+
+        if avatar_file:
+            avatar_error = _validate_avatar_file(avatar_file)
+            if avatar_error:
+                return _general_error(avatar_error)
+            # If an upload is present, ignore any clear flag
+            clear_avatar_flag = False
+        elif clear_avatar_flag and not agent.avatar:
+            # No avatar to clear; ignore the flag
+            clear_avatar_flag = False
 
         raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
         slider_value = (request.POST.get('daily_credit_limit_slider') or '').strip()
@@ -4082,6 +4136,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         try:
             with transaction.atomic():
+                old_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
+                avatar_changed = False
+
                 # Track which fields changed
                 agent_fields_to_update = []
                 browser_agent_fields_to_update = []
@@ -4119,6 +4176,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.preferred_llm_tier != resolved_preferred_tier_value:
                     agent.preferred_llm_tier = resolved_preferred_tier_value
                     agent_fields_to_update.append('preferred_llm_tier')
+
+                if avatar_file:
+                    agent.avatar = avatar_file
+                    agent_fields_to_update.append('avatar')
+                    avatar_changed = True
+                elif clear_avatar_flag and agent.avatar:
+                    agent.avatar = None
+                    agent_fields_to_update.append('avatar')
+                    avatar_changed = True
 
                 if browser_agent is not None:
                     current_proxy_id = browser_agent.preferred_proxy_id
@@ -4191,6 +4257,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     source=AnalyticsSource.WEB,
                     properties=update_props.copy(),
                 )
+
+                if avatar_changed:
+                    new_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
+                    if old_avatar_name and old_avatar_name != new_avatar_name:
+                        transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
@@ -4198,7 +4269,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             return redirect('agent_detail', pk=agent.pk)
 
         if is_ajax:
-            return JsonResponse({'success': True, 'message': "Agent updated successfully."})
+            return JsonResponse({
+                'success': True,
+                'message': "Agent updated successfully.",
+                'avatarUrl': agent.get_avatar_url(),
+            })
 
         return redirect('agent_detail', pk=agent.pk)
 

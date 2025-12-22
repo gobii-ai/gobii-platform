@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { AgentChatBanner } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
@@ -15,9 +16,10 @@ export type AgentChatPageProps = {
   agentId: string
   agentName?: string | null
   agentColor?: string | null
+  agentAvatarUrl?: string | null
 }
 
-export function AgentChatPage({ agentId, agentName, agentColor }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
@@ -179,9 +181,15 @@ export function AgentChatPage({ agentId, agentName, agentColor }: AgentChatPageP
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout
-        agentName={agentName || 'Agent'}
         agentFirstName={agentFirstName}
         agentColorHex={agentColorHex || agentColor || undefined}
+        header={
+          <AgentChatBanner
+            agentName={agentName || 'Agent'}
+            agentAvatarUrl={agentAvatarUrl}
+            agentColorHex={agentColorHex || agentColor || undefined}
+          />
+        }
         events={events}
         hasMoreOlder={hasMoreOlder}
         hasMoreNewer={hasMoreNewer}
