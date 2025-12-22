@@ -565,8 +565,15 @@
 
     <!-- Contact form -->
     <div class="mt-10 max-w-md mx-auto">
-      <form action="https://formspree.io/f/mwpovpgw" method="POST" class="space-y-4">
-        <input type="hidden" name="_subject" value="Defense Page - Contact Request">
+      <form
+        action="{% url 'pages:marketing_contact_request' %}"
+        method="post"
+        class="space-y-4"
+        hx-post="{% url 'pages:marketing_contact_request' %}"
+        hx-target="#defense-contact-response"
+        hx-swap="innerHTML"
+      >
+        {% csrf_token %}
         <input type="hidden" name="source" value="defense_landing_page">
         <div>
           <input
@@ -574,6 +581,7 @@
             name="email"
             required
             placeholder="Work email"
+            autocomplete="email"
             class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900 placeholder-gray-400"
           >
         </div>
@@ -582,6 +590,7 @@
             type="text"
             name="organization"
             placeholder="Organization"
+            autocomplete="organization"
             class="w-full px-5 py-4 rounded-xl border border-gray-200 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 outline-none transition-all text-gray-900 placeholder-gray-400"
           >
         </div>
@@ -605,6 +614,7 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </button>
+        <div id="defense-contact-response" class="text-left" aria-live="polite"></div>
       </form>
     </div>
 

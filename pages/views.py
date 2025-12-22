@@ -5,6 +5,7 @@ import uuid
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
+from django.core.mail import send_mail
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
@@ -13,6 +14,7 @@ from .models import LandingPage
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.template.loader import render_to_string
 from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
@@ -36,10 +38,11 @@ from .utils_markdown import (
     get_all_doc_pages,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
+from .forms import MarketingContactForm
 from django.contrib import sitemaps
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
-from django.utils.html import escape
+from django.utils.html import escape, strip_tags
 from opentelemetry import trace
 from marketing_events.api import capi
 import logging
@@ -1102,6 +1105,101 @@ class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
 
 class SupportView(TemplateView):
     pass
+
+
+class MarketingContactRequestView(View):
+    SOURCE_CONFIG = {
+        "healthcare_landing_page": {
+            "subject": "Healthcare Demo Request",
+            "label": "Healthcare demo request",
+        },
+        "defense_landing_page": {
+            "subject": "Defense Contact Request",
+            "label": "Defense contact request",
+        },
+    }
+
+    @staticmethod
+    def _render_form_errors(form: MarketingContactForm) -> HttpResponse:
+        errors = []
+        for field_errors in form.errors.values():
+            errors.extend(field_errors)
+
+        error_items = "".join(f"<li>{escape(message)}</li>" for message in errors)
+        error_html = (
+            '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+            'Please correct the following errors:'
+            f'<ul class="mt-2 list-disc list-inside">{error_items}</ul>'
+            "</div>"
+        )
+        return HttpResponse(error_html, status=400)
+
+    def post(self, request, *args, **kwargs):
+        form = MarketingContactForm(request.POST)
+        if not form.is_valid():
+            return self._render_form_errors(form)
+
+        cleaned = form.cleaned_data
+        source = cleaned.get("source")
+        source_config = self.SOURCE_CONFIG.get(source)
+        if not source_config:
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Invalid request source."
+                "</div>",
+                status=400,
+            )
+
+        recipient_email = settings.PUBLIC_CONTACT_EMAIL or settings.SUPPORT_EMAIL
+        if not recipient_email:
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Contact email is not configured."
+                "</div>",
+                status=500,
+            )
+
+        inquiry_label = ""
+        inquiry_value = cleaned.get("inquiry_type") or ""
+        if inquiry_value:
+            inquiry_choices = dict(MarketingContactForm.INQUIRY_CHOICES)
+            inquiry_label = inquiry_choices.get(inquiry_value, inquiry_value)
+
+        context = {
+            "source_label": source_config["label"],
+            "email": cleaned.get("email"),
+            "organization": cleaned.get("organization"),
+            "inquiry_type": inquiry_label,
+            "message": cleaned.get("message"),
+            "referrer": request.META.get("HTTP_REFERER", ""),
+        }
+
+        html_message = render_to_string("emails/marketing_contact_request.html", context)
+        plain_message = strip_tags(html_message)
+
+        try:
+            send_mail(
+                source_config["subject"],
+                plain_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [recipient_email],
+                html_message=html_message,
+                fail_silently=False,
+            )
+        except Exception:
+            logger.exception("Error sending marketing contact request email.")
+            return HttpResponse(
+                '<div class="rounded-xl border border-red-200 bg-white/90 px-4 py-3 text-sm text-red-700" role="alert">'
+                "Sorry, there was an error sending your message. Please try again later."
+                "</div>",
+                status=500,
+            )
+
+        return HttpResponse(
+            '<div class="rounded-xl border border-emerald-200 bg-white/90 px-4 py-3 text-sm text-emerald-700" role="status">'
+            "Thanks for reaching out. We will follow up shortly."
+            "</div>"
+        )
 
 
 class ClearSignupTrackingView(View):
