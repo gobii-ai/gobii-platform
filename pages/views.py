@@ -29,6 +29,7 @@ from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
+    get_user_plan,
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
@@ -820,10 +821,15 @@ class StartupCheckoutView(LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Startup subscription plan."""
 
     def get(self, request, *args, **kwargs):
+        user = request.user
+        plan = get_user_plan(user) or {}
+        plan_id = str(plan.get("id") or "").lower()
+        if plan_id and plan_id != PlanNames.FREE:
+            redirect_path = _pop_post_checkout_redirect(request) or reverse("billing")
+            return redirect(redirect_path)
+
         _prepare_stripe_or_404()
         stripe_settings = get_stripe_settings()
-
-        user = request.user
 
         # 1️⃣  Get (or lazily create) the Stripe customer linked to this user
         customer = get_or_create_stripe_customer(user)

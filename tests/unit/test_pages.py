@@ -11,6 +11,7 @@ from api.models import BrowserUseAgent, PersistentAgent
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
+from constants.plans import PlanNames
 
 
 @tag("batch_pages")
@@ -340,6 +341,37 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 
 @tag("batch_pages")
 class CheckoutRedirectTests(TestCase):
+    @tag("batch_pages")
+    @patch("pages.views.get_user_plan")
+    @patch("pages.views._prepare_stripe_or_404")
+    def test_startup_checkout_skips_paid_users(
+        self,
+        mock_prepare,
+        mock_get_user_plan,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale@test.com",
+            password="pw",
+            username="scale_user",
+        )
+        self.client.force_login(user)
+
+        session = self.client.session
+        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
+        session.save()
+
+        mock_get_user_plan.return_value = {"id": PlanNames.SCALE}
+
+        resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        self.assertEqual(parsed.path, reverse("api_keys"))
+        mock_prepare.assert_not_called()
+
+        session = self.client.session
+        self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
+
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.ensure_single_individual_subscription")
