@@ -219,7 +219,7 @@ function AgentCard({ agent }: AgentCardProps) {
 
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
-      <div className="relative flex h-52 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
+      <div className="relative flex h-44 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
         <div
           className="absolute inset-0 opacity-20"
           style={{ background: 'radial-gradient(circle at 20% 20%, rgba(255, 255, 255, 0.35), transparent 55%)' }}
@@ -230,13 +230,17 @@ function AgentCard({ agent }: AgentCardProps) {
         />
 
         <div
-          className="relative z-10 mb-4 flex size-16 items-center justify-center rounded-full border backdrop-blur-sm"
+          className="relative z-10 mb-3 flex size-14 items-center justify-center rounded-full border backdrop-blur-sm"
           style={{ backgroundColor: agent.iconBackgroundHex, borderColor: agent.iconBorderHex }}
         >
-          <Zap className={`h-8 w-8 ${agent.headerIconClass}`} aria-hidden="true" />
+          <Zap className={`h-7 w-7 ${agent.headerIconClass}`} aria-hidden="true" />
         </div>
 
-        <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>{agent.name}</h3>
+        <h3 className={`relative z-10 px-4 text-center text-lg font-semibold ${agent.headerTextClass}`}>
+          <a href={agent.detailUrl} className="focus-visible:underline focus-visible:outline-none hover:underline">
+            {agent.name}
+          </a>
+        </h3>
 
         <div className={`relative z-10 mt-2 flex flex-wrap items-center gap-2 ${agent.headerStatusClass}`}>
           <span className={`size-2 rounded-full ${agent.isActive ? 'bg-green-300' : 'bg-gray-300'}`} />
@@ -254,6 +258,14 @@ function AgentCard({ agent }: AgentCardProps) {
           </div>
         )}
 
+        <a
+          href={agent.detailUrl}
+          className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
+        >
+          <Settings className="h-4 w-4" aria-hidden="true" />
+          Configure
+        </a>
+
         {agent.auditUrl ? (
           <a
             href={agent.auditUrl}
@@ -266,7 +278,7 @@ function AgentCard({ agent }: AgentCardProps) {
         ) : null}
       </div>
 
-      <div className="flex flex-1 flex-col p-4 md:p-5">
+      <div className="flex flex-1 flex-col p-2.5 md:p-3">
         {agent.dailyCreditLow && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
             {agent.name} is almost out of daily task credits
@@ -302,16 +314,8 @@ function AgentCard({ agent }: AgentCardProps) {
           </div>
         )}
 
-        <div className="mt-auto flex flex-col gap-3 pt-4">
-          <a
-            href={agent.detailUrl}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-200/80 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900"
-          >
-            <Settings className="h-4 w-4" aria-hidden="true" />
-            Configure
-          </a>
-
-          {hasChannels && (
+        {hasChannels && (
+          <div className="mt-4 pt-4">
             <div className="flex flex-wrap gap-2">
               {canSms && (
                 <a
@@ -343,8 +347,8 @@ function AgentCard({ agent }: AgentCardProps) {
                 </a>
               )}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )
