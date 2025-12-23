@@ -13,6 +13,7 @@ from util.subscription_helper import get_owner_plan
 
 DEFAULT_MIN_CRON_SCHEDULE_MINUTES = getattr(settings, "PERSISTENT_AGENT_MIN_SCHEDULE_MINUTES", 30)
 DEFAULT_SEARCH_WEB_RESULT_COUNT = 5
+DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT = 5
 DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT = 30
 DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD = 0.97
 
@@ -27,6 +28,7 @@ class ToolPlanSettings:
     min_cron_schedule_minutes: Optional[int]
     rate_limits: Dict[str, Optional[int]] = field(default_factory=dict)
     search_web_result_count: int = DEFAULT_SEARCH_WEB_RESULT_COUNT
+    search_engine_batch_query_limit: int = DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT
     brightdata_amazon_product_search_limit: int = DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT
     duplicate_similarity_threshold: float = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
 
@@ -57,6 +59,11 @@ def _serialise(configs) -> dict:
             "min_cron_schedule_minutes": config.min_cron_schedule_minutes,
             "rate_limits": rate_limits,
             "search_web_result_count": getattr(config, "search_web_result_count", DEFAULT_SEARCH_WEB_RESULT_COUNT),
+            "search_engine_batch_query_limit": getattr(
+                config,
+                "search_engine_batch_query_limit",
+                DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
+            ),
             "brightdata_amazon_product_search_limit": getattr(
                 config,
                 "brightdata_amazon_product_search_limit",
@@ -79,6 +86,7 @@ def _ensure_defaults_exist() -> None:
             defaults={
                 "min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
                 "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
+                "search_engine_batch_query_limit": DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
                 "brightdata_amazon_product_search_limit": DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
                 "duplicate_similarity_threshold": DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
             },
@@ -140,6 +148,16 @@ def _normalize_search_web_result_count(value: Optional[int]) -> int:
     return int_value
 
 
+def _normalize_search_engine_batch_query_limit(value: Optional[int]) -> int:
+    try:
+        int_value = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT
+    if int_value <= 0:
+        return DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT
+    return int_value
+
+
 def _normalize_brightdata_amazon_product_search_limit(value: Optional[int]) -> int:
     try:
         int_value = int(value)  # type: ignore[arg-type]
@@ -172,6 +190,9 @@ def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
         rate_limits=_normalize_rate_limits(config.get("rate_limits") if config else {}),
         search_web_result_count=_normalize_search_web_result_count(
             config.get("search_web_result_count") if config else None
+        ),
+        search_engine_batch_query_limit=_normalize_search_engine_batch_query_limit(
+            config.get("search_engine_batch_query_limit") if config else None
         ),
         brightdata_amazon_product_search_limit=_normalize_brightdata_amazon_product_search_limit(
             config.get("brightdata_amazon_product_search_limit") if config else None

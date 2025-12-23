@@ -373,6 +373,36 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(cleaned), 2)
         self.assertEqual(cleaned[0]["id"], 1)
 
+    def test_execute_mcp_tool_blocks_search_engine_batch_over_limit(self):
+        ToolConfig.objects.update_or_create(
+            plan_name=PlanNames.FREE,
+            defaults={"search_engine_batch_query_limit": 2},
+        )
+        tool_info = MCPToolInfo(
+            config_id=self.runtime.config_id,
+            full_name="mcp_brightdata_search_engine_batch",
+            server_name="brightdata",
+            tool_name="search_engine_batch",
+            description="Search batch",
+            parameters={},
+        )
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        params = {"queries": ["first", "second", "third"]}
+
+        with patch.object(manager, "_ensure_event_loop", return_value=MagicMock()), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock) as mock_exec, \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                params,
+            )
+
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn("Maximum number of queries", response.get("message", ""))
+        mock_exec.assert_not_called()
+
     def test_brightdata_pdf_urls_rejected(self):
         tool_info = MCPToolInfo(
             config_id=self.runtime.config_id,
