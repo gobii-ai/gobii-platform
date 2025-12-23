@@ -7,6 +7,7 @@ Redis so the agent loop keeps the cycle open while children run.
 
 import threading
 import time
+from itertools import count
 from unittest.mock import patch, MagicMock, call
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
@@ -87,11 +88,20 @@ class SpawnDepthTrackingTests(TransactionTestCase):
             max_depth=3
         )
     
+    @patch('api.agent.tools.spawn_web_task.BrowserUseAgentTask.objects.create')
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
-    def test_parallel_spawn_increments_outstanding_children(self, mock_process_task, _mock_consume_credit):
+    def test_parallel_spawn_increments_outstanding_children(self, mock_process_task, _mock_consume_credit, mock_create):
         """Parallel spawns should each pass recursion depth=1 and increment outstanding-children counter."""
         mock_process_task.delay = MagicMock()
+        task_ids = count(1)
+
+        def _make_task(*_args, **_kwargs):
+            task = MagicMock()
+            task.id = next(task_ids)
+            return task
+
+        mock_create.side_effect = _make_task
         
         # Results will be stored here by each thread
         results = []
