@@ -172,16 +172,16 @@
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
             {% csrf_token %}
-            <button type="submit" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
               Get API key
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
             </button>
           </form>
-          <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+          <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
             Read the docs
           </a>
         </div>
@@ -644,16 +644,16 @@ agent = response.<span class="function">json</span>()
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
         {% csrf_token %}
-        <button type="submit" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
           Get API key
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </button>
       </form>
-      <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+      <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
         Read the docs
       </a>
     </div>
