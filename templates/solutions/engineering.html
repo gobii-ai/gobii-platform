@@ -168,20 +168,20 @@
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
-          Create, deploy, and control always-on AI agents via API. Build on Gobii's platform or self-host with our open-source codebase.
+          The easiest way to deploy <a href="https://github.com/browser-use/browser-use" target="_blank" rel="noopener" class="text-gray-900 hover:text-violet-700 underline decoration-gray-300 hover:decoration-violet-500 transition-colors">browser-use</a> in the cloud. Create always-on agents via API, or self-host with our open-source codebase.
         </p>
 
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
-          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+          <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
             {% csrf_token %}
-            <button type="submit" class="group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
+            <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
               Get API key
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
             </button>
           </form>
-          <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
+          <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-white/70 backdrop-blur-sm hover:bg-white/90 text-gray-800 font-medium rounded-xl border border-white/60 hover:border-indigo-200 shadow-sm transition-all duration-200">
             Read the docs
           </a>
         </div>
@@ -214,7 +214,7 @@
         Get started in seconds
       </h2>
       <p class="mt-4 text-lg text-gray-500 max-w-2xl mx-auto">
-        Create and control AI agents with a few lines of code.
+        Deploy browser-use agents with a few lines of code.
       </p>
     </div>
 
@@ -408,6 +408,31 @@ agent = response.<span class="function">json</span>()
         </div>
       </div>
 
+      <!-- browser-use -->
+      <a href="https://github.com/browser-use/browser-use" target="_blank" rel="noopener" class="lg:col-span-3 group relative bg-gradient-to-br from-slate-800/80 to-slate-800/40 backdrop-blur-sm rounded-3xl p-8 border border-slate-700/50 hover:border-slate-500/50 transition-all duration-300 overflow-hidden">
+        <div class="absolute top-0 right-0 w-64 h-64 bg-slate-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 group-hover:bg-slate-400/15 transition-all duration-500"></div>
+        <div class="relative flex flex-col md:flex-row md:items-center gap-6">
+          <div class="flex-shrink-0">
+            <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-slate-600 to-slate-700 flex items-center justify-center shadow-lg shadow-slate-500/25">
+              <i data-lucide="github" class="w-6 h-6 text-white"></i>
+            </div>
+          </div>
+          <div class="flex-grow">
+            <div class="flex items-center gap-3 mb-2">
+              <h3 class="text-xl font-semibold text-white">browser-use</h3>
+              <span class="px-2.5 py-0.5 rounded-full bg-slate-700/50 text-slate-300 text-xs font-medium border border-slate-600/50">Open Source</span>
+            </div>
+            <p class="text-slate-400 leading-relaxed">
+              The open-source standard for AI browser automation. Gobii is browser-use ready for production — deploy, scale, and manage agents without building infrastructure.
+            </p>
+          </div>
+          <div class="flex-shrink-0 flex flex-wrap md:flex-col gap-2">
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">LLM-powered</span>
+            <span class="px-3 py-1.5 rounded-lg bg-slate-700/50 text-slate-300 text-sm">Production-ready</span>
+          </div>
+        </div>
+      </a>
+
     </div>
   </div>
 </section>
@@ -568,6 +593,18 @@ agent = response.<span class="function">json</span>()
     <div class="space-y-0 divide-y divide-gray-200">
       <details class="group py-6">
         <summary class="flex items-center justify-between cursor-pointer list-none">
+          <span class="text-lg font-medium text-gray-900 pr-8">What is browser-use?</span>
+          <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
+          </svg>
+        </summary>
+        <p class="mt-4 text-gray-600 leading-relaxed">
+          <a href="https://github.com/browser-use/browser-use" target="_blank" rel="noopener" class="text-violet-600 hover:text-violet-700 underline">browser-use</a> is the open-source library for AI-powered browser automation. Gobii is browser-use ready for production — with cloud infrastructure, persistent agents, managed proxies, and everything else you need to deploy at scale.
+        </p>
+      </details>
+
+      <details class="group py-6">
+        <summary class="flex items-center justify-between cursor-pointer list-none">
           <span class="text-lg font-medium text-gray-900 pr-8">What can I build with the Gobii API?</span>
           <svg class="w-5 h-5 text-gray-400 group-open:rotate-45 transition-transform flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v12m6-6H6"/>
@@ -637,23 +674,23 @@ agent = response.<span class="function">json</span>()
     </div>
 
     <h2 class="text-4xl sm:text-5xl font-light text-gray-900 tracking-tight">
-      Ready to build?
+      Ready to deploy browser-use?
     </h2>
     <p class="mt-5 text-xl text-gray-600 max-w-xl mx-auto leading-relaxed">
-      Get your API key and start deploying AI agents in minutes.
+      Get your API key and start running browser-use agents in minutes.
     </p>
 
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
-      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="inline-flex">
+      <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
         {% csrf_token %}
-        <button type="submit" class="group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
+        <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
           Get API key
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>
         </button>
       </form>
-      <a href="https://docs.gobii.ai/developers/developer-basics" class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
+      <a href="https://docs.gobii.ai/developers/developer-basics" class="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-8 py-4 bg-white/80 backdrop-blur-sm hover:bg-white text-gray-700 font-medium rounded-xl border border-gray-200 hover:border-violet-200 shadow-sm hover:shadow transition-all duration-200">
         Read the docs
       </a>
     </div>
