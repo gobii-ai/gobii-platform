@@ -57,6 +57,7 @@ from api.services.browser_settings import (
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     DEFAULT_SEARCH_WEB_RESULT_COUNT,
+    DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
     DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
     DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
 )
@@ -795,6 +796,10 @@ class ToolConfig(models.Model):
     search_web_result_count = models.PositiveIntegerField(
         default=DEFAULT_SEARCH_WEB_RESULT_COUNT,
         help_text="Preferred number of results to return from search_web (Exa).",
+    )
+    search_engine_batch_query_limit = models.PositiveIntegerField(
+        default=DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
+        help_text="Maximum number of queries allowed in a single search_engine_batch call.",
     )
     brightdata_amazon_product_search_limit = models.PositiveIntegerField(
         default=DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,

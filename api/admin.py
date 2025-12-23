@@ -787,6 +787,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
         "plan_name",
         "min_cron_schedule_minutes",
         "search_web_result_count",
+        "search_engine_batch_query_limit",
         "brightdata_amazon_product_search_limit",
         "duplicate_similarity_threshold",
         "updated_at",
@@ -803,7 +804,7 @@ class ToolConfigAdmin(admin.ModelAdmin):
         ),
         (
             "Search web",
-            {"fields": ("search_web_result_count",)},
+            {"fields": ("search_web_result_count", "search_engine_batch_query_limit")},
         ),
         (
             "Bright Data",

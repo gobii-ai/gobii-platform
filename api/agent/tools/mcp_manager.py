@@ -34,6 +34,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
+from django.db import DatabaseError
 from django.db.models import Max
 from django.utils import timezone
 
@@ -47,6 +48,7 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
+from ...services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -1171,10 +1173,16 @@ class MCPToolManager:
                 "message": f"MCP server '{server_name}' is not available",
             }
 
+        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+
         if server_name == "brightdata":
             pdf_error = self._brightdata_pdf_guard(actual_tool_name, params)
             if pdf_error:
                 return pdf_error
+            if actual_tool_name == "search_engine_batch":
+                limit_error = self._brightdata_search_engine_batch_guard(owner, params)
+                if limit_error:
+                    return limit_error
 
         proxy_url = None
         proxy_error: Optional[str] = None
@@ -1198,7 +1206,6 @@ class MCPToolManager:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
-            owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
@@ -1398,6 +1405,32 @@ class MCPToolManager:
             return {
                 "status": "error",
                 "message": "PDF scraping is not supported for Bright Data snapshots. Use spawn_web_task to read PDFs instead.",
+            }
+        return None
+
+    def _brightdata_search_engine_batch_guard(
+        self,
+        owner: Any,
+        params: Dict[str, Any],
+    ) -> Optional[Dict[str, str]]:
+        queries = params.get("queries")
+        if not isinstance(queries, list):
+            return None
+        try:
+            settings = get_tool_settings_for_owner(owner)
+        except DatabaseError:
+            logger.error("Failed to load tool settings for search_engine_batch limit.", exc_info=True)
+            return None
+        limit = getattr(settings, "search_engine_batch_query_limit", None)
+        if not isinstance(limit, int) or limit <= 0:
+            return None
+        if len(queries) > limit:
+            return {
+                "status": "error",
+                "message": (
+                    f"Maximum number of queries ({limit}) exceeded for search_engine_batch; "
+                    f"received {len(queries)}."
+                ),
             }
         return None
 
