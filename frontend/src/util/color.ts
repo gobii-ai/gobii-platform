@@ -38,6 +38,11 @@ function rgbToHex(r: number, g: number, b: number): string {
   return `#${clamp(r).toString(16).padStart(2, '0')}${clamp(g).toString(16).padStart(2, '0')}${clamp(b).toString(16).padStart(2, '0')}`.toUpperCase()
 }
 
+function hexToRgbaString(hex: string, alpha: number): string {
+  const [r, g, b] = hexToRgb(hex)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 function adjustHex(hex: string, ratio: number): string {
   const [r, g, b] = hexToRgb(hex)
   if (ratio >= 0) {
@@ -99,6 +104,27 @@ export function buildUserChatPalette(baseHex?: string | null): { cssVars: CSSVar
     '--user-channel-badge-bg': badgeBg,
     '--user-channel-badge-border': badgeBorder,
     '--user-channel-badge-text': badgeText,
+  }
+
+  return { cssVars }
+}
+
+export function buildAgentComposerPalette(baseHex?: string | null): { cssVars: CSSVariableProperties } {
+  const base = normalizeHex(baseHex)
+  const lighter = adjustHex(base, 0.35)
+  const darker = adjustHex(base, -0.25)
+  const darkest = adjustHex(base, -0.45)
+  const textIsLight = relativeLuminance(base) <= 0.6
+  const textColor = textIsLight ? '#F8FAFC' : '#0F172A'
+
+  const cssVars: CSSVariableProperties = {
+    '--composer-accent': base,
+    '--composer-accent-light': lighter,
+    '--composer-accent-dark': darker,
+    '--composer-accent-darker': darkest,
+    '--composer-accent-text': textColor,
+    '--composer-accent-border': hexToRgbaString(base, 0.24),
+    '--composer-accent-focus': hexToRgbaString(base, 0.35),
   }
 
   return { cssVars }

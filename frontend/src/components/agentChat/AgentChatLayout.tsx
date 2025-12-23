@@ -5,6 +5,7 @@ import { ProcessingIndicator } from './ProcessingIndicator'
 import { TimelineEventList } from './TimelineEventList'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask } from '../../types/agentChat'
+import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentColorHex?: string | null
@@ -56,6 +57,7 @@ export function AgentChatLayout({
   const containerStyle = header
     ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 1.5rem)' }
     : undefined
+  const composerPalette = buildAgentComposerPalette(agentColorHex)
 
   return (
     <main className="min-h-screen">
@@ -64,6 +66,7 @@ export function AgentChatLayout({
         <div
           id="agent-workspace-root"
           className="relative flex flex-1 flex-col gap-2"
+          style={composerPalette.cssVars}
         >
           <div id="timeline-shell" className="relative flex-1">
             <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'}>
