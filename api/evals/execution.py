@@ -369,7 +369,8 @@ class ScenarioExecutionTools:
                     model=model,
                     messages=prompt,
                     tools=[tool_definition],
-                    params=safe_params
+                    params=safe_params,
+                    drop_params=True
                 )
                 return self._extract_judgment(response)
             except Exception as e:
@@ -399,7 +400,8 @@ class ScenarioExecutionTools:
                     model=effective_model,
                     messages=prompt,
                     tools=[tool_definition],
-                    params=safe_params
+                    params=safe_params,
+                    drop_params=True
                 )
                 return self._extract_judgment(response)
             except Exception as e:

@@ -52,7 +52,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
         mock_config = self._build_mock_config()
         with self.wait_for_agent_idle(agent_id, timeout=120):
             prompt = (
-                "I need the LinkedIn profile for Will Bonde, a senior software engineer at Gobii. Pull his headline and location."
+                "I need the LinkedIn profile for Will Bonde, working on AI at Gobii. Pull his headline, job title, and location."
             )
             inbound = self.inject_message(
                 agent_id,
@@ -200,6 +200,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
         required_bits = [
             "will",
             "gobii",
+            "AI @ Gobii",
             "software engineer",
             "germantown",
         ]
