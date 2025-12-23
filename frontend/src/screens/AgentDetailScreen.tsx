@@ -86,6 +86,15 @@ type AgentColorOption = {
   hex: string
 }
 
+function resolveAgentColorHex(agentColorHex: string | null | undefined, palette: AgentColorOption[]): string {
+  if (!palette.length) {
+    return agentColorHex || ''
+  }
+  const normalized = (agentColorHex || '').toUpperCase()
+  const match = palette.find((color) => color.hex.toUpperCase() === normalized)
+  return match ? match.hex : palette[0].hex
+}
+
 type DailyCreditsInfo = {
   limit: number | null
   hardLimit: number | null
@@ -332,7 +341,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
       sliderValue: initialData.dailyCredits.sliderValue ?? sliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: initialData.agent.preferredLlmTier ?? 'standard',
-      agentColorHex: initialData.agent.agentColorHex || initialData.agentColors[0]?.hex || '',
+      agentColorHex: resolveAgentColorHex(initialData.agent.agentColorHex, initialData.agentColors),
     }),
     [
       initialData.agent.name,

@@ -114,7 +114,7 @@ export function buildAgentComposerPalette(baseHex?: string | null): { cssVars: C
   const lighter = adjustHex(base, 0.35)
   const darker = adjustHex(base, -0.25)
   const darkest = adjustHex(base, -0.45)
-  const textIsLight = relativeLuminance(base) <= 0.6
+  const textIsLight = relativeLuminance(base) <= 0.55
   const textColor = textIsLight ? '#F8FAFC' : '#0F172A'
 
   const cssVars: CSSVariableProperties = {

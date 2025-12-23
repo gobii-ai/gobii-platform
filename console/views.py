@@ -4037,7 +4037,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if not normalized_agent_color_hex:
                 return _general_error("Select a valid theme color.")
             selected_agent_color = AgentColor.objects.filter(
-                hex_value__iexact=normalized_agent_color_hex
+                hex_value__iexact=normalized_agent_color_hex,
+                is_active=True,
             ).first()
             if selected_agent_color is None:
                 return _general_error("Select a valid theme color.")
