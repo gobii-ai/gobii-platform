@@ -34,10 +34,10 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
-from django.db import DatabaseError
 from django.db.models import Max
 from django.utils import timezone
 
+from .mcp_param_guards import MCPParamGuardRegistry
 from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
 from ...models import (
     MCPServerConfig,
@@ -48,7 +48,6 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
-from ...services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -237,6 +236,7 @@ class MCPToolManager:
         self._pd_agent_clients: Dict[str, Client] = {}
         self._httpx_client_factory = self._build_httpx_client_factory()
         self._pd_missing_credentials_logged = False
+        self._param_guards = MCPParamGuardRegistry.default()
         self._result_adapters = MCPResultAdapterRegistry.default()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
@@ -1175,14 +1175,9 @@ class MCPToolManager:
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
 
-        if server_name == "brightdata":
-            pdf_error = self._brightdata_pdf_guard(actual_tool_name, params)
-            if pdf_error:
-                return pdf_error
-            if actual_tool_name == "search_engine_batch":
-                limit_error = self._brightdata_search_engine_batch_guard(owner, params)
-                if limit_error:
-                    return limit_error
+        param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
+        if param_error:
+            return param_error
 
         proxy_url = None
         proxy_error: Optional[str] = None
@@ -1372,67 +1367,6 @@ class MCPToolManager:
     def _adapt_tool_result(self, server_name: str, tool_name: str, result: Any):
         """Run the tool response through any registered adapters."""
         return self._result_adapters.adapt(server_name, tool_name, result)
-
-    @staticmethod
-    def _extract_candidate_urls(params: Dict[str, Any]) -> List[str]:
-        if not isinstance(params, dict):
-            return []
-        urls: List[str] = []
-        string_keys = {"url", "link", "page", "target_url"}
-        list_keys = {"urls", "links", "pages", "targets", "target_urls"}
-        for key, value in params.items():
-            if key in string_keys and isinstance(value, str):
-                urls.append(value)
-            elif key in list_keys and isinstance(value, list):
-                urls.extend([v for v in value if isinstance(v, str)])
-        return urls
-
-    @staticmethod
-    def _is_pdf_url(url: str) -> bool:
-        if not isinstance(url, str):
-            return False
-        try:
-            parsed = urlparse(url)
-        except ValueError:
-            return False
-        return parsed.path.lower().endswith(".pdf")
-
-    def _brightdata_pdf_guard(self, tool_name: str, params: Dict[str, Any]) -> Optional[Dict[str, str]]:
-        if tool_name not in {"scrape_as_markdown", "scrape_as_html"}:
-            return None
-        urls = self._extract_candidate_urls(params)
-        if any(self._is_pdf_url(u) for u in urls):
-            return {
-                "status": "error",
-                "message": "PDF scraping is not supported for Bright Data snapshots. Use spawn_web_task to read PDFs instead.",
-            }
-        return None
-
-    def _brightdata_search_engine_batch_guard(
-        self,
-        owner: Any,
-        params: Dict[str, Any],
-    ) -> Optional[Dict[str, str]]:
-        queries = params.get("queries")
-        if not isinstance(queries, list):
-            return None
-        try:
-            settings = get_tool_settings_for_owner(owner)
-        except DatabaseError:
-            logger.error("Failed to load tool settings for search_engine_batch limit.", exc_info=True)
-            return None
-        limit = getattr(settings, "search_engine_batch_query_limit", None)
-        if not isinstance(limit, int) or limit <= 0:
-            return None
-        if len(queries) > limit:
-            return {
-                "status": "error",
-                "message": (
-                    f"Maximum number of queries ({limit}) exceeded for search_engine_batch; "
-                    f"received {len(queries)}."
-                ),
-            }
-        return None
 
     async def _execute_async(self, client: Client, tool_name: str, params: Dict[str, Any]):
         """Execute a tool asynchronously."""
