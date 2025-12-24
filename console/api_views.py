@@ -1115,6 +1115,13 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
                 return HttpResponseBadRequest("Invalid JSON body")
             message_text = (body.get("body") or "").strip()
 
+        if not message_text and attachments:
+            attachment_names = [getattr(att, "name", "attachment") for att in attachments]
+            if len(attachment_names) == 1:
+                message_text = f"Uploaded file: {attachment_names[0]}"
+            else:
+                message_text = f"Uploaded files: {', '.join(attachment_names)}"
+
         if not message_text and not attachments:
             return HttpResponseBadRequest("Message body or attachment is required")
 
