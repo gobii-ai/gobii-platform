@@ -381,6 +381,29 @@
 .composer-input-surface:focus-within {
   border-color: rgba(99, 102, 241, 0.5);
 }
+.agent-chat-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  background: radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.22), rgba(30, 64, 175, 0.08));
+  backdrop-filter: blur(2px);
+}
+
+.agent-chat-drop-overlay__panel {
+  padding: 1rem 1.5rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(99, 102, 241, 0.5);
+  background: rgba(15, 23, 42, 0.85);
+  color: #e0e7ff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
 
 .jump-to-latest {
   position: fixed;

@@ -11,10 +11,12 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
+  const [isDragActive, setIsDragActive] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentInputId = useId()
+  const dragCounter = useRef(0)
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -105,23 +107,92 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     await submitMessage()
   }
 
-  const handleAttachmentChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
+  const addAttachments = useCallback((files: File[]) => {
+    if (disabled || isSending) {
+      return
+    }
     if (!files.length) {
       return
     }
     setAttachments((current) => [...current, ...files])
+  }, [disabled, isSending])
+
+  const handleAttachmentChange = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    addAttachments(files)
     event.target.value = ''
-  }, [])
+  }, [addAttachments])
 
   const removeAttachment = useCallback((index: number) => {
     setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))
   }, [])
 
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => {
+      const types = Array.from(event.dataTransfer?.types ?? [])
+      return types.includes('Files')
+    }
+
+    const handleDragEnter = (event: DragEvent) => {
+      if (disabled || isSending || !hasFiles(event)) {
+        return
+      }
+      event.preventDefault()
+      dragCounter.current += 1
+      setIsDragActive(true)
+    }
+
+    const handleDragOver = (event: DragEvent) => {
+      if (disabled || isSending || !hasFiles(event)) {
+        return
+      }
+      event.preventDefault()
+    }
+
+    const handleDragLeave = (event: DragEvent) => {
+      if (!hasFiles(event)) {
+        return
+      }
+      event.preventDefault()
+      dragCounter.current = Math.max(0, dragCounter.current - 1)
+      if (dragCounter.current === 0) {
+        setIsDragActive(false)
+      }
+    }
+
+    const handleDrop = (event: DragEvent) => {
+      if (disabled || isSending || !hasFiles(event)) {
+        return
+      }
+      event.preventDefault()
+      dragCounter.current = 0
+      setIsDragActive(false)
+      const files = Array.from(event.dataTransfer?.files ?? [])
+      addAttachments(files)
+    }
+
+    window.addEventListener('dragenter', handleDragEnter)
+    window.addEventListener('dragover', handleDragOver)
+    window.addEventListener('dragleave', handleDragLeave)
+    window.addEventListener('drop', handleDrop)
+
+    return () => {
+      window.removeEventListener('dragenter', handleDragEnter)
+      window.removeEventListener('dragover', handleDragOver)
+      window.removeEventListener('dragleave', handleDragLeave)
+      window.removeEventListener('drop', handleDrop)
+    }
+  }, [addAttachments, disabled, isSending])
+
   return (
     <div className="composer-shell" id="agent-composer-shell" ref={shellRef}>
       <div className="composer-surface">
         <form className="flex flex-col" onSubmit={handleSubmit}>
+          {isDragActive ? (
+            <div className="agent-chat-drop-overlay" aria-hidden="true">
+              <div className="agent-chat-drop-overlay__panel">Drop files to upload</div>
+            </div>
+          ) : null}
           <div className="composer-input-surface flex flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
             <div className="flex items-center gap-3">
               <input
