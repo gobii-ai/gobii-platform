@@ -1888,6 +1888,26 @@ def _format_recent_minutes_suffix(timestamp: datetime) -> str:
         return f" {seconds // 60}m ago,"
     return f" {seconds // 3600}h ago,"
 
+
+def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
+    paths: List[str] = []
+    seen: set[str] = set()
+    for att in message.attachments.all():
+        node = getattr(att, "filespace_node", None)
+        path = getattr(node, "path", None) if node else None
+        if path and path not in seen:
+            paths.append(path)
+            seen.add(path)
+    if not paths and isinstance(message.raw_payload, dict):
+        nodes = message.raw_payload.get("filespace_nodes") or []
+        for node_info in nodes:
+            if isinstance(node_info, dict):
+                path = node_info.get("path")
+                if path and path not in seen:
+                    paths.append(path)
+                    seen.add(path)
+    return paths
+
 def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -1951,6 +1971,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             owner_agent=agent, timestamp__gt=comms_cutoff
         )
         .select_related("from_endpoint", "to_endpoint")
+        .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp")[:limit_msg_history]
     )
 
@@ -2075,6 +2096,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             else:
                 components["content"] = body if body else "(no content)"
 
+        attachment_paths = _get_message_attachment_paths(m)
+        if attachment_paths:
+            components["attachments"] = "\n".join(f"- {path}" for path in attachment_paths)
+
         structured_events.append((m.timestamp, event_type, components))
 
     # Include most recent completed browser tasks as structured events
@@ -2124,6 +2149,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
             "content": 2,     # Medium priority for message content (SMS, etc.)
+            "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
             "header": 3,      # High priority - message routing info
             "subject": 2,     # Medium priority - email subject
