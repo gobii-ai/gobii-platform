@@ -166,8 +166,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     })
   }
 
-  const handleSend = async (body: string) => {
-    await sendMessage(body)
+  const handleSend = async (body: string, attachments: File[] = []) => {
+    await sendMessage(body, attachments)
     if (!autoScrollPinned) return
     const scroller = getScrollContainer()
     requestAnimationFrame(() => {

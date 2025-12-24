@@ -89,7 +89,11 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
         <div
           className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
         >
-          <MessageContent bodyHtml={message.bodyHtml} bodyText={message.bodyText} />
+          <MessageContent
+            bodyHtml={message.bodyHtml}
+            bodyText={message.bodyText}
+            showEmptyState={!message.attachments || message.attachments.length === 0}
+          />
         </div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">

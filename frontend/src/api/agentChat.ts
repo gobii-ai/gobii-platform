@@ -36,8 +36,22 @@ export async function fetchAgentTimeline(
   return jsonFetch<TimelineResponse>(url)
 }
 
-export async function sendAgentMessage(agentId: string, body: string): Promise<TimelineEvent> {
+export async function sendAgentMessage(agentId: string, body: string, attachments: File[] = []): Promise<TimelineEvent> {
   const url = `/console/api/agents/${agentId}/messages/`
+  if (attachments.length > 0) {
+    const formData = new FormData()
+    if (body) {
+      formData.append('body', body)
+    }
+    attachments.forEach((file) => {
+      formData.append('attachments', file)
+    })
+    const response = await jsonFetch<{ event: TimelineEvent }>(url, {
+      method: 'POST',
+      body: formData,
+    })
+    return response.event
+  }
   const response = await jsonFetch<{ event: TimelineEvent }>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

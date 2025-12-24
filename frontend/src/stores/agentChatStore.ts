@@ -191,7 +191,7 @@ export type AgentChatState = {
   loadOlder: () => Promise<void>
   loadNewer: () => Promise<void>
   jumpToLatest: () => Promise<void>
-  sendMessage: (body: string) => Promise<void>
+  sendMessage: (body: string, attachments?: File[]) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
@@ -391,17 +391,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     }
   },
 
-  async sendMessage(body) {
+  async sendMessage(body, attachments = []) {
     const state = get()
     if (!state.agentId) {
       throw new Error('Agent not initialized')
     }
     const trimmed = body.trim()
-    if (!trimmed) {
+    if (!trimmed && attachments.length === 0) {
       return
     }
     try {
-      const event = await sendAgentMessage(state.agentId, trimmed)
+      const event = await sendAgentMessage(state.agentId, trimmed, attachments)
       get().receiveRealtimeEvent(event)
     } catch (error) {
       set({

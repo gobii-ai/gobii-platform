@@ -1103,14 +1103,20 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent(request.user, request.session, agent_id)
-        try:
-            body = json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON body")
+        attachments: list[Any] = []
+        message_text = ""
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            message_text = (request.POST.get("body") or "").strip()
+            attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+        else:
+            try:
+                body = json.loads(request.body or "{}")
+            except json.JSONDecodeError:
+                return HttpResponseBadRequest("Invalid JSON body")
+            message_text = (body.get("body") or "").strip()
 
-        message_text = (body.get("body") or "").strip()
-        if not message_text:
-            return HttpResponseBadRequest("Message body is required")
+        if not message_text and not attachments:
+            return HttpResponseBadRequest("Message body or attachment is required")
 
         sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
 
@@ -1131,7 +1137,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             recipient=recipient_address,
             subject=None,
             body=message_text,
-            attachments=[],
+            attachments=attachments,
             raw_payload={"source": "console", "user_id": request.user.id},
             msg_channel=CommsChannel.WEB,
         )
@@ -1141,6 +1147,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         props = {
             "message_id": str(info.message.id),
             "message_length": len(message_text),
+            "attachments_count": len(attachments),
         }
         if session_result:
             props["session_key"] = str(session_result.session.session_key)
