@@ -1,6 +1,9 @@
 from datetime import datetime, timezone as dt_timezone
 
+from urllib.parse import urlencode
+
 from django.utils import timezone
+from django.urls import reverse
 
 from api.models import (
     PersistentAgentMessage,
@@ -38,11 +41,21 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
             size_label = filesizeformat(att.file_size)
         except (TypeError, ValueError):
             size_label = None
+        filespace_path = None
+        download_url = None
+        node = getattr(att, "filespace_node", None)
+        if node:
+            filespace_path = node.path
+        if filespace_path and message.owner_agent_id:
+            query = urlencode({"path": filespace_path})
+            download_url = f"{reverse('console_agent_fs_download', kwargs={'agent_id': message.owner_agent_id})}?{query}"
         attachments.append(
             {
                 "id": str(att.id),
                 "filename": att.filename,
                 "url": att.file.url if att.file else "",
+                "download_url": download_url,
+                "filespace_path": filespace_path,
                 "file_size_label": size_label,
             }
         )
