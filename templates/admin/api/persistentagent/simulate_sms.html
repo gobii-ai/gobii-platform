@@ -20,7 +20,7 @@
     <h2>Simulate an incoming SMS to {{ agent.name }}</h2>
     <p>This will create a new inbound message that the agent can process. After submitting, you can trigger event processing to see the agent's response.</p>
     
-    <form method="post">
+    <form method="post" enctype="multipart/form-data">
         {% csrf_token %}
         
         <div class="form-row">
@@ -33,9 +33,17 @@
 
         <div class="form-row">
             <div class="field-box">
-                <label for="id_body" class="required">Message Body:</label>
-                <textarea name="body" id="id_body" class="vLargeTextField" rows="10" cols="40" required></textarea>
-                <p class="help">The content of the SMS message.</p>
+                <label for="id_body">Message Body:</label>
+                <textarea name="body" id="id_body" class="vLargeTextField" rows="10" cols="40"></textarea>
+                <p class="help">The content of the SMS message (optional if you add attachments).</p>
+            </div>
+        </div>
+
+        <div class="form-row">
+            <div class="field-box">
+                <label for="id_attachments">Attachments:</label>
+                <input type="file" name="attachments" id="id_attachments" multiple>
+                <p class="help">Optional attachments to simulate MMS media.</p>
             </div>
         </div>
         

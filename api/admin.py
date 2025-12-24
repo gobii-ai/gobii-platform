@@ -2713,12 +2713,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         if request.method == 'POST':
             from_address = request.POST.get('from_address', '').strip()
             body = request.POST.get('body', '').strip()
+            attachments = list(request.FILES.getlist('attachments') or [])
 
             # Validation
             if not from_address:
                 self.message_user(request, "From address is required", messages.ERROR)
-            elif not body:
-                self.message_user(request, "Message body is required", messages.ERROR)
+            elif not body and not attachments:
+                self.message_user(request, "Message body or attachment is required", messages.ERROR)
             else:
                 try:
                     # Find agent's primary email endpoint
@@ -2752,7 +2753,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         recipient=to_endpoint.address,
                         subject=None,
                         body=body,
-                        attachments=[],
+                        attachments=attachments,
                         raw_payload={"_source": "admin_simulation"},
                         msg_channel=CommsChannel.SMS,
                     )
