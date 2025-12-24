@@ -18,6 +18,7 @@ const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/Ll
 const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsScreen')).EvalsScreen }))
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
+const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -71,6 +72,12 @@ switch (appName) {
     const initialData = readJsonScript<import('./screens/AgentDetailScreen').AgentDetailScreenProps['initialData']>(propsId)
     screen = <AgentDetailScreen initialData={initialData} />
     break
+  case 'agent-files': {
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<import('./screens/AgentFilesScreen').AgentFilesScreenProps['initialData']>(propsId)
+    screen = <AgentFilesScreen initialData={initialData} />
+    break
+  }
   case 'diagnostics':
     screen = <DiagnosticsScreen />
     break

@@ -9,6 +9,9 @@ from drf_spectacular.views import (
 from console.api_views import (
     LLMEndpointTestAPIView,
     AgentFsNodeDownloadAPIView,
+    AgentFsNodeBulkDeleteAPIView,
+    AgentFsNodeListAPIView,
+    AgentFsNodeUploadAPIView,
     AgentMessageCreateAPIView,
     AgentProcessingStatusAPIView,
     AgentTimelineAPIView,
@@ -164,6 +167,7 @@ from console.views import (
     grant_credits,
     task_detail_view,
     AgentEmailSettingsView,
+    AgentFilesView,
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
@@ -208,6 +212,9 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
+    path("console/api/agents/<uuid:agent_id>/files/", AgentFsNodeListAPIView.as_view(), name="console_agent_fs_list"),
+    path("console/api/agents/<uuid:agent_id>/files/upload/", AgentFsNodeUploadAPIView.as_view(), name="console_agent_fs_upload"),
+    path("console/api/agents/<uuid:agent_id>/files/delete/", AgentFsNodeBulkDeleteAPIView.as_view(), name="console_agent_fs_delete"),
     path("console/api/agents/<uuid:agent_id>/files/download/", AgentFsNodeDownloadAPIView.as_view(), name="console_agent_fs_download"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditAPIView.as_view(), name="console_agent_audit"),
@@ -305,6 +312,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/enable-sms/", AgentEnableSmsView.as_view(), name="agent_enable_sms"),
     path("console/agents/<uuid:pk>/delete/", AgentDeleteView.as_view(), name="agent_delete"),
     path("console/agents/<uuid:pk>/email/", AgentEmailSettingsView.as_view(), name="agent_email_settings"),
+    path("console/agents/<uuid:pk>/files/", AgentFilesView.as_view(), name="agent_files"),
     # Agent secrets management
     path("console/agents/<uuid:pk>/secrets/", AgentSecretsView.as_view(), name="agent_secrets"),
     path("console/agents/<uuid:pk>/secrets/add/", AgentSecretsAddView.as_view(), name="agent_secrets_add"),

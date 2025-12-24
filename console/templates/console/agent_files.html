@@ -1,0 +1,16 @@
+{% extends "console_page.html" %}
+{% load vite_tags %}
+
+{% block console_content %}
+<div id="gobii-frontend-root"
+     class="space-y-6 pb-6"
+     data-app="agent-files"
+     data-props-json-id="agent-files-props">
+</div>
+{{ agent_files_props|json_script:"agent-files-props" }}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

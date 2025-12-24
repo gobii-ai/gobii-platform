@@ -3452,6 +3452,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'chat': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
                 'secrets': reverse('agent_secrets', args=[agent.id]),
                 'emailSettings': reverse('agent_email_settings', args=[agent.id]),
+                'manageFiles': reverse('agent_files', args=[agent.id]),
                 'smsEnable': reverse('agent_enable_sms', args=[agent.id]),
                 'contactRequests': reverse('agent_contact_requests', args=[agent.id]),
                 'delete': reverse('agent_delete', args=[agent.id]),
@@ -4966,6 +4967,50 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
                 messages.error(request, "Invalid policy value.")
 
         return redirect('agent_allowlist', pk=agent.pk)
+
+
+class AgentFilesView(ConsoleViewMixin, DetailView):
+    """File browser page for a single agent."""
+    model = PersistentAgent
+    template_name = "console/agent_files.html"
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
+
+    def get_queryset(self):
+        qs = super().get_queryset().select_related('organization')
+
+        context_type = self.request.session.get('context_type', 'personal')
+        if context_type == 'organization':
+            org_id = self.request.session.get('context_id')
+            if not OrganizationMembership.objects.filter(
+                user=self.request.user,
+                org_id=org_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists():
+                return qs.none()
+            return qs.filter(organization_id=org_id)
+
+        return qs.filter(user=self.request.user, organization__isnull=True)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.get_object()
+        context["agent"] = agent
+        context["agent_files_props"] = {
+            "csrfToken": get_token(self.request),
+            "agent": {
+                "id": str(agent.id),
+                "name": agent.name,
+            },
+            "urls": {
+                "agentDetail": reverse("agent_detail", args=[agent.id]),
+                "files": reverse("console_agent_fs_list", kwargs={"agent_id": agent.id}),
+                "upload": reverse("console_agent_fs_upload", kwargs={"agent_id": agent.id}),
+                "delete": reverse("console_agent_fs_delete", kwargs={"agent_id": agent.id}),
+                "download": reverse("console_agent_fs_download", kwargs={"agent_id": agent.id}),
+            },
+        }
+        return context
 
 class AgentDeleteView(LoginRequiredMixin, View):
     """Handle agent deletion."""
