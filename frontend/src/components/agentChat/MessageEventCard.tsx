@@ -97,19 +97,22 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
         </div>
         {message.attachments && message.attachments.length > 0 ? (
           <div className="chat-attachments">
-            {message.attachments.map((attachment) => (
-              <a key={attachment.id} href={attachment.url} target="_blank" rel="noopener noreferrer">
-                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
-                </svg>
-                <span className="truncate max-w-[160px]" title={attachment.filename}>
-                  {attachment.filename}
-                </span>
-                {attachment.fileSizeLabel ? (
-                  <span className={isAgent ? 'text-slate-500' : ''}>{attachment.fileSizeLabel}</span>
-                ) : null}
-              </a>
-            ))}
+            {message.attachments.map((attachment) => {
+              const href = attachment.downloadUrl || attachment.url
+              return (
+                <a key={attachment.id} href={href} target="_blank" rel="noopener noreferrer">
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
+                  </svg>
+                  <span className="truncate max-w-[160px]" title={attachment.filename}>
+                    {attachment.filename}
+                  </span>
+                  {attachment.fileSizeLabel ? (
+                    <span className={isAgent ? 'text-slate-500' : ''}>{attachment.fileSizeLabel}</span>
+                  ) : null}
+                </a>
+              )
+            })}
           </div>
         ) : null}
       </div>

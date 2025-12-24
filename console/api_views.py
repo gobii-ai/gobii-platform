@@ -1,5 +1,6 @@
 import json
 import logging
+import mimetypes
 import os
 import secrets
 import time
@@ -14,7 +15,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max
-from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -53,6 +54,9 @@ from api.models import (
     EvalRun,
     EvalRunTask,
     PersistentAgentPromptArchive,
+    AgentFileSpaceAccess,
+    AgentFsNode,
+    OrganizationMembership,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -1161,6 +1165,69 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def _has_access(self, user, agent: PersistentAgent) -> bool:
+        if user.is_staff:
+            return True
+        if agent.user_id == user.id:
+            return True
+        if agent.organization_id:
+            return OrganizationMembership.objects.filter(
+                user=user,
+                org_id=agent.organization_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        return False
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent.objects.select_related("organization"), pk=agent_id)
+        if not self._has_access(request.user, agent):
+            return HttpResponseForbidden("Not authorized to access this file.")
+
+        path = (request.GET.get("path") or "").strip()
+        if not path:
+            return HttpResponseBadRequest("path is required")
+
+        filespace_ids = AgentFileSpaceAccess.objects.filter(agent=agent).values_list("filespace_id", flat=True)
+        node = (
+            AgentFsNode.objects
+            .filter(
+                filespace_id__in=filespace_ids,
+                path=path,
+                node_type=AgentFsNode.NodeType.FILE,
+                is_deleted=False,
+            )
+            .first()
+        )
+        if not node:
+            raise Http404("File not found.")
+
+        file_field = node.content
+        if not file_field or not getattr(file_field, "name", None):
+            raise Http404("File not found.")
+
+        storage = file_field.storage
+        name = file_field.name
+        if hasattr(storage, "exists") and not storage.exists(name):
+            raise Http404("File not found.")
+        try:
+            file_handle = storage.open(name, "rb")
+        except (FileNotFoundError, OSError):
+            raise Http404("File not found.")
+
+        content_type = node.mime_type or mimetypes.guess_type(node.name or "")[0] or "application/octet-stream"
+        response = FileResponse(
+            file_handle,
+            as_attachment=True,
+            filename=node.name or "download",
+            content_type=content_type,
+        )
+        response["Cache-Control"] = "private, max-age=300"
+        return response
 
 
 class ConsoleLLMOverviewAPIView(SystemAdminAPIView):

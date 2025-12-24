@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone as dt_timezone
 import re
+from urllib.parse import urlencode
 import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
@@ -10,6 +11,7 @@ from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.timesince import timesince
+from django.urls import reverse
 
 from bleach.sanitizer import ALLOWED_ATTRIBUTES as BLEACH_ALLOWED_ATTRIBUTES_BASE
 from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
@@ -264,7 +266,7 @@ def _tool_icon_for(name: str | None) -> dict[str, object]:
     return data
 
 
-def _serialize_attachment(att: PersistentAgentMessageAttachment) -> dict:
+def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.UUID | None) -> dict:
     size_label = None
     try:
         from django.template.defaultfilters import filesizeformat
@@ -272,10 +274,20 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment) -> dict:
         size_label = filesizeformat(att.file_size)
     except Exception:
         size_label = None
+    filespace_path = None
+    download_url = None
+    node = getattr(att, "filespace_node", None)
+    if node:
+        filespace_path = node.path
+    if filespace_path and agent_id:
+        query = urlencode({"path": filespace_path})
+        download_url = f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
     return {
         "id": str(att.id),
         "filename": att.filename,
         "url": att.file.url if att.file else "",
+        "downloadUrl": download_url,
+        "filespacePath": filespace_path,
         "fileSizeLabel": size_label,
     }
 
@@ -288,7 +300,7 @@ def _serialize_message(env: MessageEnvelope) -> dict:
         channel = message.conversation.channel
     elif message.from_endpoint_id:
         channel = message.from_endpoint.channel
-    attachments = [_serialize_attachment(att) for att in message.attachments.all()]
+    attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     peer_link_id: str | None = None
     is_peer_dm = False
@@ -376,7 +388,7 @@ def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cur
             "peer_agent",
             "owner_agent",
         )
-        .prefetch_related("attachments")
+        .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp", "-seq")
     )
     if direction == "older" and cursor is not None:

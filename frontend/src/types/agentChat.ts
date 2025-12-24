@@ -2,6 +2,8 @@ export type Attachment = {
   id: string
   filename: string
   url: string
+  downloadUrl?: string | null
+  filespacePath?: string | null
   fileSizeLabel?: string | null
 }
 

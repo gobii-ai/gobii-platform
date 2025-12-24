@@ -8,6 +8,7 @@ from drf_spectacular.views import (
 )
 from console.api_views import (
     LLMEndpointTestAPIView,
+    AgentFsNodeDownloadAPIView,
     AgentMessageCreateAPIView,
     AgentProcessingStatusAPIView,
     AgentTimelineAPIView,
@@ -207,6 +208,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
+    path("console/api/agents/<uuid:agent_id>/files/download/", AgentFsNodeDownloadAPIView.as_view(), name="console_agent_fs_download"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditAPIView.as_view(), name="console_agent_audit"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/timeline/", StaffAgentAuditTimelineAPIView.as_view(), name="console_agent_audit_timeline"),
