@@ -13,6 +13,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -93,6 +94,24 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
         _broadcast_audit_event(str(instance.owner_agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgentMessageAttachment)
+def broadcast_message_attachment_update(sender, instance: PersistentAgentMessageAttachment, created: bool, **kwargs):
+    if not created:
+        return
+    message_id = instance.message_id
+    if not message_id:
+        return
+
+    def _on_commit():
+        try:
+            from api.agent.files.filespace_service import broadcast_message_attachment_update as broadcast_update
+            broadcast_update(str(message_id))
+        except Exception:
+            logger.exception("Failed to broadcast attachment update for message %s", message_id)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentStep)

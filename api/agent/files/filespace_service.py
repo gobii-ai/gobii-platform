@@ -175,8 +175,55 @@ def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNod
         except Exception:
             logger.exception("Failed to record provenance for message %s", message_id)
             pass
+        broadcast_message_attachment_update(message_id)
 
     return created
+
+
+def broadcast_message_attachment_update(message_id: str) -> None:
+    try:
+        message = (
+            PersistentAgentMessage.objects
+            .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
+            .prefetch_related("attachments__filespace_node")
+            .get(id=message_id)
+        )
+    except PersistentAgentMessage.DoesNotExist:
+        return
+    except Exception:
+        logger.exception("Failed to load message %s for attachment broadcast", message_id)
+        return
+
+    agent_id = message.owner_agent_id
+    if not agent_id:
+        return
+
+    try:
+        from asgiref.sync import async_to_sync
+        from channels.layers import get_channel_layer
+        from console.agent_chat.timeline import serialize_message_event
+        from console.agent_audit.serializers import serialize_message as serialize_audit_message
+        from console.agent_audit.realtime import send_audit_event
+    except Exception:
+        logger.exception("Failed to import realtime modules for message %s", message_id)
+        return
+
+    try:
+        payload = serialize_message_event(message)
+        channel_layer = get_channel_layer()
+        if channel_layer is not None:
+            async_to_sync(channel_layer.group_send)(
+                f"agent-chat-{agent_id}",
+                {"type": "timeline_event", "payload": payload},
+            )
+    except Exception:
+        logger.exception("Failed to broadcast chat attachment update for message %s", message_id)
+
+    try:
+        audit_payload = serialize_audit_message(message)
+        send_audit_event(str(agent_id), audit_payload)
+    except Exception:
+        logger.exception("Failed to broadcast audit attachment update for message %s", message_id)
 
 
 def enqueue_import_after_commit(message_id: str) -> None:

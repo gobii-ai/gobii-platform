@@ -7608,6 +7608,7 @@ class AgentFsNode(models.Model):
     # Binary content (only for FILE nodes). Stored via Django Storage (GCS in prod, MinIO locally).
     content = models.FileField(
         upload_to=agent_fs_upload_to,
+        max_length=512,
         null=True,
         blank=True,
         help_text="Binary content for files. Empty for directories."
