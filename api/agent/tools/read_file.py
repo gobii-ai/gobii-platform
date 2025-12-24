@@ -102,7 +102,7 @@ def get_read_file_tool() -> Dict[str, Any]:
             "name": "read_file",
             "description": (
                 "Read a file from the agent filesystem and return markdown. "
-                "Provide a filespace path like '/Inbox/2025-01-01/report.pdf'."
+                "Can read images with OCR. "
             ),
             "parameters": {
                 "type": "object",
@@ -132,14 +132,15 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
         return {"status": "error", "message": "Agent lacks access to the filespace."}
 
     try:
-        node = AgentFsNode.objects.get(
-            filespace=filespace,
-            path=path,
-            node_type=AgentFsNode.NodeType.FILE,
-            is_deleted=False,
+        node = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, path=path, is_deleted=False)
+            .first()
         )
-    except AgentFsNode.DoesNotExist:
-        return {"status": "error", "message": f"File not found: {path}"}
+        if not node:
+            return {"status": "error", "message": f"File not found: {path}"}
+        if node.node_type != AgentFsNode.NodeType.FILE:
+            return {"status": "error", "message": f"Path is a directory: {path}"}
     except Exception as exc:
         logger.error("Failed to lookup file node for %s: %s", path, exc)
         return {"status": "error", "message": "Failed to locate the file in the filespace."}

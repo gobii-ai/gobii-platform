@@ -1148,7 +1148,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             raw_payload={"source": "console", "user_id": request.user.id},
             msg_channel=CommsChannel.WEB,
         )
-        info = ingest_inbound_message(CommsChannel.WEB, parsed)
+        info = ingest_inbound_message(CommsChannel.WEB, parsed, filespace_import_mode="sync")
         event = serialize_message_event(info.message)
 
         props = {

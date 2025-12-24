@@ -21,7 +21,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
-from ..files.filespace_service import enqueue_import_after_commit
+from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
 from ...models import (
     PersistentAgentCommsEndpoint,
@@ -326,7 +326,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
 
 @transaction.atomic
 @tracer.start_as_current_span("ingest_inbound_message")
-def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -> InboundMessageInfo:
+def ingest_inbound_message(
+    channel: CommsChannel | str,
+    parsed: ParsedMessage,
+    filespace_import_mode: str = "async",
+) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
 
     channel_val = channel.value if isinstance(channel, CommsChannel) else channel
@@ -367,7 +371,17 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
 
         # Enqueue filespace import after commit, only if attachments were actually saved
         if message.attachments.exists():
-            enqueue_import_after_commit(str(message.id))
+            message_id = str(message.id)
+            if filespace_import_mode == "sync":
+                def _import_after_commit() -> None:
+                    try:
+                        import_message_attachments_to_filespace(message_id)
+                    except Exception:
+                        logging.exception("Failed synchronous filespace import for message %s", message_id)
+
+                transaction.on_commit(_import_after_commit)
+            elif filespace_import_mode == "async":
+                enqueue_import_after_commit(message_id)
 
         owner_id = message.owner_agent_id
         if owner_id:

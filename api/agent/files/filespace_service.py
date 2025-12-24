@@ -137,7 +137,10 @@ def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNod
             )
             node.save()  # Ensure PK exists for upload_to path
             # Save file content (storage handles copying)
-            node.content.save(att.filename or name, att.file, save=True)
+            if not att.file or not getattr(att.file, "name", None):
+                raise ValueError("Attachment has no stored file content.")
+            with att.file.storage.open(att.file.name, "rb") as stored_file:
+                node.content.save(att.filename or name, stored_file, save=True)
             node.refresh_from_db()
             # Link the original attachment to this filespace node and clean up original
             try:
