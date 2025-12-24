@@ -337,16 +337,26 @@
   padding: 0;
   font-size: 0.95rem;
   font-weight: 600;
-  color: #ffffff;
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 45%, #4338ca 100%);
+  color: var(--composer-accent-text, #ffffff);
+  background: linear-gradient(
+    135deg,
+    var(--composer-accent-light, #6366f1) 0%,
+    var(--composer-accent, #4f46e5) 45%,
+    var(--composer-accent-dark, #4338ca) 100%
+  );
   transition: transform 0.18s ease, background 0.3s ease;
-  border: 1px solid rgba(79, 70, 229, 0.24);
+  border: 1px solid var(--composer-accent-border, rgba(79, 70, 229, 0.24));
   cursor: pointer;
 }
 
 .composer-send-button:hover {
   transform: scale(1.03);
-  background: linear-gradient(135deg, #4f46e5 0%, #4338ca 40%, #312e81 100%);
+  background: linear-gradient(
+    135deg,
+    var(--composer-accent, #4f46e5) 0%,
+    var(--composer-accent-dark, #4338ca) 40%,
+    var(--composer-accent-darker, #312e81) 100%
+  );
 }
 
 .composer-send-button:active {
@@ -354,7 +364,7 @@
 }
 
 .composer-send-button:focus-visible {
-  outline: 3px solid rgba(99, 102, 241, 0.35);
+  outline: 3px solid var(--composer-accent-focus, rgba(99, 102, 241, 0.35));
   outline-offset: 2px;
 }
 

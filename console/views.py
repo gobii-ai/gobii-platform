@@ -74,6 +74,7 @@ from api.models import (
     CommsChannel,
     UserPhoneNumber,
     Organization,
+    AgentColor,
     OrganizationMembership,
     OrganizationInvite,
     TaskCredit,
@@ -118,6 +119,19 @@ def _hex_to_rgb_components(hex_color: str) -> tuple[int, int, int]:
     if len(normalized) != 6:
         return (0, 116, 212)
     return tuple(int(normalized[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def _normalize_agent_color_hex(hex_color: str) -> str | None:
+    normalized = (hex_color or "").strip().lstrip("#")
+    if len(normalized) == 8:
+        normalized = normalized[:6]
+    if len(normalized) != 6:
+        return None
+    try:
+        int(normalized, 16)
+    except ValueError:
+        return None
+    return f"#{normalized.upper()}"
 
 
 def _rgb_to_hex(r: int, g: int, b: int) -> str:
@@ -3379,6 +3393,16 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         primary_email = context.get('primary_email')
         primary_sms = context.get('primary_sms')
 
+        palette = AgentColor.get_active_palette()
+        agent_colors = [
+            {
+                'id': str(color.id),
+                'name': color.name,
+                'hex': color.hex_value.upper(),
+            }
+            for color in palette
+        ]
+
         features = {
             'organizations': flag_is_active(request, 'organizations'),
         }
@@ -3443,6 +3467,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
                 'preferredLlmTier': getattr(agent, 'preferred_llm_tier', AgentLLMTier.STANDARD.value),
+                'agentColorHex': agent.get_display_color().upper(),
                 'organization': (
                     {
                         'id': str(agent.organization_id),
@@ -3452,6 +3477,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     else None
                 ),
             },
+            'agentColors': agent_colors,
             'primaryEmail': {'address': primary_email.address} if primary_email else None,
             'primarySms': {'address': primary_sms.address} if primary_sms else None,
             'dailyCredits': daily_credits,
@@ -4004,6 +4030,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Checkbox inputs are only present in POST data when checked. Determine the desired
         # active state based on whether the "is_active" field was submitted.
         new_is_active = 'is_active' in request.POST
+        raw_agent_color_hex = (request.POST.get('agent_color_hex') or '').strip()
+        selected_agent_color = None
+        if raw_agent_color_hex:
+            normalized_agent_color_hex = _normalize_agent_color_hex(raw_agent_color_hex)
+            if not normalized_agent_color_hex:
+                return _general_error("Select a valid theme color.")
+            selected_agent_color = AgentColor.objects.filter(
+                hex_value__iexact=normalized_agent_color_hex,
+                is_active=True,
+            ).first()
+            if selected_agent_color is None:
+                return _general_error("Select a valid theme color.")
 
         # Handle whitelist policy update (flag removed)
         new_whitelist_policy = request.POST.get('whitelist_policy', '').strip()
@@ -4170,7 +4208,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if agent.is_active != new_is_active:
                     agent.is_active = new_is_active
                     agent_fields_to_update.append('is_active')
-                
+
+                if selected_agent_color and agent.agent_color_id != selected_agent_color.id:
+                    agent.agent_color = selected_agent_color
+                    agent_fields_to_update.append('agent_color')
+
                 # Update whitelist policy if provided and changed
                 if new_whitelist_policy and agent.whitelist_policy != new_whitelist_policy:
                     if new_whitelist_policy in [choice[0] for choice in PersistentAgent.WhitelistPolicy.choices]:
@@ -4257,6 +4299,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'daily_credit_soft_target': soft_value,
                         'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
                         'preferred_llm_tier': resolved_preferred_tier_value,
+                        'agent_color_hex': agent.get_display_color().upper(),
                     },
                     organization=agent.organization,
                 )
