@@ -30,6 +30,16 @@ import {
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Button as AriaButton,
+  Dialog,
+  DialogTrigger,
+  ListBox,
+  ListBoxItem,
+  Popover,
+  type Key,
+  type Selection,
+} from 'react-aria-components'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
 import { useModal } from '../hooks/useModal'
@@ -48,6 +58,13 @@ const button = {
   icon: 'p-2 text-slate-500 hover:bg-slate-100 rounded-full transition',
   iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition',
 }
+
+const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: string }> = [
+  { id: 'persistent', label: 'Persistent' },
+  { id: 'browser', label: 'Browser' },
+  { id: 'embedding', label: 'Embedding' },
+  { id: 'file_handler', label: 'File handler' },
+]
 
 const reasoningEffortOptions = [
   { value: '', label: 'Use endpoint default' },
@@ -1008,6 +1025,45 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
   const clearBusy = isBusy(actionKey('provider', provider.id, 'clear'))
   const toggleBusy = isBusy(actionKey('provider', provider.id, 'toggle'))
   const creatingEndpoint = isBusy(actionKey('provider', provider.id, 'create-endpoint'))
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  const [selectedAddEndpointKeys, setSelectedAddEndpointKeys] = useState<Set<Key>>(new Set())
+
+  const handleAddMenuOpenChange = (open: boolean) => {
+    setIsAddMenuOpen(open)
+    if (!open) {
+      setSelectedAddEndpointKeys(new Set())
+    }
+  }
+
+  const openAddEndpointModal = (type: llmApi.ProviderEndpoint['type']) => {
+    showModal((onClose) => createPortal(
+      <AddProviderEndpointModal
+        providerName={provider.name}
+        type={type}
+        busy={creatingEndpoint}
+        onClose={onClose}
+        onSubmit={async (values) => {
+          try {
+            await handlers.onAddEndpoint(provider, type, values)
+            onClose()
+          } catch {
+            // feedback already shown
+          }
+        }}
+      />,
+      document.body,
+    ))
+  }
+
+  const handleAddEndpointSelection = (keys: Selection) => {
+    if (keys === 'all') return
+    const selection = keys as Set<Key>
+    const selectedKey = selection.values().next().value
+    if (!selectedKey) return
+    setSelectedAddEndpointKeys(new Set())
+    setIsAddMenuOpen(false)
+    openAddEndpointModal(String(selectedKey) as llmApi.ProviderEndpoint['type'])
+  }
 
   const openEndpointEditor = (endpoint: ProviderEndpointCard) => {
     const isEditing = editingEndpointId === endpoint.id
@@ -1094,92 +1150,34 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
           <>
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-600">Manage provider endpoints</p>
-              <div className="flex gap-2">
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="persistent"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'persistent', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Persistent
-                </button>
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="browser"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'browser', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Browser
-                </button>
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="embedding"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'embedding', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Embedding
-                </button>
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="file_handler"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'file_handler', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> File handler
-                </button>
-              </div>
+              <DialogTrigger isOpen={isAddMenuOpen} onOpenChange={handleAddMenuOpenChange}>
+                <AriaButton className={button.secondary} isDisabled={creatingEndpoint}>
+                  <Plus className="size-4" /> Add endpoint
+                  <ChevronDown className={`size-4 text-slate-400 transition ${isAddMenuOpen ? 'rotate-180' : ''}`} />
+                </AriaButton>
+                <Popover className="z-50 mt-2 w-56 rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <Dialog className="p-2">
+                    <ListBox
+                      aria-label="Select endpoint type"
+                      selectionMode="single"
+                      selectedKeys={selectedAddEndpointKeys as unknown as Selection}
+                      onSelectionChange={(keys) => handleAddEndpointSelection(keys as Selection)}
+                      className="space-y-1 text-sm"
+                    >
+                      {addEndpointOptions.map((option) => (
+                        <ListBoxItem
+                          key={option.id}
+                          id={option.id}
+                          textValue={option.label}
+                          className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 data-[hovered]:bg-blue-50 data-[hovered]:text-blue-700 data-[focused]:bg-blue-50 data-[focused]:text-blue-700 data-[selected]:bg-blue-600 data-[selected]:text-white"
+                        >
+                          <span className="font-medium">{option.label}</span>
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Dialog>
+                </Popover>
+              </DialogTrigger>
             </div>
             {provider.endpoints.length === 0 && <p className="text-sm text-slate-500">No endpoints linked.</p>}
             <div className="space-y-3">
