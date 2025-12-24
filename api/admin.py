@@ -3768,6 +3768,9 @@ from .models import (
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
+    FileHandlerModelEndpoint,
+    FileHandlerLLMTier,
+    FileHandlerTierEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -3882,6 +3885,35 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [EmbeddingsTierEndpointInline]
+
+
+@admin.register(FileHandlerModelEndpoint)
+class FileHandlerModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "supports_vision", "enabled")
+    list_filter = ("enabled", "provider", "supports_vision")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "litellm_model",
+        "api_base",
+        "supports_vision",
+    )
+
+
+class FileHandlerTierEndpointInline(admin.TabularInline):
+    model = FileHandlerTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(FileHandlerLLMTier)
+class FileHandlerLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
+    ordering = ("order",)
+    inlines = [FileHandlerTierEndpointInline]
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

@@ -15,6 +15,9 @@ from api.models import (
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
     EmbeddingsModelEndpoint,
+    FileHandlerLLMTier,
+    FileHandlerTierEndpoint,
+    FileHandlerModelEndpoint,
     LLMProvider,
     LLMRoutingProfile,
     PersistentLLMTier,
@@ -104,6 +107,22 @@ def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str
     return data
 
 
+def _serialize_file_handler_endpoint(endpoint: FileHandlerModelEndpoint) -> dict[str, Any]:
+    label = f"{endpoint.provider.display_name if endpoint.provider else 'Unlinked'} · {endpoint.litellm_model}"
+    data = _serialize_endpoint_common(endpoint, label=label)
+    data.update(
+        {
+            "key": endpoint.key,
+            "model": endpoint.litellm_model,
+            "api_base": endpoint.api_base,
+            "supports_vision": endpoint.supports_vision,
+            "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
+            "type": "file_handler",
+        }
+    )
+    return data
+
+
 def build_llm_overview() -> dict[str, Any]:
     providers = (
         LLMProvider.objects.all()
@@ -112,6 +131,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("persistent_endpoints", queryset=PersistentModelEndpoint.objects.select_related("provider")),
             Prefetch("browser_endpoints", queryset=BrowserModelEndpoint.objects.select_related("provider")),
             Prefetch("embedding_endpoints", queryset=EmbeddingsModelEndpoint.objects.select_related("provider")),
+            Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
         )
     )
 
@@ -119,6 +139,7 @@ def build_llm_overview() -> dict[str, Any]:
     persistent_choices: list[dict[str, Any]] = []
     browser_choices: list[dict[str, Any]] = []
     embedding_choices: list[dict[str, Any]] = []
+    file_handler_choices: list[dict[str, Any]] = []
 
     for provider in providers:
         persistent_endpoints = [
@@ -133,10 +154,15 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_embedding_endpoint(endpoint)
             for endpoint in provider.embedding_endpoints.all()
         ]
+        file_handler_endpoints = [
+            _serialize_file_handler_endpoint(endpoint)
+            for endpoint in provider.file_handler_endpoints.all()
+        ]
 
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
         embedding_choices.extend(embedding_endpoints)
+        file_handler_choices.extend(file_handler_endpoints)
 
         provider_payload.append(
             {
@@ -150,7 +176,7 @@ def build_llm_overview() -> dict[str, Any]:
                 "vertex_project": provider.vertex_project,
                 "vertex_location": provider.vertex_location,
                 "status": _provider_key_status(provider),
-                "endpoints": persistent_endpoints + browser_endpoints + embedding_endpoints,
+                "endpoints": persistent_endpoints + browser_endpoints + embedding_endpoints + file_handler_endpoints,
             }
         )
 
@@ -296,6 +322,36 @@ def build_llm_overview() -> dict[str, Any]:
             }
         )
 
+    file_handler_payload: list[dict[str, Any]] = []
+    file_handler_tiers = FileHandlerLLMTier.objects.prefetch_related(
+        Prefetch(
+            "tier_endpoints",
+            queryset=FileHandlerTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+        )
+    ).order_by("order")
+    for tier in file_handler_tiers:
+        tier_endpoints = []
+        for te in tier.tier_endpoints.all():
+            endpoint = te.endpoint
+            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+            tier_endpoints.append(
+                {
+                    "id": str(te.id),
+                    "endpoint_id": str(endpoint.id),
+                    "label": f"{label_provider} · {endpoint.litellm_model}",
+                    "weight": float(te.weight),
+                    "endpoint_key": endpoint.key,
+                }
+            )
+        file_handler_payload.append(
+            {
+                "id": str(tier.id),
+                "order": tier.order,
+                "description": tier.description,
+                "endpoints": tier_endpoints,
+            }
+        )
+
     stats = {
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
         "persistent_endpoints": PersistentModelEndpoint.objects.filter(enabled=True).count(),
@@ -309,10 +365,12 @@ def build_llm_overview() -> dict[str, Any]:
         "persistent": {"ranges": persistent_payload},
         "browser": browser_payload,
         "embeddings": {"tiers": embedding_payload},
+        "file_handlers": {"tiers": file_handler_payload},
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,
             "embedding_endpoints": embedding_choices,
+            "file_handler_endpoints": file_handler_choices,
         },
     }
 

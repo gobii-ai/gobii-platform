@@ -19,6 +19,7 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from .read_file import get_read_file_tool, execute_read_file
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 from constants.plans import PlanNames
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
+READ_FILE_TOOL_NAME = "read_file"
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -75,6 +77,10 @@ BUILTIN_TOOL_REGISTRY = {
     HTTP_REQUEST_TOOL_NAME: {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
+    },
+    READ_FILE_TOOL_NAME: {
+        "definition": get_read_file_tool,
+        "executor": execute_read_file,
     },
 }
 

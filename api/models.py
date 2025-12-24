@@ -2152,6 +2152,92 @@ class EmbeddingsTierEndpoint(models.Model):
         return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
 
 
+class FileHandlerModelEndpoint(models.Model):
+    """File handler endpoint configuration used for file-to-markdown conversion."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt4o_file_handler'")
+    provider = models.ForeignKey(
+        LLMProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="file_handler_endpoints",
+        help_text="Optional link to the provider supplying credentials for this endpoint.",
+    )
+    enabled = models.BooleanField(default=True)
+
+    litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    api_base = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
+    )
+    supports_vision = models.BooleanField(
+        default=False,
+        help_text="Indicates the model can process image or multimodal inputs.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "litellm_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        provider = self.provider.display_name if self.provider else "no-provider"
+        return f"{self.key} → {self.litellm_model} ({provider})"
+
+
+class FileHandlerLLMTier(models.Model):
+    """Fallback tier ordering for file handler endpoints."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.PositiveIntegerField(unique=True, help_text="1-based order across all file handler tiers.")
+    description = models.CharField(max_length=256, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"Tier {self.order}"
+
+
+class FileHandlerTierEndpoint(models.Model):
+    """Weighted association between a file handler tier and an endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        FileHandlerLLMTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        FileHandlerModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+
+
 class BrowserModelEndpoint(models.Model):
     """Model endpoint for browser-use agents (Chat clients)."""
 
