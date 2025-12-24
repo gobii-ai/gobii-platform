@@ -5008,6 +5008,8 @@ class AgentFilesView(ConsoleViewMixin, DetailView):
                 "upload": reverse("console_agent_fs_upload", kwargs={"agent_id": agent.id}),
                 "delete": reverse("console_agent_fs_delete", kwargs={"agent_id": agent.id}),
                 "download": reverse("console_agent_fs_download", kwargs={"agent_id": agent.id}),
+                "createFolder": reverse("console_agent_fs_create_folder", kwargs={"agent_id": agent.id}),
+                "move": reverse("console_agent_fs_move", kwargs={"agent_id": agent.id}),
             },
         }
         return context

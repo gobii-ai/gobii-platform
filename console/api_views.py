@@ -1384,6 +1384,124 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
         return JsonResponse({"deleted": deleted})
 
 
+class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return HttpResponseBadRequest("name is required")
+
+        parent_id = (payload.get("parent_id") or payload.get("parentId") or "").strip()
+        filespace = get_or_create_default_filespace(agent)
+        parent = None
+        if parent_id:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    id=parent_id,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_id is invalid")
+
+        if AgentFsNode.objects.filter(filespace=filespace, parent=parent, name=name, is_deleted=False).exists():
+            return HttpResponseBadRequest("folder already exists")
+
+        node = AgentFsNode(
+            filespace=filespace,
+            parent=parent,
+            node_type=AgentFsNode.NodeType.DIR,
+            name=name,
+            created_by_agent=agent,
+        )
+        try:
+            node.save()
+        except ValidationError as exc:
+            return HttpResponseBadRequest(str(exc))
+        except IntegrityError:
+            return HttpResponseBadRequest("Unable to create folder due to a name conflict")
+
+        return JsonResponse({"node": _serialize_agent_fs_node(node)}, status=201)
+
+
+class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        node_id = str(payload.get("node_id") or payload.get("nodeId") or "").strip()
+        if not node_id:
+            return HttpResponseBadRequest("node_id is required")
+
+        parent_id = payload.get("parent_id") or payload.get("parentId")
+        if isinstance(parent_id, str):
+            parent_id = parent_id.strip()
+        if not parent_id:
+            parent_id = None
+
+        filespace = get_or_create_default_filespace(agent)
+        node = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, id=node_id, is_deleted=False)
+            .first()
+        )
+        if not node:
+            return HttpResponseBadRequest("node_id is invalid")
+
+        parent = None
+        if parent_id:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    id=parent_id,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_id is invalid")
+
+        if node.parent_id == (parent.id if parent else None):
+            return JsonResponse({"node": _serialize_agent_fs_node(node)})
+
+        name_conflict = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, parent=parent, name=node.name, is_deleted=False)
+            .exclude(id=node.id)
+            .exists()
+        )
+        if name_conflict:
+            return HttpResponseBadRequest("A node with that name already exists in the destination folder.")
+
+        node.parent = parent
+        try:
+            node.save()
+        except ValidationError as exc:
+            return HttpResponseBadRequest(str(exc))
+        except IntegrityError:
+            return HttpResponseBadRequest("Unable to move node due to a name conflict")
+
+        return JsonResponse({"node": _serialize_agent_fs_node(node)})
+
+
 class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
     http_method_names = ["get"]
 
