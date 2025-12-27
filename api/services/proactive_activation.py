@@ -66,8 +66,6 @@ class ProactiveActivationService:
                 scanned_agent_ids.add(agent.id)
                 total_scanned += 1
 
-                if not cls._is_owner_active(agent):
-                    continue
                 if agent.user_id in seen_users:
                     continue
                 if not cls._is_rollout_enabled_for_agent(agent):
