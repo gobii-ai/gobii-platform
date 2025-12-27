@@ -42,35 +42,41 @@ def scrub_markdown_data_images(text: str) -> str:
     )
 
 
-def _strip_image_fields(entry: dict[str, Any]) -> None:
-    entry.pop("image", None)
-    entry.pop("image_base64", None)
-    images = entry.get("images")
-    if isinstance(images, list):
-        for image_entry in images:
-            if isinstance(image_entry, dict):
-                image_entry.pop("image", None)
-                image_entry.pop("image_base64", None)
+def _strip_keys(
+    node: Any,
+    *,
+    strip_keys: Optional[set[str]] = None,
+    strip_key_prefixes: Tuple[str, ...] = (),
+    strip_key_suffixes: Tuple[str, ...] = (),
+) -> None:
+    """Recursively strip keys (and prefix/suffix matches) from nested dict/list/tuple structures."""
+    keys = strip_keys or set()
+    prefixes = strip_key_prefixes or ()
+    suffixes = strip_key_suffixes or ()
+
+    if isinstance(node, dict):
+        for key in list(node.keys()):
+            if key in keys or key.startswith(prefixes) or key.endswith(suffixes):
+                node.pop(key, None)
+            else:
+                _strip_keys(node[key], strip_keys=keys, strip_key_prefixes=prefixes, strip_key_suffixes=suffixes)
+    elif isinstance(node, (list, tuple)):
+        for item in node:
+            _strip_keys(item, strip_keys=keys, strip_key_prefixes=prefixes, strip_key_suffixes=suffixes)
 
 
 def _strip_key_name(node: Any, key_name: str) -> None:
     """Recursively remove the given key name from any dicts in the structure."""
-    if not key_name:
-        return
-
-    if isinstance(node, (list, tuple)):
-        for item in node:
-            _strip_key_name(item, key_name)
-    elif isinstance(node, dict):
-        if key_name in node:
-            node.pop(key_name, None)
-        for value in node.values():
-            _strip_key_name(value, key_name)
+    if key_name:
+        _strip_keys(node, strip_keys={key_name})
 
 
 class MCPToolResultAdapter:
     """Base adapter for normalizing MCP tool responses."""
 
+    strip_keys: Tuple[str, ...] = ()
+    strip_key_prefixes: Tuple[str, ...] = ()
+    strip_key_suffixes: Tuple[str, ...] = ()
     server_name: Optional[str] = None
     tool_name: Optional[str] = None
 
@@ -78,6 +84,17 @@ class MCPToolResultAdapter:
         server_match = self.server_name is None or self.server_name == server_name
         tool_match = self.tool_name is None or self.tool_name == tool_name
         return server_match and tool_match
+
+    def strip_payload(self, payload: Any) -> Any:
+        """Apply configured key stripping to the payload in-place."""
+        if self.strip_keys or self.strip_key_prefixes or self.strip_key_suffixes:
+            _strip_keys(
+                payload,
+                strip_keys=set(self.strip_keys),
+                strip_key_prefixes=self.strip_key_prefixes,
+                strip_key_suffixes=self.strip_key_suffixes,
+            )
+        return payload
 
     def adapt(self, result: Any) -> Any:
         """Override to mutate/normalize the tool result."""
@@ -142,6 +159,7 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "search_engine"
+    strip_keys = ("image", "image_base64")
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
@@ -198,6 +216,7 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
                     first_block.text = json.dumps(skeleton_output, ensure_ascii=False)
                     return result
 
+        self.strip_payload(payload)
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
@@ -207,6 +226,7 @@ class BrightDataLinkedInCompanyProfileAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "web_data_linkedin_company_profile"
+    strip_key_suffixes = ("_html",)
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
@@ -214,21 +234,7 @@ class BrightDataLinkedInCompanyProfileAdapter(BrightDataAdapterBase):
             return result
 
         first_block, payload = parsed
-
-        def strip_updates(node: Any):
-            if isinstance(node, list):
-                for item in node:
-                    strip_updates(item)
-            elif isinstance(node, dict):
-                updates = node.get("updates")
-                if isinstance(updates, list):
-                    for update in updates:
-                        if isinstance(update, dict):
-                            update.pop("text_html", None)
-                for value in node.values():
-                    strip_updates(value)
-
-        strip_updates(payload)
+        self.strip_payload(payload)
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
@@ -238,6 +244,18 @@ class BrightDataLinkedInPersonProfileAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "web_data_linkedin_person_profile"
+    strip_keys = (
+        "description_html",
+        "company_logo_url",
+        "institute_logo_url",
+        "banner_image",
+        "default_avatar",
+        "image_url",
+        "image",
+        "img",
+        "people_also_viewed",
+    )
+    strip_key_suffixes = ("_html", "_img")
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
@@ -245,37 +263,7 @@ class BrightDataLinkedInPersonProfileAdapter(BrightDataAdapterBase):
             return result
 
         first_block, payload = parsed
-        fields_to_strip = {
-            "description_html",
-            "company_logo_url",
-            "institute_logo_url",
-            "banner_image",
-            "default_avatar",
-            "image_url",
-            "image",
-            "img",
-            
-            # Network Fields
-            "people_also_viewed",
-        }
-
-        def strip_fields(node: Any):
-            if isinstance(node, list):
-                for item in node:
-                    strip_fields(item)
-            elif isinstance(node, dict):
-                # Remove matching keys before recursing into values
-                for key in list(node.keys()):
-                    if (
-                        key in fields_to_strip
-                        or key.endswith("_html")
-                        or key.endswith("_img")
-                    ):
-                        node.pop(key, None)
-                for value in node.values():
-                    strip_fields(value)
-
-        strip_fields(payload)
+        self.strip_payload(payload)
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
@@ -285,6 +273,7 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "search_engine_batch"
+    strip_keys = ("image", "image_base64")
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
@@ -292,24 +281,7 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
             return result
 
         first_block, payload = parsed
-        if isinstance(payload, list):
-            for item in payload:
-                if not isinstance(item, dict):
-                    continue
-                results = item.get("result")
-                if isinstance(results, dict):
-                    organic_results = results.get("organic")
-                    if isinstance(organic_results, list):
-                        for entry in organic_results:
-                            if isinstance(entry, dict):
-                                _strip_image_fields(entry)
-
-                    related_results = results.get("related")
-                    if isinstance(related_results, list):
-                        for entry in related_results:
-                            if isinstance(entry, dict):
-                                _strip_image_fields(entry)
-
+        self.strip_payload(payload)
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
 
