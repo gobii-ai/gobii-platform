@@ -2533,6 +2533,12 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                     reason=reason_value or None,
                 )
                 process_agent_events_task.delay(str(agent.pk))
+            except ValueError as exc:
+                self.message_user(
+                    request,
+                    str(exc) or "Cannot trigger proactive outreach for this agent.",
+                    level=messages.ERROR,
+                )
             except Exception:
                 logging.exception("Failed to force proactive trigger for persistent agent %s", agent.pk)
                 self.message_user(
