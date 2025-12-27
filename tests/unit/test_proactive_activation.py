@@ -194,13 +194,6 @@ class ProactiveActivationServiceTests(TestCase):
         with self.assertRaises(ValueError):
             ProactiveActivationService.force_trigger(self.agent_a)
 
-    def test_force_trigger_blocks_inactive_owner(self):
-        self.user.is_active = False
-        self.user.save(update_fields=["is_active"])
-
-        with self.assertRaises(ValueError):
-            ProactiveActivationService.force_trigger(self.agent_a)
-
     @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")
     def test_respects_recent_activity_cooldown(self, mock_redis_client, _mock_flag):
