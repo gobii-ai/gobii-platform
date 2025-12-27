@@ -6,12 +6,12 @@ from decimal import Decimal, InvalidOperation
 from typing import List, Sequence
 
 from django.db import transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
 from config.redis_client import get_redis_client
-from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
+from api.models import Organization, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,8 @@ class ProactiveActivationService:
                 scanned_agent_ids.add(agent.id)
                 total_scanned += 1
 
+                if not cls._is_owner_active(agent):
+                    continue
                 if agent.user_id in seen_users:
                     continue
                 if not cls._is_rollout_enabled_for_agent(agent):
@@ -128,9 +130,11 @@ class ProactiveActivationService:
                 is_active=True,
                 life_state=PersistentAgent.LifeState.ACTIVE,
             )
-            .select_related("user", "browser_use_agent")
+            .select_related("user", "browser_use_agent", "organization")
             .order_by(F("proactive_last_trigger_at").asc(nulls_first=True), "last_interaction_at", "created_at")
         )
+
+        qs = qs.filter(user__is_active=True).filter(Q(organization__isnull=True) | Q(organization__is_active=True))
 
         if exclude_ids:
             qs = qs.exclude(pk__in=exclude_ids)
@@ -262,6 +266,11 @@ class ProactiveActivationService:
         reason: str | None = None,
     ) -> ProactiveTriggerResult:
         """Trigger proactive outreach for an agent without cooldown checks."""
+        if not cls._is_owner_active(agent):
+            raise ValueError("Cannot trigger proactive outreach for an inactive user or organization.")
+        if not agent.is_active or agent.life_state != PersistentAgent.LifeState.ACTIVE:
+            raise ValueError("Cannot trigger proactive outreach for an inactive agent.")
+
         now = timezone.now()
         remaining = cls._daily_credit_remaining(agent)
         metadata = cls._build_metadata(now, remaining_credits=remaining)
@@ -309,6 +318,30 @@ class ProactiveActivationService:
     @staticmethod
     def _user_gate_key(user_id) -> str:
         return f"proactive:user:{user_id}"
+
+    @classmethod
+    def _is_owner_active(cls, agent: PersistentAgent) -> bool:
+        """Return True when the owning user/org is active."""
+
+        try:
+            if not agent.user_id:
+                return False
+            user_active = agent.user.__class__.objects.filter(pk=agent.user_id, is_active=True).exists()
+        except Exception:
+            logger.exception("Failed to evaluate user active state for agent %s", agent.id)
+            return False
+
+        org_id = getattr(agent, "organization_id", None)
+        if not org_id:
+            return user_active
+
+        try:
+            org_active = Organization.objects.filter(pk=org_id, is_active=True).exists()
+        except Exception:
+            logger.exception("Failed to evaluate organization active state for agent %s", agent.id)
+            return False
+
+        return bool(user_active and org_active)
 
     @classmethod
     def _is_rollout_enabled_for_agent(cls, agent: PersistentAgent) -> bool:
