@@ -53,6 +53,21 @@ def _strip_image_fields(entry: dict[str, Any]) -> None:
                 image_entry.pop("image_base64", None)
 
 
+def _strip_key_name(node: Any, key_name: str) -> None:
+    """Recursively remove the given key name from any dicts in the structure."""
+    if not key_name:
+        return
+
+    if isinstance(node, (list, tuple)):
+        for item in node:
+            _strip_key_name(item, key_name)
+    elif isinstance(node, dict):
+        if key_name in node:
+            node.pop(key_name, None)
+        for value in node.values():
+            _strip_key_name(value, key_name)
+
+
 class MCPToolResultAdapter:
     """Base adapter for normalizing MCP tool responses."""
 

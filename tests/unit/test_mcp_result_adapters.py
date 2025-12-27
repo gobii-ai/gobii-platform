@@ -11,6 +11,7 @@ from api.agent.tools.mcp_result_adapters import (
     BrightDataLinkedInPersonProfileAdapter,
     BrightDataScrapeAsMarkdownAdapter,
     BrightDataScrapeBatchAdapter,
+    _strip_key_name,
     _parse_markdown_serp,
 )
 from api.models import (
@@ -122,6 +123,31 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         self.assertNotIn("image_base64", related[0])
         self.assertNotIn("image", related[1])
         self.assertEqual(related[0]["title"], "Rel One")
+
+
+@tag("batch_mcp_tools")
+class StripKeyNameTests(SimpleTestCase):
+    def test_strips_key_from_nested_structures(self):
+        payload = {
+            "remove_me": "top",
+            "keep": {"nested": True, "remove_me": "nested", "list": [{"remove_me": "deep", "keep": 1}, {"keep": 2}]},
+            "items": [
+                {"keep": "a", "remove_me": "b"},
+                ["no-op", {"remove_me": "c"}],
+                ({"remove_me": "tuple"},),
+            ],
+        }
+
+        _strip_key_name(payload, "remove_me")
+
+        self.assertNotIn("remove_me", payload)
+        self.assertNotIn("remove_me", payload["keep"])
+        self.assertNotIn("remove_me", payload["keep"]["list"][0])
+        self.assertNotIn("remove_me", payload["items"][0])
+        self.assertNotIn("remove_me", payload["items"][1][1])
+        self.assertNotIn("remove_me", payload["items"][2][0])
+        self.assertEqual(payload["keep"]["nested"], True)
+        self.assertEqual(payload["keep"]["list"][1]["keep"], 2)
 
 
 @tag("batch_mcp_tools")
