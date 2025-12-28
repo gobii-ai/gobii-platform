@@ -102,6 +102,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
+    CommsChannel,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from config import settings
@@ -122,8 +123,146 @@ ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
+MESSAGE_TOOL_NAMES = {
+    "send_email",
+    "send_sms",
+    "send_chat_message",
+    "send_agent_message",
+}
+MESSAGE_TOOL_BODY_KEYS = {
+    "send_email": "mobile_first_html",
+    "send_sms": "body",
+    "send_chat_message": "body",
+    "send_agent_message": "message",
+}
 
 __all__ = ["process_agent_events"]
+
+
+def _extract_message_content(message: Any) -> str:
+    """Return normalized assistant message content, if any."""
+    if message is None:
+        return ""
+
+    content = None
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+
+    return ""
+
+
+def _get_tool_call_name(call: Any) -> Optional[str]:
+    if call is None:
+        return None
+    name = getattr(getattr(call, "function", None), "name", None)
+    if name:
+        return name
+    if isinstance(call, dict):
+        return call.get("function", {}).get("name")
+    return None
+
+
+def _get_last_message_tool_call(agent: PersistentAgent) -> Optional[Tuple[str, dict]]:
+    call = (
+        PersistentAgentToolCall.objects.select_related("step")
+        .filter(step__agent=agent, tool_name__in=MESSAGE_TOOL_NAMES)
+        .order_by("-step__created_at")
+        .first()
+    )
+    if not call:
+        return None
+
+    params = call.tool_params if isinstance(call.tool_params, dict) else {}
+    return call.tool_name, dict(params)
+
+
+def _default_implied_email_subject(agent: PersistentAgent) -> str:
+    name = (agent.name or "").strip()
+    if name:
+        return f"Update from {name}"
+    return "Update"
+
+
+def _build_implied_send_tool_call(
+    agent: PersistentAgent,
+    message_text: str,
+    *,
+    will_continue_work: bool,
+) -> Tuple[Optional[dict], Optional[str]]:
+    last_call = _get_last_message_tool_call(agent)
+    if last_call:
+        tool_name, tool_params = last_call
+        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+        if not body_key:
+            return None, f"Implied send does not support tool {tool_name}."
+        tool_params[body_key] = message_text
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        else:
+            tool_params.pop("will_continue_work", None)
+        return (
+            {
+                "id": "implied_send",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(tool_params),
+                },
+            },
+            None,
+        )
+
+    endpoint = agent.preferred_contact_endpoint
+    if not endpoint:
+        return None, "Implied send failed: no prior message tool call or preferred contact endpoint."
+
+    channel = endpoint.channel
+    address = endpoint.address
+    if channel == CommsChannel.EMAIL:
+        tool_name = "send_email"
+        tool_params = {
+            "to_address": address,
+            "subject": _default_implied_email_subject(agent),
+            "mobile_first_html": message_text,
+        }
+    elif channel == CommsChannel.SMS:
+        tool_name = "send_sms"
+        tool_params = {"to_number": address, "body": message_text}
+    elif channel == CommsChannel.WEB:
+        tool_name = "send_chat_message"
+        tool_params = {"to_address": address, "body": message_text}
+    else:
+        return None, f"Implied send failed: unsupported preferred contact channel '{channel}'."
+
+    if will_continue_work:
+        tool_params["will_continue_work"] = True
+
+    return (
+        {
+            "id": "implied_send",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(tool_params),
+            },
+        },
+        None,
+    )
 
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
@@ -1843,11 +1982,56 @@ def _run_agent_loop(
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
+            msg_content = _extract_message_content(msg)
+            message_text = (msg_content or "").strip()
+
+            raw_tool_calls = list(getattr(msg, "tool_calls", None) or [])
+            raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
+            has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
+            has_other_tool_calls = any(
+                name and name != "sleep_until_next_trigger" for name in raw_tool_names
+            )
+
+            implied_send = False
+            tool_calls = list(raw_tool_calls)
+            if message_text and not has_explicit_send:
+                implied_call, implied_error = _build_implied_send_tool_call(
+                    agent,
+                    message_text,
+                    will_continue_work=has_other_tool_calls,
+                )
+                if implied_call:
+                    implied_send = True
+                    tool_calls = [implied_call] + tool_calls
+                    logger.info(
+                        "Agent %s: treating message content as implied %s send.",
+                        agent.id,
+                        implied_call.get("function", {}).get("name"),
+                    )
+                else:
+                    logger.warning(
+                        "Agent %s: implied send unavailable (%s)",
+                        agent.id,
+                        implied_error or "unknown error",
+                    )
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": (
+                                "Implied send failed. "
+                                "Please call send_email, send_sms, or send_chat_message with explicit parameters."
+                            ),
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                    reasoning_only_streak = 0
+                    continue
+
             reasoning_source = thinking_content
-            if not reasoning_source:
-                msg_content = getattr(msg, "content", None)
-                if msg_content is None and isinstance(msg, dict):
-                    msg_content = msg.get("content")
+            if not reasoning_source and not implied_send:
                 reasoning_source = msg_content
 
             reasoning_text = (reasoning_source or "").strip()
@@ -1860,7 +2044,6 @@ def _run_agent_loop(
                 response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
                 _attach_prompt_archive(response_step)
 
-            tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
                 reasoning_only_streak += 1
                 continue
@@ -1876,9 +2059,7 @@ def _run_agent_loop(
                 )
                 for idx, call in enumerate(list(tool_calls) or [], start=1):
                     try:
-                        fn_name = getattr(getattr(call, "function", None), "name", None) or (
-                            call.get("function", {}).get("name") if isinstance(call, dict) else None
-                        )
+                        fn_name = _get_tool_call_name(call)
                         raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
                             call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
                         )
@@ -1921,7 +2102,7 @@ def _run_agent_loop(
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
-                    tool_name = getattr(getattr(call, "function", None), "name", None)
+                    tool_name = _get_tool_call_name(call)
                     if not tool_name:
                         logger.warning(
                             "Agent %s: received tool call without a function name; skipping and requesting resend.",
@@ -2007,8 +2188,15 @@ def _run_agent_loop(
                     credits_consumed = credit_info.get("cost")
                     consumed_credit = credit_info.get("credit")
                     try:
-                        raw_args = getattr(call.function, "arguments", "") or ""
-                        tool_params = json.loads(raw_args)
+                        raw_args = getattr(getattr(call, "function", None), "arguments", None)
+                        if raw_args is None and isinstance(call, dict):
+                            raw_args = call.get("function", {}).get("arguments")
+                        if isinstance(raw_args, dict):
+                            tool_params = raw_args
+                            raw_args = json.dumps(raw_args)
+                        else:
+                            raw_args = raw_args or ""
+                            tool_params = json.loads(raw_args)
                     except Exception:
                         # Simple recovery: record a correction instruction and retry next iteration.
                         preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
