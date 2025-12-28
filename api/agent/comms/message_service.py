@@ -228,18 +228,15 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         f"You can increase or remove the limit here: {link}"
     )
     email_context = {"agent": agent, "link": link, "plan_label": plan_label, "plan_id": plan_id}
-    analytics_source = (
-        AnalyticsSource.EMAIL
-        if channel == CommsChannel.EMAIL
-        else AnalyticsSource.SMS
-        if channel == CommsChannel.SMS
-        else AnalyticsSource.WEB
-        if channel == CommsChannel.WEB
-        else AnalyticsSource.AGENT
-    )
+    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
+    analytics_source = {
+        CommsChannel.EMAIL.value: AnalyticsSource.EMAIL,
+        CommsChannel.SMS.value: AnalyticsSource.SMS,
+        CommsChannel.WEB.value: AnalyticsSource.WEB,
+    }.get(str(channel_value), AnalyticsSource.AGENT)
 
     try:
-        if channel == CommsChannel.EMAIL:
+        if channel_value == CommsChannel.EMAIL.value:
             recipient = (parsed.sender or "").strip()
             if not recipient:
                 return False
@@ -265,7 +262,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                     {
                         "agent_id": str(agent.id),
                         "agent_name": agent.name,
-                        "channel": channel,
+                        "channel": channel_value,
                         "recipient": recipient,
                         "plan_id": plan_id,
                         "plan_label": plan_label,
@@ -275,7 +272,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
             )
             return True
 
-        if channel == CommsChannel.SMS:
+        if channel_value == CommsChannel.SMS.value:
             if not parsed.sender or sender_endpoint is None:
                 return False
             if not agent.is_sender_whitelisted(CommsChannel.SMS, parsed.sender):
@@ -303,7 +300,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                     {
                         "agent_id": str(agent.id),
                         "agent_name": agent.name,
-                        "channel": channel,
+                        "channel": channel_value,
                         "recipient": parsed.sender,
                         "plan_id": plan_id,
                         "plan_label": plan_label,
@@ -313,7 +310,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
             )
             return True
 
-        if channel == CommsChannel.WEB:
+        if channel_value == CommsChannel.WEB.value:
             if not parsed.sender or sender_endpoint is None:
                 return False
             if not agent.is_sender_whitelisted(CommsChannel.WEB, parsed.sender):
@@ -365,7 +362,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                     {
                         "agent_id": str(agent.id),
                         "agent_name": agent.name,
-                        "channel": channel,
+                        "channel": channel_value,
                         "recipient": parsed.sender,
                         "plan_id": plan_id,
                         "plan_label": plan_label,
