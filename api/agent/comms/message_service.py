@@ -233,6 +233,8 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         if channel == CommsChannel.EMAIL
         else AnalyticsSource.SMS
         if channel == CommsChannel.SMS
+        else AnalyticsSource.WEB
+        if channel == CommsChannel.WEB
         else AnalyticsSource.AGENT
     )
 
