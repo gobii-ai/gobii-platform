@@ -228,6 +228,13 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         f"You can increase or remove the limit here: {link}"
     )
     email_context = {"agent": agent, "link": link, "plan_label": plan_label, "plan_id": plan_id}
+    analytics_source = (
+        AnalyticsSource.EMAIL
+        if channel == CommsChannel.EMAIL
+        else AnalyticsSource.SMS
+        if channel == CommsChannel.SMS
+        else AnalyticsSource.AGENT
+    )
 
     try:
         if channel == CommsChannel.EMAIL:
@@ -247,6 +254,22 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 [recipient],
                 html_message=html_body,
                 fail_silently=True,
+            )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "channel": channel,
+                        "recipient": recipient,
+                        "plan_id": plan_id,
+                        "plan_label": plan_label,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
             )
             return True
 
@@ -270,6 +293,22 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 raw_payload={"kind": "daily_credit_limit_notice"},
             )
             deliver_agent_sms(outbound)
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "channel": channel,
+                        "recipient": parsed.sender,
+                        "plan_id": plan_id,
+                        "plan_label": plan_label,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
             return True
 
         if channel == CommsChannel.WEB:
@@ -315,6 +354,22 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                 latest_delivered_at=now,
                 latest_error_code="",
                 latest_error_message="",
+            )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "channel": channel,
+                        "recipient": parsed.sender,
+                        "plan_id": plan_id,
+                        "plan_label": plan_label,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
             )
             return True
 
