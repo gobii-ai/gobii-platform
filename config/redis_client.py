@@ -36,6 +36,10 @@ class _FakePipeline:
         self._ops.append(("set", args, kwargs)); return self
     def delete(self, *args, **kwargs):
         self._ops.append(("delete", args, kwargs)); return self
+    def sadd(self, *args, **kwargs):
+        self._ops.append(("sadd", args, kwargs)); return self
+    def srem(self, *args, **kwargs):
+        self._ops.append(("srem", args, kwargs)); return self
 
     def execute(self):
         for name, args, kwargs in self._ops:
@@ -50,6 +54,7 @@ class _FakeRedis:
         self._hash: Dict[str, Dict[str, Any]] = {}
         self._ttl: Dict[str, int] = {}
         self._lists: Dict[str, list] = {}
+        self._sets: Dict[str, set] = {}
 
     # Minimal API used by our code
     def ping(self):
@@ -70,19 +75,25 @@ class _FakeRedis:
         return True
 
     def delete(self, key: str) -> int:
-        existed = 1 if key in self._kv or key in self._hash else 0
+        existed = 1 if key in self._kv or key in self._hash or key in self._sets else 0
         self._kv.pop(key, None)
         self._hash.pop(key, None)
+        self._sets.pop(key, None)
         self._ttl.pop(key, None)
         return existed
 
     def exists(self, key: str) -> int:
-        return 1 if key in self._kv or key in self._hash else 0
+        return 1 if key in self._kv or key in self._hash or key in self._sets else 0
 
     def expire(self, key: str, ttl: int) -> bool:
         # We don't enforce TTL in tests; just remember
         self._ttl[key] = ttl
         return True
+
+    def ttl(self, key: str) -> int:
+        if key not in self._kv and key not in self._hash and key not in self._sets:
+            return -2
+        return int(self._ttl.get(key, -1))
 
     def hset(self, key: str, *args, **kwargs):
         m = self._hash.setdefault(key, {})
@@ -156,6 +167,53 @@ class _FakeRedis:
                 return (k, lst.pop(0))
         # No blocking behavior in fake; just return None
         return None
+
+    # Minimal set ops for pending agent queue
+    def sadd(self, key: str, *values: Any) -> int:
+        s = self._sets.setdefault(key, set())
+        added = 0
+        for value in values:
+            if value not in s:
+                s.add(value)
+                added += 1
+        return added
+
+    def srem(self, key: str, *values: Any) -> int:
+        s = self._sets.get(key, set())
+        removed = 0
+        for value in values:
+            if value in s:
+                s.remove(value)
+                removed += 1
+        if not s and key in self._sets:
+            self._sets.pop(key, None)
+        return removed
+
+    def sismember(self, key: str, value: Any) -> int:
+        s = self._sets.get(key, set())
+        return 1 if value in s else 0
+
+    def spop(self, key: str, count: int | None = None):
+        s = self._sets.get(key, set())
+        if not s:
+            return None
+        if count is None:
+            value = s.pop()
+            if not s:
+                self._sets.pop(key, None)
+            return value
+        popped = []
+        for _ in range(min(count, len(s))):
+            popped.append(s.pop())
+        if not s:
+            self._sets.pop(key, None)
+        return popped
+
+    def scard(self, key: str) -> int:
+        return len(self._sets.get(key, set()))
+
+    def smembers(self, key: str) -> set:
+        return set(self._sets.get(key, set()))
 
 
 @lru_cache(maxsize=1)

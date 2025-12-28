@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from typing import List, Tuple, Union, Optional, Dict, Any, Literal
@@ -17,6 +19,7 @@ from uuid import UUID
 import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
+from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
@@ -44,7 +47,13 @@ from .burn_control import (
     has_recent_user_message,
     should_pause_for_burn_rate,
 )
-from .processing_flags import clear_processing_queued_flag
+from .processing_flags import (
+    claim_pending_drain_slot,
+    clear_processing_queued_flag,
+    enqueue_pending_agent,
+    get_pending_drain_settings,
+    is_agent_pending,
+)
 from .llm_utils import run_completion
 from .token_usage import (
     coerce_int as _coerce_int,
@@ -137,6 +146,151 @@ MESSAGE_TOOL_BODY_KEYS = {
 }
 
 __all__ = ["process_agent_events"]
+
+
+@dataclass(frozen=True)
+class _EventProcessingLockSettings:
+    lock_timeout_seconds: int
+    lock_extend_interval_seconds: int
+    lock_acquire_timeout_seconds: float
+    lock_max_extensions: int
+    pending_set_ttl_seconds: int
+    pending_drain_delay_seconds: int
+    pending_drain_schedule_ttl_seconds: int
+
+
+def _get_event_processing_lock_settings() -> _EventProcessingLockSettings:
+    lock_timeout_seconds = int(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_TIMEOUT_SECONDS", 900)
+    )
+    lock_timeout_seconds = max(1, lock_timeout_seconds)
+    lock_extend_interval_seconds = int(
+        getattr(
+            settings,
+            "AGENT_EVENT_PROCESSING_LOCK_EXTEND_INTERVAL_SECONDS",
+            max(30, lock_timeout_seconds // 2),
+        )
+    )
+    lock_extend_interval_seconds = max(1, lock_extend_interval_seconds)
+    lock_acquire_timeout_seconds = float(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_ACQUIRE_TIMEOUT_SECONDS", 1)
+    )
+    lock_acquire_timeout_seconds = max(0.1, lock_acquire_timeout_seconds)
+    lock_max_extensions = int(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_MAX_EXTENSIONS", 200)
+    )
+    lock_max_extensions = max(1, lock_max_extensions)
+    pending_settings = get_pending_drain_settings(settings)
+    return _EventProcessingLockSettings(
+        lock_timeout_seconds=lock_timeout_seconds,
+        lock_extend_interval_seconds=lock_extend_interval_seconds,
+        lock_acquire_timeout_seconds=lock_acquire_timeout_seconds,
+        lock_max_extensions=lock_max_extensions,
+        pending_set_ttl_seconds=pending_settings.pending_set_ttl_seconds,
+        pending_drain_delay_seconds=pending_settings.pending_drain_delay_seconds,
+        pending_drain_schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
+    )
+
+
+class _LockExtender:
+    def __init__(self, lock: Redlock, *, interval_seconds: int, span=None) -> None:
+        self._lock = lock
+        self._interval_seconds = max(1, interval_seconds)
+        self._next_extend_at = time.monotonic() + self._interval_seconds
+        self._disabled = False
+        self._span = span
+
+    def maybe_extend(self) -> None:
+        if self._disabled:
+            return
+        now = time.monotonic()
+        if now < self._next_extend_at:
+            return
+        try:
+            self._lock.extend()
+            self._next_extend_at = now + self._interval_seconds
+            if self._span:
+                self._span.add_event("Distributed lock extended")
+        except (ExtendUnlockedLock, TooManyExtensions) as exc:
+            self._disabled = True
+            logger.warning("Lock extension disabled: %s", exc)
+            if self._span:
+                self._span.add_event("Distributed lock extension disabled")
+        except Exception as exc:
+            logger.warning("Failed to extend lock: %s", exc)
+
+
+def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, span=None) -> None:
+    if not claim_pending_drain_slot(ttl=schedule_ttl_seconds):
+        return
+    try:
+        from ..tasks.process_events import process_pending_agent_events_task  # noqa: WPS433 (runtime import)
+
+        process_pending_agent_events_task.apply_async(countdown=delay_seconds)
+        if span is not None:
+            span.add_event("Pending drain task scheduled")
+    except Exception as exc:
+        logger.error("Failed to schedule pending drain task: %s", exc)
+
+
+def _stale_lock_threshold_seconds(
+    lock_timeout_seconds: int,
+    pending_set_ttl_seconds: int,
+) -> int:
+    threshold = min(lock_timeout_seconds * 4, pending_set_ttl_seconds)
+    return max(1, threshold)
+
+
+def _lock_storage_keys(lock_key: str) -> tuple[str, ...]:
+    prefix = f"{getattr(Redlock, '_KEY_PREFIX', 'redlock')}:"
+    if lock_key.startswith(prefix):
+        return (lock_key,)
+    return (f"{prefix}{lock_key}", lock_key)
+
+
+def _maybe_clear_stale_lock(
+    *,
+    lock_key: str,
+    lock_timeout_seconds: int,
+    pending_set_ttl_seconds: int,
+    redis_client,
+    span=None,
+) -> bool:
+    threshold = _stale_lock_threshold_seconds(lock_timeout_seconds, pending_set_ttl_seconds)
+    for storage_key in _lock_storage_keys(lock_key):
+        try:
+            ttl = redis_client.ttl(storage_key)
+        except Exception:
+            logger.debug("Failed to check lock TTL for %s", storage_key, exc_info=True)
+            continue
+
+        if ttl is None or ttl == -2:
+            continue
+
+        if ttl == -1 or ttl > threshold:
+            try:
+                redis_client.delete(storage_key)
+                logger.warning(
+                    "Cleared stale agent event-processing lock %s (ttl=%s threshold=%s)",
+                    storage_key,
+                    ttl,
+                    threshold,
+                )
+                if span is not None:
+                    span.add_event("Cleared stale distributed lock")
+                return True
+            except Exception:
+                logger.exception("Failed to clear stale lock %s", storage_key)
+    return False
+
+
+def _normalize_persistent_agent_id(persistent_agent_id: Union[str, UUID]) -> Optional[str]:
+    if isinstance(persistent_agent_id, UUID):
+        return str(persistent_agent_id)
+    try:
+        return str(UUID(str(persistent_agent_id)))
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def _extract_message_content(message: Any) -> str:
@@ -270,13 +424,12 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
-    # If a pending follow-up is queued, keep the cycle open so it can run
+    # If pending follow-ups are queued, keep the cycle open so they can run.
     try:
         redis_client = get_redis_client()
-        pending_key = f"agent-event-processing:pending:{agent.id}"
-        if redis_client.get(pending_key):
+        if is_agent_pending(agent.id, client=redis_client):
             logger.info(
-                "Agent %s sleeping with pending follow-up flag; keeping cycle active.",
+                "Agent %s sleeping with pending work queued; keeping cycle active.",
                 agent.id,
             )
             return
@@ -1196,6 +1349,15 @@ def process_agent_events(
     burn_follow_up_token: Optional[str] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
+    normalized_agent_id = _normalize_persistent_agent_id(persistent_agent_id)
+    if not normalized_agent_id:
+        logger.warning(
+            "process_agent_events called with invalid agent id: %s",
+            persistent_agent_id,
+        )
+        return
+    persistent_agent_id = normalized_agent_id
+
     span = trace.get_current_span()
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
     span.set_attribute("persistent_agent.id", str(persistent_agent_id))
@@ -1350,31 +1512,56 @@ def process_agent_events(
 
     # Use distributed lock to ensure only one event processing call per agent
     lock_key = f"agent-event-processing:{persistent_agent_id}"
-    pending_key = f"agent-event-processing:pending:{persistent_agent_id}"
+    lock_settings = _get_event_processing_lock_settings()
 
-    lock = Redlock(key=lock_key, masters={redis_client}, auto_release_time=14400)  # 4 hour timeout to match Celery
+    lock = Redlock(
+        key=lock_key,
+        masters={redis_client},
+        auto_release_time=lock_settings.lock_timeout_seconds,
+        num_extensions=lock_settings.lock_max_extensions,
+    )
+    lock_extender = _LockExtender(
+        lock,
+        interval_seconds=lock_settings.lock_extend_interval_seconds,
+        span=span,
+    )
 
     lock_acquired = False
     processed_agent: Optional[PersistentAgent] = None
 
     try:
-        # Try to acquire the lock with a small timeout. If this instance cannot get the lock
-        # we record a *pending* flag in Redis so that exactly one follow-up task is queued
-        # once the current lock holder finishes.
-        if not lock.acquire(blocking=True, timeout=1):
-            # Mark that another round of processing should run once the lock is released.
-            # The TTL prevents a stale flag from surviving indefinitely in the unlikely event
-            # that no task is ever scheduled to clear it (e.g., if the agent is deleted).
-            redis_client.set(pending_key, "1", ex=600)
+        # Try to acquire the lock with a small timeout. If this instance cannot get the lock,
+        # enqueue the agent ID for a debounced drain task to retry once the lock clears.
+        if not lock.acquire(blocking=True, timeout=lock_settings.lock_acquire_timeout_seconds):
+            if _maybe_clear_stale_lock(
+                lock_key=lock_key,
+                lock_timeout_seconds=lock_settings.lock_timeout_seconds,
+                pending_set_ttl_seconds=lock_settings.pending_set_ttl_seconds,
+                redis_client=redis_client,
+                span=span,
+            ):
+                if lock.acquire(blocking=False):
+                    lock_acquired = True
+                else:
+                    span.add_event("Stale lock cleared but reacquire failed")
+            if not lock_acquired:
+                enqueue_pending_agent(
+                    persistent_agent_id,
+                    ttl=lock_settings.pending_set_ttl_seconds,
+                )
 
-            logger.info(
-                "Skipping event processing for agent %s – another process is already handling events (flagged pending)",
-                persistent_agent_id,
-            )
-            span.add_event("Event processing skipped – lock acquisition failed (pending flag set)")
-            span.set_attribute("lock.acquired", False)
-            clear_processing_queued_flag(persistent_agent_id)
-            return
+                logger.info(
+                    "Skipping event processing for agent %s – another process is already handling events (queued pending)",
+                    persistent_agent_id,
+                )
+                span.add_event("Event processing skipped – lock acquisition failed (pending queued)")
+                span.set_attribute("lock.acquired", False)
+                _schedule_pending_drain(
+                    delay_seconds=lock_settings.pending_drain_delay_seconds,
+                    schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
+                    span=span,
+                )
+                return
 
         lock_acquired = True
         clear_processing_queued_flag(persistent_agent_id)
@@ -1389,7 +1576,11 @@ def process_agent_events(
             span.set_attribute("sqlite_db.temp_path", _sqlite_db_path)
 
             # Actual event processing logic (protected by the lock)
-            processed_agent = _process_agent_events_locked(persistent_agent_id, span)
+            processed_agent = _process_agent_events_locked(
+                persistent_agent_id,
+                span,
+                lock_extender=lock_extender,
+            )
 
     except Exception as e:
         logger.error("Error during event processing for agent %s: %s", persistent_agent_id, str(e))
@@ -1410,9 +1601,6 @@ def process_agent_events(
         raise
     finally:
         # Release the lock
-        should_schedule_follow_up = False
-
-        # Only the lock holder attempts release & follow-up scheduling.
         if lock_acquired:
             try:
                 lock.release()
@@ -1421,48 +1609,6 @@ def process_agent_events(
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
-            finally:
-                # If any skipped task set the *pending* flag while we were processing, enqueue a single
-                # follow-up task now and clear the flag. This provides a simple *debounce* mechanism so
-                # that no matter how many additional triggers happened while we were running, we only
-                # schedule one more round of processing.
-                deleted_count = redis_client.delete(pending_key)
-                # Redis returns the number of keys removed (0 or 1). When tests mock the client,
-                # this may be a MagicMock instance – treat that as 0 to avoid eager-execution loops.
-                if isinstance(deleted_count, int) and deleted_count > 0:
-                    should_schedule_follow_up = True
-
-        if should_schedule_follow_up:
-            logger.info("Scheduling follow-up event processing for agent %s due to pending flag", persistent_agent_id)
-            span.add_event("Follow-up task scheduled")
-            # Import inside function to avoid circular dependency at module import time
-            try:
-                from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
-
-                # Skip follow-up if cycle is closed/exhausted
-                status = AgentBudgetManager.get_cycle_status(agent_id=str(persistent_agent_id))
-                active_id = AgentBudgetManager.get_active_budget_id(agent_id=str(persistent_agent_id))
-                if status and (status != "active" or active_id != ctx.budget_id):
-                    logger.info(
-                        "Skipping follow-up scheduling for agent %s; cycle status=%s active_id=%s ctx_id=%s",
-                        persistent_agent_id,
-                        status,
-                        active_id,
-                        ctx.budget_id,
-                    )
-                else:
-                    # Propagate budget context to follow‑up tasks
-                    process_agent_events_task.delay(
-                        str(persistent_agent_id),
-                        budget_id=ctx.budget_id,
-                        branch_id=ctx.branch_id,
-                        depth=ctx.depth,
-                        eval_run_id=getattr(ctx, "eval_run_id", None),
-                    )
-            except Exception as e:
-                logger.error(
-                    "Failed to schedule follow-up event processing for agent %s: %s", persistent_agent_id, str(e)
-                )
 
         # Clear local budget context
         set_budget_context(None)
@@ -1480,7 +1626,12 @@ def process_agent_events(
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
-def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> Optional[PersistentAgent]:
+def _process_agent_events_locked(
+    persistent_agent_id: Union[str, UUID],
+    span,
+    *,
+    lock_extender: Optional[_LockExtender] = None,
+) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
     try:
         agent = (
@@ -1705,6 +1856,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             is_first_run=is_first_run,
             credit_snapshot=credit_snapshot,
             run_sequence_number=run_sequence_number,
+            lock_extender=lock_extender,
         )
 
         sys_step.notes = "simplified"
@@ -1733,6 +1885,7 @@ def _run_agent_loop(
     is_first_run: bool,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     run_sequence_number: Optional[int] = None,
+    lock_extender: Optional[_LockExtender] = None,
 ) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
@@ -1818,6 +1971,8 @@ def _run_agent_loop(
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            if lock_extender:
+                lock_extender.maybe_extend()
             try:
                 daily_state = get_agent_daily_credit_state(agent)
             except Exception:
@@ -2101,6 +2256,8 @@ def _run_agent_loop(
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
+                    if lock_extender:
+                        lock_extender.maybe_extend()
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
                     tool_name = _get_tool_call_name(call)
                     if not tool_name:
