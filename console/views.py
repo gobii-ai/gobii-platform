@@ -4251,7 +4251,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
                 # Persist changes if needed
                 if agent_fields_to_update:
+                    if 'updated_at' not in agent_fields_to_update:
+                        agent_fields_to_update.append('updated_at')
                     agent.save(update_fields=agent_fields_to_update)
+                    logger.info("Updated agent %s fields: %s", agent.id, ", ".join(agent_fields_to_update))
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 
