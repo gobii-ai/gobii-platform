@@ -4110,6 +4110,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         dedicated_proxy_id = (request.POST.get('dedicated_proxy_id') or '').strip()
         selected_proxy: ProxyServer | None = None
 
+        # Capture previous values for analytics
+        prev_name = agent.name
+        prev_is_active = agent.is_active
+        prev_daily_limit = agent.daily_credit_limit
+        prev_hard_limit = agent.get_daily_credit_hard_limit()
+        prev_preferred_tier = agent.preferred_llm_tier
+        prev_agent_color_hex = agent.get_display_color().upper()
+        prev_whitelist_policy = agent.whitelist_policy
+
         plan = None
         if owner is not None:
             try:
@@ -4292,6 +4301,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
                 soft_value = float(new_daily_limit) if new_daily_limit is not None else None
                 hard_limit_value = agent.get_daily_credit_hard_limit()
+                changed_fields_for_analytics = [
+                    field for field in agent_fields_to_update if field not in {'updated_at', 'last_interaction_at'}
+                ]
                 update_props = Analytics.with_org_properties(
                     {
                         'agent_id': str(agent.pk),
@@ -4303,9 +4315,30 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
                         'preferred_llm_tier': resolved_preferred_tier_value,
                         'agent_color_hex': agent.get_display_color().upper(),
+                        'updated_fields': changed_fields_for_analytics,
                     },
                     organization=agent.organization,
                 )
+                if 'daily_credit_limit' in changed_fields_for_analytics:
+                    update_props['previous_daily_credit_limit'] = (
+                        float(prev_daily_limit) if prev_daily_limit is not None else None
+                    )
+                    update_props['previous_daily_credit_soft_target'] = (
+                        float(prev_daily_limit) if prev_daily_limit is not None else None
+                    )
+                    update_props['previous_daily_credit_hard_limit'] = (
+                        float(prev_hard_limit) if prev_hard_limit is not None else None
+                    )
+                if 'is_active' in changed_fields_for_analytics:
+                    update_props['previous_is_active'] = prev_is_active
+                if 'name' in changed_fields_for_analytics:
+                    update_props['previous_name'] = prev_name
+                if 'preferred_llm_tier' in changed_fields_for_analytics:
+                    update_props['previous_preferred_llm_tier'] = prev_preferred_tier
+                if 'agent_color' in changed_fields_for_analytics:
+                    update_props['previous_agent_color_hex'] = prev_agent_color_hex
+                if 'whitelist_policy' in changed_fields_for_analytics:
+                    update_props['previous_whitelist_policy'] = prev_whitelist_policy
                 Analytics.track_event(
                     user_id=request.user.id,
                     event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
