@@ -137,9 +137,17 @@ def start_web_session(
         )
         if not created:
             if _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
-                _touch_session(session, now=stamp, source=(source or _START_SOURCE))
+                session = _touch_session(
+                    session,
+                    now=stamp,
+                    source=(source or _START_SOURCE),
+                )
             else:
-                _restart_session(session, now=stamp, source=(source or _START_SOURCE))
+                session = _restart_session(
+                    session,
+                    now=stamp,
+                    source=(source or _START_SOURCE),
+                )
     return SessionResult(session=session, ttl_seconds=ttl_seconds)
 
 
@@ -237,13 +245,13 @@ def touch_web_session(
                     )
                     return None
 
-                _restart_session(
+                session = _restart_session(
                     session,
                     now=stamp,
                     source=(source or _MESSAGE_SOURCE),
                 )
                 return SessionResult(session=session, ttl_seconds=ttl_seconds)
-            _touch_session(session, now=stamp, source=source)
+            session = _touch_session(session, now=stamp, source=source)
             return SessionResult(session=session, ttl_seconds=ttl_seconds)
     except PersistentAgentWebSession.DoesNotExist:
         if not create:
