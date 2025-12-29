@@ -1358,9 +1358,9 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent(request.user, request.session, agent_id)
         try:
-            payload = json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            payload = {}
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
 
         node_ids = payload.get("node_ids") or payload.get("nodeIds") or []
         if not isinstance(node_ids, list) or not node_ids:
