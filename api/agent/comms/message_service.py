@@ -128,14 +128,14 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 pass
         elif isinstance(att, str):
             try:
-                resp = requests.get(att, timeout=30, allow_redirects=False)
+                resp = requests.get(att, timeout=30, allow_redirects=True)
                 resp.raise_for_status()
                 filename = att.rsplit("/", 1)[-1]
 
                 # Try HEAD to check size without downloading
                 if max_bytes:
                     try:
-                        h = requests.head(att, allow_redirects=False, timeout=15)
+                        h = requests.head(att, allow_redirects=True, timeout=15)
                         clen = int(h.headers.get("Content-Length", "0")) if h is not None else 0
                         if clen and clen > int(max_bytes):
                             logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
@@ -151,7 +151,8 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                     logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
                     continue
                 file_obj = ContentFile(content, name=filename)
-            except Exception:
+            except Exception as exc:
+                logging.warning("Failed to download attachment from '%s': %s", att, exc)
                 continue
         else:
             continue
