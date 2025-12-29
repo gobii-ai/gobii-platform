@@ -6,7 +6,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.models import PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep, UserQuota
+from api.models import Organization, PersistentAgent, PersistentAgentStep, PersistentAgentSystemStep, UserQuota
 from api.services.proactive_activation import ProactiveActivationService
 from api.tasks.proactive_agents import schedule_proactive_agents_task
 from tests.unit.test_api_persistent_agents import create_browser_agent_without_proxy
@@ -157,14 +157,42 @@ class ProactiveActivationServiceTests(TestCase):
         triggered = ProactiveActivationService.trigger_agents(batch_size=5)
         self.assertEqual(triggered, [])
 
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_skips_inactive_user(self, mock_redis_client, _mock_flag):
         mock_redis_client.return_value = _FakeRedis()
-        self.agent_a.refresh_from_db()
-        self.agent_a.proactive_last_trigger_at = timezone.now() - timedelta(days=8)
-        self.agent_a.save(update_fields=["proactive_last_trigger_at"])
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
 
-        triggered_after_cooldown = ProactiveActivationService.trigger_agents(batch_size=5)
-        self.assertEqual(len(triggered_after_cooldown), 1)
-        self.assertEqual(triggered_after_cooldown[0].id, self.agent_a.id)
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+
+        self.assertEqual(triggered, [])
+
+    @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
+    @patch("api.services.proactive_activation.get_redis_client")
+    def test_skips_inactive_organization(self, mock_redis_client, _mock_flag):
+        mock_redis_client.return_value = _FakeRedis()
+        org = Organization.objects.create(name="Org", slug="org", created_by=self.user)
+        org.billing.purchased_seats = 1
+        org.billing.save(update_fields=["purchased_seats"])
+        org.is_active = False
+        org.save(update_fields=["is_active"])
+
+        self.agent_a.organization = org
+        self.agent_a.save(update_fields=["organization"])
+        self.agent_b.proactive_opt_in = False
+        self.agent_b.save(update_fields=["proactive_opt_in"])
+
+        triggered = ProactiveActivationService.trigger_agents(batch_size=5)
+
+        self.assertEqual(triggered, [])
+
+    def test_force_trigger_blocks_inactive_owner(self):
+        self.user.is_active = False
+        self.user.save(update_fields=["is_active"])
+
+        with self.assertRaises(ValueError):
+            ProactiveActivationService.force_trigger(self.agent_a)
 
     @patch("api.services.proactive_activation.ProactiveActivationService._is_rollout_enabled_for_agent", return_value=True)
     @patch("api.services.proactive_activation.get_redis_client")

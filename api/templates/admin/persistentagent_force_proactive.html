@@ -17,6 +17,9 @@
     <strong>{{ agent.name }}</strong> (ID: {{ agent.id }}).
     This bypasses cooldown and opt-in checks and should only be used for testing.
   </p>
+  <p class="help">
+    Note: Proactive outreach will fail if the agent owner or their organization is inactive.
+  </p>
   {% if not agent.is_active %}
     <p class="warning">Warning: This agent is currently inactive. Forcing outreach may still queue processing.</p>
   {% endif %}

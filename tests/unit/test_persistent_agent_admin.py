@@ -217,6 +217,19 @@ class PersistentAgentAdminTests(TestCase):
         messages = list(response.context["messages"])
         self.assertTrue(any("Forced proactive outreach queued" in message.message for message in messages))
 
+    def test_force_proactive_post_handles_value_error(self):
+        url = reverse("admin:api_persistentagent_force_proactive", args=[self.persistent_agent.pk])
+        reason = "Inactive owner"
+
+        with patch("api.admin.ProactiveActivationService.force_trigger", side_effect=ValueError("owner inactive")) as mock_force, patch("api.admin.process_agent_events_task.delay") as mock_delay:
+            response = self.client.post(url, data={"reason": reason}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        mock_force.assert_called_once()
+        mock_delay.assert_not_called()
+        messages = list(response.context["messages"])
+        self.assertTrue(any("owner inactive" in message.message for message in messages))
+
     def test_system_message_get_renders_form(self):
         url = reverse("admin:api_persistentagent_system_message", args=[self.persistent_agent.pk])
         response = self.client.get(url)
