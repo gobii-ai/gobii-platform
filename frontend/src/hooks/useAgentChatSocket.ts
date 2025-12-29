@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 15000
@@ -36,6 +37,13 @@ function computeReconnectDelay(attempt: number): number {
   return base + jitter
 }
 
+function isPageVisible(): boolean {
+  if (typeof document === 'undefined') {
+    return true
+  }
+  return document.visibilityState === 'visible'
+}
+
 export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnapshot {
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
@@ -57,8 +65,10 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
   const socketRef = useRef<WebSocket | null>(null)
   const timeoutRef = useRef<number | null>(null)
   const syncIntervalRef = useRef<number | null>(null)
+  const scheduleConnectRef = useRef<(delay: number) => void>(() => undefined)
+  const closeSocketRef = useRef<() => void>(() => undefined)
   const closingSocketRef = useRef<WebSocket | null>(null)
-  const pausedRef = useRef(false)
+  const pauseReasonRef = useRef<'offline' | 'hidden' | null>(null)
   const lastSyncAtRef = useRef(0)
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
     status: 'idle',
@@ -83,6 +93,52 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     void refreshProcessingRef.current()
   }, [])
 
+  const handleResume = useCallback((reason: PageLifecycleResumeReason) => {
+    if (!agentId) {
+      return
+    }
+    if (!isPageVisible()) {
+      if (pauseReasonRef.current !== 'offline') {
+        pauseReasonRef.current = 'hidden'
+      }
+      return
+    }
+    if (pauseReasonRef.current === 'offline' && reason !== 'online') {
+      return
+    }
+    pauseReasonRef.current = null
+    retryRef.current = 0
+    updateSnapshot({ status: 'connecting', lastError: null })
+    scheduleConnectRef.current(0)
+    syncNow()
+  }, [agentId, syncNow, updateSnapshot])
+
+  const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
+    if (!agentId) {
+      return
+    }
+    if (reason === 'offline') {
+      pauseReasonRef.current = 'offline'
+      retryRef.current = 0
+      updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
+      if (timeoutRef.current !== null) {
+        clearTimeout(timeoutRef.current)
+        timeoutRef.current = null
+      }
+      closeSocketRef.current()
+      return
+    }
+    if (pauseReasonRef.current !== 'offline') {
+      pauseReasonRef.current = 'hidden'
+    }
+    if (timeoutRef.current !== null) {
+      clearTimeout(timeoutRef.current)
+      timeoutRef.current = null
+    }
+  }, [agentId, updateSnapshot])
+
+  usePageLifecycle({ onResume: handleResume, onSuspend: handleSuspend })
+
   useEffect(() => {
     if (!agentId) {
       updateSnapshot({ status: 'idle', lastError: null, lastConnectedAt: null })
@@ -100,6 +156,7 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
         openSocket()
       }, delay)
     }
+    scheduleConnectRef.current = scheduleConnect
 
     const closeSocket = () => {
       if (socketRef.current) {
@@ -113,9 +170,10 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
         socketRef.current = null
       }
     }
+    closeSocketRef.current = closeSocket
 
     const openSocket = () => {
-      if (pausedRef.current) {
+      if (pauseReasonRef.current !== null || !isPageVisible()) {
         return
       }
       const existing = socketRef.current
@@ -175,12 +233,12 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
           return
         }
         if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-          pausedRef.current = true
+          pauseReasonRef.current = 'offline'
           retryRef.current = 0
           updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
           return
         }
-        if (pausedRef.current) {
+        if (pauseReasonRef.current !== null) {
           return
         }
         const errorMessage = describeCloseEvent(event)
@@ -205,86 +263,30 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
       }
     }
 
-    const handleOnline = () => {
-      pausedRef.current = false
-      retryRef.current = 0
-      updateSnapshot({ status: 'connecting', lastError: null })
-      scheduleConnect(0)
-      syncNow()
+    pauseReasonRef.current = null
+    if (!isPageVisible()) {
+      pauseReasonRef.current = 'hidden'
     }
-
-    const handleOffline = () => {
-      pausedRef.current = true
-      retryRef.current = 0
-      updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
-      if (timeoutRef.current !== null) {
-        clearTimeout(timeoutRef.current)
-        timeoutRef.current = null
-      }
-      closeSocket()
-    }
-
-    const handleVisibility = () => {
-      if (document.visibilityState !== 'visible') {
-        return
-      }
-      if (pausedRef.current) {
-        return
-      }
-      scheduleConnect(0)
-      syncNow()
-    }
-
-    const handleFocus = () => {
-      if (pausedRef.current) {
-        return
-      }
-      scheduleConnect(0)
-      syncNow()
-    }
-
-    const handlePageShow = (event: PageTransitionEvent) => {
-      if (event.persisted) {
-        if (pausedRef.current) {
-          return
-        }
-        scheduleConnect(0)
-        syncNow()
-      }
-    }
-
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
-      pausedRef.current = true
+      pauseReasonRef.current = 'offline'
       updateSnapshot({ status: 'offline', lastError: 'Network connection lost.' })
-    } else {
-      pausedRef.current = false
+    } else if (pauseReasonRef.current === null) {
       scheduleConnect(0)
     }
 
     if (syncIntervalRef.current === null) {
       syncIntervalRef.current = window.setInterval(() => {
-        if (pausedRef.current) {
+        if (pauseReasonRef.current !== null) {
           return
         }
-        if (document.visibilityState !== 'visible') {
+        if (!isPageVisible()) {
           return
         }
         syncNow()
       }, BACKGROUND_SYNC_INTERVAL_MS)
     }
 
-    window.addEventListener('online', handleOnline)
-    window.addEventListener('offline', handleOffline)
-    window.addEventListener('focus', handleFocus)
-    window.addEventListener('pageshow', handlePageShow)
-    document.addEventListener('visibilitychange', handleVisibility)
-
     return () => {
-      window.removeEventListener('online', handleOnline)
-      window.removeEventListener('offline', handleOffline)
-      window.removeEventListener('focus', handleFocus)
-      window.removeEventListener('pageshow', handlePageShow)
-      document.removeEventListener('visibilitychange', handleVisibility)
       if (timeoutRef.current !== null) {
         clearTimeout(timeoutRef.current)
         timeoutRef.current = null
