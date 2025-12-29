@@ -38,6 +38,7 @@ dependencies = [
   "psycopg[binary]~=3.1",
   "pyjwt~=2.10.1",
   "pygments~=2.19.1",
+  "pdfkit==1.0.0",
   "python-frontmatter~=1.1.0",
   "ulid-py~=1.1.0",
   "redis~=6.2.0",
