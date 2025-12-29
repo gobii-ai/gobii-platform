@@ -11,7 +11,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from api.models import UserBilling, Organization, UserAttribution
 from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
 from constants.plans import PlanNames, PlanNamesChoices
-from pages.signals import handle_subscription_event, handle_user_signed_up
+from pages.signals import handle_subscription_event, handle_user_signed_up, handle_invoice_payment_failed
 from util.analytics import AnalyticsEvent
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from constants.stripe import (
@@ -204,6 +204,55 @@ def _build_event_payload(
 
 def _build_djstripe_event(payload, event_type="customer.subscription.updated"):
     return SimpleNamespace(data={"object": payload}, type=event_type)
+
+
+def _build_invoice_failed_payload(
+    *,
+    invoice_id="in_fail",
+    customer_id="cus_fail",
+    subscription_id="sub_fail",
+    attempt_count=1,
+    next_payment_attempt=None,
+    livemode=True,
+    amount_due=4720,
+    currency="usd",
+    billing_reason="subscription_cycle",
+    status="open",
+    auto_advance=True,
+    hosted_invoice_url="https://invoice.example/test",
+    invoice_pdf="https://invoice.example/test.pdf",
+    price_id="price_fail",
+    product_id="prod_fail",
+):
+    return {
+        "object": "invoice",
+        "id": invoice_id,
+        "number": "INV-FAIL",
+        "customer": customer_id,
+        "subscription": subscription_id,
+        "attempt_count": attempt_count,
+        "attempted": True,
+        "next_payment_attempt": next_payment_attempt,
+        "livemode": livemode,
+        "amount_due": amount_due,
+        "total": amount_due,
+        "currency": currency,
+        "billing_reason": billing_reason,
+        "collection_method": "charge_automatically",
+        "status": status,
+        "auto_advance": auto_advance,
+        "hosted_invoice_url": hosted_invoice_url,
+        "invoice_pdf": invoice_pdf,
+        "lines": {
+            "data": [
+                {
+                    "id": "il_fail",
+                    "object": "line_item",
+                    "price": {"id": price_id, "product": product_id},
+                }
+            ]
+        },
+    }
 
 
 @tag("batch_pages")
@@ -991,3 +1040,89 @@ class SubscriptionSignalOrganizationTests(TestCase):
         mock_item_create.assert_not_called()
         mock_modify.assert_called_once_with(sub.id, metadata={ORG_OVERAGE_STATE_META_KEY: ""})
         self.mock_capi.assert_not_called()
+
+
+@tag("batch_pages")
+class PaymentFailedSignalTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username="fail-user", email="fail@example.com", password="pw")
+
+    def test_invoice_payment_failed_for_user_tracks_event(self):
+        payload = _build_invoice_failed_payload(
+            customer_id="cus_user",
+            subscription_id="sub_user",
+            attempt_count=2,
+            next_payment_attempt=None,
+            auto_advance=False,
+            amount_due=2500,
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user"),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
+            patch("pages.signals.get_plan_by_product_id", return_value=None):
+
+            handle_invoice_payment_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
+        props = kwargs["properties"]
+        self.assertEqual(props["attempt_number"], 2)
+        self.assertTrue(props["final_attempt"])
+        self.assertEqual(props["stripe.invoice_id"], payload["id"])
+        self.assertEqual(props["stripe.subscription_id"], payload["subscription"])
+
+    def test_invoice_payment_failed_for_org_tracks_creator(self):
+        owner = User.objects.create_user(username="org-owner-fail", email="org-fail@example.com", password="pw")
+        org = Organization.objects.create(name="Fail Org", slug="fail-org", created_by=owner)
+        billing = org.billing
+        billing.stripe_customer_id = "cus_org_fail"
+        billing.save(update_fields=["stripe_customer_id"])
+
+        payload = _build_invoice_failed_payload(
+            customer_id="cus_org_fail",
+            subscription_id="sub_org",
+            attempt_count=1,
+            next_payment_attempt=timezone.now().timestamp() + 3600,
+            auto_advance=True,
+            product_id="prod_org",
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_org_fail", subscriber=None),
+            subscription=None,
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.ORG_TEAM.value}):
+
+            handle_invoice_payment_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], owner.id)
+        props = kwargs["properties"]
+        self.assertFalse(props.get("final_attempt", True))
+        self.assertEqual(props["organization_id"], str(org.id))
+        self.assertEqual(props["plan"], PlanNamesChoices.ORG_TEAM.value)

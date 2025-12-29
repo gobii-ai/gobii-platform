@@ -158,6 +158,7 @@ class AnalyticsEvent(StrEnum):
     BILLING_CANCELLATION = 'Billing Cancellation'
     BILLING_UPDATED = 'Billing Updated'
     BILLING_VIEWED = 'Billing Viewed'
+    BILLING_PAYMENT_FAILED = 'Billing Payment Failed'
 
     # API Key Events
     API_KEY_CREATED = 'API Key Created'
