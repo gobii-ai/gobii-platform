@@ -19,6 +19,7 @@ from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
+from .read_file import get_read_file_tool, execute_read_file
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 from constants.plans import PlanNames
@@ -28,6 +29,8 @@ logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
+READ_FILE_TOOL_NAME = "read_file"
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME}
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -75,6 +78,10 @@ BUILTIN_TOOL_REGISTRY = {
     HTTP_REQUEST_TOOL_NAME: {
         "definition": get_http_request_tool,
         "executor": execute_http_request,
+    },
+    READ_FILE_TOOL_NAME: {
+        "definition": get_read_file_tool,
+        "executor": execute_read_file,
     },
 }
 
@@ -438,23 +445,26 @@ def ensure_default_tools_enabled(
     *,
     allowed_server_names: Optional[Iterable[str]] = None,
 ) -> None:
-    """Ensure the default MCP tool set is enabled for new agents."""
+    """Ensure the default tool set is enabled for new agents."""
     manager = _get_manager()
 
     enabled_tools = set(
         PersistentAgentEnabledTool.objects.filter(agent=agent).values_list("tool_full_name", flat=True)
     )
     default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
-    missing = default_tools - enabled_tools
-    if not missing:
+    missing_mcp = default_tools - enabled_tools
+    missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
+    if not missing_mcp and not missing_builtin:
         return
 
-    available = {
-        tool.full_name
-        for tool in manager.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
-    }
+    available = set()
+    if missing_mcp:
+        available = {
+            tool.full_name
+            for tool in manager.get_tools_for_agent(agent, allowed_server_names=allowed_server_names)
+        }
 
-    for tool_name in missing:
+    for tool_name in missing_mcp:
         if manager.is_tool_blacklisted(tool_name):
             logger.warning("Default tool '%s' is blacklisted, skipping", tool_name)
             continue
@@ -463,6 +473,13 @@ def ensure_default_tools_enabled(
             continue
         enable_mcp_tool(agent, tool_name)
         logger.info("Enabled default tool '%s' for agent %s", tool_name, agent.id)
+
+    for tool_name in missing_builtin:
+        if tool_name not in BUILTIN_TOOL_REGISTRY:
+            logger.warning("Default builtin tool '%s' not registered, skipping", tool_name)
+            continue
+        mark_tool_enabled_without_discovery(agent, tool_name)
+        logger.info("Enabled default builtin tool '%s' for agent %s", tool_name, agent.id)
 
 
 def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]:

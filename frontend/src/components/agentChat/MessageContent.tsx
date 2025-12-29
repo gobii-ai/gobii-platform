@@ -6,9 +6,10 @@ import { MarkdownViewer } from '../common/MarkdownViewer'
 type MessageContentProps = {
   bodyHtml?: string | null
   bodyText?: string | null
+  showEmptyState?: boolean
 }
 
-export function MessageContent({ bodyHtml, bodyText }: MessageContentProps) {
+export function MessageContent({ bodyHtml, bodyText, showEmptyState = true }: MessageContentProps) {
   const htmlSource = useMemo(() => {
     if (bodyHtml && bodyHtml.trim().length > 0) {
       return sanitizeHtml(bodyHtml)
@@ -25,6 +26,10 @@ export function MessageContent({ bodyHtml, bodyText }: MessageContentProps) {
 
   if (bodyText && bodyText.trim().length > 0) {
     return <MarkdownViewer content={bodyText} />
+  }
+
+  if (!showEmptyState) {
+    return null
   }
 
   return <p className="text-sm text-slate-400">No content provided.</p>

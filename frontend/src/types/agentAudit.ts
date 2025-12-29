@@ -52,6 +52,9 @@ export type AuditMessageEvent = {
     id: string
     filename: string
     url: string
+    download_url?: string | null
+    filespace_path?: string | null
+    filespace_node_id?: string | null
     file_size_label?: string | null
   }[]
   peer_agent?: { id: string; name?: string | null } | null

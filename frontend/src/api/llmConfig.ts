@@ -22,7 +22,7 @@ export type ProviderEndpoint = {
   max_output_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
-  type: 'persistent' | 'browser' | 'embedding'
+  type: 'persistent' | 'browser' | 'embedding' | 'file_handler'
   enabled: boolean
   provider_id: string
 }
@@ -50,9 +50,9 @@ export type TierEndpoint = {
   reasoning_effort_override?: string | null
   supports_reasoning?: boolean
   endpoint_reasoning_effort?: string | null
-   extraction_endpoint_id?: string | null
-   extraction_endpoint_key?: string | null
-   extraction_label?: string | null
+  extraction_endpoint_id?: string | null
+  extraction_endpoint_key?: string | null
+  extraction_label?: string | null
 }
 
 export type PersistentTier = {
@@ -93,10 +93,18 @@ export type EmbeddingTier = {
   endpoints: TierEndpoint[]
 }
 
+export type FileHandlerTier = {
+  id: string
+  order: number
+  description: string
+  endpoints: TierEndpoint[]
+}
+
 export type EndpointChoices = {
   persistent_endpoints: ProviderEndpoint[]
   browser_endpoints: ProviderEndpoint[]
   embedding_endpoints: ProviderEndpoint[]
+  file_handler_endpoints: ProviderEndpoint[]
 }
 
 export type LlmOverviewResponse = {
@@ -105,6 +113,7 @@ export type LlmOverviewResponse = {
   persistent: { ranges: TokenRange[] }
   browser: BrowserPolicy | null
   embeddings: { tiers: EmbeddingTier[] }
+  file_handlers: { tiers: FileHandlerTier[] }
   choices: EndpointChoices
 }
 
@@ -143,6 +152,7 @@ const endpointPaths = {
   persistent: `${base}/persistent/endpoints/`,
   browser: `${base}/browser/endpoints/`,
   embedding: `${base}/embeddings/endpoints/`,
+  file_handler: `${base}/file-handlers/endpoints/`,
 } as const
 
 type EndpointKind = keyof typeof endpointPaths
@@ -244,6 +254,30 @@ export function updateEmbeddingTierEndpoint(tierEndpointId: string, payload: Rec
 
 export function deleteEmbeddingTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/embeddings/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createFileHandlerTier(payload: { description?: string }) {
+  return jsonRequest(`${base}/file-handlers/tiers/`, withCsrf(payload))
+}
+
+export function updateFileHandlerTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteFileHandlerTier(tierId: string) {
+  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addFileHandlerTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateFileHandlerTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
 export type EndpointTestResponse = {

@@ -2719,12 +2719,13 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         if request.method == 'POST':
             from_address = request.POST.get('from_address', '').strip()
             body = request.POST.get('body', '').strip()
+            attachments = list(request.FILES.getlist('attachments') or [])
 
             # Validation
             if not from_address:
                 self.message_user(request, "From address is required", messages.ERROR)
-            elif not body:
-                self.message_user(request, "Message body is required", messages.ERROR)
+            elif not body and not attachments:
+                self.message_user(request, "Message body or attachment is required", messages.ERROR)
             else:
                 try:
                     # Find agent's primary email endpoint
@@ -2758,7 +2759,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                         recipient=to_endpoint.address,
                         subject=None,
                         body=body,
-                        attachments=[],
+                        attachments=attachments,
                         raw_payload={"_source": "admin_simulation"},
                         msg_channel=CommsChannel.SMS,
                     )
@@ -3774,6 +3775,9 @@ from .models import (
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
+    FileHandlerModelEndpoint,
+    FileHandlerLLMTier,
+    FileHandlerTierEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -3888,6 +3892,35 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [EmbeddingsTierEndpointInline]
+
+
+@admin.register(FileHandlerModelEndpoint)
+class FileHandlerModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "supports_vision", "enabled")
+    list_filter = ("enabled", "provider", "supports_vision")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "litellm_model",
+        "api_base",
+        "supports_vision",
+    )
+
+
+class FileHandlerTierEndpointInline(admin.TabularInline):
+    model = FileHandlerTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(FileHandlerLLMTier)
+class FileHandlerLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
+    ordering = ("order",)
+    inlines = [FileHandlerTierEndpointInline]
 
 
 class PersistentTierEndpointInline(admin.TabularInline):

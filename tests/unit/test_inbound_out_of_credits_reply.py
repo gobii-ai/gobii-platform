@@ -66,7 +66,8 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
         mail.outbox.clear()
 
-        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
         # Should have sent one email reply to sender and owner, and skipped processing
         self.assertEqual(len(mail.outbox), 1)
@@ -91,7 +92,8 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
         mail.outbox.clear()
 
-        ingest_inbound_message(CommsChannel.EMAIL, parsed)
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
         # No reply email; processing was triggered
         self.assertEqual(len(mail.outbox), 0)

@@ -14,7 +14,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
-  onSendMessage?: (body: string) => void | Promise<void>
+  onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   autoScrollPinned?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>

@@ -176,7 +176,7 @@ def _message_events(agent: PersistentAgent, cursor: Cursor | None, limit: int, *
     qs = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
-        .prefetch_related("attachments")
+        .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp", "-seq")
     )
     if cursor:

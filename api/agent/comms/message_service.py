@@ -21,7 +21,7 @@ from django.db import transaction
 from django.template.loader import render_to_string
 from django.urls import reverse
 from django.utils import timezone
-from ..files.filespace_service import enqueue_import_after_commit
+from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
 from ...models import (
     PersistentAgentCommsEndpoint,
@@ -380,7 +380,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
 
 @transaction.atomic
 @tracer.start_as_current_span("ingest_inbound_message")
-def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -> InboundMessageInfo:
+def ingest_inbound_message(
+    channel: CommsChannel | str,
+    parsed: ParsedMessage,
+    filespace_import_mode: str = "sync",
+) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
 
     channel_val = channel.value if isinstance(channel, CommsChannel) else channel
@@ -418,10 +422,6 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
             attachment_span.set_attribute("message.id", str(message.id))
             attachment_span.set_attribute("attachments.count", len(parsed.attachments))
             _save_attachments(message, parsed.attachments)
-
-        # Enqueue filespace import after commit, only if attachments were actually saved
-        if message.attachments.exists():
-            enqueue_import_after_commit(str(message.id))
 
         owner_id = message.owner_agent_id
         if owner_id:
@@ -564,10 +564,33 @@ def ingest_inbound_message(channel: CommsChannel | str, parsed: ParsedMessage) -
                         getattr(agent_obj, "id", owner_id),
                     )
 
-            if not should_skip_processing:
+            def _trigger_processing() -> None:
+                if should_skip_processing:
+                    return
                 from api.agent.tasks import process_agent_events_task
                 # Top-level trigger: no budget context provided
                 process_agent_events_task.delay(str(owner_id))
+
+            has_attachments = message.attachments.exists()
+            message_id = str(message.id)
+
+            if has_attachments and filespace_import_mode == "sync":
+                def _import_then_maybe_process() -> None:
+                    try:
+                        import_message_attachments_to_filespace(message_id)
+                    except Exception:
+                        logging.exception(
+                            "Failed synchronous filespace import for message %s",
+                            message_id,
+                        )
+                    _trigger_processing()
+
+                transaction.on_commit(_import_then_maybe_process)
+            else:
+                if has_attachments:
+                    enqueue_import_after_commit(message_id)
+                if not should_skip_processing:
+                    transaction.on_commit(_trigger_processing)
 
         return InboundMessageInfo(message=message)
 
@@ -643,11 +666,24 @@ def inject_internal_web_message(
     # Attachments
     if attachments:
         _save_attachments(message, attachments)
-        enqueue_import_after_commit(str(message.id))
 
-    # Trigger Processing
-    if trigger_processing:
+    def _trigger_processing() -> None:
+        if not trigger_processing:
+            return
         from api.agent.tasks import process_agent_events_task
         process_agent_events_task.delay(str(agent.id), eval_run_id=eval_run_id)
+
+    if attachments:
+        message_id = str(message.id)
+        def _import_then_process() -> None:
+            try:
+                import_message_attachments_to_filespace(message_id)
+            except Exception:
+                logging.exception("Failed synchronous filespace import for message %s", message_id)
+            _trigger_processing()
+
+        transaction.on_commit(_import_then_process)
+    else:
+        transaction.on_commit(_trigger_processing)
 
     return message, conv

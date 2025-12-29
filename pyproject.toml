@@ -33,6 +33,7 @@ dependencies = [
   "zstandard~=0.23.0",
   "json-schema-to-pydantic~=0.4.1",
   "litellm @ git+https://github.com/gobii-ai/litellm.git@1e4f1e10a1a1adbf48b6be8b417844f2dd64162b",
+  "markitdown[all]==0.1.4",
   "markdown~=3.8",
   "psycopg[binary]~=3.1",
   "pyjwt~=2.10.1",

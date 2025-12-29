@@ -255,12 +255,13 @@ class AgentChatAPITests(TestCase):
     @patch("console.api_views.Analytics.track_event")
     def test_message_post_records_analytics(self, mock_track_event):
         with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
-            response = self.client.post(
-                f"/console/api/agents/{self.agent.id}/messages/",
-                data=json.dumps({"body": "Hello agent"}),
-                content_type="application/json",
-            )
-            self.assertEqual(response.status_code, 201)
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    f"/console/api/agents/{self.agent.id}/messages/",
+                    data=json.dumps({"body": "Hello agent"}),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 201)
 
         mock_delay.assert_called()
 
@@ -358,11 +359,12 @@ class AgentChatAPITests(TestCase):
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_message_post_creates_console_message(self, mock_delay):
         body = "Run weekly summary"
-        response = self.client.post(
-            f"/console/api/agents/{self.agent.id}/messages/",
-            data={"body": body},
-            content_type="application/json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/",
+                data={"body": body},
+                content_type="application/json",
+            )
         self.assertEqual(response.status_code, 201)
         payload = response.json()
         self.assertIn("event", payload)

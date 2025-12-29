@@ -34,12 +34,13 @@ class EvalInjectionTests(TestCase):
         
         # We patch process_agent_events_task to ensure it's NOT called
         with patch("api.agent.tasks.process_agent_events_task.delay") as mock_task:
-            msg, conv = inject_internal_web_message(
-                agent_id=self.agent.id,
-                body=body,
-                sender_user_id=sender_id,
-                trigger_processing=False
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                msg, conv = inject_internal_web_message(
+                    agent_id=self.agent.id,
+                    body=body,
+                    sender_user_id=sender_id,
+                    trigger_processing=False
+                )
             
             mock_task.assert_not_called()
             
@@ -60,11 +61,12 @@ class EvalInjectionTests(TestCase):
         body = "Trigger me"
         
         with patch("api.agent.tasks.process_agent_events_task.delay") as mock_task:
-            msg, conv = inject_internal_web_message(
-                agent_id=self.agent.id,
-                body=body,
-                trigger_processing=True
-            )
+            with self.captureOnCommitCallbacks(execute=True):
+                msg, conv = inject_internal_web_message(
+                    agent_id=self.agent.id,
+                    body=body,
+                    trigger_processing=True
+                )
             
             mock_task.assert_called_once_with(str(self.agent.id), eval_run_id=None)
             
@@ -103,11 +105,12 @@ class EvalInjectionTests(TestCase):
         # Use ContentFile which mimics a Django file object nicely
         dummy_file = ContentFile(b"test content", name="test.txt")
 
-        with patch("api.agent.comms.message_service.enqueue_import_after_commit") as mock_enqueue:
-            inject_internal_web_message(
-                agent_id=self.agent.id,
-                body="Attachment test",
-                attachments=[dummy_file],
-                trigger_processing=False
-            )
-            mock_enqueue.assert_called()
+        with patch("api.agent.comms.message_service.import_message_attachments_to_filespace") as mock_import:
+            with self.captureOnCommitCallbacks(execute=True):
+                msg, conv = inject_internal_web_message(
+                    agent_id=self.agent.id,
+                    body="Attachment test",
+                    attachments=[dummy_file],
+                    trigger_processing=False
+                )
+            mock_import.assert_called_once_with(str(msg.id))

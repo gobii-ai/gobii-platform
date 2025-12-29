@@ -1,5 +1,6 @@
 import json
 import logging
+import mimetypes
 import os
 import secrets
 import time
@@ -11,10 +12,10 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max
-from django.http import HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
+from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -35,6 +36,9 @@ from api.models import (
     EmbeddingsLLMTier,
     EmbeddingsModelEndpoint,
     EmbeddingsTierEndpoint,
+    FileHandlerLLMTier,
+    FileHandlerModelEndpoint,
+    FileHandlerTierEndpoint,
     LLMProvider,
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -50,6 +54,9 @@ from api.models import (
     EvalRun,
     EvalRunTask,
     PersistentAgentPromptArchive,
+    AgentFileSpaceAccess,
+    AgentFsNode,
+    OrganizationMembership,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -574,6 +581,11 @@ def _next_embedding_order() -> int:
     return (last.order if last else 0) + 1
 
 
+def _next_file_handler_order() -> int:
+    last = FileHandlerLLMTier.objects.order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
 def _swap_orders(queryset, item, direction: str) -> bool:
     siblings = list(queryset.order_by("order"))
     try:
@@ -1095,14 +1107,20 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent(request.user, request.session, agent_id)
-        try:
-            body = json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON body")
+        attachments: list[Any] = []
+        message_text = ""
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            message_text = (request.POST.get("body") or "").strip()
+            attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+        else:
+            try:
+                body = json.loads(request.body or "{}")
+            except json.JSONDecodeError:
+                return HttpResponseBadRequest("Invalid JSON body")
+            message_text = (body.get("body") or "").strip()
 
-        message_text = (body.get("body") or "").strip()
-        if not message_text:
-            return HttpResponseBadRequest("Message body is required")
+        if not message_text and not attachments:
+            return HttpResponseBadRequest("Message body or attachment is required")
 
         sender_address, recipient_address = _ensure_console_endpoints(agent, request.user)
 
@@ -1123,16 +1141,17 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
             recipient=recipient_address,
             subject=None,
             body=message_text,
-            attachments=[],
+            attachments=attachments,
             raw_payload={"source": "console", "user_id": request.user.id},
             msg_channel=CommsChannel.WEB,
         )
-        info = ingest_inbound_message(CommsChannel.WEB, parsed)
+        info = ingest_inbound_message(CommsChannel.WEB, parsed, filespace_import_mode="sync")
         event = serialize_message_event(info.message)
 
         props = {
             "message_id": str(info.message.id),
             "message_length": len(message_text),
+            "attachments_count": len(attachments),
         }
         if session_result:
             props["session_key"] = str(session_result.session.session_key)
@@ -1146,6 +1165,84 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def _has_access(self, user, agent: PersistentAgent) -> bool:
+        if user.is_staff:
+            return True
+        if agent.user_id == user.id:
+            return True
+        if agent.organization_id:
+            return OrganizationMembership.objects.filter(
+                user=user,
+                org_id=agent.organization_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        return False
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent.objects.select_related("organization"), pk=agent_id)
+        if not self._has_access(request.user, agent):
+            return HttpResponseForbidden("Not authorized to access this file.")
+
+        node_id = (request.GET.get("node_id") or "").strip()
+        path = (request.GET.get("path") or "").strip()
+        if not node_id and not path:
+            return HttpResponseBadRequest("node_id or path is required")
+
+        filespace_ids = AgentFileSpaceAccess.objects.filter(agent=agent).values_list("filespace_id", flat=True)
+        try:
+            if node_id:
+                node = (
+                    AgentFsNode.objects
+                    .filter(
+                        id=node_id,
+                        filespace_id__in=filespace_ids,
+                        node_type=AgentFsNode.NodeType.FILE,
+                        is_deleted=False,
+                    )
+                    .first()
+                )
+            else:
+                matches = AgentFsNode.objects.filter(
+                    filespace_id__in=filespace_ids,
+                    path=path,
+                    node_type=AgentFsNode.NodeType.FILE,
+                    is_deleted=False,
+                )
+                if matches.count() > 1:
+                    return HttpResponseBadRequest("Multiple files match path; use node_id instead.")
+                node = matches.first()
+        except (ValueError, ValidationError):
+            return HttpResponseBadRequest("Invalid node_id")
+        if not node:
+            raise Http404("File not found.")
+
+        file_field = node.content
+        if not file_field or not getattr(file_field, "name", None):
+            raise Http404("File not found.")
+
+        storage = file_field.storage
+        name = file_field.name
+        if hasattr(storage, "exists") and not storage.exists(name):
+            raise Http404("File not found.")
+        try:
+            file_handle = storage.open(name, "rb")
+        except (FileNotFoundError, OSError):
+            raise Http404("File not found.")
+
+        content_type = node.mime_type or mimetypes.guess_type(node.name or "")[0] or "application/octet-stream"
+        response = FileResponse(
+            file_handle,
+            as_attachment=True,
+            filename=node.name or "download",
+            content_type=content_type,
+        )
+        response["Cache-Control"] = "private, max-age=300"
+        return response
 
 
 class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
@@ -1237,6 +1334,7 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             provider.persistent_endpoints.exists()
             or provider.browser_endpoints.exists()
             or provider.embedding_endpoints.exists()
+            or provider.file_handler_endpoints.exists()
         )
         if has_dependents:
             return HttpResponseBadRequest("Provider cannot be deleted while endpoints exist")
@@ -1280,6 +1378,15 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
             elif kind == "embedding":
                 endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
                 result = _run_embedding_test(endpoint)
+            elif kind == "file_handler":
+                endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
+                result = _run_completion_test(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="litellm_model",
+                    base_attr="api_base",
+                    default_max_tokens=128,
+                )
             else:
                 return HttpResponseBadRequest("Invalid endpoint kind")
         except ValueError as exc:
@@ -1977,6 +2084,167 @@ class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
         tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+class FileHandlerEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if FileHandlerModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        provider_id = payload.get("provider_id")
+        provider = None
+        if provider_id:
+            provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+        endpoint = FileHandlerModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            litellm_model=model,
+            api_base=(payload.get("api_base") or "").strip(),
+            supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class FileHandlerEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "litellm_model" in payload:
+            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+            if model:
+                endpoint.litellm_model = model
+        if "api_base" in payload:
+            endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "supports_vision" in payload:
+            endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        if "provider_id" in payload:
+            provider_id = payload.get("provider_id")
+            if provider_id:
+                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+            else:
+                endpoint.provider = None
+        endpoint.save()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        return _json_ok()
+
+
+class FileHandlerTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        description = (payload.get("description") or "").strip()
+        order = _next_file_handler_order()
+        tier = FileHandlerLLMTier.objects.create(order=order, description=description)
+        return _json_ok(tier_id=str(tier.id))
+
+
+class FileHandlerTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            changed = _swap_orders(FileHandlerLLMTier.objects.all(), tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class FileHandlerTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(FileHandlerLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=payload.get("endpoint_id"))
+        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+            return HttpResponseBadRequest("Endpoint already exists in tier")
+        try:
+            weight = float(payload.get("weight", 1))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+        te = FileHandlerTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class FileHandlerTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(FileHandlerTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            tier_endpoint.weight = weight
+        tier_endpoint.save()
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(FileHandlerTierEndpoint, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
 

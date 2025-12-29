@@ -30,6 +30,16 @@ import {
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  Button as AriaButton,
+  Dialog,
+  DialogTrigger,
+  ListBox,
+  ListBoxItem,
+  Popover,
+  type Key,
+  type Selection,
+} from 'react-aria-components'
 import { SectionCard } from '../components/llmConfig/SectionCard'
 import { StatCard } from '../components/llmConfig/StatCard'
 import { useModal } from '../hooks/useModal'
@@ -48,6 +58,13 @@ const button = {
   icon: 'p-2 text-slate-500 hover:bg-slate-100 rounded-full transition',
   iconDanger: 'p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 rounded-full transition',
 }
+
+const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: string }> = [
+  { id: 'persistent', label: 'Persistent' },
+  { id: 'browser', label: 'Browser' },
+  { id: 'embedding', label: 'Embedding' },
+  { id: 'file_handler', label: 'File handler' },
+]
 
 const reasoningEffortOptions = [
   { value: '', label: 'Use endpoint default' },
@@ -118,7 +135,7 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
-type TierScope = 'persistent' | 'browser' | 'embedding'
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler'
 
 type EndpointTestStatus = {
   state: 'pending' | 'success' | 'error'
@@ -563,6 +580,27 @@ function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
   return mapped
 }
 
+function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'file_handler',
+      premium: false,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'file_handler')
+  return mapped
+}
+
 // Profile-based mapping functions
 function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
@@ -628,7 +666,9 @@ function AddEndpointModal({
     ? choices.browser_endpoints
     : scope === 'embedding'
       ? choices.embedding_endpoints
-      : choices.persistent_endpoints
+      : scope === 'file_handler'
+        ? choices.file_handler_endpoints
+        : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
   const [extractionSelected, setExtractionSelected] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -985,6 +1025,45 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
   const clearBusy = isBusy(actionKey('provider', provider.id, 'clear'))
   const toggleBusy = isBusy(actionKey('provider', provider.id, 'toggle'))
   const creatingEndpoint = isBusy(actionKey('provider', provider.id, 'create-endpoint'))
+  const [isAddMenuOpen, setIsAddMenuOpen] = useState(false)
+  const [selectedAddEndpointKeys, setSelectedAddEndpointKeys] = useState<Set<Key>>(new Set())
+
+  const handleAddMenuOpenChange = (open: boolean) => {
+    setIsAddMenuOpen(open)
+    if (!open) {
+      setSelectedAddEndpointKeys(new Set())
+    }
+  }
+
+  const openAddEndpointModal = (type: llmApi.ProviderEndpoint['type']) => {
+    showModal((onClose) => createPortal(
+      <AddProviderEndpointModal
+        providerName={provider.name}
+        type={type}
+        busy={creatingEndpoint}
+        onClose={onClose}
+        onSubmit={async (values) => {
+          try {
+            await handlers.onAddEndpoint(provider, type, values)
+            onClose()
+          } catch {
+            // feedback already shown
+          }
+        }}
+      />,
+      document.body,
+    ))
+  }
+
+  const handleAddEndpointSelection = (keys: Selection) => {
+    if (keys === 'all') return
+    const selection = keys as Set<Key>
+    const selectedKey = selection.values().next().value
+    if (!selectedKey) return
+    setSelectedAddEndpointKeys(new Set())
+    setIsAddMenuOpen(false)
+    openAddEndpointModal(String(selectedKey) as llmApi.ProviderEndpoint['type'])
+  }
 
   const openEndpointEditor = (endpoint: ProviderEndpointCard) => {
     const isEditing = editingEndpointId === endpoint.id
@@ -1000,7 +1079,13 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
           <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
             <div className="flex items-center justify-between">
               <h3 className="text-lg font-semibold">
-                {endpoint.type === 'persistent' ? 'Edit persistent endpoint' : endpoint.type === 'browser' ? 'Edit browser endpoint' : 'Edit embedding endpoint'}
+                {endpoint.type === 'persistent'
+                  ? 'Edit persistent endpoint'
+                  : endpoint.type === 'browser'
+                    ? 'Edit browser endpoint'
+                    : endpoint.type === 'file_handler'
+                      ? 'Edit file handler endpoint'
+                      : 'Edit embedding endpoint'}
               </h3>
               <button
                 onClick={() => {
@@ -1065,71 +1150,34 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
           <>
             <div className="flex items-center justify-between">
               <p className="text-sm text-slate-600">Manage provider endpoints</p>
-              <div className="flex gap-2">
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="persistent"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'persistent', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Persistent
-                </button>
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="browser"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'browser', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Browser
-                </button>
-                <button className={button.secondary} onClick={() => {
-                  showModal((onClose) => createPortal(
-                    <AddProviderEndpointModal
-                      providerName={provider.name}
-                      type="embedding"
-                      busy={creatingEndpoint}
-                      onClose={onClose}
-                      onSubmit={async (values) => {
-                        try {
-                          await handlers.onAddEndpoint(provider, 'embedding', values)
-                          onClose()
-                        } catch {
-                          // feedback already shown
-                        }
-                      }}
-                    />,
-                    document.body,
-                  ))
-                }}>
-                  <Plus className="size-4" /> Embedding
-                </button>
-              </div>
+              <DialogTrigger isOpen={isAddMenuOpen} onOpenChange={handleAddMenuOpenChange}>
+                <AriaButton className={button.secondary} isDisabled={creatingEndpoint}>
+                  <Plus className="size-4" /> Add endpoint
+                  <ChevronDown className={`size-4 text-slate-400 transition ${isAddMenuOpen ? 'rotate-180' : ''}`} />
+                </AriaButton>
+                <Popover className="z-50 mt-2 w-56 rounded-xl border border-slate-200 bg-white shadow-xl">
+                  <Dialog className="p-2">
+                    <ListBox
+                      aria-label="Select endpoint type"
+                      selectionMode="single"
+                      selectedKeys={selectedAddEndpointKeys as unknown as Selection}
+                      onSelectionChange={(keys) => handleAddEndpointSelection(keys as Selection)}
+                      className="space-y-1 text-sm"
+                    >
+                      {addEndpointOptions.map((option) => (
+                        <ListBoxItem
+                          key={option.id}
+                          id={option.id}
+                          textValue={option.label}
+                          className="flex w-full cursor-pointer items-center justify-between rounded-lg px-3 py-2 text-sm text-slate-700 data-[hovered]:bg-blue-50 data-[hovered]:text-blue-700 data-[focused]:bg-blue-50 data-[focused]:text-blue-700 data-[selected]:bg-blue-600 data-[selected]:text-white"
+                        >
+                          <span className="font-medium">{option.label}</span>
+                        </ListBoxItem>
+                      ))}
+                    </ListBox>
+                  </Dialog>
+                </Popover>
+              </DialogTrigger>
             </div>
             {provider.endpoints.length === 0 && <p className="text-sm text-slate-500">No endpoints linked.</p>}
             <div className="space-y-3">
@@ -1283,6 +1331,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
 
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
+  const isFileHandler = endpoint.type === 'file_handler'
+  const isToolingEndpoint = !isEmbedding && !isFileHandler
 
   return (
     <div className="space-y-3">
@@ -1317,7 +1367,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
         </label>
-        {!isBrowser && !isEmbedding && (
+        {!isBrowser && isToolingEndpoint && (
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -1331,20 +1381,20 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
             Reasoning
           </label>
         )}
-        {!isEmbedding && (
+        {isToolingEndpoint && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={supportsToolChoice} onChange={(event) => setSupportsToolChoice(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Tool choice
           </label>
         )}
-        {!isEmbedding && (
+        {isToolingEndpoint && (
           <label className="inline-flex items-center gap-2">
             <input type="checkbox" checked={parallelTools} onChange={(event) => setParallelTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
             Parallel calls
           </label>
         )}
       </div>
-      {!isBrowser && !isEmbedding && (
+      {!isBrowser && isToolingEndpoint && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span className="font-semibold text-slate-700">Default reasoning effort</span>
           <select
@@ -1396,6 +1446,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     persistent: 'Add persistent endpoint',
     browser: 'Add browser endpoint',
     embedding: 'Add embedding endpoint',
+    file_handler: 'Add file handler endpoint',
   }[type]
 
   const handleSubmit = async () => {
@@ -1480,7 +1531,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && (
+            {type !== 'embedding' && type !== 'file_handler' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2113,9 +2164,19 @@ export function LlmConfigScreen() {
     return mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers)
   }, [selectedProfile, overviewQuery.data?.embeddings.tiers])
 
+  const fileHandlerTiers = useMemo(
+    () => mapFileHandlerTiers(overviewQuery.data?.file_handlers?.tiers),
+    [overviewQuery.data?.file_handlers?.tiers],
+  )
+
   const browserStandardTiers = useMemo(() => browserTiers.filter((tier) => !tier.premium), [browserTiers])
   const browserPremiumTiers = useMemo(() => browserTiers.filter((tier) => tier.premium), [browserTiers])
-  const endpointChoices = overviewQuery.data?.choices ?? { persistent_endpoints: [], browser_endpoints: [], embedding_endpoints: [] }
+  const endpointChoices = overviewQuery.data?.choices ?? {
+    persistent_endpoints: [],
+    browser_endpoints: [],
+    embedding_endpoints: [],
+    file_handler_endpoints: [],
+  }
 
   useEffect(() => {
     setPendingWeights({})
@@ -2268,7 +2329,13 @@ export function LlmConfigScreen() {
     type: llmApi.ProviderEndpoint['type'],
     values: EndpointFormValues & { key: string },
   ) => {
-    const kind: 'persistent' | 'browser' | 'embedding' = type === 'browser' ? 'browser' : type === 'embedding' ? 'embedding' : 'persistent'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = type === 'browser'
+      ? 'browser'
+      : type === 'embedding'
+        ? 'embedding'
+        : type === 'file_handler'
+          ? 'file_handler'
+          : 'persistent'
     const payload: Record<string, unknown> = {
       provider_id: provider.id,
       key: values.key,
@@ -2286,6 +2353,12 @@ export function LlmConfigScreen() {
       payload.model = values.model
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
+      payload.enabled = true
+    } else if (type === 'file_handler') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.supports_vision = values.supportsVision ?? false
       payload.enabled = true
     } else {
       payload.model = values.model
@@ -2313,7 +2386,13 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
-    const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+      ? 'browser'
+      : endpoint.type === 'embedding'
+        ? 'embedding'
+        : endpoint.type === 'file_handler'
+          ? 'file_handler'
+          : 'persistent'
     const payload: Record<string, unknown> = {}
     if (values.model) {
       payload.model = values.model
@@ -2355,7 +2434,13 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
-    const kind: 'persistent' | 'browser' | 'embedding' = endpoint.type === 'browser' ? 'browser' : endpoint.type === 'embedding' ? 'embedding' : 'persistent'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+      ? 'browser'
+      : endpoint.type === 'embedding'
+        ? 'embedding'
+        : endpoint.type === 'file_handler'
+          ? 'file_handler'
+          : 'persistent'
     const displayName = endpoint.name || endpoint.api_base || endpoint.browser_base_url || endpoint.id
     return confirmDestructiveAction({
       title: `Delete endpoint "${displayName}"?`,
@@ -2484,6 +2569,9 @@ export function LlmConfigScreen() {
         if (scope === 'embedding') {
           return llmApi.updateEmbeddingTierEndpoint(entry.id, payload)
         }
+        if (scope === 'file_handler') {
+          return llmApi.updateFileHandlerTierEndpoint(entry.id, payload)
+        }
         return llmApi.updatePersistentTierEndpoint(entry.id, payload)
       })
       return Promise.all(ops)
@@ -2522,6 +2610,14 @@ export function LlmConfigScreen() {
         }
         if (scope === 'embedding') {
           return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(endpoint.id), {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          })
+        }
+        if (scope === 'file_handler') {
+          return runMutation(() => llmApi.deleteFileHandlerTierEndpoint(endpoint.id), {
             successMessage: 'Endpoint removed',
             label: 'Removing endpoint…',
             busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
@@ -2626,14 +2722,41 @@ export function LlmConfigScreen() {
       }),
     })
 
+  const handleFileHandlerTierAdd = () => runMutation(() => llmApi.createFileHandlerTier({}), {
+    successMessage: 'File handler tier added',
+    label: 'Creating file handler tier…',
+    busyKey: actionKey('file_handler', 'add'),
+    context: 'File handler tiers',
+  })
+  const handleFileHandlerTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateFileHandlerTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving file handler tier up…' : 'Moving file handler tier down…',
+      busyKey: actionKey('file_handler', tierId, 'move', direction),
+      busyKeys: [actionKey('file_handler', tierId, 'move')],
+      context: 'File handler tiers',
+    })
+  const handleFileHandlerTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete file handler tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteFileHandlerTier(tier.id), {
+        successMessage: 'File handler tier removed',
+        label: 'Removing file handler tier…',
+        busyKey: actionKey('file_handler', tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
+    const useProfile = Boolean(selectedProfile && scope !== 'file_handler')
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
         scope={scope}
         choices={endpointChoices}
-        busy={isBusy(actionKey(selectedProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
-        onAdd={(selection) => (selectedProfile ? submitProfileTierEndpoint(tier, scope, selection) : submitTierEndpoint(tier, scope, selection))}
+        busy={isBusy(actionKey(useProfile ? 'profile' : scope, scope, tier.id, 'attach-endpoint'))}
+        onAdd={(selection) => (useProfile ? submitProfileTierEndpoint(tier, scope, selection) : submitTierEndpoint(tier, scope, selection))}
         onClose={onClose}
       />,
       document.body,
@@ -2665,6 +2788,8 @@ export function LlmConfigScreen() {
         response = await llmApi.addBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
       } else if (scope === 'embedding') {
         response = await llmApi.addEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
+      } else if (scope === 'file_handler') {
+        response = await llmApi.addFileHandlerTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else {
         response = await llmApi.addPersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       }
@@ -2692,6 +2817,9 @@ export function LlmConfigScreen() {
         }
         if (scope === 'embedding') {
           return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload)
+        }
+        if (scope === 'file_handler') {
+          return llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload)
         }
         return llmApi.updatePersistentTierEndpoint(tierEndpointId, payload)
       })
@@ -3586,7 +3714,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, and tooling hints.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, and file handling.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -3684,6 +3812,43 @@ export function LlmConfigScreen() {
                 )
               })}
               {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <Sparkles className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">File handler tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for file-to-markdown conversion.</p>
+                  </div>
+                </div>
+                <button type="button" className={button.secondary} onClick={handleFileHandlerTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
+              </div>
+              {fileHandlerTiers.map((tier, index) => {
+                const lastIndex = fileHandlerTiers.length - 1
+                return (
+                  <TierCard
+                    key={tier.id}
+                    tier={tier}
+                    pendingWeights={pendingWeights}
+                    scope="file_handler"
+                    canMoveUp={index > 0}
+                    canMoveDown={index < lastIndex}
+                    isDirty={dirtyTierIds.has(`file_handler:${tier.id}`)}
+                    isSaving={savingTierIds.has(`file_handler:${tier.id}`)}
+                    onMove={(direction) => handleFileHandlerTierMove(tier.id, direction)}
+                    onRemove={handleFileHandlerTierRemove}
+                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'file_handler')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'file_handler')}
+                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'file_handler')}
+                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'file_handler')}
+                    isActionBusy={isBusy}
+                  />
+                )
+              })}
+              {fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
             </div>
           </div>
         </SectionCard>
