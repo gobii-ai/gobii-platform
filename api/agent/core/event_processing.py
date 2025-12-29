@@ -113,8 +113,10 @@ from ...models import (
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
     CommsChannel,
+    build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
+from api.services.web_sessions import get_active_web_sessions
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -335,6 +337,13 @@ def _get_tool_call_name(call: Any) -> Optional[str]:
     return None
 
 
+def _get_latest_active_web_session(agent: PersistentAgent):
+    for session in get_active_web_sessions(agent):
+        if session.user_id is not None:
+            return session
+    return None
+
+
 def _get_last_message_tool_call(agent: PersistentAgent) -> Optional[Tuple[str, dict]]:
     call = (
         PersistentAgentToolCall.objects.select_related("step")
@@ -362,7 +371,28 @@ def _build_implied_send_tool_call(
     *,
     will_continue_work: bool,
 ) -> Tuple[Optional[dict], Optional[str]]:
+    web_session = _get_latest_active_web_session(agent)
+    if web_session:
+        tool_params = {
+            "to_address": build_web_user_address(web_session.user_id, agent.id),
+            "body": message_text,
+        }
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        return (
+            {
+                "id": "implied_send",
+                "function": {
+                    "name": "send_chat_message",
+                    "arguments": json.dumps(tool_params),
+                },
+            },
+            None,
+        )
+
     last_call = _get_last_message_tool_call(agent)
+    if last_call and last_call[0] == "send_chat_message":
+        last_call = None
     if last_call:
         tool_name, tool_params = last_call
         body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)

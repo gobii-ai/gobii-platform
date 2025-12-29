@@ -5,6 +5,7 @@ import type {
   MessageEvent,
   ToolClusterEvent,
   ToolCallEntry,
+  ThinkingEvent,
 } from '../../types/agentChat'
 
 export type AgentTimelineProps = AgentTimelineSnapshot & {
@@ -16,5 +17,6 @@ export type {
   MessageEvent,
   ToolClusterEvent,
   ToolCallEntry,
+  ThinkingEvent,
   AgentMessage,
 }

@@ -13,7 +13,9 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
     UserQuota,
+    build_web_user_address,
 )
+from api.services.web_sessions import start_web_session
 
 
 @tag("batch_event_processing")
@@ -151,3 +153,114 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(params.get("to_address"), "owner@example.com")
         self.assertEqual(params.get("mobile_first_html"), "Hello via implied email")
         self.assertEqual(params.get("subject"), "Update from Implied Send Agent")
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_prefers_active_web_session(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_send_email,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        prior_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: send_email",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="send_email",
+            tool_params={
+                "to_address": "owner@example.com",
+                "subject": "Old subject",
+                "mobile_first_html": "old",
+            },
+            result="{}",
+        )
+
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion("Hello via web")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertEqual(
+            params.get("to_address"),
+            build_web_user_address(self.user.id, self.agent.id),
+        )
+        self.assertEqual(params.get("body"), "Hello via web")
+        self.assertFalse(mock_send_email.called)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_skips_inactive_web_session(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_send_email,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        prior_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Tool call: send_chat_message",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="send_chat_message",
+            tool_params={
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
+                "body": "old",
+            },
+            result="{}",
+        )
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="owner@example.com",
+            owner_agent=None,
+        )
+        self.agent.preferred_contact_endpoint = endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
+
+        resp = self._mock_completion("Hello fallback")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_email.called)
+        self.assertFalse(mock_send_chat.called)

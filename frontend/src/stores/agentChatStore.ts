@@ -1,137 +1,18 @@
 import { create } from 'zustand'
 
 import type {
-  AgentMessage,
   ProcessingSnapshot,
   ProcessingWebTask,
   StreamEventPayload,
   StreamState,
   TimelineEvent,
-  ToolClusterEvent,
-  ToolCallEntry,
 } from '../types/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
-
-const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
-
-function pickHtmlCandidate(message: AgentMessage): string | null {
-  const htmlValue = message.bodyHtml?.trim()
-  if (htmlValue) {
-    return htmlValue
-  }
-
-  const textValue = message.bodyText?.trim()
-  if (!textValue) {
-    return null
-  }
-
-  if (looksLikeHtml(textValue) || HTML_TAG_FALLBACK_PATTERN.test(textValue)) {
-    return textValue
-  }
-
-  return null
-}
-
-function normalizeEvent(event: TimelineEvent): TimelineEvent {
-  if (event.kind !== 'message') {
-    return event
-  }
-
-  const candidate = pickHtmlCandidate(event.message)
-  if (!candidate) {
-    if (event.message.bodyHtml === undefined) {
-      return {
-        ...event,
-        message: {
-          ...event.message,
-          bodyHtml: '',
-        },
-      }
-    }
-    return event
-  }
-
-  const sanitized = sanitizeHtml(candidate)
-  if ((event.message.bodyHtml ?? '') === sanitized) {
-    return event
-  }
-
-  return {
-    ...event,
-    message: {
-      ...event.message,
-      bodyHtml: sanitized,
-    },
-  }
-}
-
-function normalizeEvents(events: TimelineEvent[]): TimelineEvent[] {
-  return events.map(normalizeEvent)
-}
-
-function parseCursorValue(cursor: string): number {
-  const [raw] = cursor.split(':', 1)
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : 0
-}
-
-function sortEvents(events: TimelineEvent[]): TimelineEvent[] {
-  return [...events].sort((a, b) => parseCursorValue(a.cursor) - parseCursorValue(b.cursor))
-}
-
-function mergeClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): ToolClusterEvent {
-  const threshold = base.collapseThreshold || incoming.collapseThreshold
-  const entryMap = new Map<string, ToolCallEntry>()
-  const insert = (entry: ToolCallEntry) => {
-    entryMap.set(entry.id, entry)
-  }
-  base.entries.forEach(insert)
-  incoming.entries.forEach(insert)
-
-  const entries = Array.from(entryMap.values()).sort((left, right) => {
-    const leftValue = left.cursor ? parseCursorValue(left.cursor) : 0
-    const rightValue = right.cursor ? parseCursorValue(right.cursor) : 0
-    return leftValue - rightValue
-  })
-
-  const earliestTimestamp = entries[0]?.timestamp ?? base.earliestTimestamp ?? incoming.earliestTimestamp
-  const latestTimestamp = entries[entries.length - 1]?.timestamp ?? incoming.latestTimestamp ?? base.latestTimestamp
-
-  const cursor = parseCursorValue(base.cursor) <= parseCursorValue(incoming.cursor) ? base.cursor : incoming.cursor
-
-  return {
-    ...base,
-    cursor,
-    entries,
-    entryCount: entries.length,
-    earliestTimestamp,
-    latestTimestamp,
-    collapsible: entries.length >= threshold,
-    collapseThreshold: threshold,
-  }
-}
-
-function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
-  const map = new Map<string, TimelineEvent>()
-  for (const event of existing) {
-    const normalized = normalizeEvent(event)
-    map.set(normalized.cursor, normalized)
-  }
-  for (const event of incoming) {
-    const normalized = normalizeEvent(event)
-    const current = map.get(normalized.cursor)
-    if (current && current.kind === 'steps' && normalized.kind === 'steps') {
-      map.set(normalized.cursor, mergeClusters(current, normalized))
-    } else {
-      map.set(normalized.cursor, normalized)
-    }
-  }
-  return sortEvents(Array.from(map.values()))
-}
+import { mergeTimelineEvents, normalizeTimelineEvent, prepareTimelineEvents } from './agentChatTimeline'
 
 const TIMELINE_WINDOW_SIZE = 100
+let refreshLatestInFlight = false
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [] }
 
@@ -170,17 +51,14 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
   return coerceProcessingSnapshot(input)
 }
 
-export type CompletedThinking = {
-  streamId: string
-  reasoning: string
-}
-
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
   streaming: StreamState | null
-  thinkingCollapsed: boolean
-  completedThinking: CompletedThinking | null
+  streamingLastUpdatedAt: number | null
+  streamingClearOnDone: boolean
+  streamingThinkingCollapsed: boolean
+  thinkingCollapsedByCursor: Record<string, boolean>
   oldestCursor: string | null
   newestCursor: string | null
   hasMoreOlder: boolean
@@ -191,6 +69,7 @@ export type AgentChatState = {
   loading: boolean
   loadingOlder: boolean
   loadingNewer: boolean
+  refreshingLatest: boolean
   error: string | null
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
@@ -198,24 +77,29 @@ export type AgentChatState = {
   agentColorHex: string | null
   initialize: (agentId: string, options?: { agentColorHex?: string | null }) => Promise<void>
   refreshProcessing: () => Promise<void>
+  refreshLatest: () => Promise<void>
   loadOlder: () => Promise<void>
   loadNewer: () => Promise<void>
   jumpToLatest: () => Promise<void>
   sendMessage: (body: string, attachments?: File[]) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
   receiveStreamEvent: (payload: StreamEventPayload) => void
+  finalizeStreaming: () => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
-  setThinkingCollapsed: (collapsed: boolean) => void
+  toggleThinkingCollapsed: (cursor: string) => void
+  setStreamingThinkingCollapsed: (collapsed: boolean) => void
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
   events: [],
   streaming: null,
-  thinkingCollapsed: false,
-  completedThinking: null,
+  streamingLastUpdatedAt: null,
+  streamingClearOnDone: false,
+  streamingThinkingCollapsed: false,
+  thinkingCollapsedByCursor: {},
   oldestCursor: null,
   newestCursor: null,
   hasMoreOlder: false,
@@ -226,6 +110,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   loading: false,
   loadingOlder: false,
   loadingNewer: false,
+  refreshingLatest: false,
   error: null,
   autoScrollPinned: true,
   autoScrollPinSuppressedUntil: null,
@@ -241,14 +126,16 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
       streaming: null,
-      thinkingCollapsed: false,
-      completedThinking: null,
+      streamingLastUpdatedAt: null,
+      streamingClearOnDone: false,
+      streamingThinkingCollapsed: false,
+      thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
     })
 
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(normalizeEvents(snapshot.events))
+      const events = prepareTimelineEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const processingSnapshot = normalizeProcessingUpdate(
@@ -295,6 +182,86 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     }
   },
 
+  async refreshLatest() {
+    const state = get()
+    if (!state.agentId || refreshLatestInFlight || state.loading || !state.newestCursor) {
+      return
+    }
+    refreshLatestInFlight = true
+    set({ refreshingLatest: true })
+    try {
+      const snapshot = await fetchAgentTimeline(state.agentId, {
+        direction: 'newer',
+        cursor: state.newestCursor ?? undefined,
+        limit: TIMELINE_WINDOW_SIZE,
+      })
+      const incoming = prepareTimelineEvents(snapshot.events)
+      const hasThinkingEvent = incoming.some((event) => event.kind === 'thinking')
+      const processingSnapshot = normalizeProcessingUpdate(
+        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
+      )
+      set((current) => {
+        const agentColorHex = snapshot.agent_color_hex
+          ? normalizeHexColor(snapshot.agent_color_hex)
+          : current.agentColorHex
+        const hasStreamingContent = Boolean(current.streaming?.content?.trim())
+        const allowThinkingClear = Boolean(current.streaming) && !hasStreamingContent
+        const shouldClearThinkingStream = hasThinkingEvent && current.streaming?.done && allowThinkingClear
+        const shouldFlagThinkingClear = hasThinkingEvent && current.streaming && !current.streaming.done && allowThinkingClear
+        const nextStreaming = shouldClearThinkingStream ? null : current.streaming
+        const nextStreamingClearOnDone =
+          shouldClearThinkingStream
+            ? false
+            : shouldFlagThinkingClear
+              ? true
+              : allowThinkingClear
+                ? current.streamingClearOnDone
+                : false
+        if (!current.autoScrollPinned) {
+          const pendingEvents = mergeTimelineEvents(current.pendingEvents, incoming)
+          return {
+            processingActive: processingSnapshot.active,
+            processingWebTasks: processingSnapshot.webTasks,
+            pendingEvents,
+            hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
+            streaming: nextStreaming,
+            streamingClearOnDone: nextStreamingClearOnDone,
+            refreshingLatest: false,
+            agentColorHex,
+          }
+        }
+        const merged = mergeTimelineEvents(current.events, incoming)
+        const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
+        const events = merged.slice(windowStart)
+        const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
+        const newestCursor = events.length ? events[events.length - 1].cursor : current.newestCursor
+        const trimmedOlder = merged.length > events.length
+        const hasMoreOlder = incoming.length === 0 ? current.hasMoreOlder : snapshot.has_more_older || trimmedOlder
+        return {
+          events,
+          oldestCursor,
+          newestCursor,
+          hasMoreOlder,
+          hasMoreNewer: snapshot.has_more_newer,
+          processingActive: processingSnapshot.active,
+          processingWebTasks: processingSnapshot.webTasks,
+          pendingEvents: [],
+          streaming: nextStreaming,
+          streamingClearOnDone: nextStreamingClearOnDone,
+          refreshingLatest: false,
+          agentColorHex,
+        }
+      })
+    } catch (error) {
+      set({
+        refreshingLatest: false,
+        error: error instanceof Error ? error.message : 'Failed to refresh timeline',
+      })
+    } finally {
+      refreshLatestInFlight = false
+    }
+  },
+
   async loadOlder() {
     const state = get()
     if (!state.agentId || state.loadingOlder || !state.hasMoreOlder) {
@@ -307,8 +274,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.oldestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(normalizeEvents(snapshot.events))
-      const merged = mergeEvents(state.events, incoming)
+      const incoming = prepareTimelineEvents(snapshot.events)
+      const merged = mergeTimelineEvents(state.events, incoming)
       const windowSize = Math.min(TIMELINE_WINDOW_SIZE, merged.length)
       const events = merged.slice(0, windowSize)
       const oldestCursor = events.length ? events[0].cursor : null
@@ -344,8 +311,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.newestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(normalizeEvents(snapshot.events))
-      const merged = mergeEvents(state.events, incoming)
+      const incoming = prepareTimelineEvents(snapshot.events)
+      const merged = mergeTimelineEvents(state.events, incoming)
       const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
       const events = merged.slice(windowStart)
       const oldestCursor = events.length ? events[0].cursor : null
@@ -382,7 +349,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({ loading: true })
     try {
       const snapshot = await fetchAgentTimeline(state.agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(normalizeEvents(snapshot.events))
+      const events = prepareTimelineEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const processingSnapshot = normalizeProcessingUpdate(
@@ -431,29 +398,32 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   receiveRealtimeEvent(event) {
     const state = get()
-    const normalized = normalizeEvent(event)
+    const normalized = normalizeTimelineEvent(event)
     const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
+    const hasStreamingContent = Boolean(state.streaming?.content?.trim())
+    const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
+    const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done && allowThinkingClear
+    const shouldFlagThinkingClear = normalized.kind === 'thinking' && state.streaming && !state.streaming.done && allowThinkingClear
+    const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
+    const nextStreamingClearOnDone =
+      shouldClearStream || shouldClearThinkingStream
+        ? false
+        : shouldFlagThinkingClear
+          ? true
+          : allowThinkingClear
+            ? state.streamingClearOnDone
+            : false
     if (!state.autoScrollPinned) {
-      const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
+      const pendingEvents = mergeTimelineEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
-        streaming: shouldClearStream ? null : state.streaming,
+        streaming: nextStreaming,
+        streamingClearOnDone: nextStreamingClearOnDone,
       })
       return
     }
-    let events: TimelineEvent[]
-    if (normalized.kind === 'steps') {
-      const last = state.events[state.events.length - 1]
-      if (last && last.kind === 'steps') {
-        const mergedLast = mergeClusters(last, normalized)
-        events = sortEvents([...state.events.slice(0, -1), mergedLast])
-      } else {
-        events = mergeEvents(state.events, [normalized])
-      }
-    } else {
-      events = mergeEvents(state.events, [normalized])
-    }
+    const events = mergeTimelineEvents(state.events, [normalized])
     const newestCursor = events.length ? events[events.length - 1].cursor : null
     const oldestCursor = events.length ? events[0].cursor : null
     set({
@@ -461,7 +431,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       newestCursor,
       oldestCursor,
       pendingEvents: [],
-      streaming: shouldClearStream ? null : state.streaming,
+      streaming: nextStreaming,
+      streamingClearOnDone: nextStreamingClearOnDone,
     })
   },
 
@@ -471,6 +442,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     }
     const isStart = payload.status === 'start'
     const isDone = payload.status === 'done'
+    const isDelta = payload.status === 'delta'
+    const now = Date.now()
+    let shouldRefreshLatest = false
 
     set((state) => {
       const base =
@@ -485,7 +459,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         streamId: base.streamId,
         reasoning: reasoningDelta ? `${base.reasoning}${reasoningDelta}` : base.reasoning,
         content: contentDelta ? `${base.content}${contentDelta}` : base.content,
-        done: isDone ? true : base.done,
+        done: isDone ? true : isDelta ? false : base.done,
       }
 
       const hasUnseenActivity = !state.autoScrollPinned
@@ -493,15 +467,27 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         : state.hasUnseenActivity
 
       if (isDone && !next.reasoning && !next.content) {
-        return { streaming: null, hasUnseenActivity, completedThinking: null }
+        return { streaming: null, hasUnseenActivity, streamingLastUpdatedAt: now, streamingClearOnDone: false }
       }
 
-      if (isDone && next.reasoning) {
+      const hasStreamingContent = Boolean(next.content.trim())
+
+      if (isDone && next.reasoning && !hasStreamingContent) {
+        if (state.streamingClearOnDone) {
+          return {
+            streaming: null,
+            hasUnseenActivity,
+            streamingClearOnDone: false,
+            streamingLastUpdatedAt: now,
+          }
+        }
+        shouldRefreshLatest = true
         return {
           streaming: next,
           hasUnseenActivity,
-          thinkingCollapsed: true,
-          completedThinking: { streamId: next.streamId, reasoning: next.reasoning },
+          streamingThinkingCollapsed: true,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
         }
       }
 
@@ -509,12 +495,42 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return {
           streaming: next,
           hasUnseenActivity,
-          thinkingCollapsed: false,
-          completedThinking: null,
+          streamingThinkingCollapsed: false,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
         }
       }
 
-      return { streaming: next, hasUnseenActivity }
+      const nextStreamingClearOnDone = hasStreamingContent ? false : state.streamingClearOnDone
+      const nextStreamingThinkingCollapsed =
+        isDone && next.reasoning ? true : state.streamingThinkingCollapsed
+      return {
+        streaming: next,
+        hasUnseenActivity,
+        streamingClearOnDone: nextStreamingClearOnDone,
+        streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
+        streamingLastUpdatedAt: now,
+      }
+    })
+
+    if (shouldRefreshLatest) {
+      void get().refreshLatest()
+    }
+  },
+
+  finalizeStreaming() {
+    const now = Date.now()
+    set((state) => {
+      if (!state.streaming || state.streaming.done) {
+        return state
+      }
+      const hasReasoning = Boolean(state.streaming.reasoning?.trim())
+      return {
+        streaming: { ...state.streaming, done: true },
+        streamingThinkingCollapsed: hasReasoning ? true : state.streamingThinkingCollapsed,
+        streamingClearOnDone: false,
+        streamingLastUpdatedAt: now,
+      }
     })
   },
 
@@ -530,7 +546,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   setAutoScrollPinned(pinned) {
     set((state) => {
       if (pinned && state.pendingEvents.length) {
-        const merged = mergeEvents(state.events, state.pendingEvents)
+        const merged = mergeTimelineEvents(state.events, state.pendingEvents)
         const newestCursor = merged.length ? merged[merged.length - 1].cursor : state.newestCursor
         const oldestCursor = merged.length ? merged[0].cursor : state.oldestCursor
         return {
@@ -562,7 +578,20 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     })
   },
 
-  setThinkingCollapsed(collapsed) {
-    set({ thinkingCollapsed: collapsed })
+  toggleThinkingCollapsed(cursor) {
+    set((state) => {
+      const current = state.thinkingCollapsedByCursor[cursor]
+      const nextCollapsed = !(current ?? true)
+      return {
+        thinkingCollapsedByCursor: {
+          ...state.thinkingCollapsedByCursor,
+          [cursor]: nextCollapsed,
+        },
+      }
+    })
+  },
+
+  setStreamingThinkingCollapsed(collapsed) {
+    set({ streamingThinkingCollapsed: collapsed })
   },
 }))

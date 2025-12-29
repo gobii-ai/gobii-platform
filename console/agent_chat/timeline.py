@@ -23,6 +23,7 @@ from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentStep,
@@ -33,6 +34,7 @@ from api.models import (
 DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
+THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 
 HTML_TAG_PATTERN = re.compile(r"<([a-z][\w-]*)(?:\s[^>]*)?>", re.IGNORECASE)
 
@@ -76,7 +78,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step"]
+    kind: Literal["message", "step", "thinking"]
     identifier: str
 
     def encode(self) -> str:
@@ -106,6 +108,14 @@ class StepEnvelope:
     cursor: CursorPayload
     step: PersistentAgentStep
     tool_call: PersistentAgentToolCall
+
+
+@dataclass(slots=True)
+class ThinkingEnvelope:
+    sort_key: tuple[int, str, str]
+    cursor: CursorPayload
+    completion: PersistentAgentCompletion
+    reasoning: str
 
 
 @dataclass(slots=True)
@@ -346,6 +356,17 @@ def _serialize_message(env: MessageEnvelope) -> dict:
     }
 
 
+def _serialize_thinking(env: ThinkingEnvelope) -> dict:
+    completion = env.completion
+    return {
+        "kind": "thinking",
+        "cursor": env.cursor.encode(),
+        "timestamp": _format_timestamp(completion.created_at),
+        "reasoning": env.reasoning,
+        "completionId": str(completion.id),
+    }
+
+
 def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     step = env.step
     tool_call = env.tool_call
@@ -435,6 +456,38 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
     return list(qs[:limit])
 
 
+def _thinking_queryset(
+    agent: PersistentAgent,
+    direction: TimelineDirection,
+    cursor: CursorPayload | None,
+) -> Sequence[PersistentAgentCompletion]:
+    limit = MAX_PAGE_SIZE * 3
+    qs = (
+        PersistentAgentCompletion.objects.filter(
+            agent=agent,
+            completion_type__in=THINKING_COMPLETION_TYPES,
+        )
+        .exclude(thinking_content__isnull=True)
+        .exclude(thinking_content__exact="")
+        .order_by("-created_at", "-id")
+    )
+    if direction == "older" and cursor is not None:
+        qs = qs.filter(created_at__lte=_dt_from_cursor(cursor))
+    elif direction == "newer" and cursor is not None:
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "thinking":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(created_at__gt=dt) | Q(created_at=dt, id__gt=cursor_uuid)
+                )
+            except Exception:
+                qs = qs.filter(created_at__gt=dt)
+        else:
+            qs = qs.filter(created_at__gt=dt)
+    return list(qs[:limit])
+
+
 def _dt_from_cursor(cursor: CursorPayload) -> datetime:
     micros = cursor.value
     return datetime.fromtimestamp(micros / 1_000_000, tz=dt_timezone.utc)
@@ -473,15 +526,36 @@ def _envelop_steps(steps: Iterable[PersistentAgentStep]) -> list[StepEnvelope]:
     return envelopes
 
 
+def _envelop_thinking(completions: Iterable[PersistentAgentCompletion]) -> list[ThinkingEnvelope]:
+    envelopes: list[ThinkingEnvelope] = []
+    for completion in completions:
+        if completion.completion_type not in THINKING_COMPLETION_TYPES:
+            continue
+        reasoning = (completion.thinking_content or "").strip()
+        if not reasoning:
+            continue
+        sort_value = _microsecond_epoch(completion.created_at)
+        cursor = CursorPayload(value=sort_value, kind="thinking", identifier=str(completion.id))
+        envelopes.append(
+            ThinkingEnvelope(
+                sort_key=(sort_value, "thinking", str(completion.id)),
+                cursor=cursor,
+                completion=completion,
+                reasoning=reasoning,
+            )
+        )
+    return envelopes
+
+
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope] = []
+    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope] = []
     for env in envelopes:
         key = env.sort_key
         if direction == "older" and key < pivot:
@@ -492,10 +566,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -536,7 +610,32 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             ).exists()
         except Exception:
             pass
-    return message_exists or step_exists
+    completion_exists = (
+        PersistentAgentCompletion.objects.filter(
+            agent=agent,
+            completion_type__in=THINKING_COMPLETION_TYPES,
+        )
+        .exclude(thinking_content__isnull=True)
+        .exclude(thinking_content__exact="")
+        .filter(created_at__lt=dt)
+        .exists()
+    )
+    if cursor.kind == "thinking":
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            completion_exists = completion_exists or (
+                PersistentAgentCompletion.objects.filter(
+                    agent=agent,
+                    completion_type__in=THINKING_COMPLETION_TYPES,
+                )
+                .exclude(thinking_content__isnull=True)
+                .exclude(thinking_content__exact="")
+                .filter(created_at=dt, id__lt=cursor_uuid)
+                .exists()
+            )
+        except Exception:
+            pass
+    return message_exists or step_exists or completion_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -571,8 +670,33 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             ).exists()
         except Exception:
             pass
+    completion_exists = (
+        PersistentAgentCompletion.objects.filter(
+            agent=agent,
+            completion_type__in=THINKING_COMPLETION_TYPES,
+        )
+        .exclude(thinking_content__isnull=True)
+        .exclude(thinking_content__exact="")
+        .filter(created_at__gt=dt)
+        .exists()
+    )
+    if cursor.kind == "thinking":
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            completion_exists = completion_exists or (
+                PersistentAgentCompletion.objects.filter(
+                    agent=agent,
+                    completion_type__in=THINKING_COMPLETION_TYPES,
+                )
+                .exclude(thinking_content__isnull=True)
+                .exclude(thinking_content__exact="")
+                .filter(created_at=dt, id__gt=cursor_uuid)
+                .exists()
+            )
+        except Exception:
+            pass
 
-    return message_exists or step_exists
+    return message_exists or step_exists or completion_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -660,9 +784,10 @@ def fetch_timeline_window(
 
     message_envelopes = _envelop_messages(_messages_queryset(agent, direction, cursor_payload))
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
+    thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
 
-    merged: list[MessageEnvelope | StepEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *thinking_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -685,7 +810,10 @@ def fetch_timeline_window(
         if cluster_buffer:
             timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
             cluster_buffer = []
-        timeline_events.append(_serialize_message(env))
+        if isinstance(env, ThinkingEnvelope):
+            timeline_events.append(_serialize_thinking(env))
+        else:
+            timeline_events.append(_serialize_message(env))
     if cluster_buffer:
         timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
 
@@ -710,6 +838,13 @@ def fetch_timeline_window(
 def serialize_message_event(message: PersistentAgentMessage) -> dict:
     envelope = _envelop_messages([message])[0]
     return _serialize_message(envelope)
+
+
+def serialize_thinking_event(completion: PersistentAgentCompletion) -> dict | None:
+    envelopes = _envelop_thinking([completion])
+    if not envelopes:
+        return None
+    return _serialize_thinking(envelopes[0])
 
 
 def serialize_step_entry(step: PersistentAgentStep) -> dict:

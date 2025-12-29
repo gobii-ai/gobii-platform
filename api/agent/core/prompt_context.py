@@ -536,19 +536,26 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     billing_url = _build_console_url("billing")
     pricing_url = _build_console_url("pricing")
-    capabilities_note = (
-        "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
-    )
-
-    lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
-    if plan_id and plan_id != "free":
-        lines.append(
-            "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
+    has_paid_plan = bool(plan_id) and plan_id != "free"
+    is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False)) or has_paid_plan
+    if is_proprietary:
+        capabilities_note = (
+            "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
         )
+        lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
+        if plan_id and plan_id != "free":
+            lines.append(
+                "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
+            )
+        else:
+            lines.append(
+                f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+            )
     else:
-        lines.append(
-            f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+        capabilities_note = (
+            "This section summarizes account capabilities and agent settings for this deployment."
         )
+        lines = ["Edition: Community (no paid plans)."]
 
     addon_parts: list[str] = []
     if task_uplift:
@@ -558,16 +565,22 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:
-        lines.append(
-            f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
-        )
+        if is_proprietary:
+            lines.append(
+                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
+            )
+        else:
+            lines.append(
+                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} base + add-ons)."
+            )
 
     contact_usage = _get_contact_usage(agent)
     if contact_usage is not None and effective_contact_cap:
         lines.append(f"Contact usage: {contact_usage}/{effective_contact_cap}.")
 
     lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
-    lines.append(f"Billing page: {billing_url}.")
+    if is_proprietary:
+        lines.append(f"Billing page: {billing_url}.")
 
     return {
         "agent_capabilities_note": capabilities_note,
@@ -1603,9 +1616,13 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
     return (
         f"WARNING: Your previous {streak_label} included zero tool calls. "
-        "You MUST include at least one tool call in this response, unless you are intentionally sending a user-facing reply via the implied-send shortcut. "
-        "If no other action is needed, call sleep_until_next_trigger as your tool call now. "
-        "Do NOT include outbound messages in your content unless you intend them to be sent (implied sends use the most recent message tool parameters); otherwise call send_email, send_sms, send_chat_message, send_agent_message, or send_webhook_event explicitly. "
+        "You MUST include at least one tool call in this response. "
+        "Best patterns: "
+        "(1) Nothing to say? Just sleep_until_next_trigger with NO text. "
+        "(2) Replying + taking action? Write your message as text + include your tool calls (update_charter, spawn_web_task, etc.)—the text auto-sends via implied send. Maximize work per cycle. "
+        "(3) Replying only? Text + sleep_until_next_trigger. "
+        "(4) Need specific send parameters? Use explicit send_email/send_sms/send_chat_message. "
+        "Never send empty status updates like 'nothing to report' or 'still monitoring'."
     )
 
 
@@ -1712,25 +1729,28 @@ def _get_system_instruction(
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to perform the next logical step. "
+
+        "CRITICAL - HOW YOUR RESPONSES WORK: "
+        "Any text you write in your response is AUTOMATICALLY SENT to the user as a message. This includes reasoning, analysis, thinking out loud, status updates - ALL of it gets sent. "
+        "Do NOT think out loud or reason in your response. Do NOT narrate what you did or plan to do. Just make tool calls. "
+        "If you call send_chat_message AND also write text, the user receives TWO separate messages. "
+        "WRONG: Calling send_chat_message, then writing 'I've sent a welcome and updated my charter. Now I'll wait for the user to respond.' "
+        "RIGHT: Call send_chat_message + update_charter + sleep_until_next_trigger. Write NOTHING else. "
+        "Your response should contain ONLY tool calls with no surrounding text, unless the text itself IS a message you intend to send. "
+        "A response with just sleep_until_next_trigger and zero text is perfectly fine and often the right choice. "
+
         "CORE RESPONSIBILITY: Maintain an accurate charter. If your charter is unknown, unclear, generic (e.g., 'test agent'), or needs to change based on new user input/intent, call 'update_charter' IMMEDIATELY. Do this right away when a user gives you a specific request—ideally in the same tool batch as your greeting. This is your primary memory of your purpose. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
-        "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply). Do not sleep right after only a charter/schedule update; set 'will_continue_work': true on your next message or keep batching tools so you finish the ask before pausing. "
-        "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content unless you intend them as an implied send. "
-        "If you output a message without a send tool, the platform will treat it as an implied send using the most recent message tool parameters. "
-        "Use implied sends only when replying on the same channel/recipients; otherwise call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) explicitly. "
-        "If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
+        "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply); do not sleep right after only a charter/schedule update. "
+        "'will_continue_work': Only set to true when you have an immediate next action planned (e.g., about to search, scrape, or mid-task). Otherwise, let the conversation pause naturally and sleep until the next trigger. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
-        "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
-        "You may not even need to send a message at all if there is nothing new. "
-        "Do not feel the need to send messages just to show activity or artificially continue the conversation. "
-        "Do not feel the need to send messages for every little update; wait until you have something worth sending and batch things together when possible. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
@@ -1748,7 +1768,7 @@ def _get_system_instruction(
         "If you are going to do a long-running task *for the first time* or *in response to a message*, let the user know you are looking into it and you will get back to them with the results --communicate this *before* starting the long-running task. But do not do this if it is a cron/schedule trigger. "
         "YOU MUST NOT USE MARKDOWN FORMATTING IN EMAILS OR SMS! "
 
-        "Prefer to write in a natural, authentic way including word use, paragraph structure, shorthand, etc. "
+        "Write like a real person: casual, concise. Avoid emdashes, 'I'd be happy to', 'Feel free to', and other AI tells. "
         "Whenever relevant, include full, direct, accurate URLs to information, but only if they are already available in full in your context. Do not make up URLs, either spawn another tool call or don't include them at all if you don't have them in your context already. "
         "If you do need URLs and use spawn_web_task, you will need to be very detailed and explicitly ask it to provide URLs. "
         f"File downloads are {"" if settings.ALLOW_FILE_DOWNLOAD else "NOT"} supported. "
@@ -1769,24 +1789,27 @@ def _get_system_instruction(
         "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
-        "Use search_tools to search for additional tools; it will automatically enable all relevant tools in one step. "
-        "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
+        "search_tools enables integrations (not web search)—call it to unlock tools for Instagram, LinkedIn, Reddit, etc. "
 
         "TOOL USAGE RULES: "
-        "1. Every response requires a tool call unless you are intentionally using an implied send; message text without a send tool is treated as a send using the most recent message tool parameters. Avoid repeating the same tool/params in consecutive turns; move forward once you have a usable URL or data. "
-        "2. To speak: Use send_chat_message, send_email, or send_sms, or use an implied send when replying on the same channel/recipients as the last message. "
-        "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
+        "1. Text IS SENT to the user. No text needed—tool-only responses are fine. Never meta-comment ('I've sent...', 'I'll wait...', 'Feel free to...'). After sending, just call sleep_until_next_trigger. "
+        "2. To speak: Use send_chat_message, send_email, or send_sms—OR use IMPLIED SEND (preferred when applicable, see below). "
+        "3. To sleep: Call sleep_until_next_trigger when awaiting user input or when no work remains. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
-        "5. Batching: Combine independent tool calls in one response."
+        "5. Batching: Combine independent tool calls in one response. "
+        "6. SILENCE IS GOLDEN: Do NOT send status updates just because you're sleeping. If a cron trigger fires and there's nothing new to report, just sleep—no message needed. The user doesn't need 'still monitoring' or 'nothing to report' messages. Only contact them with genuinely new, valuable information. "
+
+        "IMPLIED SEND (efficient shortcut): When replying to the user without changing recipients or channel, just write your message as plain text in your response—no send tool call needed. The system auto-converts it to the appropriate send tool using: (1) active web chat session, (2) previous send_email/send_sms/send_agent_message parameters, or (3) your preferred contact endpoint. "
+        "Implied send combines naturally with other tool calls. Example: respond to user + update_charter + spawn_web_task—all in one response. The text becomes the message; the tools execute normally. This is the ideal pattern: acknowledge/respond to the user while simultaneously taking action, maximizing work per cycle. "
+        "Use implied send for: ongoing conversations, follow-ups, quick responses where recipient is obvious. "
+        "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line)."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
 
-        "DO NOT CONTACT THE USER REDUNDANTLY OR PERFORM REPEATED, REDUNDANT WORK. PAY ATTENTION TO EVENT AND TOOL CALL HISTORY TO AVOID REPETITION. "
-        "DO NOT SPAM THE USER. "
-        "DO NOT RESPOND TO THE SAME MESSAGE MULTIPLE TIMES. "
- 
-        "DO NOT FORGET TO CALL update_schedule TO UPDATE YOUR SCHEDULE IF YOU DO NOT HAVE A SCHEDULE AND NEED TO CONTINUE DOING MORE WORK LATER. "
+        "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
+
+        "Call update_schedule when you need to continue work later. "
         "BE EAGER TO CALL update_charter TO UPDATE YOUR CHARTER IF THE USER GIVES YOU ANY FEEDBACK OR CORRECTIONS. YOUR CHARTER SHOULD GROW MORE DETAILED AND EVOLVE OVER TIME TO MEET THE USER's REQUIREMENTS. BE THOROUGH, DILIGENT, AND PERSISTENT. "
 
         "BE HONEST ABOUT YOUR LIMITATIONS. HELP THE USER REDUCE SCOPE SO THAT YOU CAN STILL PROVIDE VALUE TO THEM. IT IS BETTER TO SUCCEED AT A SMALL VALUE-ADD TASK THAN FAIL AT AN OVERLY-AMBITIOUS ONE. "

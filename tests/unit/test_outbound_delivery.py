@@ -351,6 +351,7 @@ class SMSThrottleNoticeTests(TestCase):
             address="+15550002222",
         )
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
     @patch("config.redis_client.get_redis_client")
     @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="sms123")

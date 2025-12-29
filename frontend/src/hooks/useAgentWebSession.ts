@@ -7,10 +7,12 @@ import {
   type AgentWebSessionSnapshot,
 } from '../api/agentChat'
 import { HttpError } from '../api/http'
+import { usePageLifecycle } from './usePageLifecycle'
 
 const MIN_HEARTBEAT_INTERVAL_MS = 15_000
 const START_RETRY_BASE_DELAY_MS = 2_000
 const START_RETRY_MAX_DELAY_MS = 60_000
+const RESUME_THROTTLE_MS = 4000
 
 type WebSessionStatus = 'idle' | 'starting' | 'active' | 'error'
 
@@ -286,10 +288,39 @@ export function useAgentWebSession(agentId: string | null) {
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('pagehide', handleBeforeUnload)
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('pagehide', handleBeforeUnload)
     }
   }, [agentId])
+
+  const requestResume = useCallback(() => {
+    if (!agentIdRef.current) {
+      return
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return
+    }
+    if (snapshotRef.current) {
+      void performHeartbeatRef.current()
+      return
+    }
+    void performStartRef.current()
+  }, [])
+
+  const handleSuspend = useCallback(() => {
+    clearHeartbeat()
+    clearStartRetry()
+  }, [clearHeartbeat, clearStartRetry])
+
+  usePageLifecycle(
+    {
+      onResume: requestResume,
+      onSuspend: handleSuspend,
+    },
+    { resumeThrottleMs: RESUME_THROTTLE_MS },
+  )
 
   return {
     session,

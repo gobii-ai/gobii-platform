@@ -228,7 +228,13 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
         f"You can increase or remove the limit here: {link}"
     )
-    email_context = {"agent": agent, "link": link, "plan_label": plan_label, "plan_id": plan_id}
+    email_context = {
+        "agent": agent,
+        "link": link,
+        "plan_label": plan_label,
+        "plan_id": plan_id,
+        "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
+    }
     channel_value = channel.value if isinstance(channel, CommsChannel) else channel
     analytics_source = {
         CommsChannel.EMAIL.value: AnalyticsSource.EMAIL,
@@ -480,6 +486,7 @@ def ingest_inbound_message(
                                     "owner": agent_obj.user,
                                     "sender": parsed.sender,
                                     "subject": parsed.subject or "",
+                                    "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
                                 }
                                 subject = render_to_string(
                                     "emails/agent_out_of_credits_subject.txt", context

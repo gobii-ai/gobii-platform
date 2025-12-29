@@ -1,4 +1,4 @@
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
@@ -16,6 +16,7 @@ from constants.plans import PlanNames
 
 
 @tag("enable_database")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class EnableDatabaseToolTests(TestCase):
     """Tests for enable_database tool with eligible (paid + max intelligence) agents."""
 
@@ -87,6 +88,7 @@ class EnableDatabaseToolTests(TestCase):
 
 
 @tag("enable_database")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class SqliteToolRestrictionTests(TestCase):
     """Tests for sqlite tool restrictions based on account type and intelligence tier."""
 

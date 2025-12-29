@@ -229,6 +229,21 @@ def select_cron_throttle_footer(
         else None
     )
 
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        interval_line = (
+            f"<p>Current interval: about <strong>{interval_text}</strong>.</p>"
+            if interval_text
+            else ""
+        )
+        html_content = (
+            "<p>Heads up: scheduled runs may be delayed to manage resources.</p>"
+            + interval_line
+        )
+        text_content = "Heads up: scheduled runs may be delayed to manage resources."
+        if interval_text:
+            text_content = f"{text_content} Current interval: about {interval_text}."
+        return ThrottleFooterContent(html_content=html_content, text_content=text_content)
+
     variants: list[ThrottleFooterContent] = [
         ThrottleFooterContent(
             html_content=(
@@ -283,6 +298,12 @@ def select_cron_throttle_sms_suffix(
         if effective_interval_seconds
         else None
     )
+
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        suffix = f"Heads up: {agent_name} scheduled runs may be delayed to manage resources"
+        if interval_text:
+            suffix = f"{suffix} (about every {interval_text})"
+        return f"{suffix}."
 
     variants = [
         (

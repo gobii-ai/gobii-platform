@@ -121,6 +121,7 @@ def _init_db() -> None:
 
 def _increment_count(hostname: str) -> int:
     """Atomically increment the counter for the given worker hostname."""
+    last_exc = None
     for attempt in range(5):
         try:
             with _get_conn() as conn:
@@ -143,6 +144,7 @@ def _increment_count(hostname: str) -> int:
                 conn.commit()
                 return int(row[0]) if row else 0
         except sqlite3.OperationalError as exc:
+            last_exc = exc
             # Most likely SQLITE_BUSY – back-off and retry a few times.
             logger.warning(
                 "SQLite operational error while incrementing task counter (attempt %s/5): %s",
@@ -153,6 +155,12 @@ def _increment_count(hostname: str) -> int:
         except Exception:
             logger.exception("Unexpected error while incrementing browser-use task count")
             return 0  # Give up – best effort
+    if last_exc is not None:
+        logger.warning(
+            "SQLite operational error while incrementing task counter; giving up after retries: %s",
+            last_exc,
+        )
+    return 0
 
 
 def _maybe_trigger_shutdown(hostname: str, current_count: int) -> None:

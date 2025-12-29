@@ -7,7 +7,6 @@ import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState } from '../../types/agentChat'
-import type { CompletedThinking } from '../../stores/agentChatStore'
 import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -27,9 +26,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
   streaming?: StreamState | null
-  thinkingCollapsed?: boolean
-  completedThinking?: CompletedThinking | null
-  onToggleThinking?: () => void
+  thinkingCollapsedByCursor?: Record<string, boolean>
+  onToggleThinking?: (cursor: string) => void
+  streamingThinkingCollapsed?: boolean
+  onToggleStreamingThinking?: () => void
 }
 
 export function AgentChatLayout({
@@ -43,9 +43,10 @@ export function AgentChatLayout({
   processingActive,
   processingWebTasks = [],
   streaming,
-  thinkingCollapsed = false,
-  completedThinking,
+  thinkingCollapsedByCursor,
   onToggleThinking,
+  streamingThinkingCollapsed = false,
+  onToggleStreamingThinking,
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -60,8 +61,8 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
-  const hasCompletedReasoning = Boolean(completedThinking?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
+  const showStreamingReasoning = hasStreamingReasoning
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
@@ -114,20 +115,19 @@ export function AgentChatLayout({
                   events={events}
                   agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
-                  thinkingReasoning={hasCompletedReasoning && !isStreaming ? completedThinking?.reasoning : undefined}
-                  thinkingCollapsed={thinkingCollapsed}
+                  thinkingCollapsedByCursor={thinkingCollapsedByCursor}
                   onToggleThinking={onToggleThinking}
                 />
               </div>
 
-              {(hasStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
+              {(showStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
                 <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
-                  {hasStreamingReasoning && onToggleThinking ? (
+                  {showStreamingReasoning && onToggleStreamingThinking ? (
                     <ThinkingBubble
                       reasoning={streaming?.reasoning || ''}
-                      isStreaming={true}
-                      collapsed={thinkingCollapsed}
-                      onToggle={onToggleThinking}
+                      isStreaming={isStreaming}
+                      collapsed={streamingThinkingCollapsed}
+                      onToggle={onToggleStreamingThinking}
                     />
                   ) : null}
                   {hasStreamingContent ? (

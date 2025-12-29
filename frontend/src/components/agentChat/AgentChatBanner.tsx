@@ -1,15 +1,26 @@
 import { useEffect, useRef } from 'react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
+import { ConnectionStatusIndicator, type ConnectionStatusTone } from './ConnectionStatusIndicator'
 import { normalizeHexColor } from '../../util/color'
 
 type AgentChatBannerProps = {
   agentName: string
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
+  connectionStatus?: ConnectionStatusTone
+  connectionLabel?: string
+  connectionDetail?: string | null
 }
 
-export function AgentChatBanner({ agentName, agentAvatarUrl, agentColorHex }: AgentChatBannerProps) {
+export function AgentChatBanner({
+  agentName,
+  agentAvatarUrl,
+  agentColorHex,
+  connectionStatus,
+  connectionLabel,
+  connectionDetail,
+}: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex)
   const bannerRef = useRef<HTMLDivElement | null>(null)
@@ -48,7 +59,16 @@ export function AgentChatBanner({ agentName, agentAvatarUrl, agentColorHex }: Ag
               fallbackStyle={{ background: `linear-gradient(135deg, ${accentColor}, #0f172a)` }}
             />
             <div>
-              <div className="text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-slate-500">Live chat</div>
+              <div className="flex flex-wrap items-center gap-3 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-slate-500">
+                <span>Live chat</span>
+                {connectionStatus && connectionLabel ? (
+                  <ConnectionStatusIndicator
+                    status={connectionStatus}
+                    label={connectionLabel}
+                    detail={connectionDetail}
+                  />
+                ) : null}
+              </div>
               <div className="text-lg font-semibold text-slate-900">{trimmedName}</div>
             </div>
           </div>

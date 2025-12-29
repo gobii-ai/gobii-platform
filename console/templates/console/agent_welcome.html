@@ -98,6 +98,7 @@
     </div>
   </div>
 
+  {% if settings.GOBII_PROPRIETARY_MODE %}
   {% if show_pro_scale_upsell or show_scale_upsell or agent_has_org and not org_has_paid_seats %}
   <div class="gobii-card-base overflow-hidden">
     <div class="p-6 sm:p-7 bg-gradient-to-r from-sky-50 via-white to-indigo-50">
@@ -227,6 +228,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
   {% endif %}
 
   <!-- FAQ / Tips -->

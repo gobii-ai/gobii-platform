@@ -12,6 +12,7 @@ from api.models import (
     CommsChannel,
     DeliveryStatus,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
     PersistentAgentMessage,
@@ -115,6 +116,23 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    def test_timeline_includes_thinking_events(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            thinking_content="Reasoned path",
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        events = payload.get("events", [])
+        thinking_event = next(event for event in events if event.get("kind") == "thinking")
+
+        self.assertEqual(thinking_event.get("reasoning"), "Reasoned path")
+        self.assertEqual(thinking_event.get("completionId"), str(completion.id))
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_html_email_body(self):
