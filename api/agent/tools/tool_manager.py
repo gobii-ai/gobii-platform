@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
+from django.conf import settings
 from django.db.models import F
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
@@ -44,6 +45,9 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
     if agent is None:
         return False
+
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return True
 
     user = getattr(agent, "user", None)
     if getattr(user, "is_vip", False):
@@ -635,9 +639,15 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
 
     # Block sqlite execution for ineligible agents (even if previously enabled)
     if tool_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
+        message = "Database tool is not available for this deployment."
+        if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+            message = (
+                "Database tool is not available on your current plan. "
+                "Upgrade to a paid plan with max intelligence to access this feature."
+            )
         return {
             "status": "error",
-            "message": "Database tool is not available on your current plan. Upgrade to a paid plan with max intelligence to access this feature.",
+            "message": message,
         }
 
     if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():

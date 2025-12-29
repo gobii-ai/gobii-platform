@@ -2,6 +2,7 @@
 import uuid
 from urllib.parse import urlparse
 
+from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
@@ -488,7 +489,9 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
                 plan = None
         allowed = max_allowed_tier_for_plan(plan, is_organization=is_org)
         if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-            raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
+            if settings.GOBII_PROPRIETARY_MODE:
+                raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
+            raise serializers.ValidationError("Selected intelligence tier is not available for this deployment.")
         return tier.value
 
     def _apply_personal_servers(self, agent: PersistentAgent, server_ids):

@@ -42,9 +42,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
-  const thinkingCollapsed = useAgentChatStore((state) => state.thinkingCollapsed)
-  const completedThinking = useAgentChatStore((state) => state.completedThinking)
-  const setThinkingCollapsed = useAgentChatStore((state) => state.setThinkingCollapsed)
+  const thinkingCollapsedByCursor = useAgentChatStore((state) => state.thinkingCollapsedByCursor)
+  const toggleThinkingCollapsed = useAgentChatStore((state) => state.toggleThinkingCollapsed)
+  const streamingThinkingCollapsed = useAgentChatStore((state) => state.streamingThinkingCollapsed)
+  const setStreamingThinkingCollapsed = useAgentChatStore((state) => state.setStreamingThinkingCollapsed)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -179,9 +180,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     })
   }
 
-  const handleToggleThinking = useCallback(() => {
-    setThinkingCollapsed(!thinkingCollapsed)
-  }, [setThinkingCollapsed, thinkingCollapsed])
+  const handleToggleThinking = useCallback(
+    (cursor: string) => {
+      toggleThinkingCollapsed(cursor)
+    },
+    [toggleThinkingCollapsed],
+  )
+
+  const handleToggleStreamingThinking = useCallback(() => {
+    setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
+  }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
 
   return (
     <div className="min-h-screen">
@@ -206,9 +214,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
         processingActive={processingActive}
         processingWebTasks={processingWebTasks}
         streaming={streaming}
-        thinkingCollapsed={thinkingCollapsed}
-        completedThinking={completedThinking}
+        thinkingCollapsedByCursor={thinkingCollapsedByCursor}
         onToggleThinking={handleToggleThinking}
+        streamingThinkingCollapsed={streamingThinkingCollapsed}
+        onToggleStreamingThinking={handleToggleStreamingThinking}
         onLoadOlder={hasMoreOlder ? loadOlder : undefined}
         onLoadNewer={hasMoreNewer ? loadNewer : undefined}
         onSendMessage={handleSend}

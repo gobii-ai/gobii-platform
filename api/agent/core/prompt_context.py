@@ -536,19 +536,25 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     billing_url = _build_console_url("billing")
     pricing_url = _build_console_url("pricing")
-    capabilities_note = (
-        "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
-    )
-
-    lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
-    if plan_id and plan_id != "free":
-        lines.append(
-            "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
+    is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False))
+    if is_proprietary:
+        capabilities_note = (
+            "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
         )
+        lines: list[str] = [f"Plan: {plan_name}. Available plans: {available_plans}."]
+        if plan_id and plan_id != "free":
+            lines.append(
+                "Intelligence selection available on this plan; user can change the agent's intelligence level on the agent settings page."
+            )
+        else:
+            lines.append(
+                f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+            )
     else:
-        lines.append(
-            f"User can upgrade to a paid plan to unlock intelligence selection (pricing: {pricing_url})."
+        capabilities_note = (
+            "This section summarizes account capabilities and agent settings for this deployment."
         )
+        lines = ["Edition: Community (no paid plans)."]
 
     addon_parts: list[str] = []
     if task_uplift:
@@ -558,16 +564,22 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:
-        lines.append(
-            f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
-        )
+        if is_proprietary:
+            lines.append(
+                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
+            )
+        else:
+            lines.append(
+                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} base + add-ons)."
+            )
 
     contact_usage = _get_contact_usage(agent)
     if contact_usage is not None and effective_contact_cap:
         lines.append(f"Contact usage: {contact_usage}/{effective_contact_cap}.")
 
     lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
-    lines.append(f"Billing page: {billing_url}.")
+    if is_proprietary:
+        lines.append(f"Billing page: {billing_url}.")
 
     return {
         "agent_capabilities_note": capabilities_note,
@@ -1716,11 +1728,11 @@ def _get_system_instruction(
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
-        "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply). Do not sleep right after only a charter/schedule update; set 'will_continue_work': true on your next message or keep batching tools so you finish the ask before pausing. "
+        "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply); do not sleep right after only a charter/schedule update. "
         "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content unless you intend them as an implied send. "
         "If you output a message without a send tool, the platform will treat it as an implied send using the most recent message tool parameters. "
         "Use implied sends only when replying on the same channel/recipients; otherwise call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) explicitly. "
-        "If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
+        "'will_continue_work': Only set to true when you have an immediate next action planned (e.g., about to search, scrape, or mid-task). Otherwise, let the conversation pause naturally and sleep until the next trigger. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
@@ -1729,8 +1741,7 @@ def _get_system_instruction(
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "If you contact the user with information, make sure it is *new* information, do not repeat things you have already sent to the user. "
         "You may not even need to send a message at all if there is nothing new. "
-        "Do not feel the need to send messages just to show activity or artificially continue the conversation. "
-        "Do not feel the need to send messages for every little update; wait until you have something worth sending and batch things together when possible. "
+        "Do not send messages just to show activity or for every small update; batch information and wait until you have something worth sending. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
@@ -1782,10 +1793,8 @@ def _get_system_instruction(
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
 
-        "DO NOT CONTACT THE USER REDUNDANTLY OR PERFORM REPEATED, REDUNDANT WORK. PAY ATTENTION TO EVENT AND TOOL CALL HISTORY TO AVOID REPETITION. "
-        "DO NOT SPAM THE USER. "
-        "DO NOT RESPOND TO THE SAME MESSAGE MULTIPLE TIMES. "
- 
+        "DO NOT SPAM OR CONTACT THE USER REDUNDANTLY. PAY ATTENTION TO HISTORY TO AVOID REPEATING MESSAGES OR WORK. "
+
         "DO NOT FORGET TO CALL update_schedule TO UPDATE YOUR SCHEDULE IF YOU DO NOT HAVE A SCHEDULE AND NEED TO CONTINUE DOING MORE WORK LATER. "
         "BE EAGER TO CALL update_charter TO UPDATE YOUR CHARTER IF THE USER GIVES YOU ANY FEEDBACK OR CORRECTIONS. YOUR CHARTER SHOULD GROW MORE DETAILED AND EVOLVE OVER TIME TO MEET THE USER's REQUIREMENTS. BE THOROUGH, DILIGENT, AND PERSISTENT. "
 

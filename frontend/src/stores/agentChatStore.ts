@@ -170,17 +170,12 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
   return coerceProcessingSnapshot(input)
 }
 
-export type CompletedThinking = {
-  streamId: string
-  reasoning: string
-}
-
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
   streaming: StreamState | null
-  thinkingCollapsed: boolean
-  completedThinking: CompletedThinking | null
+  streamingThinkingCollapsed: boolean
+  thinkingCollapsedByCursor: Record<string, boolean>
   oldestCursor: string | null
   newestCursor: string | null
   hasMoreOlder: boolean
@@ -207,15 +202,16 @@ export type AgentChatState = {
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
-  setThinkingCollapsed: (collapsed: boolean) => void
+  toggleThinkingCollapsed: (cursor: string) => void
+  setStreamingThinkingCollapsed: (collapsed: boolean) => void
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
   events: [],
   streaming: null,
-  thinkingCollapsed: false,
-  completedThinking: null,
+  streamingThinkingCollapsed: false,
+  thinkingCollapsedByCursor: {},
   oldestCursor: null,
   newestCursor: null,
   hasMoreOlder: false,
@@ -241,8 +237,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
       streaming: null,
-      thinkingCollapsed: false,
-      completedThinking: null,
+      streamingThinkingCollapsed: false,
+      thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
     })
 
@@ -433,12 +429,14 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const state = get()
     const normalized = normalizeEvent(event)
     const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
+    const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done
+    const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
     if (!state.autoScrollPinned) {
       const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
-        streaming: shouldClearStream ? null : state.streaming,
+        streaming: nextStreaming,
       })
       return
     }
@@ -461,7 +459,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       newestCursor,
       oldestCursor,
       pendingEvents: [],
-      streaming: shouldClearStream ? null : state.streaming,
+      streaming: nextStreaming,
     })
   },
 
@@ -493,15 +491,14 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         : state.hasUnseenActivity
 
       if (isDone && !next.reasoning && !next.content) {
-        return { streaming: null, hasUnseenActivity, completedThinking: null }
+        return { streaming: null, hasUnseenActivity }
       }
 
       if (isDone && next.reasoning) {
         return {
           streaming: next,
           hasUnseenActivity,
-          thinkingCollapsed: true,
-          completedThinking: { streamId: next.streamId, reasoning: next.reasoning },
+          streamingThinkingCollapsed: true,
         }
       }
 
@@ -509,8 +506,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return {
           streaming: next,
           hasUnseenActivity,
-          thinkingCollapsed: false,
-          completedThinking: null,
+          streamingThinkingCollapsed: false,
         }
       }
 
@@ -562,7 +558,20 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     })
   },
 
-  setThinkingCollapsed(collapsed) {
-    set({ thinkingCollapsed: collapsed })
+  toggleThinkingCollapsed(cursor) {
+    set((state) => {
+      const current = state.thinkingCollapsedByCursor[cursor]
+      const nextCollapsed = !(current ?? true)
+      return {
+        thinkingCollapsedByCursor: {
+          ...state.thinkingCollapsedByCursor,
+          [cursor]: nextCollapsed,
+        },
+      }
+    })
+  },
+
+  setStreamingThinkingCollapsed(collapsed) {
+    set({ streamingThinkingCollapsed: collapsed })
   },
 }))

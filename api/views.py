@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
+from django.conf import settings
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.http import HttpResponseRedirect, Http404
@@ -506,8 +507,14 @@ class BrowserUseAgentTaskViewSet(mixins.CreateModelMixin,
         # Check if the user has enough task credits
         available = TaskCreditService.calculate_available_tasks(request.user)
         if available <= 0 and available != TASKS_UNLIMITED:
+            message = "User does not have enough task credits to create a new task."
+            if settings.GOBII_PROPRIETARY_MODE:
+                message = (
+                    "User does not have enough task credits to create a new task. "
+                    "Please upgrade your plan or enable extra task purchases."
+                )
             return Response({
-                    "message": "User does not have enough task credits to create a new task. Please upgrade your plan or enable extra task purchases.",
+                    "message": message,
                 },
                 status=status.HTTP_402_PAYMENT_REQUIRED
             )

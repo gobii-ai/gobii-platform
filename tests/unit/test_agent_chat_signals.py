@@ -10,6 +10,7 @@ from django.test import TestCase, override_settings, tag
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
@@ -79,3 +80,17 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(processing.get("type"), "processing_event")
         processing_payload = processing.get("payload", {})
         self.assertIn("active", processing_payload)
+
+    @tag("batch_agent_chat")
+    def test_completion_emits_thinking_timeline_event(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            thinking_content="Thinking output",
+        )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        payload = timeline.get("payload", {})
+        self.assertEqual(payload.get("kind"), "thinking")
+        self.assertEqual(payload.get("completionId"), str(completion.id))

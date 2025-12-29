@@ -84,7 +84,15 @@ export type MessageEvent = {
   message: AgentMessage
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent
+export type ThinkingEvent = {
+  kind: 'thinking'
+  cursor: string
+  timestamp?: string | null
+  reasoning: string
+  completionId?: string | null
+}
+
+export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]

@@ -252,7 +252,10 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
     )
     disabled_reason = None
     if not can_edit:
-        disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
+        if settings.GOBII_PROPRIETARY_MODE:
+            disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
+        else:
+            disabled_reason = "Intelligence levels are managed by deployment settings."
 
     multipliers = get_llm_tier_multipliers()
     options = [
@@ -4153,7 +4156,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
         if preferred_tier_changed:
             if not can_edit_intelligence:
-                return _general_error("Upgrade your plan to adjust intelligence levels.")
+                if settings.GOBII_PROPRIETARY_MODE:
+                    return _general_error("Upgrade your plan to adjust intelligence levels.")
+                return _general_error("Intelligence levels are locked by deployment settings.")
             if TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
                 return _general_error("That intelligence level isn't available for this plan.")
 
@@ -8904,7 +8909,10 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
         owner_plan_id = getattr(billing, "subscription", PlanNamesChoices.FREE.value) if billing else PlanNamesChoices.FREE.value
 
     if owner_plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.FREE):
-        messages.error(request, "Upgrade to a paid plan to add dedicated IPs.")
+        if settings.GOBII_PROPRIETARY_MODE:
+            messages.error(request, "Upgrade to a paid plan to add dedicated IPs.")
+        else:
+            messages.error(request, "Dedicated IPs are not available in this deployment.")
         return redirect(_billing_redirect(owner, owner_type))
 
     form = DedicatedIpAddForm(request.POST)

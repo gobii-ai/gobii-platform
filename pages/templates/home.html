@@ -316,7 +316,11 @@
 
           <!-- Description -->
           <p class="text-gray-600 mb-6 max-w-2xl mx-auto">
-            You've reached your agent limit for your current plan. Upgrade to unlock more agents and take advantage of advanced features to boost your productivity.
+            {% if settings.GOBII_PROPRIETARY_MODE %}
+              You've reached your agent limit for your current plan. Upgrade to unlock more agents and take advantage of advanced features to boost your productivity.
+            {% else %}
+              You've reached your agent limit for this deployment. Adjust deployment settings to allow more agents.
+            {% endif %}
           </p>
 
           <!-- Stats Card -->
@@ -340,6 +344,7 @@
           </a>
           {% endif %}
 
+          {% if settings.GOBII_PROPRIETARY_MODE %}
           <!-- Benefits Preview -->
           <div class="mt-8 pt-6 border-t border-blue-200">
             <h4 class="text-lg font-semibold text-gray-900 mb-4">What you'll get with an upgrade:</h4>
@@ -377,6 +382,7 @@
           </div>
         </div>
       </div>
+      {% endif %}
       {% endif %}
 
       <!-- OR Divider -->

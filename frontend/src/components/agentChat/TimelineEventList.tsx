@@ -1,4 +1,4 @@
-import { Fragment, useMemo } from 'react'
+import { useCallback } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { ToolDetailProvider } from './tooling/ToolDetailContext'
@@ -10,9 +10,8 @@ type TimelineEventListProps = {
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
-  thinkingReasoning?: string
-  thinkingCollapsed?: boolean
-  onToggleThinking?: () => void
+  thinkingCollapsedByCursor?: Record<string, boolean>
+  onToggleThinking?: (cursor: string) => void
 }
 
 export function TimelineEventList({
@@ -20,31 +19,17 @@ export function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
-  thinkingReasoning,
-  thinkingCollapsed = false,
+  thinkingCollapsedByCursor,
   onToggleThinking,
 }: TimelineEventListProps) {
-  const lastAgentMessageIndex = useMemo(() => {
-    for (let i = events.length - 1; i >= 0; i--) {
-      const event = events[i]
-      if (event.kind === 'message' && event.message.isOutbound) {
-        return i
+  const handleToggleThinking = useCallback(
+    (cursor: string) => {
+      if (onToggleThinking) {
+        onToggleThinking(cursor)
       }
-    }
-    return -1
-  }, [events])
-
-  const hasThinking = Boolean(thinkingReasoning?.trim())
-  const thinkingAnchorIndex = useMemo(() => {
-    if (!events.length) {
-      return -1
-    }
-    if (lastAgentMessageIndex >= 0) {
-      return lastAgentMessageIndex
-    }
-    return events.length - 1
-  }, [events.length, lastAgentMessageIndex])
-  const showThinking = hasThinking && onToggleThinking && thinkingAnchorIndex >= 0
+    },
+    [onToggleThinking],
+  )
 
   if (initialLoading) {
     return (
@@ -56,57 +41,36 @@ export function TimelineEventList({
   }
 
   if (!events.length) {
-    if (hasThinking && onToggleThinking) {
-      return (
-        <ThinkingBubble
-          reasoning={thinkingReasoning || ''}
-          isStreaming={false}
-          collapsed={thinkingCollapsed}
-          onToggle={onToggleThinking}
-        />
-      )
-    }
     return <div className="timeline-empty text-center text-sm text-slate-400">No activity yet.</div>
   }
 
   return (
     <ToolDetailProvider>
-      {events.map((event, index) => {
-        const showThinkingHere = showThinking && index === thinkingAnchorIndex
-
+      {events.map((event) => {
         if (event.kind === 'message') {
           return (
-            <Fragment key={event.cursor}>
-              {showThinkingHere && (
-                <ThinkingBubble
-                  reasoning={thinkingReasoning || ''}
-                  isStreaming={false}
-                  collapsed={thinkingCollapsed}
-                  onToggle={onToggleThinking}
-                />
-              )}
-              <MessageEventCard
-                eventCursor={event.cursor}
-                message={event.message}
-                agentFirstName={agentFirstName}
-                agentColorHex={agentColorHex}
-              />
-            </Fragment>
+            <MessageEventCard
+              key={event.cursor}
+              eventCursor={event.cursor}
+              message={event.message}
+              agentFirstName={agentFirstName}
+              agentColorHex={agentColorHex}
+            />
           )
         }
-        return (
-          <Fragment key={event.cursor}>
-            {showThinkingHere && (
-              <ThinkingBubble
-                reasoning={thinkingReasoning || ''}
-                isStreaming={false}
-                collapsed={thinkingCollapsed}
-                onToggle={onToggleThinking}
-              />
-            )}
-            <ToolClusterCard cluster={event} />
-          </Fragment>
-        )
+        if (event.kind === 'thinking') {
+          const collapsed = thinkingCollapsedByCursor?.[event.cursor] ?? true
+          return (
+            <ThinkingBubble
+              key={event.cursor}
+              reasoning={event.reasoning || ''}
+              isStreaming={false}
+              collapsed={collapsed}
+              onToggle={() => handleToggleThinking(event.cursor)}
+            />
+          )
+        }
+        return <ToolClusterCard key={event.cursor} cluster={event} />
       })}
     </ToolDetailProvider>
   )

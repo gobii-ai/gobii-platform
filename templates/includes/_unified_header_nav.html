@@ -33,6 +33,7 @@
       <nav class="hidden md:flex items-center">
         <!-- Main nav links in a colored pill -->
         <div class="flex items-center gap-x-0.5 p-1 rounded-xl bg-indigo-800/90 shadow-lg shadow-indigo-900/20">
+          {% if settings.GOBII_PROPRIETARY_MODE %}
           <!-- Solutions Dropdown -->
           <div x-data="{ open: false }" class="relative" @mouseleave="open = false">
             <button @mouseover="open = true" @click="open = !open"
@@ -90,6 +91,7 @@
               </div>
             </div>
         </div>
+          {% endif %}
 
           {% if settings.GOBII_PROPRIETARY_MODE %}
             <a href="{% url 'proprietary:pricing' %}" class="px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">Pricing</a>
@@ -257,6 +259,7 @@
     
     <div class="py-4">
       <div class="px-4 space-y-3 text-sm font-medium">
+        {% if settings.GOBII_PROPRIETARY_MODE %}
         <!-- Mobile Solutions -->
         <div x-data="{ expanded: false }">
             <button @click="expanded = !expanded" class="flex w-full items-center justify-between py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
@@ -288,6 +291,7 @@
                 </a>
             </div>
         </div>
+        {% endif %}
 
         {% if settings.GOBII_PROPRIETARY_MODE %}
           <a href="{% url 'proprietary:pricing' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Pricing</a>

@@ -86,15 +86,25 @@ def _send_sleep_notification(agent) -> None:
 
     now = timezone.now()
     subject = "I’m going to sleep for now 💤"
+    upgrade_line = ""
+    upgrade_sms = ""
+    if settings.GOBII_PROPRIETARY_MODE:
+        upgrade_line = (
+            f"<p>Want agents that never expire or turn off? "
+            f"<a href=\"{upgrade_link}\">Upgrade to Pro or Scale</a>.</p>"
+        )
+        upgrade_sms = (
+            f" Upgrade to Pro or Scale for agents that never expire or turn off: {upgrade_link}"
+        )
     body_email = (
         "<p>Since I haven’t heard from you in a while, I’m going to take a nap to save resources.</p>"
         "<p>Need me? Just reply to this message to wake me up anytime.</p>"
-        f"<p>Want agents that never expire or turn off? <a href=\"{upgrade_link}\">Upgrade to Pro or Scale</a>.</p>"
+        f"{upgrade_line}"
         f"<p>Best,<br>{agent.name}</p>"
     )
     body_sms = (
         "I haven’t heard from you lately, so I’m going to sleep. "
-        f"Text me to wake me anytime. Upgrade to Pro or Scale for agents that never expire or turn off: {upgrade_link}"
+        f"Text me to wake me anytime.{upgrade_sms}"
     )
 
     if ep.channel == CommsChannel.EMAIL:

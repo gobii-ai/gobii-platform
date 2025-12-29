@@ -31,6 +31,7 @@ from .timeline import (
     build_tool_cluster_from_steps,
     serialize_message_event,
     serialize_processing_snapshot,
+    serialize_thinking_event,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,13 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
 def broadcast_new_completion(sender, instance: PersistentAgentCompletion, created: bool, **kwargs):
     if not created:
         return
+    if instance.agent_id:
+        try:
+            thinking_payload = serialize_thinking_event(instance)
+            if thinking_payload:
+                _send(_group_name(instance.agent_id), "timeline_event", thinking_payload)
+        except Exception:
+            logger.debug("Failed to broadcast thinking event for %s", instance.id, exc_info=True)
     try:
         audit_payload = serialize_completion(instance)
         _broadcast_audit_event(str(instance.agent_id), audit_payload)

@@ -4,10 +4,12 @@ Hi there,
 
 You can increase or remove the limit here: {{ link }}
 
+{% if is_proprietary_mode %}
 {% if plan_id == "free" %}
 Need more task credits? Upgrade to our Pro or Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free
 {% elif plan_id == "pro" or plan_id == "startup" %}
 Need more task credits? Upgrade to our Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro
+{% endif %}
 {% endif %}
 
 Thanks,
