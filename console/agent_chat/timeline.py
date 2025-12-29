@@ -275,12 +275,14 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
     except Exception:
         size_label = None
     filespace_path = None
+    filespace_node_id = None
     download_url = None
     node = getattr(att, "filespace_node", None)
     if node:
         filespace_path = node.path
-    if filespace_path and agent_id:
-        query = urlencode({"path": filespace_path})
+        filespace_node_id = str(node.id)
+    if (filespace_path or filespace_node_id) and agent_id:
+        query = urlencode({"node_id": filespace_node_id} if filespace_node_id else {"path": filespace_path})
         download_url = f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
     return {
         "id": str(att.id),
@@ -288,6 +290,7 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         "url": att.file.url if att.file else "",
         "downloadUrl": download_url,
         "filespacePath": filespace_path,
+        "filespaceNodeId": filespace_node_id,
         "fileSizeLabel": size_label,
     }
 

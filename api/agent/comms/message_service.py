@@ -511,6 +511,8 @@ def ingest_inbound_message(
                     )
 
             def _trigger_processing() -> None:
+                if should_skip_processing:
+                    return
                 from api.agent.tasks import process_agent_events_task
                 # Top-level trigger: no budget context provided
                 process_agent_events_task.delay(str(owner_id))
@@ -518,25 +520,21 @@ def ingest_inbound_message(
             has_attachments = message.attachments.exists()
             message_id = str(message.id)
 
-            if has_attachments:
-                if filespace_import_mode == "sync":
-                    def _import_then_maybe_process() -> None:
-                        try:
-                            import_message_attachments_to_filespace(message_id)
-                        except Exception:
-                            logging.exception(
-                                "Failed synchronous filespace import for message %s",
-                                message_id,
-                            )
-                        if not should_skip_processing:
-                            _trigger_processing()
+            if has_attachments and filespace_import_mode == "sync":
+                def _import_then_maybe_process() -> None:
+                    try:
+                        import_message_attachments_to_filespace(message_id)
+                    except Exception:
+                        logging.exception(
+                            "Failed synchronous filespace import for message %s",
+                            message_id,
+                        )
+                    _trigger_processing()
 
-                    transaction.on_commit(_import_then_maybe_process)
-                else:
-                    enqueue_import_after_commit(message_id)
-                    if not should_skip_processing:
-                        transaction.on_commit(_trigger_processing)
+                transaction.on_commit(_import_then_maybe_process)
             else:
+                if has_attachments:
+                    enqueue_import_after_commit(message_id)
                 if not should_skip_processing:
                     transaction.on_commit(_trigger_processing)
 

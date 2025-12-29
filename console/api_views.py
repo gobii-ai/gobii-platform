@@ -12,7 +12,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -1188,21 +1188,36 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         if not self._has_access(request.user, agent):
             return HttpResponseForbidden("Not authorized to access this file.")
 
+        node_id = (request.GET.get("node_id") or "").strip()
         path = (request.GET.get("path") or "").strip()
-        if not path:
-            return HttpResponseBadRequest("path is required")
+        if not node_id and not path:
+            return HttpResponseBadRequest("node_id or path is required")
 
         filespace_ids = AgentFileSpaceAccess.objects.filter(agent=agent).values_list("filespace_id", flat=True)
-        node = (
-            AgentFsNode.objects
-            .filter(
-                filespace_id__in=filespace_ids,
-                path=path,
-                node_type=AgentFsNode.NodeType.FILE,
-                is_deleted=False,
-            )
-            .first()
-        )
+        try:
+            if node_id:
+                node = (
+                    AgentFsNode.objects
+                    .filter(
+                        id=node_id,
+                        filespace_id__in=filespace_ids,
+                        node_type=AgentFsNode.NodeType.FILE,
+                        is_deleted=False,
+                    )
+                    .first()
+                )
+            else:
+                matches = AgentFsNode.objects.filter(
+                    filespace_id__in=filespace_ids,
+                    path=path,
+                    node_type=AgentFsNode.NodeType.FILE,
+                    is_deleted=False,
+                )
+                if matches.count() > 1:
+                    return HttpResponseBadRequest("Multiple files match path; use node_id instead.")
+                node = matches.first()
+        except (ValueError, ValidationError):
+            return HttpResponseBadRequest("Invalid node_id")
         if not node:
             raise Http404("File not found.")
 

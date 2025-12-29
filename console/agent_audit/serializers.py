@@ -42,12 +42,14 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
         except (TypeError, ValueError):
             size_label = None
         filespace_path = None
+        filespace_node_id = None
         download_url = None
         node = getattr(att, "filespace_node", None)
         if node:
             filespace_path = node.path
-        if filespace_path and message.owner_agent_id:
-            query = urlencode({"path": filespace_path})
+            filespace_node_id = str(node.id)
+        if (filespace_path or filespace_node_id) and message.owner_agent_id:
+            query = urlencode({"node_id": filespace_node_id} if filespace_node_id else {"path": filespace_path})
             download_url = f"{reverse('console_agent_fs_download', kwargs={'agent_id': message.owner_agent_id})}?{query}"
         attachments.append(
             {
@@ -56,6 +58,7 @@ def serialize_message(message: PersistentAgentMessage) -> dict:
                 "url": att.file.url if att.file else "",
                 "download_url": download_url,
                 "filespace_path": filespace_path,
+                "filespace_node_id": filespace_node_id,
                 "file_size_label": size_label,
             }
         )
