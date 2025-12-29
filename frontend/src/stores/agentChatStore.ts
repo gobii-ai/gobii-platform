@@ -1,135 +1,15 @@
 import { create } from 'zustand'
 
 import type {
-  AgentMessage,
   ProcessingSnapshot,
   ProcessingWebTask,
   StreamEventPayload,
   StreamState,
   TimelineEvent,
-  ToolClusterEvent,
-  ToolCallEntry,
 } from '../types/agentChat'
 import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
-import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
-
-const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
-
-function pickHtmlCandidate(message: AgentMessage): string | null {
-  const htmlValue = message.bodyHtml?.trim()
-  if (htmlValue) {
-    return htmlValue
-  }
-
-  const textValue = message.bodyText?.trim()
-  if (!textValue) {
-    return null
-  }
-
-  if (looksLikeHtml(textValue) || HTML_TAG_FALLBACK_PATTERN.test(textValue)) {
-    return textValue
-  }
-
-  return null
-}
-
-function normalizeEvent(event: TimelineEvent): TimelineEvent {
-  if (event.kind !== 'message') {
-    return event
-  }
-
-  const candidate = pickHtmlCandidate(event.message)
-  if (!candidate) {
-    if (event.message.bodyHtml === undefined) {
-      return {
-        ...event,
-        message: {
-          ...event.message,
-          bodyHtml: '',
-        },
-      }
-    }
-    return event
-  }
-
-  const sanitized = sanitizeHtml(candidate)
-  if ((event.message.bodyHtml ?? '') === sanitized) {
-    return event
-  }
-
-  return {
-    ...event,
-    message: {
-      ...event.message,
-      bodyHtml: sanitized,
-    },
-  }
-}
-
-function normalizeEvents(events: TimelineEvent[]): TimelineEvent[] {
-  return events.map(normalizeEvent)
-}
-
-function parseCursorValue(cursor: string): number {
-  const [raw] = cursor.split(':', 1)
-  const value = Number(raw)
-  return Number.isFinite(value) ? value : 0
-}
-
-function sortEvents(events: TimelineEvent[]): TimelineEvent[] {
-  return [...events].sort((a, b) => parseCursorValue(a.cursor) - parseCursorValue(b.cursor))
-}
-
-function mergeClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): ToolClusterEvent {
-  const threshold = base.collapseThreshold || incoming.collapseThreshold
-  const entryMap = new Map<string, ToolCallEntry>()
-  const insert = (entry: ToolCallEntry) => {
-    entryMap.set(entry.id, entry)
-  }
-  base.entries.forEach(insert)
-  incoming.entries.forEach(insert)
-
-  const entries = Array.from(entryMap.values()).sort((left, right) => {
-    const leftValue = left.cursor ? parseCursorValue(left.cursor) : 0
-    const rightValue = right.cursor ? parseCursorValue(right.cursor) : 0
-    return leftValue - rightValue
-  })
-
-  const earliestTimestamp = entries[0]?.timestamp ?? base.earliestTimestamp ?? incoming.earliestTimestamp
-  const latestTimestamp = entries[entries.length - 1]?.timestamp ?? incoming.latestTimestamp ?? base.latestTimestamp
-
-  const cursor = parseCursorValue(base.cursor) <= parseCursorValue(incoming.cursor) ? base.cursor : incoming.cursor
-
-  return {
-    ...base,
-    cursor,
-    entries,
-    entryCount: entries.length,
-    earliestTimestamp,
-    latestTimestamp,
-    collapsible: entries.length >= threshold,
-    collapseThreshold: threshold,
-  }
-}
-
-function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
-  const map = new Map<string, TimelineEvent>()
-  for (const event of existing) {
-    const normalized = normalizeEvent(event)
-    map.set(normalized.cursor, normalized)
-  }
-  for (const event of incoming) {
-    const normalized = normalizeEvent(event)
-    const current = map.get(normalized.cursor)
-    if (current && current.kind === 'steps' && normalized.kind === 'steps') {
-      map.set(normalized.cursor, mergeClusters(current, normalized))
-    } else {
-      map.set(normalized.cursor, normalized)
-    }
-  }
-  return sortEvents(Array.from(map.values()))
-}
+import { mergeTimelineEvents, normalizeTimelineEvent, prepareTimelineEvents } from './agentChatTimeline'
 
 const TIMELINE_WINDOW_SIZE = 100
 let refreshLatestInFlight = false
@@ -255,7 +135,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(normalizeEvents(snapshot.events))
+      const events = prepareTimelineEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const processingSnapshot = normalizeProcessingUpdate(
@@ -315,7 +195,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.newestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(normalizeEvents(snapshot.events))
+      const incoming = prepareTimelineEvents(snapshot.events)
       const hasThinkingEvent = incoming.some((event) => event.kind === 'thinking')
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
@@ -338,7 +218,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
                 ? current.streamingClearOnDone
                 : false
         if (!current.autoScrollPinned) {
-          const pendingEvents = mergeEvents(current.pendingEvents, incoming)
+          const pendingEvents = mergeTimelineEvents(current.pendingEvents, incoming)
           return {
             processingActive: processingSnapshot.active,
             processingWebTasks: processingSnapshot.webTasks,
@@ -350,7 +230,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             agentColorHex,
           }
         }
-        const merged = mergeEvents(current.events, incoming)
+        const merged = mergeTimelineEvents(current.events, incoming)
         const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
         const events = merged.slice(windowStart)
         const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
@@ -394,8 +274,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.oldestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(normalizeEvents(snapshot.events))
-      const merged = mergeEvents(state.events, incoming)
+      const incoming = prepareTimelineEvents(snapshot.events)
+      const merged = mergeTimelineEvents(state.events, incoming)
       const windowSize = Math.min(TIMELINE_WINDOW_SIZE, merged.length)
       const events = merged.slice(0, windowSize)
       const oldestCursor = events.length ? events[0].cursor : null
@@ -431,8 +311,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         cursor: state.newestCursor ?? undefined,
         limit: TIMELINE_WINDOW_SIZE,
       })
-      const incoming = sortEvents(normalizeEvents(snapshot.events))
-      const merged = mergeEvents(state.events, incoming)
+      const incoming = prepareTimelineEvents(snapshot.events)
+      const merged = mergeTimelineEvents(state.events, incoming)
       const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
       const events = merged.slice(windowStart)
       const oldestCursor = events.length ? events[0].cursor : null
@@ -469,7 +349,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({ loading: true })
     try {
       const snapshot = await fetchAgentTimeline(state.agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
-      const events = sortEvents(normalizeEvents(snapshot.events))
+      const events = prepareTimelineEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const processingSnapshot = normalizeProcessingUpdate(
@@ -518,7 +398,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   receiveRealtimeEvent(event) {
     const state = get()
-    const normalized = normalizeEvent(event)
+    const normalized = normalizeTimelineEvent(event)
     const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
     const hasStreamingContent = Boolean(state.streaming?.content?.trim())
     const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
@@ -534,7 +414,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             ? state.streamingClearOnDone
             : false
     if (!state.autoScrollPinned) {
-      const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
+      const pendingEvents = mergeTimelineEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
@@ -543,18 +423,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       })
       return
     }
-    let events: TimelineEvent[]
-    if (normalized.kind === 'steps') {
-      const last = state.events[state.events.length - 1]
-      if (last && last.kind === 'steps') {
-        const mergedLast = mergeClusters(last, normalized)
-        events = sortEvents([...state.events.slice(0, -1), mergedLast])
-      } else {
-        events = mergeEvents(state.events, [normalized])
-      }
-    } else {
-      events = mergeEvents(state.events, [normalized])
-    }
+    const events = mergeTimelineEvents(state.events, [normalized])
     const newestCursor = events.length ? events[events.length - 1].cursor : null
     const oldestCursor = events.length ? events[0].cursor : null
     set({
@@ -677,7 +546,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   setAutoScrollPinned(pinned) {
     set((state) => {
       if (pinned && state.pendingEvents.length) {
-        const merged = mergeEvents(state.events, state.pendingEvents)
+        const merged = mergeTimelineEvents(state.events, state.pendingEvents)
         const newestCursor = merged.length ? merged[merged.length - 1].cursor : state.newestCursor
         const oldestCursor = merged.length ? merged[0].cursor : state.oldestCursor
         return {
