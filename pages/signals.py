@@ -164,7 +164,11 @@ def _amount_major_units(*candidates: Any) -> float | None:
 def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     try:
         return (payload.get("lines") or {}).get("data") or []
-    except Exception:
+    except Exception as e:
+        logger.exception(
+            "Failed to extract invoice lines from payload: %s",
+            e
+        )
         return []
 
 
