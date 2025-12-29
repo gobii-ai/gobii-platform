@@ -536,7 +536,8 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     billing_url = _build_console_url("billing")
     pricing_url = _build_console_url("pricing")
-    is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False))
+    has_paid_plan = bool(plan_id) and plan_id != "free"
+    is_proprietary = bool(getattr(settings, "GOBII_PROPRIETARY_MODE", False)) or has_paid_plan
     if is_proprietary:
         capabilities_note = (
             "This section shows the plan/subscription info for the user's Gobii account and the agent settings available to the user."
