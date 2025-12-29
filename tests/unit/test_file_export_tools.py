@@ -1,3 +1,4 @@
+import base64
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -61,6 +62,32 @@ class FileExportToolTests(TestCase):
         result = execute_create_pdf(
             self.agent,
             {"html": "<meta http-equiv='refresh' content='0; url=https://example.com'>"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("asset", result["message"].lower())
+
+    def test_create_pdf_blocks_data_css_import(self):
+        css_payload = "@import url('https://example.com/x.css');"
+        css_b64 = base64.b64encode(css_payload.encode("utf-8")).decode("ascii")
+        result = execute_create_pdf(
+            self.agent,
+            {"html": f"<link rel='stylesheet' href='data:text/css;base64,{css_b64}'>"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("asset", result["message"].lower())
+
+    def test_create_pdf_blocks_data_svg_external(self):
+        svg_payload = (
+            "<svg xmlns='http://www.w3.org/2000/svg'>"
+            "<image href='https://example.com/x.png' />"
+            "</svg>"
+        )
+        svg_b64 = base64.b64encode(svg_payload.encode("utf-8")).decode("ascii")
+        result = execute_create_pdf(
+            self.agent,
+            {"html": f"<img src='data:image/svg+xml;base64,{svg_b64}'>"},
         )
 
         self.assertEqual(result["status"], "error")

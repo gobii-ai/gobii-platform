@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import os
 from dataclasses import dataclass
-from typing import List
+from typing import Any, List
 
 from celery.utils.log import get_task_logger
 from django.conf import settings
@@ -106,18 +106,18 @@ def _normalize_filename(raw_name: str | None, fallback_name: str, extension: str
     return name
 
 
-def _agent_has_access(agent, filespace_id) -> bool:
+def _agent_has_access(agent: "PersistentAgent", filespace_id: "uuid.UUID") -> bool:
     return AgentFileSpaceAccess.objects.filter(agent=agent, filespace_id=filespace_id).exists()
 
 
 def write_bytes_to_exports(
-    agent,
+    agent: "PersistentAgent",
     content_bytes: bytes,
     filename: str | None,
     fallback_name: str,
     extension: str,
     mime_type: str,
-):
+) -> dict[str, Any]:
     if not isinstance(content_bytes, (bytes, bytearray)):
         return {"status": "error", "message": "File content must be bytes."}
 

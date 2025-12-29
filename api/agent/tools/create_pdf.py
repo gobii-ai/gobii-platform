@@ -1,7 +1,9 @@
+import base64
 import logging
 import re
 from html.parser import HTMLParser
 from typing import Any, Dict
+from urllib.parse import unquote_to_bytes
 
 import pdfkit
 
@@ -19,6 +21,8 @@ MIME_TYPE = "application/pdf"
 CSS_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?P<url>[^)\"'\s]+)", re.IGNORECASE)
 CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\()?['\"]?\s*(?P<url>[^'\"\)\s]+)", re.IGNORECASE)
 META_REFRESH_URL_RE = re.compile(r"url\s*=\s*(?P<url>[^;]+)", re.IGNORECASE)
+DATA_URL_RE = re.compile(r"^data:(?P<meta>[^,]*?),(?P<data>.*)$", re.IGNORECASE | re.DOTALL)
+SVG_URL_ATTR_RE = re.compile(r"(?:href|xlink:href)\s*=\s*['\"](?P<url>[^'\"]+)['\"]", re.IGNORECASE)
 URL_ATTRS = {"src", "href", "data", "poster", "action", "formaction", "xlink:href", "background"}
 
 
@@ -28,7 +32,71 @@ def _is_allowed_asset_url(url: str) -> bool:
         return True
     if url.startswith("#"):
         return True
-    return url.lower().startswith("data:")
+    if not url.lower().startswith("data:"):
+        return False
+    return _is_allowed_data_url(url)
+
+
+def _is_allowed_data_url(url: str) -> bool:
+    parsed = _parse_data_url(url)
+    if not parsed:
+        return False
+    media_type, payload = parsed
+    if media_type == "image/svg+xml":
+        return not _svg_contains_blocked_urls(payload)
+    if media_type.startswith("image/"):
+        return True
+    return False
+
+
+def _parse_data_url(url: str) -> tuple[str, bytes] | None:
+    match = DATA_URL_RE.match(url)
+    if not match:
+        return None
+    media_type, is_base64 = _parse_data_url_meta(match.group("meta"))
+    data = match.group("data")
+    try:
+        if is_base64:
+            data = re.sub(r"\s+", "", data)
+            if data:
+                data += "=" * (-len(data) % 4)
+            payload = base64.b64decode(data, validate=True)
+        else:
+            payload = unquote_to_bytes(data)
+    except Exception:
+        return None
+    return media_type, payload
+
+
+def _parse_data_url_meta(meta: str) -> tuple[str, bool]:
+    media_type = ""
+    is_base64 = False
+    if meta:
+        parts = [part.strip() for part in meta.split(";") if part.strip()]
+        if parts:
+            if "/" in parts[0]:
+                media_type = parts[0].lower()
+                parts = parts[1:]
+            for part in parts:
+                if part.lower() == "base64":
+                    is_base64 = True
+    if not media_type:
+        media_type = "text/plain"
+    return media_type, is_base64
+
+
+def _svg_contains_blocked_urls(payload: bytes) -> bool:
+    try:
+        text = payload.decode("utf-8", errors="replace")
+    except Exception:
+        return True
+    if _css_contains_blocked_urls(text):
+        return True
+    for match in SVG_URL_ATTR_RE.finditer(text):
+        url = match.group("url").strip()
+        if url and not _is_allowed_asset_url(url):
+            return True
+    return False
 
 
 def _srcset_contains_blocked_urls(value: str) -> bool:
