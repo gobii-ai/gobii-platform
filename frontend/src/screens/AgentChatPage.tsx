@@ -68,7 +68,7 @@ function deriveConnectionIndicator({
     return {
       status: shouldReconnect ? 'reconnecting' : 'connecting',
       label: shouldReconnect ? 'Reconnecting' : 'Connecting',
-      detail: 'Re-establishing session.',
+      detail: sessionError || 'Re-establishing session.',
     }
   }
 
@@ -342,7 +342,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
 
   return (
     <div className="min-h-screen">
-      {error || sessionError ? (
+      {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout

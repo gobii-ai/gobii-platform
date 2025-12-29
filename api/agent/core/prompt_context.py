@@ -1616,9 +1616,13 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
     return (
         f"WARNING: Your previous {streak_label} included zero tool calls. "
-        "You MUST include at least one tool call in this response, unless you are intentionally sending a user-facing reply via the implied-send shortcut. "
-        "If no other action is needed, call sleep_until_next_trigger as your tool call now. "
-        "Do NOT include outbound messages in your content unless you intend them to be sent (implied sends use the most recent message tool parameters); otherwise call send_email, send_sms, send_chat_message, send_agent_message, or send_webhook_event explicitly. "
+        "You MUST include at least one tool call in this response. "
+        "Best patterns: "
+        "(1) Nothing to say? Just sleep_until_next_trigger with NO text. "
+        "(2) Replying + taking action? Write your message as text + include your tool calls (update_charter, spawn_web_task, etc.)—the text auto-sends via implied send. Maximize work per cycle. "
+        "(3) Replying only? Text + sleep_until_next_trigger. "
+        "(4) Need specific send parameters? Use explicit send_email/send_sms/send_chat_message. "
+        "Never send empty status updates like 'nothing to report' or 'still monitoring'."
     )
 
 
@@ -1789,10 +1793,16 @@ def _get_system_instruction(
 
         "TOOL USAGE RULES: "
         "1. Text IS SENT to the user. No text needed—tool-only responses are fine. Never meta-comment ('I've sent...', 'I'll wait...', 'Feel free to...'). After sending, just call sleep_until_next_trigger. "
-        "2. To speak: Use send_chat_message, send_email, or send_sms, or use an implied send when replying on the same channel/recipients as the last message. "
+        "2. To speak: Use send_chat_message, send_email, or send_sms—OR use IMPLIED SEND (preferred when applicable, see below). "
         "3. To sleep: Call sleep_until_next_trigger when awaiting user input or when no work remains. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
-        "5. Batching: Combine independent tool calls in one response."
+        "5. Batching: Combine independent tool calls in one response. "
+        "6. SILENCE IS GOLDEN: Do NOT send status updates just because you're sleeping. If a cron trigger fires and there's nothing new to report, just sleep—no message needed. The user doesn't need 'still monitoring' or 'nothing to report' messages. Only contact them with genuinely new, valuable information. "
+
+        "IMPLIED SEND (efficient shortcut): When replying to the user without changing recipients or channel, just write your message as plain text in your response—no send tool call needed. The system auto-converts it to the appropriate send tool using: (1) active web chat session, (2) previous send_email/send_sms/send_agent_message parameters, or (3) your preferred contact endpoint. "
+        "Implied send combines naturally with other tool calls. Example: respond to user + update_charter + spawn_web_task—all in one response. The text becomes the message; the tools execute normally. This is the ideal pattern: acknowledge/respond to the user while simultaneously taking action, maximizing work per cycle. "
+        "Use implied send for: ongoing conversations, follow-ups, quick responses where recipient is obvious. "
+        "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line)."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
