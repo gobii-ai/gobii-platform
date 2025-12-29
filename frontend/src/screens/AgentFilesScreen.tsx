@@ -184,6 +184,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
   const [dragOverNodeId, setDragOverNodeId] = useState<string | null>(null)
+  const [uploadInfo, setUploadInfo] = useState<{ parentId: string | null; fileCount: number } | null>(null)
   const dragNodeRef = useRef<AgentFsNode | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -214,6 +215,9 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const currentFolder = currentFolderId ? nodeMap.get(currentFolderId) ?? null : null
   const currentFolderPath = currentFolder?.path ?? '/'
   const currentRows = childrenByParent.get(currentFolderId) ?? []
+  const parentFolderId = currentFolder?.parentId ?? null
+  const parentFolderPath = parentFolderId ? nodeMap.get(parentFolderId)?.path ?? '/' : '/'
+  const parentDropKey = currentFolderId ? (parentFolderId ?? 'root') : null
   const breadcrumbs = useMemo(() => {
     const trail: AgentFsNode[] = []
     let cursor: AgentFsNode | null = currentFolder
@@ -226,12 +230,21 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
 
   const uploadMutation = useMutation({
     mutationFn: (payload: UploadPayload) => uploadFiles(initialData.urls.upload, payload),
-    onSuccess: async () => {
+    onMutate: (payload) => {
       setActionError(null)
+      setUploadInfo({
+        parentId: payload.parentId,
+        fileCount: payload.files.length,
+      })
+    },
+    onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['agent-files', initialData.agent.id] })
     },
     onError: (error) => {
       setActionError(resolveErrorMessage(error, 'Failed to upload files.'))
+    },
+    onSettled: () => {
+      setUploadInfo(null)
     },
   })
 
@@ -400,9 +413,9 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     [handleOpenFolder],
   )
 
-  const handleNavigateUp = useCallback(() => {
-    setCurrentFolderId(currentFolder?.parentId ?? null)
-  }, [currentFolder])
+  const handleParentClick = useCallback(() => {
+    setCurrentFolderId(parentFolderId ?? null)
+  }, [parentFolderId])
 
   const handleNavigateTo = useCallback((folderId: string | null) => {
     setCurrentFolderId(folderId)
@@ -418,6 +431,68 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     })
     setActionError(null)
   }, [])
+
+  const handleParentDragOver = useCallback((event: DragEvent<HTMLTableRowElement>) => {
+    event.preventDefault()
+    const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+    event.dataTransfer.dropEffect = canCopy ? 'copy' : 'move'
+  }, [])
+
+  const handleParentDragEnter = useCallback(
+    (event: DragEvent<HTMLTableRowElement>) => {
+      if (!parentDropKey) {
+        return
+      }
+      event.preventDefault()
+      setDragOverNodeId(parentDropKey)
+    },
+    [parentDropKey],
+  )
+
+  const handleParentDragLeave = useCallback(
+    (event: DragEvent<HTMLTableRowElement>) => {
+      if (!parentDropKey) {
+        return
+      }
+      const nextTarget = event.relatedTarget as Node | null
+      if (nextTarget && event.currentTarget.contains(nextTarget)) {
+        return
+      }
+      setDragOverNodeId((prev) => (prev === parentDropKey ? null : prev))
+    },
+    [parentDropKey],
+  )
+
+  const handleParentDrop = useCallback(
+    async (event: DragEvent<HTMLTableRowElement>) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setDragOverNodeId(null)
+      const files = event.dataTransfer.files
+      const targetParentId = parentFolderId ?? null
+      if (files && files.length > 0) {
+        try {
+          await uploadMutation.mutateAsync({ files, parentId: targetParentId })
+        } catch (error) {
+          // Errors are surfaced via mutation callbacks.
+        }
+        return
+      }
+      const draggedNode = dragNodeRef.current
+      if (!draggedNode) {
+        return
+      }
+      if (draggedNode.parentId === targetParentId) {
+        return
+      }
+      try {
+        await moveMutation.mutateAsync({ nodeId: draggedNode.id, parentId: targetParentId })
+      } catch (error) {
+        // Errors are surfaced via mutation callbacks.
+      }
+    },
+    [moveMutation, parentFolderId, uploadMutation],
+  )
 
   const handleDragStart = useCallback((node: AgentFsNode, event: DragEvent<HTMLElement>) => {
     dragNodeRef.current = node
@@ -568,6 +643,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
               </span>
               <div
                 className={`flex flex-1 flex-col ${isDir ? 'cursor-pointer' : ''}`}
+                onClick={isDir ? () => handleOpenFolder(row.original) : undefined}
                 onKeyDown={(event) => handleFolderKeyDown(row.original, event)}
                 role={isDir ? 'button' : undefined}
                 tabIndex={isDir ? 0 : undefined}
@@ -661,6 +737,11 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
 
   const currentFolderLabel = `Folder: ${currentFolderPath}`
   const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
+  const uploadTargetName = uploadInfo
+    ? uploadInfo.parentId
+      ? nodeMap.get(uploadInfo.parentId)?.path ?? 'Folder'
+      : '/'
+    : null
 
   return (
     <div className="space-y-6 pb-6">
@@ -722,19 +803,19 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{currentFolderLabel}</span>
-              {currentFolderId ? (
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition hover:bg-blue-50 disabled:opacity-60"
-                  onClick={handleNavigateUp}
-                  disabled={isBusy}
-                >
-                  <ArrowUp className="h-3.5 w-3.5" aria-hidden="true" />
-                  Up
-                </button>
-              ) : null}
             </div>
           </div>
+          {uploadMutation.isPending && uploadInfo ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+              <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span>
+                Uploading {uploadInfo.fileCount} file{uploadInfo.fileCount === 1 ? '' : 's'} to {uploadTargetName}
+              </span>
+              <span className="h-1.5 w-32 overflow-hidden rounded-full bg-blue-200">
+                <span className="block h-full w-1/2 animate-pulse rounded-full bg-blue-600" />
+              </span>
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
             <button
               type="button"
@@ -812,36 +893,73 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
                     {resolveErrorMessage(filesQuery.error, 'Unable to load agent files right now.')}
                   </td>
                 </tr>
-              ) : currentRows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-500">
-                    This folder is empty. Upload files or create a folder to get started.
-                  </td>
-                </tr>
               ) : (
-                table.getRowModel().rows.map((row) => (
-                  <tr
-                    key={row.id}
-                    className={[
-                      row.getIsSelected() ? 'bg-blue-50/50' : '',
-                      dragOverNodeId === row.original.id ? 'bg-blue-100/70' : '',
-                    ].join(' ')}
-                    draggable={!isBusy}
-                    onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}
-                    onDragStart={(event) => handleDragStart(row.original, event)}
-                    onDragEnd={handleDragEnd}
-                    onDragOver={(event) => handleFolderDragOver(row.original, event)}
-                    onDragEnter={(event) => handleFolderDragEnter(row.original, event)}
-                    onDragLeave={(event) => handleFolderDragLeave(row.original, event)}
-                    onDrop={(event) => handleFolderDrop(row.original, event)}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <td key={cell.id} className="px-4 py-4 align-middle">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                <>
+                  {currentFolderId ? (
+                    <tr
+                      className={[
+                        'cursor-pointer bg-blue-50/40',
+                        dragOverNodeId === parentDropKey ? 'bg-blue-100/70' : '',
+                      ].join(' ')}
+                      onClick={handleParentClick}
+                      onDragOver={handleParentDragOver}
+                      onDragEnter={handleParentDragEnter}
+                      onDragLeave={handleParentDragLeave}
+                      onDrop={handleParentDrop}
+                    >
+                      <td className="px-4 py-3 align-middle">
+                        <input
+                          type="checkbox"
+                          disabled
+                          className="h-4 w-4 rounded border-slate-300 text-blue-600 opacity-50"
+                          aria-label="Parent folder selection disabled"
+                        />
                       </td>
-                    ))}
-                  </tr>
-                ))
+                      <td colSpan={columns.length - 1} className="px-4 py-3">
+                        <div className="flex items-center gap-3 text-sm text-slate-700">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                            <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                          </span>
+                          <div className="flex flex-col">
+                            <span className="text-sm font-semibold text-slate-900">Parent folder</span>
+                            <span className="text-xs text-slate-500">{parentFolderPath}</span>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
+                  {currentRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-500">
+                        This folder is empty. Upload files or create a folder to get started.
+                      </td>
+                    </tr>
+                  ) : (
+                    table.getRowModel().rows.map((row) => (
+                      <tr
+                        key={row.id}
+                        className={[
+                          row.getIsSelected() ? 'bg-blue-50/50' : '',
+                          dragOverNodeId === row.original.id ? 'bg-blue-100/70' : '',
+                        ].join(' ')}
+                        draggable={!isBusy}
+                        onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}
+                        onDragStart={(event) => handleDragStart(row.original, event)}
+                        onDragEnd={handleDragEnd}
+                        onDragOver={(event) => handleFolderDragOver(row.original, event)}
+                        onDragEnter={(event) => handleFolderDragEnter(row.original, event)}
+                        onDragLeave={(event) => handleFolderDragLeave(row.original, event)}
+                        onDrop={(event) => handleFolderDrop(row.original, event)}
+                      >
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} className="px-4 py-4 align-middle">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
+                      </tr>
+                    ))
+                  )}
+                </>
               )}
             </tbody>
           </table>
