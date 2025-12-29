@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { AgentChatBanner } from '../components/agentChat/AgentChatBanner'
+import type { ConnectionStatusTone } from '../components/agentChat/ConnectionStatusIndicator'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
@@ -10,6 +11,71 @@ function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
   return first || 'Agent'
+}
+
+type ConnectionIndicator = {
+  status: ConnectionStatusTone
+  label: string
+  detail?: string | null
+}
+
+function deriveConnectionIndicator({
+  socketStatus,
+  socketError,
+  sessionStatus,
+  sessionError,
+}: {
+  socketStatus: ReturnType<typeof useAgentChatSocket>['status']
+  socketError: string | null
+  sessionStatus: ReturnType<typeof useAgentWebSession>['status']
+  sessionError: string | null
+}): ConnectionIndicator {
+  if (socketStatus === 'offline') {
+    return { status: 'offline', label: 'Offline', detail: 'Waiting for network connection.' }
+  }
+
+  if (sessionStatus === 'error') {
+    return {
+      status: 'error',
+      label: 'Session error',
+      detail: sessionError || 'Web session needs attention.',
+    }
+  }
+
+  if (socketStatus === 'error') {
+    return {
+      status: 'error',
+      label: 'Connection error',
+      detail: socketError || 'WebSocket needs attention.',
+    }
+  }
+
+  if (socketStatus === 'connected' && sessionStatus === 'active') {
+    return { status: 'connected', label: 'Connected', detail: 'Live updates active.' }
+  }
+
+  if (socketStatus === 'reconnecting') {
+    return {
+      status: 'reconnecting',
+      label: 'Reconnecting',
+      detail: socketError || 'Restoring live updates.',
+    }
+  }
+
+  if (sessionStatus === 'starting') {
+    const shouldReconnect = socketStatus === 'connected' || socketStatus === 'reconnecting'
+    return {
+      status: shouldReconnect ? 'reconnecting' : 'connecting',
+      label: shouldReconnect ? 'Reconnecting' : 'Connecting',
+      detail: 'Re-establishing session.',
+    }
+  }
+
+  if (socketStatus === 'connected') {
+    return { status: 'connecting', label: 'Syncing', detail: 'Syncing session state.' }
+  }
+
+  return { status: 'connecting', label: 'Connecting', detail: 'Opening live connection.' }
 }
 
 export type AgentChatPageProps = {
@@ -62,7 +128,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
 
-  const { error: sessionError } = useAgentWebSession(agentId)
+  const socketSnapshot = useAgentChatSocket(agentId)
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(agentId)
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -73,8 +140,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   useEffect(() => {
     autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
   }, [autoScrollPinSuppressedUntil])
-
-  useAgentChatSocket(agentId)
 
   useEffect(() => {
     initialize(agentId, { agentColorHex: agentColor })
@@ -145,6 +210,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   }, [scrollToBottom, events, processingActive, streaming])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
+  const connectionIndicator = useMemo(
+    () =>
+      deriveConnectionIndicator({
+        socketStatus: socketSnapshot.status,
+        socketError: socketSnapshot.lastError,
+        sessionStatus,
+        sessionError,
+      }),
+    [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
+  )
 
   useEffect(() => {
     const sentinel = bottomSentinelRef.current
@@ -251,6 +326,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
             agentName={agentName || 'Agent'}
             agentAvatarUrl={agentAvatarUrl}
             agentColorHex={agentColorHex || agentColor || undefined}
+            connectionStatus={connectionIndicator.status}
+            connectionLabel={connectionIndicator.label}
+            connectionDetail={connectionIndicator.detail}
           />
         }
         events={events}

@@ -11,6 +11,7 @@ import { HttpError } from '../api/http'
 const MIN_HEARTBEAT_INTERVAL_MS = 15_000
 const START_RETRY_BASE_DELAY_MS = 2_000
 const START_RETRY_MAX_DELAY_MS = 60_000
+const RESUME_THROTTLE_MS = 4000
 
 type WebSessionStatus = 'idle' | 'starting' | 'active' | 'error'
 
@@ -75,6 +76,7 @@ export function useAgentWebSession(agentId: string | null) {
   const agentIdRef = useRef<string | null>(agentId)
   const unmountedRef = useRef(false)
   const startRetryAttemptsRef = useRef(0)
+  const lastResumeAtRef = useRef(0)
 
   useEffect(() => {
     agentIdRef.current = agentId
@@ -286,10 +288,69 @@ export function useAgentWebSession(agentId: string | null) {
     }
 
     window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('pagehide', handleBeforeUnload)
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload)
+      window.removeEventListener('pagehide', handleBeforeUnload)
     }
   }, [agentId])
+
+  const requestResume = useCallback(() => {
+    if (!agentIdRef.current) {
+      return
+    }
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return
+    }
+    const now = Date.now()
+    if (now - lastResumeAtRef.current < RESUME_THROTTLE_MS) {
+      return
+    }
+    lastResumeAtRef.current = now
+    if (snapshotRef.current) {
+      void performHeartbeatRef.current()
+      return
+    }
+    void performStartRef.current()
+  }, [])
+
+  useEffect(() => {
+    if (!agentId) {
+      return
+    }
+
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        requestResume()
+      }
+    }
+
+    const handleFocus = () => {
+      requestResume()
+    }
+
+    const handleOnline = () => {
+      requestResume()
+    }
+
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        requestResume()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    window.addEventListener('focus', handleFocus)
+    window.addEventListener('online', handleOnline)
+    window.addEventListener('pageshow', handlePageShow)
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility)
+      window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [agentId, requestResume])
 
   return {
     session,

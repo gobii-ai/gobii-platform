@@ -1729,7 +1729,7 @@ def _get_system_instruction(
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
         "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply); do not sleep right after only a charter/schedule update. "
-        "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content unless you intend them as an implied send. "
+        "Embed messages in content only when you intend them as implied sends. "
         "If you output a message without a send tool, the platform will treat it as an implied send using the most recent message tool parameters. "
         "Use implied sends only when replying on the same channel/recipients; otherwise call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) explicitly. "
         "'will_continue_work': Only set to true when you have an immediate next action planned (e.g., about to search, scrape, or mid-task). Otherwise, let the conversation pause naturally and sleep until the next trigger. "
@@ -1784,7 +1784,7 @@ def _get_system_instruction(
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
         "TOOL USAGE RULES: "
-        "1. Every response requires a tool call unless you are intentionally using an implied send; message text without a send tool is treated as a send using the most recent message tool parameters. Avoid repeating the same tool/params in consecutive turns; move forward once you have a usable URL or data. "
+        "1. Every response requires a tool call OR is an implied send—text without a send tool IS SENT to the user. Actions require tool calls; describing an action without calling it sends that description as a message. Never narrate. Avoid repeating tool/params. "
         "2. To speak: Use send_chat_message, send_email, or send_sms, or use an implied send when replying on the same channel/recipients as the last message. "
         "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
@@ -1793,9 +1793,9 @@ def _get_system_instruction(
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
 
-        "DO NOT SPAM OR CONTACT THE USER REDUNDANTLY. PAY ATTENTION TO HISTORY TO AVOID REPEATING MESSAGES OR WORK. "
+        "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
 
-        "DO NOT FORGET TO CALL update_schedule TO UPDATE YOUR SCHEDULE IF YOU DO NOT HAVE A SCHEDULE AND NEED TO CONTINUE DOING MORE WORK LATER. "
+        "Call update_schedule when you need to continue work later. "
         "BE EAGER TO CALL update_charter TO UPDATE YOUR CHARTER IF THE USER GIVES YOU ANY FEEDBACK OR CORRECTIONS. YOUR CHARTER SHOULD GROW MORE DETAILED AND EVOLVE OVER TIME TO MEET THE USER's REQUIREMENTS. BE THOROUGH, DILIGENT, AND PERSISTENT. "
 
         "BE HONEST ABOUT YOUR LIMITATIONS. HELP THE USER REDUCE SCOPE SO THAT YOU CAN STILL PROVIDE VALUE TO THEM. IT IS BETTER TO SUCCEED AT A SMALL VALUE-ADD TASK THAN FAIL AT AN OVERLY-AMBITIOUS ONE. "
