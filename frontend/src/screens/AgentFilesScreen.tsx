@@ -195,7 +195,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   })
 
   const nodes = filesQuery.data?.nodes ?? []
-  const filespaceName = filesQuery.data?.filespace?.name ?? 'Agent Files'
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const childrenByParent = useMemo(() => {
     const map = new Map<string | null, AgentFsNode[]>()
@@ -213,7 +212,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   }, [nodes])
 
   const currentFolder = currentFolderId ? nodeMap.get(currentFolderId) ?? null : null
-  const currentFolderPath = currentFolder?.path ?? '/'
   const currentRows = childrenByParent.get(currentFolderId) ?? []
   const parentFolderId = currentFolder?.parentId ?? null
   const parentFolderPath = parentFolderId ? nodeMap.get(parentFolderId)?.path ?? '/' : '/'
@@ -735,7 +733,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     filesQuery.refetch().catch(() => {})
   }, [filesQuery])
 
-  const currentFolderLabel = `Folder: ${currentFolderPath}`
   const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
   const uploadTargetName = uploadInfo
     ? uploadInfo.parentId
@@ -796,15 +793,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
         </div>
 
         <div className="flex flex-col gap-3 px-6 py-4">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex flex-col">
-              <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filespace</span>
-              <span className="text-sm font-medium text-slate-800">{filespaceName}</span>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700">{currentFolderLabel}</span>
-            </div>
-          </div>
           {uploadMutation.isPending && uploadInfo ? (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
               <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
