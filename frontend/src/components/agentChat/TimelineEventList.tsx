@@ -35,7 +35,16 @@ export function TimelineEventList({
   }, [events])
 
   const hasThinking = Boolean(thinkingReasoning?.trim())
-  const showThinkingBeforeMessage = hasThinking && lastAgentMessageIndex >= 0 && onToggleThinking
+  const thinkingAnchorIndex = useMemo(() => {
+    if (!events.length) {
+      return -1
+    }
+    if (lastAgentMessageIndex >= 0) {
+      return lastAgentMessageIndex
+    }
+    return events.length - 1
+  }, [events.length, lastAgentMessageIndex])
+  const showThinking = hasThinking && onToggleThinking && thinkingAnchorIndex >= 0
 
   if (initialLoading) {
     return (
@@ -47,13 +56,23 @@ export function TimelineEventList({
   }
 
   if (!events.length) {
+    if (hasThinking && onToggleThinking) {
+      return (
+        <ThinkingBubble
+          reasoning={thinkingReasoning || ''}
+          isStreaming={false}
+          collapsed={thinkingCollapsed}
+          onToggle={onToggleThinking}
+        />
+      )
+    }
     return <div className="timeline-empty text-center text-sm text-slate-400">No activity yet.</div>
   }
 
   return (
     <ToolDetailProvider>
       {events.map((event, index) => {
-        const showThinkingHere = showThinkingBeforeMessage && index === lastAgentMessageIndex
+        const showThinkingHere = showThinking && index === thinkingAnchorIndex
 
         if (event.kind === 'message') {
           return (

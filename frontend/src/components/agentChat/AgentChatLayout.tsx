@@ -62,6 +62,7 @@ export function AgentChatLayout({
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasCompletedReasoning = Boolean(completedThinking?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
+  const showStreamingReasoning = Boolean(isStreaming && hasStreamingReasoning)
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
@@ -120,12 +121,12 @@ export function AgentChatLayout({
                 />
               </div>
 
-              {(hasStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
+              {(showStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
                 <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
-                  {hasStreamingReasoning && onToggleThinking ? (
+                  {showStreamingReasoning && onToggleThinking ? (
                     <ThinkingBubble
                       reasoning={streaming?.reasoning || ''}
-                      isStreaming={true}
+                      isStreaming={isStreaming}
                       collapsed={thinkingCollapsed}
                       onToggle={onToggleThinking}
                     />
