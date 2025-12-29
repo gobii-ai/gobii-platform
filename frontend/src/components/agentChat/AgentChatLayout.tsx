@@ -49,7 +49,7 @@ export function AgentChatLayout({
   loadingNewer = false,
   initialLoading = false,
 }: AgentChatLayoutProps) {
-  const showProcessingIndicator = Boolean(processingActive && !hasMoreNewer)
+  const showProcessingIndicator = Boolean((processingActive || streaming) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
@@ -100,15 +100,15 @@ export function AgentChatLayout({
                   events={events}
                   agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
-                  streaming={streaming}
                 />
               </div>
 
               <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
                 <ProcessingIndicator
                   agentFirstName={agentFirstName}
-                  active={showProcessingIndicator}
+                  active={Boolean(processingActive || streaming)}
                   tasks={processingWebTasks}
+                  streaming={streaming ?? null}
                 />
               </div>
 

@@ -64,6 +64,13 @@
   pointer-events: auto;
 }
 
+#agent-processing-indicator[data-has-streaming='true'] {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.8rem;
+  padding: 0.75rem 0.95rem;
+}
+
 #agent-processing-indicator[data-expanded='true'] {
   flex-direction: column;
   align-items: stretch;
@@ -76,9 +83,20 @@
   display: none;
 }
 
+#agent-processing-indicator[data-expanded='true'] .processing-stream {
+  margin-left: 0;
+}
+
 .processing-content {
   display: flex;
   flex-direction: column;
+  gap: 0.6rem;
+  width: 100%;
+}
+
+.processing-header {
+  display: flex;
+  align-items: center;
   gap: 0.6rem;
   width: 100%;
 }
@@ -121,6 +139,8 @@
   transition: opacity 0.18s ease;
   text-align: left;
   width: 100%;
+  flex: 1;
+  min-width: 0;
 }
 
 .processing-label:disabled {
@@ -153,6 +173,116 @@
   font-weight: 600;
   letter-spacing: 0.02em;
   text-transform: uppercase;
+}
+
+.processing-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  row-gap: 0.35rem;
+  justify-content: flex-end;
+}
+
+.processing-stream-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  border: 1px dashed rgba(79, 70, 229, 0.3);
+  background: rgba(238, 242, 255, 0.9);
+  color: #4f46e5;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.processing-stream {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-left: 1.1rem;
+  padding: 0.1rem 0 0.2rem 0.75rem;
+  border-left: 2px solid rgba(99, 102, 241, 0.3);
+  color: #1e1b4b;
+}
+
+.processing-stream-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.processing-stream-label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(79, 70, 229, 0.7);
+}
+
+.processing-stream-markdown {
+  color: #1e1b4b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.processing-stream-markdown p {
+  margin: 0.35rem 0;
+}
+
+.processing-stream-markdown ul,
+.processing-stream-markdown ol {
+  margin: 0.35rem 0 0.35rem 1.1rem;
+  padding-left: 0.9rem;
+}
+
+.processing-stream-markdown ul {
+  list-style: disc;
+}
+
+.processing-stream-markdown ol {
+  list-style: decimal;
+}
+
+.processing-stream-markdown li {
+  margin: 0.1rem 0;
+}
+
+.processing-stream-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: rgba(79, 70, 229, 0.7);
+  font-size: 0.85rem;
+}
+
+.processing-stream-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: rgba(79, 70, 229, 0.7);
+  animation: processingStreamPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes processingStreamPulse {
+  0%,
+  100% {
+    transform: scale(0.75);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .processing-stream-dot {
+    animation: none;
+  }
 }
 
 .processing-task-list {
@@ -1238,97 +1368,6 @@
   background: rgba(248, 249, 255, 0.95);
   color: #1e1b4b;
   border: 1px solid rgba(79, 70, 229, 0.12);
-}
-
-.chat-bubble--stream {
-  background: linear-gradient(135deg, rgba(224, 231, 255, 0.92) 0%, rgba(230, 245, 255, 0.9) 100%);
-  border: 1px dashed rgba(59, 130, 246, 0.4);
-}
-
-.chat-stream-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  margin-top: 0.6rem;
-}
-
-.chat-stream-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: rgba(37, 99, 235, 0.75);
-}
-
-.chat-stream-body {
-  white-space: pre-wrap;
-  font-size: 0.9rem;
-  line-height: 1.5;
-  color: #1e1b4b;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.chat-stream-markdown {
-  color: #1e1b4b;
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
-.chat-stream-markdown p {
-  margin: 0.35rem 0;
-}
-
-.chat-stream-markdown ul,
-.chat-stream-markdown ol {
-  margin: 0.35rem 0 0.35rem 1.1rem;
-  padding-left: 0.9rem;
-}
-
-.chat-stream-markdown ul {
-  list-style: disc;
-}
-
-.chat-stream-markdown ol {
-  list-style: decimal;
-}
-
-.chat-stream-markdown li {
-  margin: 0.1rem 0;
-}
-
-.chat-stream-placeholder {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  margin-top: 0.35rem;
-  color: rgba(79, 70, 229, 0.7);
-  font-size: 0.85rem;
-}
-
-.chat-stream-dot {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 9999px;
-  background: rgba(79, 70, 229, 0.7);
-  animation: streamPulse 1.2s ease-in-out infinite;
-}
-
-@keyframes streamPulse {
-  0%,
-  100% {
-    transform: scale(0.75);
-    opacity: 0.4;
-  }
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-stream-dot {
-    animation: none;
-  }
 }
 
 .chat-bubble--peer-out {

@@ -1,8 +1,6 @@
 import { MessageEventCard } from './MessageEventCard'
-import { StreamEventCard } from './StreamEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { ToolDetailProvider } from './tooling/ToolDetailContext'
-import type { StreamState } from '../../types/agentChat'
 import type { TimelineEvent } from './types'
 
 type TimelineEventListProps = {
@@ -10,7 +8,6 @@ type TimelineEventListProps = {
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
-  streaming?: StreamState | null
 }
 
 export function TimelineEventList({
@@ -18,7 +15,6 @@ export function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
-  streaming,
 }: TimelineEventListProps) {
   if (initialLoading) {
     return (
@@ -29,7 +25,7 @@ export function TimelineEventList({
     )
   }
 
-  if (!events.length && !streaming) {
+  if (!events.length) {
     return <div className="timeline-empty text-center text-sm text-slate-400">No activity yet.</div>
   }
 
@@ -49,9 +45,6 @@ export function TimelineEventList({
         }
         return <ToolClusterCard key={event.cursor} cluster={event} />
       })}
-      {streaming ? (
-        <StreamEventCard stream={streaming} agentFirstName={agentFirstName} />
-      ) : null}
     </ToolDetailProvider>
   )
 }

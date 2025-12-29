@@ -1,9 +1,10 @@
 import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
-import type { ProcessingWebTask } from '../../types/agentChat'
+import type { ProcessingWebTask, StreamState } from '../../types/agentChat'
 import { scrollIntoViewIfNeeded } from './scrollIntoView'
 import { useAgentChatStore } from '../../stores/agentChatStore'
+import { looksLikeHtml, sanitizeHtml } from '../../util/sanitize'
 
 function combineClassNames(...values: Array<string | undefined | false>) {
   return values.filter(Boolean).join(' ')
@@ -60,10 +61,33 @@ type ProcessingIndicatorProps = {
   className?: string
   fade?: boolean
   tasks?: ProcessingWebTask[]
+  streaming?: StreamState | null
 }
 
-export function ProcessingIndicator({ agentFirstName, active, className, fade = false, tasks }: ProcessingIndicatorProps) {
+export function ProcessingIndicator({
+  agentFirstName,
+  active,
+  className,
+  fade = false,
+  tasks,
+  streaming,
+}: ProcessingIndicatorProps) {
   const activeTasks = useMemo(() => (Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []), [tasks])
+  const hasStreaming = Boolean(streaming)
+  const streamingReasoning = streaming?.reasoning ?? ''
+  const streamingContent = streaming?.content ?? ''
+  const hasStreamingReasoning = streamingReasoning.trim().length > 0
+  const hasStreamingContent = streamingContent.trim().length > 0
+  const streamingStatusLabel = streaming?.done ? 'Draft ready' : 'Live response'
+  const htmlReply = useMemo(() => {
+    if (!streaming || !streaming.done) {
+      return null
+    }
+    if (!streamingContent || !looksLikeHtml(streamingContent)) {
+      return null
+    }
+    return sanitizeHtml(streamingContent)
+  }, [streaming, streamingContent])
   const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set())
@@ -197,7 +221,7 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
     }
   }, [isExpanded, setAutoScrollPinned, suppressAutoScrollPin])
 
-  if (!active) {
+  if (!active && !hasStreaming) {
     return null
   }
 
@@ -212,13 +236,49 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       className={classes}
       data-visible={active ? 'true' : 'false'}
       data-expanded={isExpanded ? 'true' : 'false'}
+      data-has-streaming={hasStreaming ? 'true' : 'false'}
     >
-      <span className="processing-pip" aria-hidden="true" />
       <div className="processing-content">
-        <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
-          <strong>{agentFirstName}</strong> is working
-          {activeTasks.length ? <span className="processing-count">{taskCountLabel}</span> : null}
-        </button>
+        <div className="processing-header">
+          <span className="processing-pip" aria-hidden="true" />
+          <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
+            <strong>{agentFirstName}</strong> is working
+          </button>
+          {hasStreaming || activeTasks.length ? (
+            <div className="processing-meta">
+              {hasStreaming ? <span className="processing-stream-badge">{streamingStatusLabel}</span> : null}
+              {activeTasks.length ? <span className="processing-count">{taskCountLabel}</span> : null}
+            </div>
+          ) : null}
+        </div>
+        {hasStreaming ? (
+          <div className="processing-stream" aria-live="polite">
+            {hasStreamingReasoning ? (
+              <div className="processing-stream-section">
+                <div className="processing-stream-label">Thinking</div>
+                <MarkdownViewer content={streamingReasoning} className="processing-stream-markdown" enableHighlight={false} />
+              </div>
+            ) : null}
+            {hasStreamingContent ? (
+              <div className="processing-stream-section">
+                <div className="processing-stream-label">Reply</div>
+                {htmlReply ? (
+                  <div
+                    className="processing-stream-markdown"
+                    dangerouslySetInnerHTML={{ __html: htmlReply }}
+                  />
+                ) : (
+                  <MarkdownViewer content={streamingContent} className="processing-stream-markdown" enableHighlight={false} />
+                )}
+              </div>
+            ) : (
+              <div className="processing-stream-placeholder">
+                <span className="processing-stream-dot" aria-hidden="true" />
+                <span>{streaming?.done ? 'No message content.' : 'Drafting reply...'}</span>
+              </div>
+            )}
+          </div>
+        ) : null}
         {activeTasks.length && isExpanded ? (
           <div className="processing-task-list" aria-live="polite">
             {activeTasks.map((task) => {
