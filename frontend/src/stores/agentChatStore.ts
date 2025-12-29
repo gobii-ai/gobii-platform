@@ -132,6 +132,7 @@ function mergeEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): Time
 }
 
 const TIMELINE_WINDOW_SIZE = 100
+let refreshLatestInFlight = false
 
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [] }
 
@@ -174,6 +175,8 @@ export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
   streaming: StreamState | null
+  streamingLastUpdatedAt: number | null
+  streamingClearOnDone: boolean
   streamingThinkingCollapsed: boolean
   thinkingCollapsedByCursor: Record<string, boolean>
   oldestCursor: string | null
@@ -186,6 +189,7 @@ export type AgentChatState = {
   loading: boolean
   loadingOlder: boolean
   loadingNewer: boolean
+  refreshingLatest: boolean
   error: string | null
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
@@ -193,12 +197,14 @@ export type AgentChatState = {
   agentColorHex: string | null
   initialize: (agentId: string, options?: { agentColorHex?: string | null }) => Promise<void>
   refreshProcessing: () => Promise<void>
+  refreshLatest: () => Promise<void>
   loadOlder: () => Promise<void>
   loadNewer: () => Promise<void>
   jumpToLatest: () => Promise<void>
   sendMessage: (body: string, attachments?: File[]) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
   receiveStreamEvent: (payload: StreamEventPayload) => void
+  finalizeStreaming: () => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
@@ -210,6 +216,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
   events: [],
   streaming: null,
+  streamingLastUpdatedAt: null,
+  streamingClearOnDone: false,
   streamingThinkingCollapsed: false,
   thinkingCollapsedByCursor: {},
   oldestCursor: null,
@@ -222,6 +230,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   loading: false,
   loadingOlder: false,
   loadingNewer: false,
+  refreshingLatest: false,
   error: null,
   autoScrollPinned: true,
   autoScrollPinSuppressedUntil: null,
@@ -237,6 +246,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
       streaming: null,
+      streamingLastUpdatedAt: null,
+      streamingClearOnDone: false,
       streamingThinkingCollapsed: false,
       thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
@@ -288,6 +299,86 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       set({
         error: error instanceof Error ? error.message : 'Failed to refresh processing status',
       })
+    }
+  },
+
+  async refreshLatest() {
+    const state = get()
+    if (!state.agentId || refreshLatestInFlight) {
+      return
+    }
+    refreshLatestInFlight = true
+    set({ refreshingLatest: true })
+    try {
+      const snapshot = await fetchAgentTimeline(state.agentId, {
+        direction: 'newer',
+        cursor: state.newestCursor ?? undefined,
+        limit: TIMELINE_WINDOW_SIZE,
+      })
+      const incoming = sortEvents(normalizeEvents(snapshot.events))
+      const hasThinkingEvent = incoming.some((event) => event.kind === 'thinking')
+      const processingSnapshot = normalizeProcessingUpdate(
+        snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
+      )
+      set((current) => {
+        const agentColorHex = snapshot.agent_color_hex
+          ? normalizeHexColor(snapshot.agent_color_hex)
+          : current.agentColorHex
+        const hasStreamingContent = Boolean(current.streaming?.content?.trim())
+        const allowThinkingClear = Boolean(current.streaming) && !hasStreamingContent
+        const shouldClearThinkingStream = hasThinkingEvent && current.streaming?.done && allowThinkingClear
+        const shouldFlagThinkingClear = hasThinkingEvent && current.streaming && !current.streaming.done && allowThinkingClear
+        const nextStreaming = shouldClearThinkingStream ? null : current.streaming
+        const nextStreamingClearOnDone =
+          shouldClearThinkingStream
+            ? false
+            : shouldFlagThinkingClear
+              ? true
+              : allowThinkingClear
+                ? current.streamingClearOnDone
+                : false
+        if (!current.autoScrollPinned) {
+          const pendingEvents = mergeEvents(current.pendingEvents, incoming)
+          return {
+            processingActive: processingSnapshot.active,
+            processingWebTasks: processingSnapshot.webTasks,
+            pendingEvents,
+            hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
+            streaming: nextStreaming,
+            streamingClearOnDone: nextStreamingClearOnDone,
+            refreshingLatest: false,
+            agentColorHex,
+          }
+        }
+        const merged = mergeEvents(current.events, incoming)
+        const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
+        const events = merged.slice(windowStart)
+        const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
+        const newestCursor = events.length ? events[events.length - 1].cursor : current.newestCursor
+        const trimmedOlder = merged.length > events.length
+        const hasMoreOlder = incoming.length === 0 ? current.hasMoreOlder : snapshot.has_more_older || trimmedOlder
+        return {
+          events,
+          oldestCursor,
+          newestCursor,
+          hasMoreOlder,
+          hasMoreNewer: snapshot.has_more_newer,
+          processingActive: processingSnapshot.active,
+          processingWebTasks: processingSnapshot.webTasks,
+          pendingEvents: [],
+          streaming: nextStreaming,
+          streamingClearOnDone: nextStreamingClearOnDone,
+          refreshingLatest: false,
+          agentColorHex,
+        }
+      })
+    } catch (error) {
+      set({
+        refreshingLatest: false,
+        error: error instanceof Error ? error.message : 'Failed to refresh timeline',
+      })
+    } finally {
+      refreshLatestInFlight = false
     }
   },
 
@@ -429,14 +520,26 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const state = get()
     const normalized = normalizeEvent(event)
     const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
-    const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done
+    const hasStreamingContent = Boolean(state.streaming?.content?.trim())
+    const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
+    const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done && allowThinkingClear
+    const shouldFlagThinkingClear = normalized.kind === 'thinking' && state.streaming && !state.streaming.done && allowThinkingClear
     const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
+    const nextStreamingClearOnDone =
+      shouldClearStream || shouldClearThinkingStream
+        ? false
+        : shouldFlagThinkingClear
+          ? true
+          : allowThinkingClear
+            ? state.streamingClearOnDone
+            : false
     if (!state.autoScrollPinned) {
       const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
         streaming: nextStreaming,
+        streamingClearOnDone: nextStreamingClearOnDone,
       })
       return
     }
@@ -460,6 +563,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       oldestCursor,
       pendingEvents: [],
       streaming: nextStreaming,
+      streamingClearOnDone: nextStreamingClearOnDone,
     })
   },
 
@@ -469,6 +573,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     }
     const isStart = payload.status === 'start'
     const isDone = payload.status === 'done'
+    const isDelta = payload.status === 'delta'
+    const now = Date.now()
+    let shouldRefreshLatest = false
 
     set((state) => {
       const base =
@@ -483,7 +590,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         streamId: base.streamId,
         reasoning: reasoningDelta ? `${base.reasoning}${reasoningDelta}` : base.reasoning,
         content: contentDelta ? `${base.content}${contentDelta}` : base.content,
-        done: isDone ? true : base.done,
+        done: isDone ? true : isDelta ? false : base.done,
       }
 
       const hasUnseenActivity = !state.autoScrollPinned
@@ -491,14 +598,27 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         : state.hasUnseenActivity
 
       if (isDone && !next.reasoning && !next.content) {
-        return { streaming: null, hasUnseenActivity }
+        return { streaming: null, hasUnseenActivity, streamingLastUpdatedAt: now, streamingClearOnDone: false }
       }
 
-      if (isDone && next.reasoning) {
+      const hasStreamingContent = Boolean(next.content.trim())
+
+      if (isDone && next.reasoning && !hasStreamingContent) {
+        if (state.streamingClearOnDone) {
+          return {
+            streaming: null,
+            hasUnseenActivity,
+            streamingClearOnDone: false,
+            streamingLastUpdatedAt: now,
+          }
+        }
+        shouldRefreshLatest = true
         return {
           streaming: next,
           hasUnseenActivity,
           streamingThinkingCollapsed: true,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
         }
       }
 
@@ -507,10 +627,41 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streaming: next,
           hasUnseenActivity,
           streamingThinkingCollapsed: false,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
         }
       }
 
-      return { streaming: next, hasUnseenActivity }
+      const nextStreamingClearOnDone = hasStreamingContent ? false : state.streamingClearOnDone
+      const nextStreamingThinkingCollapsed =
+        isDone && next.reasoning ? true : state.streamingThinkingCollapsed
+      return {
+        streaming: next,
+        hasUnseenActivity,
+        streamingClearOnDone: nextStreamingClearOnDone,
+        streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
+        streamingLastUpdatedAt: now,
+      }
+    })
+
+    if (shouldRefreshLatest) {
+      void get().refreshLatest()
+    }
+  },
+
+  finalizeStreaming() {
+    const now = Date.now()
+    set((state) => {
+      if (!state.streaming || state.streaming.done) {
+        return state
+      }
+      const hasReasoning = Boolean(state.streaming.reasoning?.trim())
+      return {
+        streaming: { ...state.streaming, done: true },
+        streamingThinkingCollapsed: hasReasoning ? true : state.streamingThinkingCollapsed,
+        streamingClearOnDone: false,
+        streamingLastUpdatedAt: now,
+      }
     })
   },
 

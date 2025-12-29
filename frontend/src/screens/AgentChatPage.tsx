@@ -19,6 +19,9 @@ export type AgentChatPageProps = {
   agentAvatarUrl?: string | null
 }
 
+const STREAMING_STALE_MS = 6000
+const STREAMING_REFRESH_INTERVAL_MS = 6000
+
 export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -42,10 +45,14 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
+  const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const thinkingCollapsedByCursor = useAgentChatStore((state) => state.thinkingCollapsedByCursor)
   const toggleThinkingCollapsed = useAgentChatStore((state) => state.toggleThinkingCollapsed)
   const streamingThinkingCollapsed = useAgentChatStore((state) => state.streamingThinkingCollapsed)
   const setStreamingThinkingCollapsed = useAgentChatStore((state) => state.setStreamingThinkingCollapsed)
+  const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
+  const refreshLatest = useAgentChatStore((state) => state.refreshLatest)
+  const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -190,6 +197,46 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
+
+  useEffect(() => {
+    if (!streaming || streaming.done) {
+      return () => undefined
+    }
+    const interval = window.setInterval(() => {
+      void refreshProcessing()
+    }, STREAMING_REFRESH_INTERVAL_MS)
+    return () => window.clearInterval(interval)
+  }, [refreshProcessing, streaming])
+
+  useEffect(() => {
+    if (!streaming || streaming.done) {
+      return () => undefined
+    }
+    if (processingActive) {
+      return () => undefined
+    }
+    const lastUpdated = streamingLastUpdatedAt ?? Date.now()
+    const elapsed = Date.now() - lastUpdated
+    const timeoutMs = Math.max(0, STREAMING_STALE_MS - elapsed)
+    const handleTimeout = () => {
+      finalizeStreaming()
+      if (streaming.reasoning && !streaming.content) {
+        void refreshLatest()
+      }
+    }
+    if (timeoutMs === 0) {
+      handleTimeout()
+      return () => undefined
+    }
+    const timeout = window.setTimeout(handleTimeout, timeoutMs)
+    return () => window.clearTimeout(timeout)
+  }, [
+    finalizeStreaming,
+    processingActive,
+    refreshLatest,
+    streaming,
+    streamingLastUpdatedAt,
+  ])
 
   return (
     <div className="min-h-screen">
