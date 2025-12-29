@@ -72,6 +72,34 @@ export function coerceString(value: unknown): string | null {
   return null
 }
 
+function deriveFileExport(
+  entry: ToolCallEntry,
+  parameters: Record<string, unknown> | null,
+  fallbackLabel: string,
+): ToolDescriptorTransform {
+  const resultObject = parseResultObject(entry.result)
+  const status = coerceString(resultObject?.['status'])
+  const message = coerceString(resultObject?.['message'])
+  const filename = coerceString(resultObject?.['filename']) || coerceString(parameters?.['filename'])
+  const path = coerceString(resultObject?.['path'])
+  const isError = status?.toLowerCase() === 'error'
+
+  const caption = message ? truncate(message, 56) : filename ? truncate(filename, 56) : path ? truncate(path, 56) : null
+  const summaryParts: string[] = []
+  if (path) {
+    summaryParts.push(path)
+  }
+  if (filename && filename !== path) {
+    summaryParts.push(filename)
+  }
+
+  return {
+    label: isError ? `${fallbackLabel} failed` : fallbackLabel,
+    caption: caption ?? entry.caption ?? fallbackLabel,
+    summary: summaryParts.length ? truncate(summaryParts.join(' • '), 96) : entry.summary ?? null,
+  }
+}
+
 export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   {
     name: 'update_charter',
@@ -260,6 +288,28 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     derive(_, parameters) {
       const path = coerceString(parameters?.path) || coerceString(parameters?.file_path) || coerceString(parameters?.filename)
       return { caption: path ? truncate(path, 40) : 'Read file' }
+    },
+  },
+  {
+    name: 'create_csv',
+    label: 'CSV export',
+    icon: ClipboardList,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-600',
+    detailKind: 'fileExport',
+    derive(entry, parameters) {
+      return deriveFileExport(entry, parameters, 'CSV export')
+    },
+  },
+  {
+    name: 'create_pdf',
+    label: 'PDF export',
+    icon: FileText,
+    iconBgClass: 'bg-rose-100',
+    iconColorClass: 'text-rose-600',
+    detailKind: 'fileExport',
+    derive(entry, parameters) {
+      return deriveFileExport(entry, parameters, 'PDF export')
     },
   },
   {
