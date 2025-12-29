@@ -179,7 +179,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const queryClient = useQueryClient()
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
-  const [pendingUploadParentId, setPendingUploadParentId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
   const [newFolderName, setNewFolderName] = useState('')
@@ -187,6 +186,9 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const [uploadInfo, setUploadInfo] = useState<{ parentId: string | null; fileCount: number } | null>(null)
   const dragNodeRef = useRef<AgentFsNode | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const emptyNodesRef = useRef<AgentFsNode[]>([])
+  const pendingUploadParentIdRef = useRef<string | null>(null)
+  const uploadInputId = 'agent-files-upload-input'
 
   const filesQuery = useQuery<AgentFilesResponse, Error>({
     queryKey: ['agent-files', initialData.agent.id],
@@ -194,7 +196,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     refetchOnWindowFocus: false,
   })
 
-  const nodes = filesQuery.data?.nodes ?? []
+  const nodes = filesQuery.data?.nodes ?? emptyNodesRef.current
   const nodeMap = useMemo(() => new Map(nodes.map((node) => [node.id, node])), [nodes])
   const childrenByParent = useMemo(() => {
     const map = new Map<string | null, AgentFsNode[]>()
@@ -212,7 +214,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   }, [nodes])
 
   const currentFolder = currentFolderId ? nodeMap.get(currentFolderId) ?? null : null
-  const currentRows = childrenByParent.get(currentFolderId) ?? []
+  const currentRows = childrenByParent.get(currentFolderId) ?? emptyNodesRef.current
   const parentFolderId = currentFolder?.parentId ?? null
   const parentFolderPath = parentFolderId ? nodeMap.get(parentFolderId)?.path ?? '/' : '/'
   const parentDropKey = currentFolderId ? (parentFolderId ?? 'root') : null
@@ -298,30 +300,29 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     setRowSelection({})
   }, [currentFolderId])
 
-  const handleUploadClick = useCallback((parentId: string | null) => {
-    setPendingUploadParentId(parentId)
-    fileInputRef.current?.click()
+  const handleUploadRequest = useCallback((parentId: string | null) => {
+    pendingUploadParentIdRef.current = parentId
   }, [])
 
   const handleFileChange = useCallback(
     async (event: ChangeEvent<HTMLInputElement>) => {
       const files = event.target.files
       if (!files || files.length === 0) {
-        setPendingUploadParentId(null)
+        pendingUploadParentIdRef.current = null
         return
       }
       try {
         await uploadMutation.mutateAsync({
           files,
-          parentId: pendingUploadParentId,
+          parentId: pendingUploadParentIdRef.current,
         })
       } catch (error) {
         // Errors are surfaced via mutation callbacks.
       }
-      setPendingUploadParentId(null)
+      pendingUploadParentIdRef.current = null
       event.target.value = ''
     },
-    [pendingUploadParentId, uploadMutation],
+    [uploadMutation],
   )
 
   const selectedNodes = useMemo(() => {
@@ -599,6 +600,8 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     [currentFolderId, moveMutation, uploadMutation],
   )
 
+  const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
+
   const columns = useMemo<ColumnDef<AgentFsNode>[]>(() => {
     return [
       {
@@ -683,14 +686,33 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
           const node = row.original
           if (node.nodeType === 'dir') {
             return (
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
-                onClick={() => handleUploadClick(node.id)}
+              <label
+                htmlFor={uploadInputId}
+                role="button"
+                tabIndex={isBusy ? -1 : 0}
+                aria-disabled={isBusy}
+                className={`inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-100'}`}
+                onPointerDown={(event) => {
+                  if (isBusy) {
+                    event.preventDefault()
+                    return
+                  }
+                  handleUploadRequest(node.id)
+                }}
+                onKeyDown={(event) => {
+                  if (isBusy) {
+                    return
+                  }
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault()
+                    handleUploadRequest(node.id)
+                    fileInputRef.current?.click()
+                  }
+                }}
               >
                 <UploadCloud className="h-3.5 w-3.5" />
                 Upload here
-              </button>
+              </label>
             )
           }
 
@@ -717,7 +739,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
         },
       },
     ]
-  }, [handleFolderKeyDown, handleSingleDelete, handleUploadClick, initialData.urls.download])
+  }, [handleFolderKeyDown, handleSingleDelete, handleUploadRequest, initialData.urls.download, isBusy, uploadInputId])
 
   const table = useReactTable({
     data: currentRows,
@@ -732,8 +754,6 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const handleRefresh = useCallback(() => {
     filesQuery.refetch().catch(() => {})
   }, [filesQuery])
-
-  const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
   const uploadTargetName = uploadInfo
     ? uploadInfo.parentId
       ? nodeMap.get(uploadInfo.parentId)?.path ?? 'Folder'
@@ -753,15 +773,33 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
             </a>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-100 disabled:opacity-60"
-              onClick={() => handleUploadClick(currentFolderId)}
-              disabled={isBusy}
+            <label
+              htmlFor={uploadInputId}
+              role="button"
+              tabIndex={isBusy ? -1 : 0}
+              aria-disabled={isBusy}
+              className={`inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-100'}`}
+              onPointerDown={(event) => {
+                if (isBusy) {
+                  event.preventDefault()
+                  return
+                }
+                handleUploadRequest(currentFolderId)
+              }}
+              onKeyDown={(event) => {
+                if (isBusy) {
+                  return
+                }
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  handleUploadRequest(currentFolderId)
+                  fileInputRef.current?.click()
+                }
+              }}
             >
               <UploadCloud className="h-4 w-4" aria-hidden="true" />
               Upload Files
-            </button>
+            </label>
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
@@ -955,6 +993,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
       </div>
 
       <input
+        id={uploadInputId}
         ref={fileInputRef}
         type="file"
         multiple
