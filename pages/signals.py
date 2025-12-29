@@ -125,6 +125,187 @@ def _coerce_bool(value: Any) -> bool | None:
         return None
 
 
+def _is_final_payment_attempt(invoice_payload: Mapping[str, Any] | None) -> bool | None:
+    """Best-effort signal for whether Stripe will try the invoice again."""
+    if not isinstance(invoice_payload, Mapping):
+        return None
+
+    next_attempt = invoice_payload.get("next_payment_attempt")
+    status = (invoice_payload.get("status") or "").lower()
+    auto_advance = _coerce_bool(invoice_payload.get("auto_advance"))
+
+    if next_attempt in (None, "", 0):
+        return True
+    if status in {"uncollectible", "void"}:
+        return True
+    if auto_advance is False:
+        return True
+    return False
+
+
+def _normalize_currency_code(currency: Any) -> str | None:
+    if isinstance(currency, str):
+        return currency.upper()
+    return None
+
+
+def _amount_major_units(*candidates: Any) -> float | None:
+    """Return the first currency amount (in cents) converted to major units."""
+    for cand in candidates:
+        if cand is None:
+            continue
+        try:
+            return float(Decimal(str(cand)) / Decimal("100"))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+    return None
+
+
+def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    try:
+        return (payload.get("lines") or {}).get("data") or []
+    except Exception as e:
+        logger.exception(
+            "Failed to extract invoice lines from payload: %s",
+            e
+        )
+        return []
+
+
+def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
+    for line in lines:
+        price_info = line.get("price") or {}
+        if not price_info:
+            price_info = (line.get("pricing") or {}).get("price_details") or {}
+        product = price_info.get("product")
+        if isinstance(product, Mapping):
+            product = product.get("id")
+        if product:
+            plan = get_plan_by_product_id(product)
+            if plan and plan.get("id"):
+                return plan.get("id")
+    return None
+
+
+def _extract_subscription_id(payload: Mapping[str, Any], invoice: Invoice | None) -> str | None:
+    subscription_id = None
+    if invoice and getattr(invoice, "subscription", None):
+        try:
+            subscription_id = getattr(invoice.subscription, "id", None) or str(invoice.subscription)
+        except Exception:
+            subscription_id = None
+
+    if not subscription_id:
+        subscription_id = payload.get("subscription")
+
+    if not subscription_id:
+        try:
+            parent = payload.get("parent") or {}
+            if isinstance(parent, Mapping):
+                sub_details = parent.get("subscription_details") or {}
+                if isinstance(sub_details, Mapping):
+                    subscription_id = sub_details.get("subscription")
+        except Exception:
+            subscription_id = None
+
+    return subscription_id
+
+
+def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
+    customer = getattr(invoice, "customer", None) if invoice else None
+    customer_id = getattr(customer, "id", None) if customer else None
+    if not customer_id:
+        customer_id = payload.get("customer")
+
+    owner = None
+    owner_type = ""
+    organization_billing: OrganizationBilling | None = None
+
+    if customer and getattr(customer, "subscriber", None):
+        owner = customer.subscriber
+        owner_type = "user"
+    elif customer_id:
+        organization_billing = (
+            OrganizationBilling.objects.select_related("organization")
+            .filter(stripe_customer_id=customer_id)
+            .first()
+        )
+        if organization_billing and organization_billing.organization:
+            owner = organization_billing.organization
+            owner_type = "organization"
+
+    return owner, owner_type, organization_billing, customer_id
+
+
+def _build_invoice_properties(
+    payload: Mapping[str, Any],
+    invoice: Invoice | None,
+    *,
+    customer_id: str | None,
+    subscription_id: str | None,
+    plan_value: str | None,
+    lines: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    attempt_count = payload.get("attempt_count")
+    attempted_flag = _coerce_bool(payload.get("attempted"))
+    next_attempt_dt = _coerce_datetime(payload.get("next_payment_attempt"))
+    final_attempt = _is_final_payment_attempt(payload)
+
+    currency = _normalize_currency_code(payload.get("currency"))
+    amount_due_major = _amount_major_units(payload.get("amount_due"), payload.get("total"))
+    amount_paid_major = _amount_major_units(payload.get("amount_paid"))
+
+    properties: dict[str, Any] = {
+        "stripe.invoice_id": payload.get("id") or getattr(invoice, "id", None),
+        "stripe.invoice_number": payload.get("number") or getattr(invoice, "number", None),
+        "stripe.customer_id": customer_id,
+        "stripe.subscription_id": subscription_id,
+        "billing_reason": payload.get("billing_reason"),
+        "collection_method": payload.get("collection_method"),
+        "livemode": bool(payload.get("livemode")),
+        "amount_due": amount_due_major,
+        "amount_paid": amount_paid_major,
+        "currency": currency,
+        "attempt_number": attempt_count,
+        "attempted": attempted_flag,
+        "next_payment_attempt_at": next_attempt_dt,
+        "final_attempt": final_attempt,
+        "status": payload.get("status"),
+        "customer_email": payload.get("customer_email"),
+        "customer_name": payload.get("customer_name"),
+        "hosted_invoice_url": payload.get("hosted_invoice_url"),
+        "invoice_pdf": payload.get("invoice_pdf"),
+        "line_items": len(lines) if isinstance(lines, list) else None,
+        "plan": plan_value,
+        "receipt_number": payload.get("receipt_number"),
+    }
+
+    status_transitions = payload.get("status_transitions") or {}
+    paid_at = _coerce_datetime(status_transitions.get("paid_at"))
+    finalized_at = _coerce_datetime(status_transitions.get("finalized_at"))
+    if paid_at:
+        properties["paid_at"] = paid_at
+    if finalized_at:
+        properties["finalized_at"] = finalized_at
+
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("gobii_event_id"):
+        properties["gobii_event_id"] = metadata.get("gobii_event_id")
+
+    price_ids = []
+    for line in lines:
+        price_info = line.get("price") or {}
+        if not price_info:
+            price_info = (line.get("pricing") or {}).get("price_details") or {}
+        price_id = price_info.get("id") or price_info.get("price")
+        if price_id:
+            price_ids.append(price_id)
+    if price_ids:
+        properties["line_price_ids"] = price_ids
+
+    return {k: v for k, v in properties.items() if v not in (None, "")}
+
+
 def _safe_client_ip(request) -> str | None:
     """Return a normalized client IP or None if unavailable."""
     if not request:
@@ -745,6 +926,202 @@ def handle_user_logged_out(sender, request, user, **kwargs):
         logger.info("Analytics tracking successful for logout.")
     except Exception:
         logger.exception("Analytics tracking failed during logout.")
+
+
+@djstripe_receiver(["invoice.payment_failed"])
+def handle_invoice_payment_failed(event, **kwargs):
+    """Emit analytics when Stripe fails to collect payment for an invoice."""
+    with tracer.start_as_current_span("handle_invoice_payment_failed") as span:
+        payload = event.data.get("object", {}) or {}
+        if payload.get("object") != "invoice":
+            span.add_event("unexpected_object", {"object": payload.get("object")})
+            logger.info("Invoice payment failed webhook received non-invoice payload")
+            return
+
+        status = stripe_status()
+        if not status.enabled:
+            span.add_event("stripe_disabled")
+            logger.info("Stripe disabled; ignoring invoice payment failed webhook %s", payload.get("id"))
+            return
+
+        stripe_key = PaymentsHelper.get_stripe_key()
+        if not stripe_key:
+            span.add_event("stripe_key_missing")
+            logger.warning("Stripe key unavailable; ignoring invoice payment failed webhook %s", payload.get("id"))
+            return
+
+        stripe.api_key = stripe_key
+
+        invoice = None
+        try:
+            invoice = Invoice.sync_from_stripe_data(payload)
+        except Exception:
+            span.add_event("invoice_sync_failed")
+            logger.exception("Failed to sync invoice %s from webhook", payload.get("id"))
+
+        owner, owner_type, _organization_billing, customer_id = _resolve_invoice_owner(invoice, payload)
+
+        if owner_type:
+            span.set_attribute("invoice.owner.type", owner_type)
+        if owner:
+            span.set_attribute("invoice.owner.id", str(getattr(owner, "id", "")))
+        if not owner:
+            span.add_event("owner_not_found", {"customer.id": customer_id})
+
+        subscription_id = _extract_subscription_id(payload, invoice)
+        lines = _invoice_lines(payload)
+        plan_value = _extract_plan_from_lines(lines)
+
+        properties = _build_invoice_properties(
+            payload,
+            invoice,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            plan_value=plan_value,
+            lines=lines,
+        )
+
+        properties = Analytics.with_org_properties(
+            properties,
+            organization=owner if owner_type == "organization" else None,
+            organization_flag=owner_type == "organization",
+        )
+
+        try:
+            if owner_type == "user" and owner:
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.BILLING_PAYMENT_FAILED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            elif owner_type == "organization" and owner:
+                track_user_id = getattr(owner, "created_by_id", None)
+                if track_user_id:
+                    Analytics.track_event(
+                        user_id=track_user_id,
+                        event=AnalyticsEvent.BILLING_PAYMENT_FAILED,
+                        source=AnalyticsSource.API,
+                        properties=properties,
+                    )
+                elif customer_id:
+                    Analytics.track_event_anonymous(
+                        anonymous_id=str(customer_id),
+                        event=AnalyticsEvent.BILLING_PAYMENT_FAILED,
+                        source=AnalyticsSource.API,
+                        properties=properties,
+                    )
+            elif customer_id:
+                Analytics.track_event_anonymous(
+                    anonymous_id=str(customer_id),
+                    event=AnalyticsEvent.BILLING_PAYMENT_FAILED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            else:
+                span.add_event("analytics_skipped_no_actor")
+                logger.info("Skipping analytics for invoice %s: no user or customer context", payload.get("id"))
+        except Exception:
+            span.add_event("analytics_failure")
+            logger.exception("Failed to track invoice.payment_failed for invoice %s", payload.get("id"))
+
+
+@djstripe_receiver(["invoice.payment_succeeded"])
+def handle_invoice_payment_succeeded(event, **kwargs):
+    """Emit analytics when Stripe successfully collects payment for an invoice."""
+    with tracer.start_as_current_span("handle_invoice_payment_succeeded") as span:
+        payload = event.data.get("object", {}) or {}
+        if payload.get("object") != "invoice":
+            span.add_event("unexpected_object", {"object": payload.get("object")})
+            logger.info("Invoice payment succeeded webhook received non-invoice payload")
+            return
+
+        status = stripe_status()
+        if not status.enabled:
+            span.add_event("stripe_disabled")
+            logger.info("Stripe disabled; ignoring invoice payment succeeded webhook %s", payload.get("id"))
+            return
+
+        stripe_key = PaymentsHelper.get_stripe_key()
+        if not stripe_key:
+            span.add_event("stripe_key_missing")
+            logger.warning("Stripe key unavailable; ignoring invoice payment succeeded webhook %s", payload.get("id"))
+            return
+
+        stripe.api_key = stripe_key
+
+        invoice = None
+        try:
+            invoice = Invoice.sync_from_stripe_data(payload)
+        except Exception:
+            span.add_event("invoice_sync_failed")
+            logger.exception("Failed to sync invoice %s from webhook", payload.get("id"))
+
+        owner, owner_type, _organization_billing, customer_id = _resolve_invoice_owner(invoice, payload)
+
+        if owner_type:
+            span.set_attribute("invoice.owner.type", owner_type)
+        if owner:
+            span.set_attribute("invoice.owner.id", str(getattr(owner, "id", "")))
+        if not owner:
+            span.add_event("owner_not_found", {"customer.id": customer_id})
+
+        subscription_id = _extract_subscription_id(payload, invoice)
+        lines = _invoice_lines(payload)
+        plan_value = _extract_plan_from_lines(lines)
+
+        properties = _build_invoice_properties(
+            payload,
+            invoice,
+            customer_id=customer_id,
+            subscription_id=subscription_id,
+            plan_value=plan_value,
+            lines=lines,
+        )
+
+        properties = Analytics.with_org_properties(
+            properties,
+            organization=owner if owner_type == "organization" else None,
+            organization_flag=owner_type == "organization",
+        )
+
+        try:
+            if owner_type == "user" and owner:
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            elif owner_type == "organization" and owner:
+                track_user_id = getattr(owner, "created_by_id", None)
+                if track_user_id:
+                    Analytics.track_event(
+                        user_id=track_user_id,
+                        event=AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED,
+                        source=AnalyticsSource.API,
+                        properties=properties,
+                    )
+                elif customer_id:
+                    Analytics.track_event_anonymous(
+                        anonymous_id=str(customer_id),
+                        event=AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED,
+                        source=AnalyticsSource.API,
+                        properties=properties,
+                    )
+            elif customer_id:
+                Analytics.track_event_anonymous(
+                    anonymous_id=str(customer_id),
+                    event=AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            else:
+                span.add_event("analytics_skipped_no_actor")
+                logger.info("Skipping analytics for invoice %s: no user or customer context", payload.get("id"))
+        except Exception:
+            span.add_event("analytics_failure")
+            logger.exception("Failed to track invoice.payment_succeeded for invoice %s", payload.get("id"))
 
 @djstripe_receiver(["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"])
 def handle_subscription_event(event, **kwargs):
