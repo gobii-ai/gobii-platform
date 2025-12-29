@@ -1268,6 +1268,34 @@
   word-break: break-word;
 }
 
+.chat-stream-markdown {
+  color: #1e1b4b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-stream-markdown p {
+  margin: 0.35rem 0;
+}
+
+.chat-stream-markdown ul,
+.chat-stream-markdown ol {
+  margin: 0.35rem 0 0.35rem 1.1rem;
+  padding-left: 0.9rem;
+}
+
+.chat-stream-markdown ul {
+  list-style: disc;
+}
+
+.chat-stream-markdown ol {
+  list-style: decimal;
+}
+
+.chat-stream-markdown li {
+  margin: 0.1rem 0;
+}
+
 .chat-stream-placeholder {
   display: inline-flex;
   align-items: center;
