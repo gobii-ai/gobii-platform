@@ -198,7 +198,7 @@ export function FileTable({
             )
           }
 
-          const downloadUrl = `${downloadBaseUrl}?path=${encodeURIComponent(node.path)}`
+          const downloadUrl = `${downloadBaseUrl}?node_id=${encodeURIComponent(node.id)}`
           return (
             <div className="flex flex-wrap items-center gap-2">
               <a
