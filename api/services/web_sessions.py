@@ -78,6 +78,31 @@ def _touch_session(
     return session
 
 
+def _restart_session(
+    session: PersistentAgentWebSession,
+    *,
+    now: Optional[timezone.datetime] = None,
+    source: Optional[str] = None,
+) -> PersistentAgentWebSession:
+    stamp = now or _now()
+    session.session_key = uuid.uuid4()
+    session.started_at = stamp
+    session.last_seen_at = stamp
+    if source:
+        session.last_seen_source = source[:32]
+    session.ended_at = None
+    session.save(
+        update_fields=[
+            "session_key",
+            "started_at",
+            "last_seen_at",
+            "last_seen_source",
+            "ended_at",
+        ]
+    )
+    return session
+
+
 @dataclass(slots=True)
 class SessionResult:
     session: PersistentAgentWebSession
@@ -111,20 +136,10 @@ def start_web_session(
             )
         )
         if not created:
-            session.session_key = uuid.uuid4()
-            session.started_at = stamp
-            session.last_seen_at = stamp
-            session.last_seen_source = (source or _START_SOURCE)[:32]
-            session.ended_at = None
-            session.save(
-                update_fields=[
-                    "session_key",
-                    "started_at",
-                    "last_seen_at",
-                    "last_seen_source",
-                    "ended_at",
-                ]
-            )
+            if _is_session_live(session, ttl_seconds=ttl_seconds, now=stamp):
+                _touch_session(session, now=stamp, source=(source or _START_SOURCE))
+            else:
+                _restart_session(session, now=stamp, source=(source or _START_SOURCE))
     return SessionResult(session=session, ttl_seconds=ttl_seconds)
 
 
@@ -145,7 +160,13 @@ def heartbeat_web_session(
                 .get(session_key=key)
             )
         except PersistentAgentWebSession.DoesNotExist as exc:
-            raise ValueError("Unknown web session.") from exc
+            session = (
+                PersistentAgentWebSession.objects.select_for_update()
+                .filter(agent=agent, user=user)
+                .first()
+            )
+            if session is None:
+                raise ValueError("Unknown web session.") from exc
 
         if session.agent_id != agent.id or session.user_id != getattr(user, "id", None):
             raise ValueError("Session does not belong to this agent or user.")
@@ -216,21 +237,13 @@ def touch_web_session(
                     )
                     return None
 
-                session.session_key = uuid.uuid4()
-                session.started_at = stamp
-            if source:
-                session.last_seen_source = source[:32]
-            session.last_seen_at = stamp
-            session.ended_at = None
-            session.save(
-                update_fields=[
-                    "session_key",
-                    "started_at",
-                    "last_seen_source",
-                    "last_seen_at",
-                    "ended_at",
-                ]
-            )
+                _restart_session(
+                    session,
+                    now=stamp,
+                    source=(source or _MESSAGE_SOURCE),
+                )
+                return SessionResult(session=session, ttl_seconds=ttl_seconds)
+            _touch_session(session, now=stamp, source=source)
             return SessionResult(session=session, ttl_seconds=ttl_seconds)
     except PersistentAgentWebSession.DoesNotExist:
         if not create:

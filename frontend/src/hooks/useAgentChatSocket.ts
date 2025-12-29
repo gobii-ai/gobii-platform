@@ -108,6 +108,17 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     }
     pauseReasonRef.current = null
     retryRef.current = 0
+    const existingSocket = socketRef.current
+    if (existingSocket?.readyState === WebSocket.OPEN) {
+      updateSnapshot({ status: 'connected', lastError: null })
+      syncNow()
+      return
+    }
+    if (existingSocket?.readyState === WebSocket.CONNECTING) {
+      updateSnapshot({ status: retryRef.current > 0 ? 'reconnecting' : 'connecting', lastError: null })
+      syncNow()
+      return
+    }
     updateSnapshot({ status: 'connecting', lastError: null })
     scheduleConnectRef.current(0)
     syncNow()

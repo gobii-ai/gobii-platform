@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import uuid
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
@@ -64,3 +65,27 @@ class WebSessionServiceTests(TestCase):
 
         ended = PersistentAgentWebSession.objects.get(agent=self.agent, user=self.user)
         self.assertIsNotNone(ended.ended_at)
+
+    @tag("batch_agent_chat")
+    def test_start_reuses_active_session(self):
+        first = start_web_session(self.agent, self.user)
+        original_key = first.session.session_key
+        original_started_at = first.session.started_at
+
+        second = start_web_session(self.agent, self.user)
+        self.assertEqual(second.session.session_key, original_key)
+        self.assertEqual(second.session.started_at, original_started_at)
+        self.assertGreaterEqual(second.session.last_seen_at, first.session.last_seen_at)
+
+    @tag("batch_agent_chat")
+    def test_heartbeat_recovers_when_session_key_rotates(self):
+        first = start_web_session(self.agent, self.user)
+        original_key = first.session.session_key
+
+        refreshed_key = uuid.uuid4()
+        PersistentAgentWebSession.objects.filter(agent=self.agent, user=self.user).update(
+            session_key=refreshed_key
+        )
+
+        recovered = heartbeat_web_session(original_key, self.agent, self.user)
+        self.assertEqual(recovered.session.session_key, refreshed_key)
