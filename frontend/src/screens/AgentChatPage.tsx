@@ -42,6 +42,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
+  const thinkingCollapsed = useAgentChatStore((state) => state.thinkingCollapsed)
+  const completedThinking = useAgentChatStore((state) => state.completedThinking)
+  const setThinkingCollapsed = useAgentChatStore((state) => state.setThinkingCollapsed)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -176,6 +179,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     })
   }
 
+  const handleToggleThinking = useCallback(() => {
+    setThinkingCollapsed(!thinkingCollapsed)
+  }, [setThinkingCollapsed, thinkingCollapsed])
+
   return (
     <div className="min-h-screen">
       {error || sessionError ? (
@@ -199,6 +206,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
         processingActive={processingActive}
         processingWebTasks={processingWebTasks}
         streaming={streaming}
+        thinkingCollapsed={thinkingCollapsed}
+        completedThinking={completedThinking}
+        onToggleThinking={handleToggleThinking}
         onLoadOlder={hasMoreOlder ? loadOlder : undefined}
         onLoadNewer={hasMoreNewer ? loadNewer : undefined}
         onSendMessage={handleSend}

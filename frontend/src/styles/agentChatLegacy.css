@@ -1513,3 +1513,188 @@
     font-size: 0.9rem;
   }
 }
+
+/* ThinkingBubble */
+.thinking-event {
+  align-items: flex-start;
+}
+
+.thinking-bubble {
+  max-width: min(60rem, 100%);
+  border-radius: 1.25rem;
+  background: rgba(238, 242, 255, 0.85);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.08);
+  overflow: hidden;
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+
+.thinking-bubble[data-streaming='true'] {
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.15);
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.thinking-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.65rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4338ca;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  transition: background 0.15s ease;
+}
+
+.thinking-bubble-header:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.thinking-bubble-header:focus-visible {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: -2px;
+}
+
+.thinking-bubble-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  color: #6366f1;
+}
+
+.thinking-bubble-icon svg {
+  width: 1rem;
+  height: 1rem;
+}
+
+.thinking-pulse {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #6366f1;
+  animation: processingPulse 1.6s ease-in-out infinite;
+}
+
+.thinking-bubble-label {
+  flex: 1;
+  text-align: left;
+}
+
+.thinking-bubble-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  color: #6366f1;
+  transition: transform 0.2s ease;
+}
+
+.thinking-bubble-chevron svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.thinking-bubble-chevron[data-collapsed='true'] {
+  transform: rotate(-90deg);
+}
+
+.thinking-bubble-content {
+  padding: 0 1rem 1rem;
+  animation: thinkingContentFadeIn 0.2s ease;
+}
+
+@keyframes thinkingContentFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.thinking-bubble-markdown {
+  font-size: 0.85rem;
+  color: #1e1b4b;
+  line-height: 1.55;
+}
+
+.thinking-bubble-markdown p {
+  margin: 0.4rem 0;
+}
+
+.thinking-bubble-markdown p:first-child {
+  margin-top: 0;
+}
+
+.thinking-bubble-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+/* StreamingReplyCard */
+.streaming-reply-event {
+  align-items: flex-start;
+}
+
+.streaming-reply-bubble {
+  position: relative;
+}
+
+.streaming-reply-bubble[data-streaming='true']::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 1rem;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: #4f46e5;
+  animation: processingPulse 1.6s ease-in-out infinite;
+}
+
+.streaming-reply-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0;
+}
+
+.streaming-reply-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: #6366f1;
+  animation: streamingTypingDot 1.2s ease-in-out infinite;
+}
+
+.streaming-reply-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.streaming-reply-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes streamingTypingDot {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: scale(0.85);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+}
+
+#streaming-response-slot {
+  margin-top: var(--timeline-row-gap, 0.75rem);
+}
