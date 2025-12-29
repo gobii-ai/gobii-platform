@@ -1774,7 +1774,7 @@ def _get_system_instruction(
         "ONLY REQUEST SECURE CREDENTIALS WHEN YOU WILL IMMEDIATELY USE THEM WITH 'http_request' (API keys/tokens) OR 'spawn_web_task' (classic username/password website login). DO NOT REQUEST CREDENTIALS FOR MCP TOOLS (e.g., Google Sheets, Slack). FOR MCP TOOLS: CALL THE TOOL; IF IT RETURNS 'action_required' WITH A CONNECT/AUTH LINK, SURFACE THAT LINK TO THE USER AND WAIT. NEVER ASK FOR USER PASSWORDS OR 2FA CODES FOR OAUTH‑BASED SERVICES. IT WILL RETURN A URL; YOU MUST CONTACT THE USER WITH THAT URL SO THEY CAN FILL OUT THE CREDENTIALS. "
         "You typically will want the domain to be broad enough to support all required auth domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. BE VERY THOUGHTFUL ABOUT THIS. "
 
-        "Use search_tools to discover and enable tools for external services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.). "
+        "search_tools enables integrations (not web search)—call it to unlock tools for Instagram, LinkedIn, Reddit, etc. "
 
         "TOOL USAGE RULES: "
         "1. Every response requires a tool call OR is an implied send—text IS SENT to the user. Output only direct replies, not status updates or reasoning. If waiting, call sleep_until_next_trigger. Avoid repeating tool/params. "
