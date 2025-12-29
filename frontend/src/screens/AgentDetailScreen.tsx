@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleHelp,
+  Folder,
   Info,
   Lock,
   KeyRound,
@@ -265,6 +266,7 @@ type AgentDetailPageData = {
     chat: string
     secrets: string
     emailSettings: string
+    manageFiles: string
     smsEnable: string | null
     contactRequests: string
     delete: string
@@ -1113,7 +1115,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               href={initialData.urls.chat}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-blue-50 transition-colors"
             >
               <MessageSquare className="w-4 h-4" aria-hidden="true" />
               Web Chat
@@ -1131,6 +1133,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             >
               <Mail className="w-4 h-4" aria-hidden="true" />
               Email Settings
+            </a>
+            <a
+              href={initialData.urls.manageFiles}
+              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
+            >
+              <Folder className="w-4 h-4" aria-hidden="true" />
+              Manage Files
             </a>
           </div>
         </div>

@@ -22,9 +22,11 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.urls import reverse
+from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
     BrowserLLMPolicy,
@@ -1243,6 +1245,261 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         )
         response["Cache-Control"] = "private, max-age=300"
         return response
+
+
+def _serialize_agent_fs_node(node: AgentFsNode) -> dict[str, Any]:
+    return {
+        "id": str(node.id),
+        "parentId": str(node.parent_id) if node.parent_id else None,
+        "name": node.name,
+        "path": node.path,
+        "nodeType": node.node_type,
+        "sizeBytes": node.size_bytes,
+        "mimeType": node.mime_type or None,
+        "createdAt": node.created_at.isoformat() if node.created_at else None,
+        "updatedAt": node.updated_at.isoformat() if node.updated_at else None,
+    }
+
+
+class AgentFsNodeListAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        filespace = get_or_create_default_filespace(agent)
+        nodes = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, is_deleted=False)
+            .only(
+                "id",
+                "parent_id",
+                "name",
+                "path",
+                "node_type",
+                "size_bytes",
+                "mime_type",
+                "created_at",
+                "updated_at",
+            )
+            .order_by("parent_id", "node_type", "name")
+        )
+
+        payload = {
+            "filespace": {"id": str(filespace.id), "name": filespace.name},
+            "nodes": [_serialize_agent_fs_node(node) for node in nodes],
+        }
+        return JsonResponse(payload)
+
+
+class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        files = list(request.FILES.getlist("files")) or list(request.FILES.getlist("file"))
+        if not files:
+            return HttpResponseBadRequest("files are required")
+
+        filespace = get_or_create_default_filespace(agent)
+        parent = None
+        parent_id = (request.POST.get("parent_id") or "").strip()
+        parent_path = (request.POST.get("parent_path") or "").strip()
+
+        if parent_id:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    id=parent_id,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_id is invalid")
+        elif parent_path:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    path=parent_path,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_path is invalid")
+
+        created = []
+        for upload in files:
+            base_name = get_valid_filename(os.path.basename(upload.name or "")) or "file"
+            name = dedupe_name(filespace, parent, base_name)
+            node = AgentFsNode(
+                filespace=filespace,
+                parent=parent,
+                node_type=AgentFsNode.NodeType.FILE,
+                name=name,
+                created_by_agent=agent,
+                mime_type=getattr(upload, "content_type", "") or "",
+            )
+            node.save()
+            node.content.save(name, upload, save=True)
+            node.refresh_from_db()
+            created.append(_serialize_agent_fs_node(node))
+
+        return JsonResponse({"created": created}, status=201)
+
+
+class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        node_ids = payload.get("node_ids") or payload.get("nodeIds") or []
+        if not isinstance(node_ids, list) or not node_ids:
+            return HttpResponseBadRequest("node_ids must be a non-empty list")
+
+        filespace = get_or_create_default_filespace(agent)
+        nodes = (
+            AgentFsNode.objects
+            .filter(
+                filespace=filespace,
+                id__in=node_ids,
+                node_type=AgentFsNode.NodeType.FILE,
+                is_deleted=False,
+            )
+        )
+
+        deleted = 0
+        for node in nodes:
+            deleted += node.trash_subtree()
+
+        return JsonResponse({"deleted": deleted})
+
+
+class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return HttpResponseBadRequest("name is required")
+
+        parent_id = (payload.get("parent_id") or payload.get("parentId") or "").strip()
+        filespace = get_or_create_default_filespace(agent)
+        parent = None
+        if parent_id:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    id=parent_id,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_id is invalid")
+
+        if AgentFsNode.objects.filter(filespace=filespace, parent=parent, name=name, is_deleted=False).exists():
+            return HttpResponseBadRequest("folder already exists")
+
+        node = AgentFsNode(
+            filespace=filespace,
+            parent=parent,
+            node_type=AgentFsNode.NodeType.DIR,
+            name=name,
+            created_by_agent=agent,
+        )
+        try:
+            node.save()
+        except ValidationError as exc:
+            return HttpResponseBadRequest(str(exc))
+        except IntegrityError:
+            return HttpResponseBadRequest("Unable to create folder due to a name conflict")
+
+        return JsonResponse({"node": _serialize_agent_fs_node(node)}, status=201)
+
+
+class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        node_id = str(payload.get("node_id") or payload.get("nodeId") or "").strip()
+        if not node_id:
+            return HttpResponseBadRequest("node_id is required")
+
+        parent_id = payload.get("parent_id") or payload.get("parentId")
+        if isinstance(parent_id, str):
+            parent_id = parent_id.strip()
+        if not parent_id:
+            parent_id = None
+
+        filespace = get_or_create_default_filespace(agent)
+        node = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, id=node_id, is_deleted=False)
+            .first()
+        )
+        if not node:
+            return HttpResponseBadRequest("node_id is invalid")
+
+        parent = None
+        if parent_id:
+            parent = (
+                AgentFsNode.objects
+                .filter(
+                    filespace=filespace,
+                    id=parent_id,
+                    node_type=AgentFsNode.NodeType.DIR,
+                    is_deleted=False,
+                )
+                .first()
+            )
+            if not parent:
+                return HttpResponseBadRequest("parent_id is invalid")
+
+        if node.parent_id == (parent.id if parent else None):
+            return JsonResponse({"node": _serialize_agent_fs_node(node)})
+
+        name_conflict = (
+            AgentFsNode.objects
+            .filter(filespace=filespace, parent=parent, name=node.name, is_deleted=False)
+            .exclude(id=node.id)
+            .exists()
+        )
+        if name_conflict:
+            return HttpResponseBadRequest("A node with that name already exists in the destination folder.")
+
+        node.parent = parent
+        try:
+            node.save()
+        except ValidationError as exc:
+            return HttpResponseBadRequest(str(exc))
+        except IntegrityError:
+            return HttpResponseBadRequest("Unable to move node due to a name conflict")
+
+        return JsonResponse({"node": _serialize_agent_fs_node(node)})
 
 
 class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
