@@ -21,6 +21,12 @@ from ..comms.outbound_delivery import deliver_agent_email
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import strip_control_chars
+from ..files.attachment_helpers import (
+    AttachmentResolutionError,
+    create_message_attachments,
+    resolve_filespace_attachments,
+)
+from ..files.filespace_service import broadcast_message_attachment_update
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,11 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "subject": {"type": "string", "description": "Email subject."},
                     "mobile_first_html": {"type": "string", "description": "Email content as lightweight HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>"},
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of filespace paths from the agent's default filespace to attach.",
+                    },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "Set true if you are sending an update but will continue working immediately afterward.",
@@ -75,16 +86,23 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     mobile_first_html = strip_control_chars(params.get("mobile_first_html"))
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     will_continue = _should_continue_work(params)
+    attachment_paths = params.get("attachments")
 
     if not all([to_address, subject, mobile_first_html]):
         return {"status": "error", "message": "Missing required parameters: to_address, subject, or mobile_first_html"}
 
+    try:
+        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+    except AttachmentResolutionError as exc:
+        return {"status": "error", "message": str(exc)}
+
     # Log email attempt
     body_preview = mobile_first_html[:100] + "..." if len(mobile_first_html) > 100 else mobile_first_html
     cc_info = f", CC: {cc_addresses}" if cc_addresses else ""
+    attachment_info = f", attachments: {len(resolved_attachments)}" if resolved_attachments else ""
     logger.info(
-        "Agent %s sending email to %s%s, subject: '%s', body: %s",
-        agent.id, to_address, cc_info, subject, body_preview
+        "Agent %s sending email to %s%s%s, subject: '%s', body: %s",
+        agent.id, to_address, cc_info, attachment_info, subject, body_preview
     )
 
     try:
@@ -189,6 +207,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             # Add CC endpoints to the message
             if cc_endpoint_objects:
                 message.cc_endpoints.set(cc_endpoint_objects)
+            if resolved_attachments:
+                create_message_attachments(message, resolved_attachments)
+                broadcast_message_attachment_update(str(message.id))
         except OperationalError:
             close_old_connections()
             message = PersistentAgentMessage.objects.create(
@@ -202,6 +223,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             # Add CC endpoints to the message
             if cc_endpoint_objects:
                 message.cc_endpoints.set(cc_endpoint_objects)
+            if resolved_attachments:
+                create_message_attachments(message, resolved_attachments)
+                broadcast_message_attachment_update(str(message.id))
 
         # Immediately attempt delivery
         deliver_agent_email(message)

@@ -8,7 +8,14 @@ from waffle import switch_is_active
 from anymail.message import AnymailMessage
 from anymail.exceptions import AnymailAPIError
 
-from api.models import PersistentAgentMessage, OutboundMessageAttempt, DeliveryStatus, CommsChannel, AgentEmailAccount
+from api.models import (
+    AgentEmailAccount,
+    AgentFsNode,
+    CommsChannel,
+    DeliveryStatus,
+    OutboundMessageAttempt,
+    PersistentAgentMessage,
+)
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
@@ -237,6 +244,69 @@ def _prepare_email_content(message: PersistentAgentMessage, body_raw: str) -> tu
     html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
     agent = getattr(message, "owner_agent", None)
     return append_footer_if_needed(agent, html_snippet, plaintext_body)
+
+
+def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage) -> int:
+    attachments = list(message.attachments.select_related("filespace_node"))
+    if not attachments:
+        return 0
+
+    max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
+    attached = 0
+    for att in attachments:
+        filename = att.filename or "attachment"
+        content_type = att.content_type or "application/octet-stream"
+        file_field = None
+
+        if att.file and getattr(att.file, "name", None):
+            file_field = att.file
+        else:
+            node = getattr(att, "filespace_node", None)
+            if node and getattr(node, "node_type", None) == AgentFsNode.NodeType.FILE:
+                file_field = node.content
+                if node.name:
+                    filename = node.name
+                if node.mime_type:
+                    content_type = node.mime_type or content_type
+
+        if not file_field or not getattr(file_field, "name", None):
+            logger.warning("Skipping attachment %s for message %s (missing file content)", att.id, message.id)
+            continue
+
+        size_bytes = att.file_size or getattr(file_field, "size", None)
+        try:
+            if max_bytes and size_bytes and int(size_bytes) > int(max_bytes):
+                logger.warning(
+                    "Skipping attachment %s for message %s (size %s exceeds max %s)",
+                    att.id,
+                    message.id,
+                    size_bytes,
+                    max_bytes,
+                )
+                continue
+        except Exception:
+            logger.warning(
+                "Skipping attachment %s for message %s (failed size validation)",
+                att.id,
+                message.id,
+            )
+            continue
+
+        storage = file_field.storage
+        name = file_field.name
+        if hasattr(storage, "exists") and not storage.exists(name):
+            logger.warning("Skipping attachment %s for message %s (missing storage blob)", att.id, message.id)
+            continue
+
+        try:
+            with storage.open(name, "rb") as handle:
+                content = handle.read()
+            msg.attach(filename, content, content_type)
+            attached += 1
+        except Exception:
+            logger.exception("Failed attaching file %s to message %s", att.id, message.id)
+
+    return attached
 
 
 @tracer.start_as_current_span("AGENT - Deliver Agent Email")
@@ -633,6 +703,14 @@ def deliver_agent_email(message: PersistentAgentMessage):
         # Attach the HTML alternative
         logger.info("Attaching HTML alternative to message %s", message.id)
         msg.attach_alternative(html_body, "text/html")
+
+        attachment_count = _attach_email_attachments(message, msg)
+        if attachment_count:
+            logger.info(
+                "Attached %d file(s) to email message %s",
+                attachment_count,
+                message.id,
+            )
         
         # Send the message
         logger.info(
