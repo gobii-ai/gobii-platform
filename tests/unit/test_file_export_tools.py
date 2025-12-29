@@ -1,7 +1,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_pdf import execute_create_pdf
@@ -47,6 +47,48 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("asset", result["message"].lower())
+
+    def test_create_pdf_blocks_object_data(self):
+        result = execute_create_pdf(
+            self.agent,
+            {"html": "<object data='https://example.com/file.pdf'></object>"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("asset", result["message"].lower())
+
+    def test_create_pdf_blocks_meta_refresh(self):
+        result = execute_create_pdf(
+            self.agent,
+            {"html": "<meta http-equiv='refresh' content='0; url=https://example.com'>"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("asset", result["message"].lower())
+
+    @override_settings(MAX_FILE_SIZE=10)
+    def test_create_pdf_rejects_oversized_html(self):
+        result = execute_create_pdf(
+            self.agent,
+            {"html": "<html><body>this is too large</body></html>"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("maximum", result["message"].lower())
+
+    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
+    def test_create_pdf_allows_data_srcset(self, mock_pdf):
+        result = execute_create_pdf(
+            self.agent,
+            {
+                "html": (
+                    "<img srcset='data:image/png;base64,AAAA 1x, "
+                    "data:image/png;base64,BBBB 2x'>"
+                )
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
 
     @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
     def test_create_pdf_writes_exports_file(self, mock_pdf):

@@ -8,7 +8,7 @@ from typing import List
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.core.files.base import ContentFile
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils.text import get_valid_filename
 
 from ...models import (
@@ -145,19 +145,36 @@ def write_bytes_to_exports(
         return {"status": "error", "message": "Failed to access the exports directory."}
 
     base_name = _normalize_filename(filename, fallback_name, extension)
-    name = dedupe_name(filespace, exports_dir, base_name)
     checksum = hashlib.sha256(content_bytes).hexdigest()
-
-    node = AgentFsNode(
-        filespace=filespace,
-        parent=exports_dir,
-        node_type=AgentFsNode.NodeType.FILE,
-        name=name,
-        created_by_agent=agent,
-        mime_type=mime_type,
-        checksum_sha256=checksum,
-    )
-    node.save()
+    node = None
+    max_attempts = 5
+    for attempt in range(max_attempts):
+        name = dedupe_name(filespace, exports_dir, base_name)
+        node = AgentFsNode(
+            filespace=filespace,
+            parent=exports_dir,
+            node_type=AgentFsNode.NodeType.FILE,
+            name=name,
+            created_by_agent=agent,
+            mime_type=mime_type,
+            checksum_sha256=checksum,
+        )
+        try:
+            with transaction.atomic():
+                node.save()
+            break
+        except IntegrityError:
+            logger.warning(
+                "Filename collision for agent %s on %s (attempt %s)",
+                agent.id,
+                name,
+                attempt + 1,
+            )
+            if attempt == max_attempts - 1:
+                return {
+                    "status": "error",
+                    "message": "Failed to allocate a unique filename for this export.",
+                }
 
     try:
         node.content.save(name, ContentFile(content_bytes), save=True)
