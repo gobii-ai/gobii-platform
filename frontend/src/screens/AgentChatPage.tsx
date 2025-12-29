@@ -41,6 +41,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
+  const streaming = useAgentChatStore((state) => state.streaming)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -130,7 +131,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
 
   useLayoutEffect(() => {
     scrollToBottom()
-  }, [scrollToBottom, events, processingActive])
+  }, [scrollToBottom, events, processingActive, streaming])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
 
@@ -197,6 +198,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
         newestCursor={events.length ? events[events.length - 1].cursor : null}
         processingActive={processingActive}
         processingWebTasks={processingWebTasks}
+        streaming={streaming}
         onLoadOlder={hasMoreOlder ? loadOlder : undefined}
         onLoadNewer={hasMoreNewer ? loadNewer : undefined}
         onSendMessage={handleSend}

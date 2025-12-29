@@ -1240,6 +1240,69 @@
   border: 1px solid rgba(79, 70, 229, 0.12);
 }
 
+.chat-bubble--stream {
+  background: linear-gradient(135deg, rgba(224, 231, 255, 0.92) 0%, rgba(230, 245, 255, 0.9) 100%);
+  border: 1px dashed rgba(59, 130, 246, 0.4);
+}
+
+.chat-stream-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+
+.chat-stream-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(37, 99, 235, 0.75);
+}
+
+.chat-stream-body {
+  white-space: pre-wrap;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  color: #1e1b4b;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.chat-stream-placeholder {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+  color: rgba(79, 70, 229, 0.7);
+  font-size: 0.85rem;
+}
+
+.chat-stream-dot {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 9999px;
+  background: rgba(79, 70, 229, 0.7);
+  animation: streamPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes streamPulse {
+  0%,
+  100% {
+    transform: scale(0.75);
+    opacity: 0.4;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-stream-dot {
+    animation: none;
+  }
+}
+
 .chat-bubble--peer-out {
   background: linear-gradient(135deg, rgba(79, 70, 229, 0.08) 0%, rgba(99, 102, 241, 0.1) 100%);
   color: #1e1b4b;

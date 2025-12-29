@@ -4,7 +4,7 @@ import { AgentComposer } from './AgentComposer'
 import { ProcessingIndicator } from './ProcessingIndicator'
 import { TimelineEventList } from './TimelineEventList'
 import type { AgentTimelineProps } from './types'
-import type { ProcessingWebTask } from '../../types/agentChat'
+import type { ProcessingWebTask, StreamState } from '../../types/agentChat'
 import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -23,6 +23,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  streaming?: StreamState | null
 }
 
 export function AgentChatLayout({
@@ -35,6 +36,7 @@ export function AgentChatLayout({
   hasMoreNewer,
   processingActive,
   processingWebTasks = [],
+  streaming,
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -98,6 +100,7 @@ export function AgentChatLayout({
                   events={events}
                   agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
+                  streaming={streaming}
                 />
               </div>
 

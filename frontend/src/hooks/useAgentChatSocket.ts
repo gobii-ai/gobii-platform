@@ -8,11 +8,13 @@ const MAX_RETRIES = 5
 export function useAgentChatSocket(agentId: string | null) {
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
+  const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
 
   useEffect(() =>
     useAgentChatStore.subscribe((state) => {
       receiveEventRef.current = state.receiveRealtimeEvent
       updateProcessingRef.current = state.updateProcessing
+      receiveStreamRef.current = state.receiveStreamEvent
     }),
   [])
 
@@ -50,6 +52,8 @@ export function useAgentChatSocket(agentId: string | null) {
             receiveEventRef.current(payload.payload as TimelineEvent)
           } else if (payload?.type === 'processing' && payload.payload) {
             updateProcessingRef.current(payload.payload as Partial<ProcessingSnapshot>)
+          } else if (payload?.type === 'stream.event' && payload.payload) {
+            receiveStreamRef.current(payload.payload)
           }
         } catch (error) {
           console.error('Failed to process websocket message', error)

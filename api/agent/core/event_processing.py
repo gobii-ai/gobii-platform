@@ -55,6 +55,7 @@ from .processing_flags import (
     is_agent_pending,
 )
 from .llm_utils import run_completion
+from .llm_streaming import StreamAccumulator
 from .token_usage import (
     coerce_int as _coerce_int,
     completion_kwargs_from_usage,
@@ -123,6 +124,7 @@ from .gemini_cache import (
     disable_gemini_cache_for,
     is_gemini_cache_conflict_error,
 )
+from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -524,6 +526,40 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
+def _stream_completion_with_broadcast(
+    *,
+    model: str,
+    messages: List[dict],
+    params: dict,
+    tools: Optional[List[dict]],
+    provider: Optional[str],
+    stream_broadcaster: Optional[WebStreamBroadcaster],
+) -> Any:
+    if stream_broadcaster:
+        stream_broadcaster.start()
+
+    accumulator = StreamAccumulator()
+    try:
+        stream = run_completion(
+            model=model,
+            messages=messages,
+            params=params,
+            tools=tools,
+            drop_params=True,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in stream:
+            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
+            if stream_broadcaster:
+                stream_broadcaster.push_delta(reasoning_delta, content_delta)
+    finally:
+        if stream_broadcaster:
+            stream_broadcaster.finish()
+
+    return accumulator.build_response(model=model, provider=provider)
+
+
 _GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
 _GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
@@ -535,6 +571,7 @@ def _completion_with_failover(
     agent_id: str = None,
     safety_identifier: str = None,
     preferred_config: Optional[Tuple[str, str]] = None,
+    stream_broadcaster: Optional[WebStreamBroadcaster] = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -546,9 +583,10 @@ def _completion_with_failover(
         agent_id: Optional agent ID for logging
         safety_identifier: Optional user ID for safety filtering
         preferred_config: Optional tuple of (provider, model) to try first
+        stream_broadcaster: Optional broadcaster for streaming deltas to web UI
         
     Returns:
-        Tuple of (LiteLLM completion response, token usage dict)
+        Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
         Token usage dict contains: prompt_tokens, completion_tokens, total_tokens, 
         cached_tokens (optional), model, provider
         
@@ -558,6 +596,7 @@ def _completion_with_failover(
     last_exc: Exception | None = None
     base_messages: List[dict] = list(messages or [])
     base_tools: List[dict] = list(tools or [])
+    active_stream_broadcaster = stream_broadcaster
     
     ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
     if preferred_config:
@@ -633,13 +672,40 @@ def _completion_with_failover(
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
 
-                response = run_completion(
-                    model=model,
-                    messages=request_messages,
-                    params=params,
-                    tools=request_tools_payload,
-                    drop_params=True,
-                )
+                if active_stream_broadcaster:
+                    try:
+                        response = _stream_completion_with_broadcast(
+                            model=model,
+                            messages=request_messages,
+                            params=params,
+                            tools=request_tools_payload,
+                            provider=provider,
+                            stream_broadcaster=active_stream_broadcaster,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Streaming completion failed for provider=%s model=%s; retrying without streaming",
+                            provider,
+                            model,
+                            exc_info=True,
+                        )
+                        active_stream_broadcaster.finish()
+                        active_stream_broadcaster = None
+                        response = run_completion(
+                            model=model,
+                            messages=request_messages,
+                            params=params,
+                            tools=request_tools_payload,
+                            drop_params=True,
+                        )
+                else:
+                    response = run_completion(
+                        model=model,
+                        messages=request_messages,
+                        params=params,
+                        tools=request_tools_payload,
+                        drop_params=True,
+                    )
 
                 logger.info(
                     "Provider %s succeeded for agent %s",
@@ -2079,6 +2145,13 @@ def _run_agent_loop(
                 break
 
             preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
+            stream_broadcaster = None
+            try:
+                stream_target = resolve_web_stream_target(agent)
+                if stream_target:
+                    stream_broadcaster = WebStreamBroadcaster(stream_target)
+            except Exception:
+                logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
 
             try:
                 response, token_usage = _completion_with_failover(
@@ -2088,6 +2161,7 @@ def _run_agent_loop(
                     agent_id=str(agent.id),
                     safety_identifier=agent.user.id if agent.user else None,
                     preferred_config=preferred_config,
+                    stream_broadcaster=stream_broadcaster,
                 )
                 
                 # Accumulate token usage
