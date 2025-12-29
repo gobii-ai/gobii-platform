@@ -63,7 +63,8 @@ function deriveConnectionIndicator({
   }
 
   if (sessionStatus === 'starting') {
-    const shouldReconnect = socketStatus === 'connected' || socketStatus === 'reconnecting'
+    // socketStatus can only be 'connected' here since 'reconnecting' was already handled above
+    const shouldReconnect = socketStatus === 'connected'
     return {
       status: shouldReconnect ? 'reconnecting' : 'connecting',
       label: shouldReconnect ? 'Reconnecting' : 'Connecting',
@@ -136,6 +137,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     autoScrollPinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
 
+  // Track if we should scroll on next content update (captured before DOM changes)
+  const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
+
   const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
   useEffect(() => {
     autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
@@ -150,63 +154,108 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   useEffect(() => {
     const scroller = getScrollContainer()
 
-    const threshold = 160
-    let ticking = false
+    // Threshold for re-sticking when user scrolls back to bottom
+    const restickThreshold = 20
 
-    const readScrollPosition = () => {
+    const getDistanceToBottom = () => {
       const target = scroller || document.documentElement || document.body
-      const distanceToBottom = target.scrollHeight - target.clientHeight - target.scrollTop
-      return distanceToBottom
+      return target.scrollHeight - target.clientHeight - target.scrollTop
     }
 
-    const handleScroll = () => {
-      if (ticking) {
-        return
+    // Detect user scrolling UP via wheel - immediately unstick
+    const handleWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0 && autoScrollPinnedRef.current) {
+        // User is scrolling up - unstick immediately
+        setAutoScrollPinned(false)
       }
+    }
+
+    // Detect user scrolling UP via touch
+    let touchStartY = 0
+    const handleTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0]?.clientY ?? 0
+    }
+    const handleTouchMove = (e: TouchEvent) => {
+      const touchY = e.touches[0]?.clientY ?? 0
+      // Touch moved down = scrolling up (pulling content down)
+      if (touchY > touchStartY + 10 && autoScrollPinnedRef.current) {
+        setAutoScrollPinned(false)
+      }
+    }
+
+    // Detect user scrolling UP via keyboard
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (!autoScrollPinnedRef.current) return
+      const scrollUpKeys = ['ArrowUp', 'PageUp', 'Home']
+      if (scrollUpKeys.includes(e.key)) {
+        setAutoScrollPinned(false)
+      }
+    }
+
+    // Check if user has scrolled back to bottom (for re-sticking)
+    let ticking = false
+    const handleScroll = () => {
+      if (ticking) return
       ticking = true
       requestAnimationFrame(() => {
         ticking = false
-        const distanceToBottom = readScrollPosition()
+        const distanceToBottom = getDistanceToBottom()
         const currentlyPinned = autoScrollPinnedRef.current
         const suppressedUntil = autoScrollPinSuppressedUntilRef.current
         const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
 
-        if (!currentlyPinned && !suppressionActive && distanceToBottom <= 12) {
+        // Re-stick when user scrolls to bottom
+        if (!currentlyPinned && !suppressionActive && distanceToBottom <= restickThreshold) {
           setAutoScrollPinned(true)
-          return
-        }
-
-        if (!currentlyPinned) {
-          return
-        }
-
-        if (distanceToBottom > threshold) {
-          setAutoScrollPinned(false)
         }
       })
     }
 
+    window.addEventListener('wheel', handleWheel, { passive: true })
+    window.addEventListener('touchstart', handleTouchStart, { passive: true })
+    window.addEventListener('touchmove', handleTouchMove, { passive: true })
+    window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('scroll', handleScroll, { passive: true })
-    document.addEventListener('scroll', handleScroll, { passive: true })
-    scroller?.addEventListener('scroll', handleScroll, { passive: true })
 
     return () => {
+      window.removeEventListener('wheel', handleWheel)
+      window.removeEventListener('touchstart', handleTouchStart)
+      window.removeEventListener('touchmove', handleTouchMove)
+      window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
-      document.removeEventListener('scroll', handleScroll)
-      scroller?.removeEventListener('scroll', handleScroll)
     }
   }, [getScrollContainer, setAutoScrollPinned])
 
+  // Capture scroll decision BEFORE content changes to avoid race with scroll handler
+  const prevEventsRef = useRef(events)
+  const prevStreamingRef = useRef(streaming)
+  const prevProcessingActiveRef = useRef(processingActive)
+
+  // Before render, capture whether we should scroll (based on current scroll position)
+  if (
+    events !== prevEventsRef.current ||
+    streaming !== prevStreamingRef.current ||
+    processingActive !== prevProcessingActiveRef.current
+  ) {
+    // Content is about to change - capture scroll decision NOW before DOM updates
+    shouldScrollOnNextUpdateRef.current = autoScrollPinnedRef.current
+    prevEventsRef.current = events
+    prevStreamingRef.current = streaming
+    prevProcessingActiveRef.current = processingActive
+  }
+
   const scrollToBottom = useCallback(() => {
-    if (!autoScrollPinned) return
     const scroller = getScrollContainer()
     requestAnimationFrame(() => {
       window.scrollTo({ top: scroller.scrollHeight })
     })
-  }, [autoScrollPinned, getScrollContainer])
+  }, [getScrollContainer])
 
   useLayoutEffect(() => {
-    scrollToBottom()
+    // Use the captured decision from before the DOM update
+    if (shouldScrollOnNextUpdateRef.current) {
+      scrollToBottom()
+    }
   }, [scrollToBottom, events, processingActive, streaming])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
@@ -221,28 +270,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
 
-  useEffect(() => {
-    const sentinel = bottomSentinelRef.current
-    if (!sentinel) {
-      setAutoScrollPinned(false)
-      return
-    }
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const entry = entries.find((item) => item.target === sentinel)
-        const nextPinned = Boolean(entry?.isIntersecting)
-        setAutoScrollPinned(nextPinned)
-      },
-      { root: null, threshold: 0.75 },
-    )
-
-    observer.observe(sentinel)
-
-    return () => {
-      observer.disconnect()
-    }
-  }, [setAutoScrollPinned, hasMoreNewer])
 
   const handleJumpToLatest = async () => {
     await jumpToLatest()

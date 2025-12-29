@@ -198,7 +198,7 @@ function pickTimestamp(entries: ToolCallEntry[], direction: 'earliest' | 'latest
   }
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     if (entries[i].timestamp) {
-      return entries[i].timestamp
+      return entries[i].timestamp ?? null
     }
   }
   return null
