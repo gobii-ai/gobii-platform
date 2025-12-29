@@ -1,11 +1,12 @@
 import logging
 import re
+from html.parser import HTMLParser
 from typing import Any, Dict
 
 import pdfkit
 
 from api.models import PersistentAgent
-from .filespace_writer import write_bytes_to_exports
+from api.agent.files.filespace_service import write_bytes_to_exports
 
 logger = logging.getLogger(__name__)
 
@@ -13,11 +14,6 @@ DEFAULT_FILENAME = "export.pdf"
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
-ASSET_TAG_RE = re.compile(
-    r"<\s*(img|script|link|iframe|video|audio|source|object|embed)\b[^>]*"
-    r"(?:src|href)\s*=\s*['\"]\s*(?P<url>[^'\"]+)",
-    re.IGNORECASE,
-)
 SRCSET_RE = re.compile(r"\bsrcset\s*=\s*['\"](?P<value>[^'\"]+)", re.IGNORECASE)
 CSS_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?P<url>[^)\"'\s]+)", re.IGNORECASE)
 CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\()?['\"]?\s*(?P<url>[^'\"\)\s]+)", re.IGNORECASE)
@@ -32,26 +28,71 @@ def _is_allowed_asset_url(url: str) -> bool:
     return url.lower().startswith("data:")
 
 
-def _contains_blocked_asset_references(html: str) -> bool:
-    for match in ASSET_TAG_RE.finditer(html):
-        if not _is_allowed_asset_url(match.group("url")):
+def _srcset_contains_blocked_urls(value: str) -> bool:
+    for candidate in value.split(","):
+        url = candidate.strip().split(" ")[0]
+        if url and not _is_allowed_asset_url(url):
             return True
-
-    for match in SRCSET_RE.finditer(html):
-        for candidate in match.group("value").split(","):
-            url = candidate.strip().split(" ")[0]
-            if url and not _is_allowed_asset_url(url):
-                return True
-
-    for match in CSS_URL_RE.finditer(html):
-        if not _is_allowed_asset_url(match.group("url")):
-            return True
-
-    for match in CSS_IMPORT_RE.finditer(html):
-        if not _is_allowed_asset_url(match.group("url")):
-            return True
-
     return False
+
+
+def _css_contains_blocked_urls(text: str) -> bool:
+    for match in CSS_URL_RE.finditer(text):
+        if not _is_allowed_asset_url(match.group("url")):
+            return True
+    for match in CSS_IMPORT_RE.finditer(text):
+        if not _is_allowed_asset_url(match.group("url")):
+            return True
+    return False
+
+
+class _AssetScanParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocked = False
+        self._in_style = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._inspect_attrs(attrs)
+        if tag.lower() == "style":
+            self._in_style = True
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        self._inspect_attrs(attrs)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.lower() == "style":
+            self._in_style = False
+
+    def handle_data(self, data: str) -> None:
+        if self._in_style and _css_contains_blocked_urls(data):
+            self.blocked = True
+
+    def _inspect_attrs(self, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if not value:
+                continue
+            key = key.lower()
+            if key in {"src", "href"} and not _is_allowed_asset_url(value):
+                self.blocked = True
+                return
+            if key == "srcset" and _srcset_contains_blocked_urls(value):
+                self.blocked = True
+                return
+            if key == "style" and _css_contains_blocked_urls(value):
+                self.blocked = True
+                return
+
+
+def _contains_blocked_asset_references(html: str) -> bool:
+    parser = _AssetScanParser()
+    try:
+        parser.feed(html)
+        parser.close()
+    except Exception:
+        logger.exception("Failed to parse HTML for asset scanning.")
+        return True
+    return parser.blocked
 
 
 def get_create_pdf_tool() -> Dict[str, Any]:

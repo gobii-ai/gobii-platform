@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from celery.utils.log import get_task_logger
-
-"""Service helpers for importing message attachments into an agent filespace."""
-
-from typing import List
+import hashlib
+import os
 from dataclasses import dataclass
+from typing import List
+
+from celery.utils.log import get_task_logger
+from django.conf import settings
+from django.core.files.base import ContentFile
 from django.db import transaction
+from django.utils.text import get_valid_filename
 
 from ...models import (
     PersistentAgentMessage,
@@ -16,6 +19,7 @@ from ...models import (
 )
 
 logger = get_task_logger(__name__)
+EXPORTS_DIR_NAME = "exports"
 
 
 @dataclass
@@ -90,6 +94,90 @@ def dedupe_name(fs: AgentFileSpace, parent: AgentFsNode | None, base_name: str) 
         if candidate not in conflicting_names:
             return candidate
         i += 1
+
+
+def _normalize_filename(raw_name: str | None, fallback_name: str, extension: str) -> str:
+    name = (raw_name or "").strip()
+    if not name:
+        name = fallback_name
+    name = get_valid_filename(os.path.basename(name)) or fallback_name
+    if not name.lower().endswith(extension):
+        name = f"{name}{extension}"
+    return name
+
+
+def _agent_has_access(agent, filespace_id) -> bool:
+    return AgentFileSpaceAccess.objects.filter(agent=agent, filespace_id=filespace_id).exists()
+
+
+def write_bytes_to_exports(
+    agent,
+    content_bytes: bytes,
+    filename: str | None,
+    fallback_name: str,
+    extension: str,
+    mime_type: str,
+):
+    if not isinstance(content_bytes, (bytes, bytearray)):
+        return {"status": "error", "message": "File content must be bytes."}
+
+    content_bytes = bytes(content_bytes)
+    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    if max_size and len(content_bytes) > max_size:
+        return {
+            "status": "error",
+            "message": f"File exceeds maximum allowed size ({len(content_bytes)} bytes > {max_size} bytes).",
+        }
+
+    try:
+        filespace = get_or_create_default_filespace(agent)
+    except Exception as exc:
+        logger.error("Failed to resolve default filespace for agent %s: %s", agent.id, exc)
+        return {"status": "error", "message": "No filespace configured for this agent."}
+
+    if not _agent_has_access(agent, filespace.id):
+        return {"status": "error", "message": "Agent lacks access to the filespace."}
+
+    try:
+        exports_dir = get_or_create_dir(filespace, None, EXPORTS_DIR_NAME)
+    except Exception as exc:
+        logger.exception("Failed to resolve exports directory for agent %s: %s", agent.id, exc)
+        return {"status": "error", "message": "Failed to access the exports directory."}
+
+    base_name = _normalize_filename(filename, fallback_name, extension)
+    name = dedupe_name(filespace, exports_dir, base_name)
+    checksum = hashlib.sha256(content_bytes).hexdigest()
+
+    node = AgentFsNode(
+        filespace=filespace,
+        parent=exports_dir,
+        node_type=AgentFsNode.NodeType.FILE,
+        name=name,
+        created_by_agent=agent,
+        mime_type=mime_type,
+        checksum_sha256=checksum,
+    )
+    node.save()
+
+    try:
+        node.content.save(name, ContentFile(content_bytes), save=True)
+        node.refresh_from_db()
+    except Exception:
+        logger.exception("Failed to persist file to exports for agent %s", agent.id)
+        try:
+            if node.content and getattr(node.content, "name", None):
+                node.content.delete(save=False)
+        except Exception:
+            logger.exception("Failed to clean up file content for node %s", node.id)
+        node.delete()
+        return {"status": "error", "message": "Failed to save the file in the filespace."}
+
+    return {
+        "status": "ok",
+        "path": node.path,
+        "node_id": str(node.id),
+        "filename": node.name,
+    }
 
 
 def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNodeInfo]:

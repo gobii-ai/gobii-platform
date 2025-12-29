@@ -1,7 +1,7 @@
 from typing import Any, Dict
 
 from api.models import PersistentAgent
-from .filespace_writer import write_bytes_to_exports
+from api.agent.files.filespace_service import write_bytes_to_exports
 
 DEFAULT_FILENAME = "export.csv"
 EXTENSION = ".csv"
