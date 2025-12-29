@@ -21,6 +21,10 @@ export function StreamingReplyCard({ content, agentFirstName, isStreaming }: Str
     return sanitizeHtml(content)
   }, [content, hasContent, isStreaming])
 
+  if (!hasContent) {
+    return null
+  }
+
   return (
     <article className="timeline-event chat-event is-agent streaming-reply-event" data-streaming={isStreaming ? 'true' : 'false'}>
       <div className="chat-bubble chat-bubble--agent streaming-reply-bubble">
@@ -28,18 +32,10 @@ export function StreamingReplyCard({ content, agentFirstName, isStreaming }: Str
           {agentFirstName || 'Agent'}
         </div>
         <div className="chat-content prose prose-sm max-w-none leading-relaxed text-slate-800">
-          {hasContent ? (
-            htmlContent ? (
-              <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
-            ) : (
-              <MarkdownViewer content={content} enableHighlight={!isStreaming} />
-            )
+          {htmlContent ? (
+            <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
           ) : (
-            <div className="streaming-reply-typing">
-              <span className="streaming-reply-dot" />
-              <span className="streaming-reply-dot" />
-              <span className="streaming-reply-dot" />
-            </div>
+            <MarkdownViewer content={content} enableHighlight={!isStreaming} />
           )}
         </div>
       </div>

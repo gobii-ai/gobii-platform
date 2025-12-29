@@ -61,11 +61,9 @@ export function AgentChatLayout({
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasCompletedReasoning = Boolean(completedThinking?.reasoning?.trim())
-  const hasThinking = hasStreamingReasoning || hasCompletedReasoning
-  const hasStreamingContent = Boolean(streaming?.content?.trim()) || isStreaming
-  const thinkingReasoning = streaming?.reasoning || completedThinking?.reasoning || ''
+  const hasStreamingContent = Boolean(streaming?.content?.trim())
 
-  const showProcessingIndicator = Boolean(processingActive && !hasMoreNewer)
+  const showProcessingIndicator = Boolean((processingActive || isStreaming) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
@@ -116,15 +114,18 @@ export function AgentChatLayout({
                   events={events}
                   agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
+                  thinkingReasoning={hasCompletedReasoning && !isStreaming ? completedThinking?.reasoning : undefined}
+                  thinkingCollapsed={thinkingCollapsed}
+                  onToggleThinking={onToggleThinking}
                 />
               </div>
 
-              {(hasThinking || hasStreamingContent) && !hasMoreNewer ? (
+              {(hasStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
                 <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
-                  {hasThinking && onToggleThinking ? (
+                  {hasStreamingReasoning && onToggleThinking ? (
                     <ThinkingBubble
-                      reasoning={thinkingReasoning}
-                      isStreaming={isStreaming && hasStreamingReasoning}
+                      reasoning={streaming?.reasoning || ''}
+                      isStreaming={true}
                       collapsed={thinkingCollapsed}
                       onToggle={onToggleThinking}
                     />
@@ -144,6 +145,7 @@ export function AgentChatLayout({
                   agentFirstName={agentFirstName}
                   active={Boolean(processingActive)}
                   tasks={processingWebTasks}
+                  isStreaming={isStreaming}
                 />
               </div>
 

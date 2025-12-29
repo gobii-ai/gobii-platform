@@ -433,15 +433,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const state = get()
     const normalized = normalizeEvent(event)
     const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
-    const shouldClearThinking = shouldClearStream
     if (!state.autoScrollPinned) {
       const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
         streaming: shouldClearStream ? null : state.streaming,
-        completedThinking: shouldClearThinking ? null : state.completedThinking,
-        thinkingCollapsed: shouldClearThinking ? false : state.thinkingCollapsed,
       })
       return
     }
@@ -465,8 +462,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       oldestCursor,
       pendingEvents: [],
       streaming: shouldClearStream ? null : state.streaming,
-      completedThinking: shouldClearThinking ? null : state.completedThinking,
-      thinkingCollapsed: shouldClearThinking ? false : state.thinkingCollapsed,
     })
   },
 

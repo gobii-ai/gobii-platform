@@ -60,6 +60,7 @@ type ProcessingIndicatorProps = {
   className?: string
   fade?: boolean
   tasks?: ProcessingWebTask[]
+  isStreaming?: boolean
 }
 
 export function ProcessingIndicator({
@@ -68,6 +69,7 @@ export function ProcessingIndicator({
   className,
   fade = false,
   tasks,
+  isStreaming = false,
 }: ProcessingIndicatorProps) {
   const activeTasks = Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []
   const [currentTime, setCurrentTime] = useState(() => Date.now())
@@ -223,7 +225,16 @@ export function ProcessingIndicator({
         <div className="processing-header">
           <span className="processing-pip" aria-hidden="true" />
           <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
-            <strong>{agentFirstName}</strong> is working
+            <strong>{agentFirstName}</strong>
+            {isStreaming ? (
+              <span className="processing-ellipsis" aria-label="is working">
+                <span className="processing-ellipsis-dot" />
+                <span className="processing-ellipsis-dot" />
+                <span className="processing-ellipsis-dot" />
+              </span>
+            ) : (
+              <span> is working</span>
+            )}
           </button>
           {activeTasks.length ? (
             <div className="processing-meta">
