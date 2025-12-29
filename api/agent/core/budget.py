@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 # These apply unless overridden via Django settings.
 DEFAULT_MAX_STEPS: int = getattr(settings, "PA_MAX_STEPS_PER_CYCLE", 100)
 DEFAULT_MAX_DEPTH: int = getattr(settings, "PA_MAX_RECURSION_DEPTH", 2)
-# Keep budget context alive long enough to cover long‑running tasks
-# Align with distributed lock auto_release_time (4h) by default
+# Keep budget context alive long enough to cover long‑running tasks.
+# Default stays generous to avoid premature cleanup across long cycles.
 DEFAULT_TTL_SECONDS: int = getattr(settings, "PA_CYCLE_TTL_SECONDS", 14400)
 
 

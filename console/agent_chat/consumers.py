@@ -7,6 +7,7 @@ from channels.generic.websocket import AsyncJsonWebsocketConsumer
 from django.core.exceptions import PermissionDenied
 
 from console.agent_chat.access import resolve_agent
+from console.agent_chat.realtime import user_stream_group_name
 
 
 logger = logging.getLogger(__name__)
@@ -38,12 +39,14 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
             return
 
         self.group_name = f"agent-chat-{self.agent_id}"
+        self.user_group_name = user_stream_group_name(self.agent_id, user.id)
         if self.channel_layer is None:
             logger.error("AgentChatConsumer cannot attach to channel layer (not configured)")
             await self.close(code=1011)
             return
         try:
             await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.channel_layer.group_add(self.user_group_name, self.channel_name)
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception(
                 "AgentChatConsumer failed to join group; channel layer unavailable (agent=%s): %s",
@@ -60,6 +63,7 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
             logger.info("AgentChatConsumer disconnect agent=%s channel=%s code=%s", getattr(self, "agent_id", None), self.channel_name, code)
             try:
                 await self.channel_layer.group_discard(self.group_name, self.channel_name)
+                await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("AgentChatConsumer failed removing channel from group: %s", exc)
 
@@ -73,6 +77,9 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
 
     async def processing_event(self, event):
         await self.send_json({"type": "processing", "payload": event.get("payload")})
+
+    async def stream_event(self, event):
+        await self.send_json({"type": "stream.event", "payload": event.get("payload")})
 
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id):

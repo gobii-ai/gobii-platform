@@ -95,3 +95,18 @@ export type AgentTimelineSnapshot = {
   processingActive?: boolean
   processingSnapshot?: ProcessingSnapshot
 }
+
+export type StreamEventPayload = {
+  stream_id: string
+  status: 'start' | 'delta' | 'done'
+  reasoning_delta?: string | null
+  content_delta?: string | null
+  timestamp?: string | null
+}
+
+export type StreamState = {
+  streamId: string
+  reasoning: string
+  content: string
+  done: boolean
+}

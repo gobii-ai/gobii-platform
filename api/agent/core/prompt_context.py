@@ -1603,9 +1603,9 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
     return (
         f"WARNING: Your previous {streak_label} included zero tool calls. "
-        "You MUST include at least one tool call in this response, even if you only call sleep_until_next_trigger. "
+        "You MUST include at least one tool call in this response, unless you are intentionally sending a user-facing reply via the implied-send shortcut. "
         "If no other action is needed, call sleep_until_next_trigger as your tool call now. "
-        "Do NOT embed outbound messages inside your content - always call send_email, send_sms, send_chat_message, send_agent_message, or send_webhook_event instead. "
+        "Do NOT include outbound messages in your content unless you intend them to be sent (implied sends use the most recent message tool parameters); otherwise call send_email, send_sms, send_chat_message, send_agent_message, or send_webhook_event explicitly. "
     )
 
 
@@ -1717,8 +1717,10 @@ def _get_system_instruction(
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
         "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply). Do not sleep right after only a charter/schedule update; set 'will_continue_work': true on your next message or keep batching tools so you finish the ask before pausing. "
-        "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content. "
-        "Instead, ALWAYS call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) to deliver the message. If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
+        "Do NOT embed outbound emails, SMS messages, or chat replies inside your internal reasoning or final content unless you intend them as an implied send. "
+        "If you output a message without a send tool, the platform will treat it as an implied send using the most recent message tool parameters. "
+        "Use implied sends only when replying on the same channel/recipients; otherwise call the appropriate tool (send_email, send_sms, send_chat_message, send_agent_message, send_webhook_event) explicitly. "
+        "If you have more work to do after calling a tool that supports it (e.g., chat, email, SMS, agent messages), ensure you set 'will_continue_work' to true to prevent premature sleeping. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
@@ -1771,8 +1773,8 @@ def _get_system_instruction(
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
         "TOOL USAGE RULES: "
-        "1. Every response requires a tool call. Never output text without a tool. Avoid repeating the same tool/params in consecutive turns; move forward once you have a usable URL or data. "
-        "2. To speak: Use send_chat_message, send_email, or send_sms. "
+        "1. Every response requires a tool call unless you are intentionally using an implied send; message text without a send tool is treated as a send using the most recent message tool parameters. Avoid repeating the same tool/params in consecutive turns; move forward once you have a usable URL or data. "
+        "2. To speak: Use send_chat_message, send_email, or send_sms, or use an implied send when replying on the same channel/recipients as the last message. "
         "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
         "5. Batching: Combine independent tool calls in one response."

@@ -4,6 +4,8 @@ import type {
   AgentMessage,
   ProcessingSnapshot,
   ProcessingWebTask,
+  StreamEventPayload,
+  StreamState,
   TimelineEvent,
   ToolClusterEvent,
   ToolCallEntry,
@@ -168,9 +170,17 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
   return coerceProcessingSnapshot(input)
 }
 
+export type CompletedThinking = {
+  streamId: string
+  reasoning: string
+}
+
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
+  streaming: StreamState | null
+  thinkingCollapsed: boolean
+  completedThinking: CompletedThinking | null
   oldestCursor: string | null
   newestCursor: string | null
   hasMoreOlder: boolean
@@ -193,14 +203,19 @@ export type AgentChatState = {
   jumpToLatest: () => Promise<void>
   sendMessage: (body: string, attachments?: File[]) => Promise<void>
   receiveRealtimeEvent: (event: TimelineEvent) => void
+  receiveStreamEvent: (payload: StreamEventPayload) => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
+  setThinkingCollapsed: (collapsed: boolean) => void
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
   events: [],
+  streaming: null,
+  thinkingCollapsed: false,
+  completedThinking: null,
   oldestCursor: null,
   newestCursor: null,
   hasMoreOlder: false,
@@ -225,6 +240,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       error: null,
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
+      streaming: null,
+      thinkingCollapsed: false,
+      completedThinking: null,
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
     })
 
@@ -414,11 +432,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   receiveRealtimeEvent(event) {
     const state = get()
     const normalized = normalizeEvent(event)
+    const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
     if (!state.autoScrollPinned) {
       const pendingEvents = mergeEvents(state.pendingEvents, [normalized])
       set({
         pendingEvents,
         hasUnseenActivity: true,
+        streaming: shouldClearStream ? null : state.streaming,
       })
       return
     }
@@ -441,6 +461,60 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       newestCursor,
       oldestCursor,
       pendingEvents: [],
+      streaming: shouldClearStream ? null : state.streaming,
+    })
+  },
+
+  receiveStreamEvent(payload) {
+    if (!payload?.stream_id) {
+      return
+    }
+    const isStart = payload.status === 'start'
+    const isDone = payload.status === 'done'
+
+    set((state) => {
+      const base =
+        isStart || !state.streaming || state.streaming.streamId !== payload.stream_id
+          ? { streamId: payload.stream_id, reasoning: '', content: '', done: false }
+          : state.streaming
+
+      const reasoningDelta = payload.reasoning_delta ?? ''
+      const contentDelta = payload.content_delta ?? ''
+
+      const next: StreamState = {
+        streamId: base.streamId,
+        reasoning: reasoningDelta ? `${base.reasoning}${reasoningDelta}` : base.reasoning,
+        content: contentDelta ? `${base.content}${contentDelta}` : base.content,
+        done: isDone ? true : base.done,
+      }
+
+      const hasUnseenActivity = !state.autoScrollPinned
+        ? true
+        : state.hasUnseenActivity
+
+      if (isDone && !next.reasoning && !next.content) {
+        return { streaming: null, hasUnseenActivity, completedThinking: null }
+      }
+
+      if (isDone && next.reasoning) {
+        return {
+          streaming: next,
+          hasUnseenActivity,
+          thinkingCollapsed: true,
+          completedThinking: { streamId: next.streamId, reasoning: next.reasoning },
+        }
+      }
+
+      if (isStart) {
+        return {
+          streaming: next,
+          hasUnseenActivity,
+          thinkingCollapsed: false,
+          completedThinking: null,
+        }
+      }
+
+      return { streaming: next, hasUnseenActivity }
     })
   },
 
@@ -486,5 +560,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       }
       return { autoScrollPinSuppressedUntil: until }
     })
+  },
+
+  setThinkingCollapsed(collapsed) {
+    set({ thinkingCollapsed: collapsed })
   },
 }))

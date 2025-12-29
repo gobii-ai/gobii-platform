@@ -7,6 +7,7 @@ business logic to the event processing module.
 """
 
 import logging
+from uuid import UUID
 from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
@@ -16,8 +17,18 @@ from django.conf import settings
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
+from config.redis_client import get_redis_client
 from ..core.event_processing import process_agent_events
-from ..core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
+from ..core.processing_flags import (
+    claim_pending_drain_slot,
+    clear_pending_drain_slot,
+    clear_processing_queued_flag,
+    count_pending_agents,
+    get_pending_drain_settings,
+    is_agent_pending,
+    pop_pending_agents,
+    set_processing_queued_flag,
+)
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
@@ -52,6 +63,15 @@ def _extract_agent_id(args: Sequence[Any] | None, kwargs: dict[str, Any] | None)
     if kwargs and kwargs.get("persistent_agent_id"):
         return str(kwargs["persistent_agent_id"])
     return None
+
+
+def _normalize_agent_id(agent_id: Any) -> str | None:
+    if isinstance(agent_id, UUID):
+        return str(agent_id)
+    try:
+        return str(UUID(str(agent_id)))
+    except (TypeError, ValueError, AttributeError):
+        return None
 
 
 def _broadcast_processing_state(agent_id: str) -> None:
@@ -128,9 +148,73 @@ def process_agent_events_task(
         )
     finally:
         set_current_eval_routing_profile(None)
-        # Ensure queued flag clears even if processing short-circuits
-        clear_processing_queued_flag(persistent_agent_id)
+        # Ensure queued flag clears even if processing short-circuits,
+        # but keep it set when pending work is queued for retry.
+        if not is_agent_pending(persistent_agent_id):
+            clear_processing_queued_flag(persistent_agent_id)
         _broadcast_processing_state(persistent_agent_id)
+
+
+@shared_task(bind=True, name="api.agent.tasks.process_pending_agent_events")
+def process_pending_agent_events_task(
+    self,
+    max_agents: int | None = None,
+    delay_seconds: int | None = None,
+) -> None:  # noqa: D401, ANN001
+    """Drain the pending agent set and re-queue processing tasks."""
+    redis_client = get_redis_client()
+    clear_pending_drain_slot(client=redis_client)
+
+    pending_settings = get_pending_drain_settings()
+    limit = int(max_agents if max_agents is not None else pending_settings.pending_drain_limit)
+    agent_ids = pop_pending_agents(limit=limit, client=redis_client)
+    if not agent_ids:
+        return
+
+    valid_agent_ids: list[str] = []
+    invalid_agent_ids: list[str] = []
+    for agent_id in agent_ids:
+        normalized = _normalize_agent_id(agent_id)
+        if normalized:
+            valid_agent_ids.append(normalized)
+        else:
+            invalid_agent_ids.append(str(agent_id))
+
+    if invalid_agent_ids:
+        logger.warning(
+            "Pending drain skipped %s invalid agent id(s): %s",
+            len(invalid_agent_ids),
+            invalid_agent_ids[:5],
+        )
+
+    for agent_id in valid_agent_ids:
+        process_agent_events_task.delay(agent_id)
+
+    remaining = count_pending_agents(client=redis_client)
+    if remaining <= 0:
+        logger.info(
+            "Pending drain processed: drained=%s skipped_invalid=%s remaining=0 rescheduled=False",
+            len(valid_agent_ids),
+            len(invalid_agent_ids),
+        )
+        return
+
+    delay = int(delay_seconds if delay_seconds is not None else pending_settings.pending_drain_delay_seconds)
+    schedule_ttl = pending_settings.pending_drain_schedule_ttl_seconds
+    if delay_seconds is not None:
+        schedule_ttl = max(30, delay * 6)
+    rescheduled = False
+    if claim_pending_drain_slot(ttl=schedule_ttl, client=redis_client):
+        process_pending_agent_events_task.apply_async(countdown=delay)
+        rescheduled = True
+    logger.info(
+        "Pending drain processed: drained=%s skipped_invalid=%s remaining=%s rescheduled=%s delay=%s",
+        len(valid_agent_ids),
+        len(invalid_agent_ids),
+        remaining,
+        rescheduled,
+        delay if rescheduled else None,
+    )
 
 
 def _remove_orphaned_celery_beat_task(agent_id: str) -> None:

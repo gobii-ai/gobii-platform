@@ -1,26 +1,20 @@
-"""Ensure pending follow-ups are dropped once a cycle closes early."""
-
-import os
-from unittest.mock import patch
-
+"""Ensure pending work keeps the budget cycle open on sleep."""
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.agent.core.budget import AgentBudgetManager
-from api.agent.core.event_processing import process_agent_events
+from api.agent.core.budget import AgentBudgetManager, BudgetContext
+from api.agent.core.event_processing import _attempt_cycle_close_for_sleep
+from api.agent.core.processing_flags import enqueue_pending_agent, pending_set_key
 from api.models import BrowserUseAgent, PersistentAgent
 from config.redis_client import get_redis_client
 
 
 @tag("batch_event_processing")
 class PendingFollowUpClosureTests(TestCase):
-    """Prove that a pending follow-up is skipped once the cycle is closed."""
+    """Prove pending work blocks cycle closure on sleep."""
 
     @classmethod
     def setUpTestData(cls) -> None:
-        os.environ["USE_FAKE_REDIS"] = "1"
-        get_redis_client.cache_clear()
-
         User = get_user_model()
         cls.user = User.objects.create_user(
             username="pending-followup-user",
@@ -40,37 +34,34 @@ class PendingFollowUpClosureTests(TestCase):
         )
 
     def setUp(self) -> None:
-        os.environ["USE_FAKE_REDIS"] = "1"
-        get_redis_client.cache_clear()
         self.redis = get_redis_client()
+        self.redis.delete(pending_set_key())
 
-    @patch("api.agent.core.event_processing.Redlock")
-    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
-    @patch("api.agent.core.event_processing._process_agent_events_locked")
-    def test_pending_flag_triggers_follow_up_without_cycle_close(self, mock_locked, mock_delay, mock_redlock) -> None:
-        pending_key = f"agent-event-processing:pending:{self.agent.id}"
+    def _build_budget_context(self) -> BudgetContext:
+        budget_id, max_steps, max_depth = AgentBudgetManager.find_or_start_cycle(
+            agent_id=str(self.agent.id),
+        )
+        branch_id = AgentBudgetManager.create_branch(
+            agent_id=str(self.agent.id),
+            budget_id=budget_id,
+            depth=0,
+        )
+        return BudgetContext(
+            agent_id=str(self.agent.id),
+            budget_id=budget_id,
+            branch_id=branch_id,
+            depth=0,
+            max_steps=max_steps,
+            max_depth=max_depth,
+        )
 
-        mock_lock = mock_redlock.return_value
-        mock_lock.acquire.return_value = True
-        mock_lock.release.return_value = True
+    def test_pending_set_keeps_cycle_open(self) -> None:
+        budget_ctx = self._build_budget_context()
+        enqueue_pending_agent(self.agent.id, client=self.redis, ttl=300)
 
-        def mark_pending_only(*_args, **_kwargs):
-            # Simulate a background completion setting the pending flag while the lock is held.
-            self.redis.set(pending_key, "1")
-            return self.agent
+        _attempt_cycle_close_for_sleep(self.agent, budget_ctx)
 
-        mock_locked.side_effect = mark_pending_only
-
-        process_agent_events(self.agent.id)
-
-        # Pending flag should be consumed and a follow-up should be scheduled using the active cycle.
-        self.assertIsNone(self.redis.get(pending_key))
-        mock_delay.assert_called_once()
-
-        args, kwargs = mock_delay.call_args
-        self.assertEqual(str(self.agent.id), args[0])
         self.assertEqual(
             AgentBudgetManager.get_cycle_status(agent_id=str(self.agent.id)),
             "active",
         )
-        self.assertEqual(kwargs.get("budget_id"), AgentBudgetManager.get_active_budget_id(agent_id=str(self.agent.id)))

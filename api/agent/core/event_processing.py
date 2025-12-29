@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import json
 import logging
+import time
+from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from typing import List, Tuple, Union, Optional, Dict, Any, Literal
@@ -17,6 +19,7 @@ from uuid import UUID
 import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
+from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
@@ -44,8 +47,15 @@ from .burn_control import (
     has_recent_user_message,
     should_pause_for_burn_rate,
 )
-from .processing_flags import clear_processing_queued_flag
+from .processing_flags import (
+    claim_pending_drain_slot,
+    clear_processing_queued_flag,
+    enqueue_pending_agent,
+    get_pending_drain_settings,
+    is_agent_pending,
+)
 from .llm_utils import run_completion
+from .llm_streaming import StreamAccumulator
 from .token_usage import (
     coerce_int as _coerce_int,
     completion_kwargs_from_usage,
@@ -102,6 +112,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
+    CommsChannel,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from config import settings
@@ -113,6 +124,7 @@ from .gemini_cache import (
     disable_gemini_cache_for,
     is_gemini_cache_conflict_error,
 )
+from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -122,8 +134,291 @@ ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
+MESSAGE_TOOL_NAMES = {
+    "send_email",
+    "send_sms",
+    "send_chat_message",
+    "send_agent_message",
+}
+MESSAGE_TOOL_BODY_KEYS = {
+    "send_email": "mobile_first_html",
+    "send_sms": "body",
+    "send_chat_message": "body",
+    "send_agent_message": "message",
+}
 
 __all__ = ["process_agent_events"]
+
+
+@dataclass(frozen=True)
+class _EventProcessingLockSettings:
+    lock_timeout_seconds: int
+    lock_extend_interval_seconds: int
+    lock_acquire_timeout_seconds: float
+    lock_max_extensions: int
+    pending_set_ttl_seconds: int
+    pending_drain_delay_seconds: int
+    pending_drain_schedule_ttl_seconds: int
+
+
+def _get_event_processing_lock_settings() -> _EventProcessingLockSettings:
+    lock_timeout_seconds = int(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_TIMEOUT_SECONDS", 900)
+    )
+    lock_timeout_seconds = max(1, lock_timeout_seconds)
+    lock_extend_interval_seconds = int(
+        getattr(
+            settings,
+            "AGENT_EVENT_PROCESSING_LOCK_EXTEND_INTERVAL_SECONDS",
+            max(30, lock_timeout_seconds // 2),
+        )
+    )
+    lock_extend_interval_seconds = max(1, lock_extend_interval_seconds)
+    lock_acquire_timeout_seconds = float(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_ACQUIRE_TIMEOUT_SECONDS", 1)
+    )
+    lock_acquire_timeout_seconds = max(0.1, lock_acquire_timeout_seconds)
+    lock_max_extensions = int(
+        getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_MAX_EXTENSIONS", 200)
+    )
+    lock_max_extensions = max(1, lock_max_extensions)
+    pending_settings = get_pending_drain_settings(settings)
+    return _EventProcessingLockSettings(
+        lock_timeout_seconds=lock_timeout_seconds,
+        lock_extend_interval_seconds=lock_extend_interval_seconds,
+        lock_acquire_timeout_seconds=lock_acquire_timeout_seconds,
+        lock_max_extensions=lock_max_extensions,
+        pending_set_ttl_seconds=pending_settings.pending_set_ttl_seconds,
+        pending_drain_delay_seconds=pending_settings.pending_drain_delay_seconds,
+        pending_drain_schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
+    )
+
+
+class _LockExtender:
+    def __init__(self, lock: Redlock, *, interval_seconds: int, span=None) -> None:
+        self._lock = lock
+        self._interval_seconds = max(1, interval_seconds)
+        self._next_extend_at = time.monotonic() + self._interval_seconds
+        self._disabled = False
+        self._span = span
+
+    def maybe_extend(self) -> None:
+        if self._disabled:
+            return
+        now = time.monotonic()
+        if now < self._next_extend_at:
+            return
+        try:
+            self._lock.extend()
+            self._next_extend_at = now + self._interval_seconds
+            if self._span:
+                self._span.add_event("Distributed lock extended")
+        except (ExtendUnlockedLock, TooManyExtensions) as exc:
+            self._disabled = True
+            logger.warning("Lock extension disabled: %s", exc)
+            if self._span:
+                self._span.add_event("Distributed lock extension disabled")
+        except Exception as exc:
+            logger.warning("Failed to extend lock: %s", exc)
+
+
+def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, span=None) -> None:
+    if not claim_pending_drain_slot(ttl=schedule_ttl_seconds):
+        return
+    try:
+        from ..tasks.process_events import process_pending_agent_events_task  # noqa: WPS433 (runtime import)
+
+        process_pending_agent_events_task.apply_async(countdown=delay_seconds)
+        if span is not None:
+            span.add_event("Pending drain task scheduled")
+    except Exception as exc:
+        logger.error("Failed to schedule pending drain task: %s", exc)
+
+
+def _stale_lock_threshold_seconds(
+    lock_timeout_seconds: int,
+    pending_set_ttl_seconds: int,
+) -> int:
+    threshold = min(lock_timeout_seconds * 4, pending_set_ttl_seconds)
+    return max(1, threshold)
+
+
+def _lock_storage_keys(lock_key: str) -> tuple[str, ...]:
+    prefix = f"{getattr(Redlock, '_KEY_PREFIX', 'redlock')}:"
+    if lock_key.startswith(prefix):
+        return (lock_key,)
+    return (f"{prefix}{lock_key}", lock_key)
+
+
+def _maybe_clear_stale_lock(
+    *,
+    lock_key: str,
+    lock_timeout_seconds: int,
+    pending_set_ttl_seconds: int,
+    redis_client,
+    span=None,
+) -> bool:
+    threshold = _stale_lock_threshold_seconds(lock_timeout_seconds, pending_set_ttl_seconds)
+    for storage_key in _lock_storage_keys(lock_key):
+        try:
+            ttl = redis_client.ttl(storage_key)
+        except Exception:
+            logger.debug("Failed to check lock TTL for %s", storage_key, exc_info=True)
+            continue
+
+        if ttl is None or ttl == -2:
+            continue
+
+        if ttl == -1 or ttl > threshold:
+            try:
+                redis_client.delete(storage_key)
+                logger.warning(
+                    "Cleared stale agent event-processing lock %s (ttl=%s threshold=%s)",
+                    storage_key,
+                    ttl,
+                    threshold,
+                )
+                if span is not None:
+                    span.add_event("Cleared stale distributed lock")
+                return True
+            except Exception:
+                logger.exception("Failed to clear stale lock %s", storage_key)
+    return False
+
+
+def _normalize_persistent_agent_id(persistent_agent_id: Union[str, UUID]) -> Optional[str]:
+    if isinstance(persistent_agent_id, UUID):
+        return str(persistent_agent_id)
+    try:
+        return str(UUID(str(persistent_agent_id)))
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+def _extract_message_content(message: Any) -> str:
+    """Return normalized assistant message content, if any."""
+    if message is None:
+        return ""
+
+    content = None
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            if isinstance(part, dict):
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+
+    return ""
+
+
+def _get_tool_call_name(call: Any) -> Optional[str]:
+    if call is None:
+        return None
+    name = getattr(getattr(call, "function", None), "name", None)
+    if name:
+        return name
+    if isinstance(call, dict):
+        return call.get("function", {}).get("name")
+    return None
+
+
+def _get_last_message_tool_call(agent: PersistentAgent) -> Optional[Tuple[str, dict]]:
+    call = (
+        PersistentAgentToolCall.objects.select_related("step")
+        .filter(step__agent=agent, tool_name__in=MESSAGE_TOOL_NAMES)
+        .order_by("-step__created_at")
+        .first()
+    )
+    if not call:
+        return None
+
+    params = call.tool_params if isinstance(call.tool_params, dict) else {}
+    return call.tool_name, dict(params)
+
+
+def _default_implied_email_subject(agent: PersistentAgent) -> str:
+    name = (agent.name or "").strip()
+    if name:
+        return f"Update from {name}"
+    return "Update"
+
+
+def _build_implied_send_tool_call(
+    agent: PersistentAgent,
+    message_text: str,
+    *,
+    will_continue_work: bool,
+) -> Tuple[Optional[dict], Optional[str]]:
+    last_call = _get_last_message_tool_call(agent)
+    if last_call:
+        tool_name, tool_params = last_call
+        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+        if not body_key:
+            return None, f"Implied send does not support tool {tool_name}."
+        tool_params[body_key] = message_text
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        else:
+            tool_params.pop("will_continue_work", None)
+        return (
+            {
+                "id": "implied_send",
+                "function": {
+                    "name": tool_name,
+                    "arguments": json.dumps(tool_params),
+                },
+            },
+            None,
+        )
+
+    endpoint = agent.preferred_contact_endpoint
+    if not endpoint:
+        return None, "Implied send failed: no prior message tool call or preferred contact endpoint."
+
+    channel = endpoint.channel
+    address = endpoint.address
+    if channel == CommsChannel.EMAIL:
+        tool_name = "send_email"
+        tool_params = {
+            "to_address": address,
+            "subject": _default_implied_email_subject(agent),
+            "mobile_first_html": message_text,
+        }
+    elif channel == CommsChannel.SMS:
+        tool_name = "send_sms"
+        tool_params = {"to_number": address, "body": message_text}
+    elif channel == CommsChannel.WEB:
+        tool_name = "send_chat_message"
+        tool_params = {"to_address": address, "body": message_text}
+    else:
+        return None, f"Implied send failed: unsupported preferred contact channel '{channel}'."
+
+    if will_continue_work:
+        tool_params["will_continue_work"] = True
+
+    return (
+        {
+            "id": "implied_send",
+            "function": {
+                "name": tool_name,
+                "arguments": json.dumps(tool_params),
+            },
+        },
+        None,
+    )
 
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""
@@ -131,13 +426,12 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
     if budget_ctx is None:
         return
 
-    # If a pending follow-up is queued, keep the cycle open so it can run
+    # If pending follow-ups are queued, keep the cycle open so they can run.
     try:
         redis_client = get_redis_client()
-        pending_key = f"agent-event-processing:pending:{agent.id}"
-        if redis_client.get(pending_key):
+        if is_agent_pending(agent.id, client=redis_client):
             logger.info(
-                "Agent %s sleeping with pending follow-up flag; keeping cycle active.",
+                "Agent %s sleeping with pending work queued; keeping cycle active.",
                 agent.id,
             )
             return
@@ -232,6 +526,40 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
+def _stream_completion_with_broadcast(
+    *,
+    model: str,
+    messages: List[dict],
+    params: dict,
+    tools: Optional[List[dict]],
+    provider: Optional[str],
+    stream_broadcaster: Optional[WebStreamBroadcaster],
+) -> Any:
+    if stream_broadcaster:
+        stream_broadcaster.start()
+
+    accumulator = StreamAccumulator()
+    try:
+        stream = run_completion(
+            model=model,
+            messages=messages,
+            params=params,
+            tools=tools,
+            drop_params=True,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in stream:
+            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
+            if stream_broadcaster:
+                stream_broadcaster.push_delta(reasoning_delta, content_delta)
+    finally:
+        if stream_broadcaster:
+            stream_broadcaster.finish()
+
+    return accumulator.build_response(model=model, provider=provider)
+
+
 _GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
 _GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
@@ -243,6 +571,7 @@ def _completion_with_failover(
     agent_id: str = None,
     safety_identifier: str = None,
     preferred_config: Optional[Tuple[str, str]] = None,
+    stream_broadcaster: Optional[WebStreamBroadcaster] = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -254,9 +583,10 @@ def _completion_with_failover(
         agent_id: Optional agent ID for logging
         safety_identifier: Optional user ID for safety filtering
         preferred_config: Optional tuple of (provider, model) to try first
+        stream_broadcaster: Optional broadcaster for streaming deltas to web UI
         
     Returns:
-        Tuple of (LiteLLM completion response, token usage dict)
+        Tuple of (LiteLLM completion response or streaming aggregate, token usage dict)
         Token usage dict contains: prompt_tokens, completion_tokens, total_tokens, 
         cached_tokens (optional), model, provider
         
@@ -266,6 +596,7 @@ def _completion_with_failover(
     last_exc: Exception | None = None
     base_messages: List[dict] = list(messages or [])
     base_tools: List[dict] = list(tools or [])
+    active_stream_broadcaster = stream_broadcaster
     
     ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
     if preferred_config:
@@ -341,13 +672,40 @@ def _completion_with_failover(
                 if (provider.startswith("openai") or provider == "openai") and safety_identifier:
                     params["safety_identifier"] = str(safety_identifier)
 
-                response = run_completion(
-                    model=model,
-                    messages=request_messages,
-                    params=params,
-                    tools=request_tools_payload,
-                    drop_params=True,
-                )
+                if active_stream_broadcaster:
+                    try:
+                        response = _stream_completion_with_broadcast(
+                            model=model,
+                            messages=request_messages,
+                            params=params,
+                            tools=request_tools_payload,
+                            provider=provider,
+                            stream_broadcaster=active_stream_broadcaster,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Streaming completion failed for provider=%s model=%s; retrying without streaming",
+                            provider,
+                            model,
+                            exc_info=True,
+                        )
+                        active_stream_broadcaster.finish()
+                        active_stream_broadcaster = None
+                        response = run_completion(
+                            model=model,
+                            messages=request_messages,
+                            params=params,
+                            tools=request_tools_payload,
+                            drop_params=True,
+                        )
+                else:
+                    response = run_completion(
+                        model=model,
+                        messages=request_messages,
+                        params=params,
+                        tools=request_tools_payload,
+                        drop_params=True,
+                    )
 
                 logger.info(
                     "Provider %s succeeded for agent %s",
@@ -1057,6 +1415,15 @@ def process_agent_events(
     burn_follow_up_token: Optional[str] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
+    normalized_agent_id = _normalize_persistent_agent_id(persistent_agent_id)
+    if not normalized_agent_id:
+        logger.warning(
+            "process_agent_events called with invalid agent id: %s",
+            persistent_agent_id,
+        )
+        return
+    persistent_agent_id = normalized_agent_id
+
     span = trace.get_current_span()
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
     span.set_attribute("persistent_agent.id", str(persistent_agent_id))
@@ -1211,31 +1578,56 @@ def process_agent_events(
 
     # Use distributed lock to ensure only one event processing call per agent
     lock_key = f"agent-event-processing:{persistent_agent_id}"
-    pending_key = f"agent-event-processing:pending:{persistent_agent_id}"
+    lock_settings = _get_event_processing_lock_settings()
 
-    lock = Redlock(key=lock_key, masters={redis_client}, auto_release_time=14400)  # 4 hour timeout to match Celery
+    lock = Redlock(
+        key=lock_key,
+        masters={redis_client},
+        auto_release_time=lock_settings.lock_timeout_seconds,
+        num_extensions=lock_settings.lock_max_extensions,
+    )
+    lock_extender = _LockExtender(
+        lock,
+        interval_seconds=lock_settings.lock_extend_interval_seconds,
+        span=span,
+    )
 
     lock_acquired = False
     processed_agent: Optional[PersistentAgent] = None
 
     try:
-        # Try to acquire the lock with a small timeout. If this instance cannot get the lock
-        # we record a *pending* flag in Redis so that exactly one follow-up task is queued
-        # once the current lock holder finishes.
-        if not lock.acquire(blocking=True, timeout=1):
-            # Mark that another round of processing should run once the lock is released.
-            # The TTL prevents a stale flag from surviving indefinitely in the unlikely event
-            # that no task is ever scheduled to clear it (e.g., if the agent is deleted).
-            redis_client.set(pending_key, "1", ex=600)
+        # Try to acquire the lock with a small timeout. If this instance cannot get the lock,
+        # enqueue the agent ID for a debounced drain task to retry once the lock clears.
+        if not lock.acquire(blocking=True, timeout=lock_settings.lock_acquire_timeout_seconds):
+            if _maybe_clear_stale_lock(
+                lock_key=lock_key,
+                lock_timeout_seconds=lock_settings.lock_timeout_seconds,
+                pending_set_ttl_seconds=lock_settings.pending_set_ttl_seconds,
+                redis_client=redis_client,
+                span=span,
+            ):
+                if lock.acquire(blocking=False):
+                    lock_acquired = True
+                else:
+                    span.add_event("Stale lock cleared but reacquire failed")
+            if not lock_acquired:
+                enqueue_pending_agent(
+                    persistent_agent_id,
+                    ttl=lock_settings.pending_set_ttl_seconds,
+                )
 
-            logger.info(
-                "Skipping event processing for agent %s – another process is already handling events (flagged pending)",
-                persistent_agent_id,
-            )
-            span.add_event("Event processing skipped – lock acquisition failed (pending flag set)")
-            span.set_attribute("lock.acquired", False)
-            clear_processing_queued_flag(persistent_agent_id)
-            return
+                logger.info(
+                    "Skipping event processing for agent %s – another process is already handling events (queued pending)",
+                    persistent_agent_id,
+                )
+                span.add_event("Event processing skipped – lock acquisition failed (pending queued)")
+                span.set_attribute("lock.acquired", False)
+                _schedule_pending_drain(
+                    delay_seconds=lock_settings.pending_drain_delay_seconds,
+                    schedule_ttl_seconds=lock_settings.pending_drain_schedule_ttl_seconds,
+                    span=span,
+                )
+                return
 
         lock_acquired = True
         clear_processing_queued_flag(persistent_agent_id)
@@ -1250,7 +1642,11 @@ def process_agent_events(
             span.set_attribute("sqlite_db.temp_path", _sqlite_db_path)
 
             # Actual event processing logic (protected by the lock)
-            processed_agent = _process_agent_events_locked(persistent_agent_id, span)
+            processed_agent = _process_agent_events_locked(
+                persistent_agent_id,
+                span,
+                lock_extender=lock_extender,
+            )
 
     except Exception as e:
         logger.error("Error during event processing for agent %s: %s", persistent_agent_id, str(e))
@@ -1271,9 +1667,6 @@ def process_agent_events(
         raise
     finally:
         # Release the lock
-        should_schedule_follow_up = False
-
-        # Only the lock holder attempts release & follow-up scheduling.
         if lock_acquired:
             try:
                 lock.release()
@@ -1282,48 +1675,6 @@ def process_agent_events(
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
-            finally:
-                # If any skipped task set the *pending* flag while we were processing, enqueue a single
-                # follow-up task now and clear the flag. This provides a simple *debounce* mechanism so
-                # that no matter how many additional triggers happened while we were running, we only
-                # schedule one more round of processing.
-                deleted_count = redis_client.delete(pending_key)
-                # Redis returns the number of keys removed (0 or 1). When tests mock the client,
-                # this may be a MagicMock instance – treat that as 0 to avoid eager-execution loops.
-                if isinstance(deleted_count, int) and deleted_count > 0:
-                    should_schedule_follow_up = True
-
-        if should_schedule_follow_up:
-            logger.info("Scheduling follow-up event processing for agent %s due to pending flag", persistent_agent_id)
-            span.add_event("Follow-up task scheduled")
-            # Import inside function to avoid circular dependency at module import time
-            try:
-                from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
-
-                # Skip follow-up if cycle is closed/exhausted
-                status = AgentBudgetManager.get_cycle_status(agent_id=str(persistent_agent_id))
-                active_id = AgentBudgetManager.get_active_budget_id(agent_id=str(persistent_agent_id))
-                if status and (status != "active" or active_id != ctx.budget_id):
-                    logger.info(
-                        "Skipping follow-up scheduling for agent %s; cycle status=%s active_id=%s ctx_id=%s",
-                        persistent_agent_id,
-                        status,
-                        active_id,
-                        ctx.budget_id,
-                    )
-                else:
-                    # Propagate budget context to follow‑up tasks
-                    process_agent_events_task.delay(
-                        str(persistent_agent_id),
-                        budget_id=ctx.budget_id,
-                        branch_id=ctx.branch_id,
-                        depth=ctx.depth,
-                        eval_run_id=getattr(ctx, "eval_run_id", None),
-                    )
-            except Exception as e:
-                logger.error(
-                    "Failed to schedule follow-up event processing for agent %s: %s", persistent_agent_id, str(e)
-                )
 
         # Clear local budget context
         set_budget_context(None)
@@ -1341,7 +1692,12 @@ def process_agent_events(
             logger.debug("Failed to broadcast processing state for agent %s: %s", persistent_agent_id, e)
 
 
-def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) -> Optional[PersistentAgent]:
+def _process_agent_events_locked(
+    persistent_agent_id: Union[str, UUID],
+    span,
+    *,
+    lock_extender: Optional[_LockExtender] = None,
+) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
     try:
         agent = (
@@ -1566,6 +1922,7 @@ def _process_agent_events_locked(persistent_agent_id: Union[str, UUID], span) ->
             is_first_run=is_first_run,
             credit_snapshot=credit_snapshot,
             run_sequence_number=run_sequence_number,
+            lock_extender=lock_extender,
         )
 
         sys_step.notes = "simplified"
@@ -1594,6 +1951,7 @@ def _run_agent_loop(
     is_first_run: bool,
     credit_snapshot: Optional[Dict[str, Any]] = None,
     run_sequence_number: Optional[int] = None,
+    lock_extender: Optional[_LockExtender] = None,
 ) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
@@ -1679,6 +2037,8 @@ def _run_agent_loop(
     for i in range(max_remaining):
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            if lock_extender:
+                lock_extender.maybe_extend()
             try:
                 daily_state = get_agent_daily_credit_state(agent)
             except Exception:
@@ -1785,6 +2145,13 @@ def _run_agent_loop(
                 break
 
             preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
+            stream_broadcaster = None
+            try:
+                stream_target = resolve_web_stream_target(agent)
+                if stream_target:
+                    stream_broadcaster = WebStreamBroadcaster(stream_target)
+            except Exception:
+                logger.debug("Failed to resolve web stream target for agent %s", agent.id, exc_info=True)
 
             try:
                 response, token_usage = _completion_with_failover(
@@ -1794,6 +2161,7 @@ def _run_agent_loop(
                     agent_id=str(agent.id),
                     safety_identifier=agent.user.id if agent.user else None,
                     preferred_config=preferred_config,
+                    stream_broadcaster=stream_broadcaster,
                 )
                 
                 # Accumulate token usage
@@ -1843,11 +2211,56 @@ def _run_agent_loop(
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
+            msg_content = _extract_message_content(msg)
+            message_text = (msg_content or "").strip()
+
+            raw_tool_calls = list(getattr(msg, "tool_calls", None) or [])
+            raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
+            has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
+            has_other_tool_calls = any(
+                name and name != "sleep_until_next_trigger" for name in raw_tool_names
+            )
+
+            implied_send = False
+            tool_calls = list(raw_tool_calls)
+            if message_text and not has_explicit_send:
+                implied_call, implied_error = _build_implied_send_tool_call(
+                    agent,
+                    message_text,
+                    will_continue_work=has_other_tool_calls,
+                )
+                if implied_call:
+                    implied_send = True
+                    tool_calls = [implied_call] + tool_calls
+                    logger.info(
+                        "Agent %s: treating message content as implied %s send.",
+                        agent.id,
+                        implied_call.get("function", {}).get("name"),
+                    )
+                else:
+                    logger.warning(
+                        "Agent %s: implied send unavailable (%s)",
+                        agent.id,
+                        implied_error or "unknown error",
+                    )
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": (
+                                "Implied send failed. "
+                                "Please call send_email, send_sms, or send_chat_message with explicit parameters."
+                            ),
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug("Failed to persist implied-send correction step", exc_info=True)
+                    reasoning_only_streak = 0
+                    continue
+
             reasoning_source = thinking_content
-            if not reasoning_source:
-                msg_content = getattr(msg, "content", None)
-                if msg_content is None and isinstance(msg, dict):
-                    msg_content = msg.get("content")
+            if not reasoning_source and not implied_send:
                 reasoning_source = msg_content
 
             reasoning_text = (reasoning_source or "").strip()
@@ -1860,7 +2273,6 @@ def _run_agent_loop(
                 response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
                 _attach_prompt_archive(response_step)
 
-            tool_calls = getattr(msg, "tool_calls", None)
             if not tool_calls:
                 reasoning_only_streak += 1
                 continue
@@ -1876,9 +2288,7 @@ def _run_agent_loop(
                 )
                 for idx, call in enumerate(list(tool_calls) or [], start=1):
                     try:
-                        fn_name = getattr(getattr(call, "function", None), "name", None) or (
-                            call.get("function", {}).get("name") if isinstance(call, dict) else None
-                        )
+                        fn_name = _get_tool_call_name(call)
                         raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
                             call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
                         )
@@ -1920,8 +2330,10 @@ def _run_agent_loop(
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
+                    if lock_extender:
+                        lock_extender.maybe_extend()
                     tool_span.set_attribute("persistent_agent.id", str(agent.id))
-                    tool_name = getattr(getattr(call, "function", None), "name", None)
+                    tool_name = _get_tool_call_name(call)
                     if not tool_name:
                         logger.warning(
                             "Agent %s: received tool call without a function name; skipping and requesting resend.",
@@ -2007,8 +2419,15 @@ def _run_agent_loop(
                     credits_consumed = credit_info.get("cost")
                     consumed_credit = credit_info.get("credit")
                     try:
-                        raw_args = getattr(call.function, "arguments", "") or ""
-                        tool_params = json.loads(raw_args)
+                        raw_args = getattr(getattr(call, "function", None), "arguments", None)
+                        if raw_args is None and isinstance(call, dict):
+                            raw_args = call.get("function", {}).get("arguments")
+                        if isinstance(raw_args, dict):
+                            tool_params = raw_args
+                            raw_args = json.dumps(raw_args)
+                        else:
+                            raw_args = raw_args or ""
+                            tool_params = json.loads(raw_args)
                     except Exception:
                         # Simple recovery: record a correction instruction and retry next iteration.
                         preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]

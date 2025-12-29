@@ -1,4 +1,4 @@
-import { type MouseEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type MouseEvent, useEffect, useRef, useState } from 'react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import type { ProcessingWebTask } from '../../types/agentChat'
@@ -60,10 +60,18 @@ type ProcessingIndicatorProps = {
   className?: string
   fade?: boolean
   tasks?: ProcessingWebTask[]
+  isStreaming?: boolean
 }
 
-export function ProcessingIndicator({ agentFirstName, active, className, fade = false, tasks }: ProcessingIndicatorProps) {
-  const activeTasks = useMemo(() => (Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []), [tasks])
+export function ProcessingIndicator({
+  agentFirstName,
+  active,
+  className,
+  fade = false,
+  tasks,
+  isStreaming = false,
+}: ProcessingIndicatorProps) {
+  const activeTasks = Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []
   const [currentTime, setCurrentTime] = useState(() => Date.now())
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(new Set())
@@ -213,12 +221,27 @@ export function ProcessingIndicator({ agentFirstName, active, className, fade = 
       data-visible={active ? 'true' : 'false'}
       data-expanded={isExpanded ? 'true' : 'false'}
     >
-      <span className="processing-pip" aria-hidden="true" />
       <div className="processing-content">
-        <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
-          <strong>{agentFirstName}</strong> is working
-          {activeTasks.length ? <span className="processing-count">{taskCountLabel}</span> : null}
-        </button>
+        <div className="processing-header">
+          <span className="processing-pip" aria-hidden="true" />
+          <button className="processing-label" onClick={togglePanelExpanded} type="button" disabled={!activeTasks.length}>
+            <strong>{agentFirstName}</strong>
+            {isStreaming ? (
+              <span className="processing-ellipsis" aria-label="is working">
+                <span className="processing-ellipsis-dot" />
+                <span className="processing-ellipsis-dot" />
+                <span className="processing-ellipsis-dot" />
+              </span>
+            ) : (
+              <span> is working</span>
+            )}
+          </button>
+          {activeTasks.length ? (
+            <div className="processing-meta">
+              <span className="processing-count">{taskCountLabel}</span>
+            </div>
+          ) : null}
+        </div>
         {activeTasks.length && isExpanded ? (
           <div className="processing-task-list" aria-live="polite">
             {activeTasks.map((task) => {

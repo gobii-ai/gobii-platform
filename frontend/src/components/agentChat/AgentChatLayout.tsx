@@ -3,8 +3,11 @@ import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
 import { ProcessingIndicator } from './ProcessingIndicator'
 import { TimelineEventList } from './TimelineEventList'
+import { ThinkingBubble } from './ThinkingBubble'
+import { StreamingReplyCard } from './StreamingReplyCard'
 import type { AgentTimelineProps } from './types'
-import type { ProcessingWebTask } from '../../types/agentChat'
+import type { ProcessingWebTask, StreamState } from '../../types/agentChat'
+import type { CompletedThinking } from '../../stores/agentChatStore'
 import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -23,6 +26,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  streaming?: StreamState | null
+  thinkingCollapsed?: boolean
+  completedThinking?: CompletedThinking | null
+  onToggleThinking?: () => void
 }
 
 export function AgentChatLayout({
@@ -35,6 +42,10 @@ export function AgentChatLayout({
   hasMoreNewer,
   processingActive,
   processingWebTasks = [],
+  streaming,
+  thinkingCollapsed = false,
+  completedThinking,
+  onToggleThinking,
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
@@ -47,7 +58,12 @@ export function AgentChatLayout({
   loadingNewer = false,
   initialLoading = false,
 }: AgentChatLayoutProps) {
-  const showProcessingIndicator = Boolean(processingActive && !hasMoreNewer)
+  const isStreaming = Boolean(streaming && !streaming.done)
+  const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
+  const hasCompletedReasoning = Boolean(completedThinking?.reasoning?.trim())
+  const hasStreamingContent = Boolean(streaming?.content?.trim())
+
+  const showProcessingIndicator = Boolean((processingActive || isStreaming) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
@@ -98,14 +114,38 @@ export function AgentChatLayout({
                   events={events}
                   agentColorHex={agentColorHex || undefined}
                   initialLoading={initialLoading}
+                  thinkingReasoning={hasCompletedReasoning && !isStreaming ? completedThinking?.reasoning : undefined}
+                  thinkingCollapsed={thinkingCollapsed}
+                  onToggleThinking={onToggleThinking}
                 />
               </div>
+
+              {(hasStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
+                <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
+                  {hasStreamingReasoning && onToggleThinking ? (
+                    <ThinkingBubble
+                      reasoning={streaming?.reasoning || ''}
+                      isStreaming={true}
+                      collapsed={thinkingCollapsed}
+                      onToggle={onToggleThinking}
+                    />
+                  ) : null}
+                  {hasStreamingContent ? (
+                    <StreamingReplyCard
+                      content={streaming?.content || ''}
+                      agentFirstName={agentFirstName}
+                      isStreaming={isStreaming}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
 
               <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
                 <ProcessingIndicator
                   agentFirstName={agentFirstName}
-                  active={showProcessingIndicator}
+                  active={Boolean(processingActive)}
                   tasks={processingWebTasks}
+                  isStreaming={isStreaming}
                 />
               </div>
 
