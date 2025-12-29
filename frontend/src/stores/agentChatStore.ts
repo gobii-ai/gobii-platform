@@ -304,7 +304,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   async refreshLatest() {
     const state = get()
-    if (!state.agentId || refreshLatestInFlight) {
+    if (!state.agentId || refreshLatestInFlight || state.loading || !state.newestCursor) {
       return
     }
     refreshLatestInFlight = true

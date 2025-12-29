@@ -1784,9 +1784,9 @@ def _get_system_instruction(
         "If you need access to specific services (Instagram, LinkedIn, Reddit, Zillow, Amazon, etc.), call search_tools and it will auto-enable the best matching tools. "
 
         "TOOL USAGE RULES: "
-        "1. Every response requires a tool call OR is an implied send—text without a send tool IS SENT to the user. Actions require tool calls; describing an action without calling it sends that description as a message. Never narrate. Avoid repeating tool/params. "
+        "1. Every response requires a tool call OR is an implied send—text IS SENT to the user. Output only direct replies, not status updates or reasoning. If waiting, call sleep_until_next_trigger. Avoid repeating tool/params. "
         "2. To speak: Use send_chat_message, send_email, or send_sms, or use an implied send when replying on the same channel/recipients as the last message. "
-        "3. To sleep: Use sleep_until_next_trigger ONLY if you have no message to send and no work to do. "
+        "3. To sleep: Call sleep_until_next_trigger when awaiting user input or when no work remains. "
         "4. To chain: Set 'will_continue_work': true on message tools if you have more actions this cycle. "
         "5. Batching: Combine independent tool calls in one response."
 
