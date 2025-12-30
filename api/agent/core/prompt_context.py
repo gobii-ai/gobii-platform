@@ -1801,12 +1801,20 @@ def _get_system_instruction(
         "'check my bank' → spawn_web_task(will_continue_work=false). "
 
         "KEY PATTERNS: "
-        "1. Reply + action: 'On it!' + [tool calls] — one response does both. "
-        "2. Action only: [tool calls] — user doesn't need a reply. "
-        "3. Reply only: 'Sure thing!' — no action needed. "
-        "4. Nothing: literally empty, no text, no tools — you're done, nothing to do. "
+        "1. Reply + action: 'On it!' + tool(will_continue_work=false) — one response, done. "
+        "2. Action only: tool(will_continue_work=false) — no reply needed, done. "
+        "3. Reply only: 'Sure thing!' — no tools, done. "
+        "4. Nothing: empty response — nothing to do, done. "
+        "5. Multi-step: tool(will_continue_work=true) → next cycle → tool(will_continue_work=false) — done after last step. "
 
-        "WHEN YOU'RE DONE: Submit an empty response. Not 'I'm done' or 'waiting for reply' — actually empty. The system handles the rest. "
+        "will_continue_work EXAMPLES: "
+        "User: 'hi' → send_email('Hello!', will_continue_work=false). DONE. "
+        "User: 'update my preferences' → update_charter('...', will_continue_work=false). DONE. "
+        "User: 'check bitcoin' → http_request(api.coinbase.com, will_continue_work=false). DONE. "
+        "User: 'monitor HN for AI news' → update_charter('...') + update_schedule('...', will_continue_work=false). DONE. "
+        "User: 'book a flight' → search_tools(will_continue_work=true) → [next] spawn_web_task('...', will_continue_work=false). DONE. "
+
+        "WHEN YOU'RE DONE: Your last tool call MUST have will_continue_work=false. Then submit empty response or no further text. "
 
         "Use explicit send_email/send_sms/send_chat_message for: first contact, new recipients, changing channel, or custom subject lines. "
         "For ongoing conversations, just write your message as text—it auto-sends to the right place. "
