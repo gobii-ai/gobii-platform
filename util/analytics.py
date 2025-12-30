@@ -120,6 +120,9 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_EMAIL_RECEIVED = 'Persistent Agent Message Received'
     PERSISTENT_AGENT_EMAIL_OUT_OF_CREDITS = 'Persistent Agent Out of Credits Email'
     PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT = 'Persistent Agent Daily Credit Notice Sent'
+    AGENT_FILE_SENT = 'Agent File Sent'
+    AGENT_FILE_SEND_FAILED = 'Agent File Send Failed'
+    AGENT_FILE_UNSUPPORTED = 'Agent File Unsupported'
 
     # PA Peer Links
     PERSISTENT_AGENT_PEER_LINKED = 'Persistent Agent Linked'
