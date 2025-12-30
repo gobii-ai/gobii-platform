@@ -25,6 +25,37 @@ def _get_db_size_mb(db_path: str) -> float:
     return 0.0
 
 
+def _clean_statement(statement: str) -> Optional[str]:
+    trimmed = statement.strip()
+    if not trimmed:
+        return None
+    while trimmed.endswith(";"):
+        trimmed = trimmed[:-1].rstrip()
+    return trimmed or None
+
+
+def _split_sqlite_statements(sql: str) -> List[str]:
+    """Split SQL into statements using SQLite's parser boundaries."""
+    statements: List[str] = []
+    buffer: List[str] = []
+
+    for ch in sql:
+        buffer.append(ch)
+        if ch == ";":
+            candidate = "".join(buffer)
+            if sqlite3.complete_statement(candidate):
+                cleaned = _clean_statement(candidate)
+                if cleaned:
+                    statements.append(cleaned)
+                buffer = []
+
+    tail = _clean_statement("".join(buffer))
+    if tail:
+        statements.append(tail)
+
+    return statements
+
+
 def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     """Return a list of SQL strings from the single 'queries' parameter."""
     if "queries" not in params:
@@ -40,9 +71,11 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
 
     queries: List[str] = []
     for item in items:
-        if not isinstance(item, str) or not item.strip():
+        if not isinstance(item, str):
             return None
-        queries.append(item)
+        split_items = _split_sqlite_statements(item)
+        if split_items:
+            queries.extend(split_items)
 
     return queries if queries else None
 
@@ -150,7 +183,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
-                "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially. "
+                "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially; "
+                "multiple statements in one string are split using SQLite parsing. "
                 "REMEMBER TO PROPERLY ESCAPE STRINGS IN SQL STATEMENTS. "
             ),
             "parameters": {
