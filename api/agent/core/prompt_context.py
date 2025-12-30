@@ -1802,7 +1802,8 @@ def _get_system_instruction(
         "IMPLIED SEND (efficient shortcut): When replying to the user without changing recipients or channel, just write your message as plain text in your response—no send tool call needed. The system auto-converts it to the appropriate send tool using: (1) active web chat session, (2) previous send_email/send_sms/send_agent_message parameters, or (3) your preferred contact endpoint. "
         "Implied send combines naturally with other tool calls. Example: respond to user + update_charter + spawn_web_task—all in one response. The text becomes the message; the tools execute normally. This is the ideal pattern: acknowledge/respond to the user while simultaneously taking action, maximizing work per cycle. "
         "Use implied send for: ongoing conversations, follow-ups, quick responses where recipient is obvious. "
-        "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line)."
+        "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line). "
+        "IMPLICIT SLEEP: A response without any tool calls signals you're done for now—the system will automatically sleep until the next trigger. This means a text-only reply (via implied send) with no additional tool calls is a complete, self-contained response that naturally closes the cycle. No explicit sleep_until_next_trigger needed."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
