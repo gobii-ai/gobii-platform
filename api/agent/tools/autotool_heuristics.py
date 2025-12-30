@@ -206,6 +206,19 @@ AUTOTOOL_HEURISTICS: list[dict] = [
             "mcp_brightdata_web_data_yahoo_finance_business",
         ],
     },
+    # File exports
+    {
+        "keywords": ["csv"],
+        "tools": [
+            "create_csv",
+        ],
+    },
+    {
+        "keywords": ["pdf"],
+        "tools": [
+            "create_pdf",
+        ],
+    },
 ]
 
 
