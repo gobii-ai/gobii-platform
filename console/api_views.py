@@ -112,6 +112,19 @@ from api.services import mcp_servers as mcp_server_service
 logger = logging.getLogger(__name__)
 
 
+def _path_meta(path: str | None) -> tuple[str | None, str | None]:
+    if not path:
+        return None, None
+    parent = path.rsplit("/", 1)[0] or "/"
+    return parent, None
+
+
+def _ext_from_name(name: str | None) -> str | None:
+    if not name or "." not in name:
+        return None
+    return name.rsplit(".", 1)[-1].lower() or None
+
+
 def _ensure_console_endpoints(agent: PersistentAgent, user) -> tuple[str, str]:
     """Ensure dedicated console endpoints exist and return (sender, recipient) addresses."""
     channel = CommsChannel.WEB
@@ -1253,6 +1266,28 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         if not node:
             raise Http404("File not found.")
 
+        try:
+            parent_path, _ = _path_meta(node.path)
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILE_DOWNLOADED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(node.filespace_id),
+                        "node_id": str(node.id),
+                        "parent_path": parent_path,
+                        "path": node.path,
+                        "mime_type": node.mime_type or None,
+                        "size_bytes": node.size_bytes,
+                        "download_type": "direct",
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit download analytics for agent %s node %s", agent.id, getattr(node, "id", None), exc_info=True)
         return _build_filespace_download_response(node)
 
 
@@ -1288,6 +1323,26 @@ class SignedAgentFsNodeDownloadAPIView(View):
         if not node:
             raise Http404("File not found.")
 
+        try:
+            parent_path, _ = _path_meta(node.path)
+            owner_user_id = getattr(getattr(node.filespace, "owner_user", None), "id", None)
+            Analytics.track_event(
+                user_id=str(owner_user_id or payload.get("agent_id") or ""),
+                event=AnalyticsEvent.AGENT_FILE_DOWNLOADED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    "agent_id": str(agent_uuid),
+                    "filespace_id": str(node.filespace_id),
+                    "node_id": str(node.id),
+                    "parent_path": parent_path,
+                    "path": node.path,
+                    "mime_type": node.mime_type or None,
+                    "size_bytes": node.size_bytes,
+                    "download_type": "signed",
+                },
+            )
+        except Exception:
+            logger.debug("Failed to emit signed download analytics for node %s", getattr(node, "id", None), exc_info=True)
         return _build_filespace_download_response(node)
 
 
@@ -1328,6 +1383,28 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
             .order_by("parent_id", "node_type", "name")
         )
 
+        try:
+            node_count = nodes.count()
+            file_count = nodes.filter(node_type=AgentFsNode.NodeType.FILE).count()
+            dir_count = node_count - file_count
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILES_VIEWED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(filespace.id),
+                        "node_count": node_count,
+                        "file_count": file_count,
+                        "dir_count": dir_count,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit agent files viewed analytics for agent %s", agent.id, exc_info=True)
+
         payload = {
             "filespace": {"id": str(filespace.id), "name": filespace.name},
             "nodes": [_serialize_agent_fs_node(node) for node in nodes],
@@ -1342,6 +1419,19 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
         agent = resolve_agent(request.user, request.session, agent_id)
         files = list(request.FILES.getlist("files")) or list(request.FILES.getlist("file"))
         if not files:
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILES_UPLOAD_FAILED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": None,
+                        "reason_code": "no_files",
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
             return HttpResponseBadRequest("files are required")
 
         filespace = get_or_create_default_filespace(agent)
@@ -1361,6 +1451,19 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                 .first()
             )
             if not parent:
+                Analytics.track_event(
+                    user_id=str(request.user.id),
+                    event=AnalyticsEvent.AGENT_FILES_UPLOAD_FAILED,
+                    source=AnalyticsSource.WEB,
+                    properties=Analytics.with_org_properties(
+                        {
+                            "agent_id": str(agent.id),
+                            "filespace_id": str(filespace.id),
+                            "reason_code": "invalid_parent",
+                        },
+                        organization=getattr(agent, "organization", None),
+                    ),
+                )
                 return HttpResponseBadRequest("parent_id is invalid")
         elif parent_path:
             parent = (
@@ -1374,9 +1477,23 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
                 .first()
             )
             if not parent:
+                Analytics.track_event(
+                    user_id=str(request.user.id),
+                    event=AnalyticsEvent.AGENT_FILES_UPLOAD_FAILED,
+                    source=AnalyticsSource.WEB,
+                    properties=Analytics.with_org_properties(
+                        {
+                            "agent_id": str(agent.id),
+                            "filespace_id": str(filespace.id),
+                            "reason_code": "invalid_parent",
+                        },
+                        organization=getattr(agent, "organization", None),
+                    ),
+                )
                 return HttpResponseBadRequest("parent_path is invalid")
 
         created = []
+        total_bytes = 0
         for upload in files:
             base_name = get_valid_filename(os.path.basename(upload.name or "")) or "file"
             name = dedupe_name(filespace, parent, base_name)
@@ -1392,7 +1509,30 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
             node.content.save(name, upload, save=True)
             node.refresh_from_db()
             created.append(_serialize_agent_fs_node(node))
+            try:
+                total_bytes += int(getattr(upload, "size", 0) or 0)
+            except Exception:
+                pass
 
+        try:
+            parent_path_val = parent.path if parent else "/"
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILES_UPLOADED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(filespace.id),
+                        "parent_path": parent_path_val,
+                        "file_count": len(created),
+                        "total_bytes": total_bytes,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit upload analytics for agent %s", agent.id, exc_info=True)
         return JsonResponse({"created": created}, status=201)
 
 
@@ -1425,6 +1565,23 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
         for node in nodes:
             deleted += node.trash_subtree()
 
+        try:
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILES_DELETED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(filespace.id),
+                        "deleted_count": deleted,
+                        "requested_count": len(node_ids),
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit delete analytics for agent %s", agent.id, exc_info=True)
         return JsonResponse({"deleted": deleted})
 
 
@@ -1476,6 +1633,25 @@ class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
         except IntegrityError:
             return HttpResponseBadRequest("Unable to create folder due to a name conflict")
 
+        try:
+            parent_path, _ = _path_meta(node.path)
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FOLDER_CREATED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(filespace.id),
+                        "node_id": str(node.id),
+                        "parent_path": parent_path,
+                        "path": node.path,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit folder create analytics for agent %s", agent.id, exc_info=True)
         return JsonResponse({"node": _serialize_agent_fs_node(node)}, status=201)
 
 
@@ -1508,6 +1684,8 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
         if not node:
             return HttpResponseBadRequest("node_id is invalid")
 
+        old_parent = node.parent
+        old_parent_path = old_parent.path if old_parent else "/"
         parent = None
         if parent_id:
             parent = (
@@ -1543,6 +1721,28 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
         except IntegrityError:
             return HttpResponseBadRequest("Unable to move node due to a name conflict")
 
+        try:
+            new_parent_path = parent.path if parent else "/"
+            parent_path, _ = _path_meta(node.path)
+            Analytics.track_event(
+                user_id=str(request.user.id),
+                event=AnalyticsEvent.AGENT_FILE_MOVED,
+                source=AnalyticsSource.WEB,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "filespace_id": str(filespace.id),
+                        "node_id": str(node.id),
+                        "from_parent_path": old_parent_path,
+                        "to_parent_path": new_parent_path,
+                        "path": node.path,
+                        "parent_path": parent_path,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logger.debug("Failed to emit move analytics for agent %s", agent.id, exc_info=True)
         return JsonResponse({"node": _serialize_agent_fs_node(node)})
 
 

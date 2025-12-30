@@ -1,4 +1,3 @@
-import hashlib
 from dataclasses import dataclass
 from typing import Iterable, List
 from urllib.parse import urlencode
@@ -40,8 +39,7 @@ def _path_meta(path: str | None) -> tuple[str | None, str | None]:
     if not path:
         return None, None
     parent_path = path.rsplit("/", 1)[0] or "/"
-    digest = hashlib.sha256(path.encode()).hexdigest()[:12]
-    return parent_path, digest
+    return parent_path, None
 
 
 def _track_file_event(
@@ -61,7 +59,7 @@ def _track_file_event(
     if agent is None or agent.user_id is None:
         return
 
-    parent_path, path_hash = _path_meta(path or getattr(node, "path", None))
+    parent_path, _ = _path_meta(path or getattr(node, "path", None))
     extension = _ext_from_name(filename or getattr(node, "name", None))
 
     props: dict[str, object] = {
@@ -73,8 +71,8 @@ def _track_file_event(
         props["node_id"] = str(node.id)
     if parent_path:
         props["parent_path"] = parent_path
-    if path_hash:
-        props["path_hash"] = path_hash
+    if path:
+        props["path"] = path
     if extension:
         props["extension"] = extension
     if size_bytes is not None:
