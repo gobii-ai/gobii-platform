@@ -1619,8 +1619,8 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
         "You MUST include at least one tool call in this response. "
         "Best patterns: "
         "(1) Nothing to say? Just sleep_until_next_trigger with NO text. "
-        "(2) Replying + taking action? Write your message as text + include your tool calls (update_charter, spawn_web_task, etc.)—the text auto-sends via implied send. Maximize work per cycle. "
-        "(3) Replying only? Text + sleep_until_next_trigger. "
+        "(2) Replying + taking action? For web chat, write your message as text + include your tool calls (update_charter, spawn_web_task, etc.)—the text auto-sends via implied send. For SMS/email, use explicit send_email/send_sms + include your tool calls. Maximize work per cycle. "
+        "(3) Replying only? For web chat, text + sleep_until_next_trigger. For SMS/email, use explicit send_email/send_sms. "
         "(4) Need specific send parameters? Use explicit send_email/send_sms/send_chat_message. "
         "Never send empty status updates like 'nothing to report' or 'still monitoring'."
     )
@@ -1730,7 +1730,7 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to perform the next logical step. "
 
-        "TEXT = MESSAGE: Any text you write gets sent to the user. Only write what you want them to read. "
+        "TEXT = MESSAGE (WEB CHAT ONLY): Any text you write goes to the user's web chat. Only write what you want them to read. For SMS/email, never put the message in chat text—use explicit send_email/send_sms. "
         "Tool calls are silent actions. You can combine text + tools: 'Got it!' + [update_charter]. "
         "After tool calls, write nothing—the tools speak for themselves. "
         "IMPORTANT: Tool calls MUST use JSON format, NOT XML. Never output tool calls as XML tags. "
@@ -1839,7 +1839,7 @@ def _get_system_instruction(
         "search_tools enables integrations (not web search)—call it to unlock tools for Instagram, LinkedIn, Reddit, etc. "
 
         "HOW RESPONSES WORK: "
-        "- Text you write = message sent to user. Tool calls = actions you take. "
+        "- Text you write (web chat only) = message sent to user. For SMS/email, send via tools. Tool calls = actions you take. "
         "- You can combine both: text + tool calls in one response. "
         "- No tool calls in response = done for now, auto-sleep until next trigger. "
 
@@ -1875,7 +1875,7 @@ def _get_system_instruction(
         "WHEN YOU'RE DONE: Your last tool call MUST have will_continue_work=false. Then submit empty response or no further text. "
 
         "Use explicit send_email/send_sms/send_chat_message for: first contact, new recipients, changing channel, or custom subject lines. "
-        "For ongoing conversations, just write your message as text—it auto-sends to the right place. "
+        "For ongoing web chat conversations, just write your message as text—it auto-sends in web chat. For SMS/email, always use explicit send_email/send_sms. "
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "

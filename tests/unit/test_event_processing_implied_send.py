@@ -58,34 +58,34 @@ class ImpliedSendTests(TestCase):
         return resp
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
-    @patch("api.agent.core.event_processing.execute_send_sms", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_reuses_last_tool_params(
+    def test_implied_send_requires_active_web_session_for_last_chat(
         self,
         mock_completion,
         mock_build_prompt,
-        mock_send_sms,
+        mock_send_chat,
         _mock_credit,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         prior_step = PersistentAgentStep.objects.create(
             agent=self.agent,
-            description="Tool call: send_sms",
+            description="Tool call: send_chat_message",
         )
         PersistentAgentToolCall.objects.create(
             step=prior_step,
-            tool_name="send_sms",
+            tool_name="send_chat_message",
             tool_params={
-                "to_number": "+15550123456",
+                "to_address": build_web_user_address(self.user.id, self.agent.id),
                 "body": "old",
                 "will_continue_work": True,
             },
             result="{}",
         )
 
-        resp = self._mock_completion("New implied SMS")
+        resp = self._mock_completion("New implied web chat")
         mock_completion.return_value = (
             resp,
             {
@@ -100,43 +100,35 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertTrue(mock_send_sms.called)
-        params = mock_send_sms.call_args[0][1]
-        self.assertEqual(params.get("to_number"), "+15550123456")
-        self.assertEqual(params.get("body"), "New implied SMS")
-        self.assertNotEqual(params.get("will_continue_work"), True)
-
-        latest_call = (
-            PersistentAgentToolCall.objects.filter(step__agent=self.agent)
-            .order_by("-step__created_at")
-            .first()
-        )
-        self.assertIsNotNone(latest_call)
-        self.assertEqual(latest_call.tool_name, "send_sms")
-        self.assertEqual(latest_call.tool_params.get("body"), "New implied SMS")
+        self.assertFalse(mock_send_chat.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Implied send failed",
+        ).first()
+        self.assertIsNotNone(correction_step)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
-    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_uses_preferred_contact_endpoint(
+    def test_implied_send_requires_active_web_session_with_preferred_endpoint(
         self,
         mock_completion,
         mock_build_prompt,
-        mock_send_email,
+        mock_send_chat,
         _mock_credit,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         endpoint = PersistentAgentCommsEndpoint.objects.create(
-            channel=CommsChannel.EMAIL,
-            address="owner@example.com",
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
             owner_agent=None,
         )
         self.agent.preferred_contact_endpoint = endpoint
         self.agent.save(update_fields=["preferred_contact_endpoint"])
 
-        resp = self._mock_completion("Hello via implied email")
+        resp = self._mock_completion("Hello via implied web chat")
         mock_completion.return_value = (
             resp,
             {
@@ -151,11 +143,12 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertTrue(mock_send_email.called)
-        params = mock_send_email.call_args[0][1]
-        self.assertEqual(params.get("to_address"), "owner@example.com")
-        self.assertEqual(params.get("mobile_first_html"), "Hello via implied email")
-        self.assertEqual(params.get("subject"), "Update from Implied Send Agent")
+        self.assertFalse(mock_send_chat.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Implied send failed",
+        ).first()
+        self.assertIsNotNone(correction_step)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
@@ -218,7 +211,7 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_skips_inactive_web_session(
+    def test_implied_send_uses_last_chat_message_without_active_session(
         self,
         mock_completion,
         mock_build_prompt,
@@ -265,17 +258,32 @@ class ImpliedSendTests(TestCase):
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertTrue(mock_send_email.called)
         self.assertFalse(mock_send_chat.called)
+        self.assertFalse(mock_send_email.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Implied send failed",
+        ).first()
+        self.assertIsNotNone(correction_step)
 
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
     def test_implied_send_failure_persists_reasoning_step(
         self,
         mock_completion,
         mock_build_prompt,
+        mock_send_email,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="owner@example.com",
+            owner_agent=None,
+        )
+        self.agent.preferred_contact_endpoint = endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
 
         resp = self._mock_completion(
             "Hello without destination",
@@ -304,6 +312,7 @@ class ImpliedSendTests(TestCase):
 
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Implied send failed.",
+            description__startswith="Implied send failed",
         ).first()
         self.assertIsNotNone(correction_step)
+        self.assertFalse(mock_send_email.called)
