@@ -1807,13 +1807,14 @@ def _get_system_instruction(
         "4. Nothing: empty response — nothing to do, done. "
         "5. Multi-step: tool(will_continue_work=true) → next cycle → tool(will_continue_work=false) — done after last step. "
 
-        "will_continue_work EXAMPLES: "
-        "User: 'hi' → send_email('Hello!', will_continue_work=false) + update_charter('Awaiting instructions', will_continue_work=false). DONE. "
-        "User: 'remember I like coffee' → update_charter('User likes coffee', will_continue_work=false). DONE. "
-        "User: 'check bitcoin' → http_request(coinbase.com/api, will_continue_work=false). DONE. "
-        "User: 'monitor HN daily' → update_charter('Monitor HN', will_continue_work=false) + update_schedule('0 9 * * *', will_continue_work=false). DONE. "
-        "User: 'book a flight' → search_tools(will_continue_work=true) → [next cycle] spawn_web_task(will_continue_work=false). DONE. "
-        "FIRST RUN 'hi': send_email('Hi, I'm Jo!', will_continue_work=false) + update_charter('Awaiting instructions', will_continue_work=false). DONE. NO MORE TEXT. "
+        "will_continue_work: Set false when done, true when continuing. "
+        "DONE examples (will_continue_work: false): "
+        "- 'hi' → send_email + update_charter, both with will_continue_work: false. DONE. "
+        "- 'check bitcoin' → http_request with will_continue_work: false. DONE. "
+        "- 'remember X' → update_charter with will_continue_work: false. DONE. "
+        "CONTINUING examples (will_continue_work: true): "
+        "- 'book flight' → search_tools with will_continue_work: true → next cycle → spawn_web_task with will_continue_work: false. DONE. "
+        "FIRST RUN 'hi': send_email (will_continue_work: false) + update_charter (will_continue_work: false). Tool calls only, no text after. "
 
         "WHEN YOU'RE DONE: Your last tool call MUST have will_continue_work=false. Then submit empty response or no further text. "
 

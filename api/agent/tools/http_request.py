@@ -76,9 +76,14 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         return {"status": "error", "message": "Missing required parameter: url"}
 
     will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is not None and not isinstance(will_continue_work_raw, bool):
-        return {"status": "error", "message": "'will_continue_work' must be a boolean when provided."}
-    will_continue_work = will_continue_work_raw
+    if will_continue_work_raw is None:
+        will_continue_work = None
+    elif isinstance(will_continue_work_raw, bool):
+        will_continue_work = will_continue_work_raw
+    elif isinstance(will_continue_work_raw, str):
+        will_continue_work = will_continue_work_raw.lower() == "true"
+    else:
+        will_continue_work = None
 
     # Log original request details (before secret substitution)
     logger.info(

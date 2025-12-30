@@ -28,6 +28,43 @@ from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce parameter values to match expected types from JSON schema.
+
+    Handles common LLM mistakes like passing "true"/"false" strings for booleans,
+    or string numbers for integers/numbers.
+    """
+    if not schema or not isinstance(params, dict):
+        return params
+
+    properties = schema.get("properties", {})
+    if not properties:
+        return params
+
+    coerced = dict(params)
+    for key, value in params.items():
+        if key not in properties or value is None:
+            continue
+
+        prop_schema = properties[key]
+        expected_type = prop_schema.get("type")
+
+        if expected_type == "boolean" and isinstance(value, str):
+            coerced[key] = value.lower() == "true"
+        elif expected_type == "integer" and isinstance(value, str):
+            try:
+                coerced[key] = int(value)
+            except ValueError:
+                pass
+        elif expected_type == "number" and isinstance(value, str):
+            try:
+                coerced[key] = float(value)
+            except ValueError:
+                pass
+
+    return coerced
+
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
@@ -680,6 +717,9 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     entry = resolve_tool_entry(agent, tool_name)
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
+
+    # Coerce params to match expected types (handles LLM passing "true" instead of true, etc.)
+    params = _coerce_params_to_schema(params, entry.parameters)
 
     # Block sqlite execution for ineligible agents (even if previously enabled)
     if tool_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
