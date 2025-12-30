@@ -451,7 +451,14 @@ def get_llm_config() -> Tuple[str, dict]:
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_reasoning", "reasoning_effort")
+        if k not in (
+            "supports_tool_choice",
+            "use_parallel_tool_calls",
+            "supports_vision",
+            "supports_reasoning",
+            "reasoning_effort",
+            "max_input_tokens",
+        )
     }
     return model, params
 
@@ -642,6 +649,7 @@ def _collect_failover_configs(
             params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
             params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
             params_with_hints["supports_reasoning"] = supports_reasoning
+            params_with_hints["max_input_tokens"] = endpoint.max_input_tokens
             if supports_reasoning and reasoning_effort:
                 params_with_hints["reasoning_effort"] = reasoning_effort
 

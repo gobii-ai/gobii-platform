@@ -80,6 +80,7 @@ from .llm_config import (
     get_llm_config_with_failover,
     LLMNotConfiguredError,
     is_llm_bootstrap_required,
+    REFERENCE_TOKENIZER_MODEL,
 )
 from api.agent.events import publish_agent_event, AgentEventType
 from api.evals.execution import get_current_eval_routing_profile
@@ -88,6 +89,7 @@ from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
     get_agent_tools,
+    get_prompt_token_budget,
 )
 
 from ..tools.email_sender import execute_send_email
@@ -132,6 +134,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
+DEFAULT_INPUT_TOKEN_BUFFER = 1024
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -554,6 +557,65 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     
     # Apply reasonable bounds
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
+
+
+def _coerce_positive_int(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _resolve_max_input_tokens(model: str, params: dict) -> Optional[int]:
+    explicit = _coerce_positive_int(params.get("max_input_tokens"))
+    if explicit:
+        return explicit
+    try:
+        model_info = litellm.get_model_info(model=model)
+    except Exception:
+        logger.debug("Unable to resolve model info for %s", model, exc_info=True)
+        return None
+    return _coerce_positive_int(_usage_attribute(model_info, "max_input_tokens"))
+
+
+def _count_request_tokens(model: str, messages: List[dict], tools: Optional[List[dict]]) -> int:
+    try:
+        return litellm.token_counter(model=model, messages=messages, tools=tools or None)
+    except Exception:
+        logger.debug("Token counting failed for model %s; falling back to reference model.", model, exc_info=True)
+        try:
+            return litellm.token_counter(
+                model=REFERENCE_TOKENIZER_MODEL,
+                messages=messages,
+                tools=tools or None,
+            )
+        except Exception:
+            logger.debug("Reference token counting failed; using heuristic estimate.", exc_info=True)
+            return _estimate_message_tokens(messages)
+
+
+def _filter_failover_configs_by_context(
+    failover_configs: List[Tuple[str, str, dict]],
+    messages: List[dict],
+    tools: Optional[List[dict]],
+    buffer_tokens: int,
+) -> tuple[List[Tuple[str, str, dict]], List[int], Dict[str, int]]:
+    eligible: List[Tuple[str, str, dict]] = []
+    limits: List[int] = []
+    token_counts: Dict[str, int] = {}
+    for provider, model, params in failover_configs:
+        max_input_tokens = _resolve_max_input_tokens(model, params)
+        if max_input_tokens is not None:
+            limits.append(max_input_tokens)
+            request_tokens = token_counts.get(model)
+            if request_tokens is None:
+                request_tokens = _count_request_tokens(model, messages, tools)
+                token_counts[model] = request_tokens
+            if request_tokens > max(0, max_input_tokens - buffer_tokens):
+                continue
+        eligible.append((provider, model, params))
+    return eligible, limits, token_counts
 
 
 def _stream_completion_with_broadcast(
@@ -2173,6 +2235,86 @@ def _run_agent_loop(
                 )
                 span.add_event("Agent loop aborted - llm bootstrap required")
                 break
+
+            buffer_tokens = max(
+                0,
+                int(getattr(settings, "LLM_INPUT_TOKEN_BUFFER", DEFAULT_INPUT_TOKEN_BUFFER)),
+            )
+            original_config_count = len(failover_configs)
+            filtered_configs, context_limits, token_counts = _filter_failover_configs_by_context(
+                failover_configs,
+                history,
+                tools,
+                buffer_tokens,
+            )
+            if not filtered_configs and context_limits:
+                max_limit = max(context_limits)
+                target_limit = max(0, max_limit - buffer_tokens)
+                model_for_fit = None
+                for _provider, model, params in failover_configs:
+                    if _resolve_max_input_tokens(model, params) == max_limit:
+                        model_for_fit = model
+                        break
+                if model_for_fit:
+                    request_tokens = token_counts.get(model_for_fit)
+                    if request_tokens is None:
+                        request_tokens = _count_request_tokens(model_for_fit, history, tools)
+                    overhead = max(0, request_tokens - fitted_token_count)
+                    token_budget = get_prompt_token_budget(agent)
+                    desired_budget = max(1, target_limit - overhead)
+                    if desired_budget < token_budget:
+                        logger.info(
+                            "Agent %s prompt over context limit; shrinking budget from %s to %s tokens.",
+                            agent.id,
+                            token_budget,
+                            desired_budget,
+                        )
+                        history, fitted_token_count, prompt_archive_id = build_prompt_context(
+                            agent,
+                            current_iteration=i + 1,
+                            max_iterations=MAX_AGENT_LOOP_ITERATIONS,
+                            reasoning_only_streak=reasoning_only_streak,
+                            is_first_run=is_first_run,
+                            daily_credit_state=daily_state,
+                            routing_profile=get_current_eval_routing_profile(),
+                            token_budget_override=desired_budget,
+                        )
+                        try:
+                            failover_configs = get_llm_config_with_failover(
+                                agent_id=str(agent.id),
+                                token_count=fitted_token_count,
+                                agent=agent,
+                                is_first_loop=is_first_run,
+                                routing_profile=get_current_eval_routing_profile(),
+                            )
+                        except LLMNotConfiguredError:
+                            logger.warning(
+                                "Agent %s loop aborted – LLM configuration missing mid-run.",
+                                agent.id,
+                            )
+                            span.add_event("Agent loop aborted - llm bootstrap required")
+                            break
+                        original_config_count = len(failover_configs)
+                        filtered_configs, context_limits, _token_counts = _filter_failover_configs_by_context(
+                            failover_configs,
+                            history,
+                            tools,
+                            buffer_tokens,
+                        )
+            if filtered_configs:
+                if len(filtered_configs) != original_config_count:
+                    logger.info(
+                        "Filtered %s/%s LLM endpoints due to context limits for agent %s.",
+                        len(filtered_configs),
+                        original_config_count,
+                        agent.id,
+                    )
+                failover_configs = filtered_configs
+            elif context_limits:
+                logger.warning(
+                    "Agent %s prompt exceeds all configured context limits; proceeding without filtering.",
+                    agent.id,
+                )
 
             preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
             stream_broadcaster = None

@@ -110,6 +110,7 @@ type ProviderEndpointCard = {
   enabled: boolean
   api_base?: string
   browser_base_url?: string
+  max_input_tokens?: number | null
   max_output_tokens?: number | null
   temperature?: number | null
   supports_temperature?: boolean
@@ -155,6 +156,7 @@ type EndpointFormValues = {
   supportsTemperature?: boolean
   api_base?: string
   browser_base_url?: string
+  max_input_tokens?: string
   max_output_tokens?: string
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
@@ -465,6 +467,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       enabled: endpoint.enabled,
       api_base: endpoint.api_base,
       browser_base_url: endpoint.browser_base_url,
+      max_input_tokens: endpoint.max_input_tokens ?? null,
       max_output_tokens: endpoint.max_output_tokens ?? null,
       temperature: endpoint.temperature_override ?? null,
       supports_temperature: endpoint.supports_temperature ?? true,
@@ -1309,6 +1312,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   )
   const [apiBase, setApiBase] = useState(endpoint.api_base || endpoint.browser_base_url || '')
   const [maxTokens, setMaxTokens] = useState(endpoint.max_output_tokens?.toString() ?? '')
+  const [maxInputTokens, setMaxInputTokens] = useState(endpoint.max_input_tokens?.toString() ?? '')
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
@@ -1322,6 +1326,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       temperature,
       api_base: apiBase,
       browser_base_url: apiBase,
+      max_input_tokens: maxInputTokens,
       max_output_tokens: maxTokens,
       supportsTemperature,
       supportsToolChoice: supportsToolChoice,
@@ -1351,6 +1356,18 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+          </div>
+        )}
+        {isPersistent && (
+          <div>
+            <label className="text-xs text-slate-500">Max input tokens</label>
+            <input
+              type="number"
+              value={maxInputTokens}
+              onChange={(event) => setMaxInputTokens(event.target.value)}
+              placeholder="Auto"
+              className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
           </div>
         )}
         <div>
@@ -1449,6 +1466,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [model, setModel] = useState('')
   const [apiBase, setApiBase] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
+  const [maxInputTokens, setMaxInputTokens] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
@@ -1475,6 +1493,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         model,
         api_base: apiBase,
         browser_base_url: apiBase,
+        max_input_tokens: maxInputTokens,
         max_output_tokens: maxTokens,
         supportsTemperature,
         supportsVision,
@@ -1514,6 +1533,18 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <div>
                 <label className="text-xs text-slate-500">Temperature override</label>
                 <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
+              </div>
+            )}
+            {type === 'persistent' && (
+              <div>
+                <label className="text-xs text-slate-500">Max input tokens</label>
+                <input
+                  type="number"
+                  value={maxInputTokens}
+                  onChange={(event) => setMaxInputTokens(event.target.value)}
+                  placeholder="Auto"
+                  className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                />
               </div>
             )}
             {type === 'browser' && (
@@ -2394,6 +2425,8 @@ export function LlmConfigScreen() {
       payload.model = values.model
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
+      const maxInputTokens = parseNumber(values.max_input_tokens)
+      if (maxInputTokens !== undefined) payload.max_input_tokens = maxInputTokens
       const temp = parseNumber(values.temperature)
       payload.temperature_override = temp ?? null
       payload.supports_temperature = values.supportsTemperature ?? true
@@ -2452,6 +2485,10 @@ export function LlmConfigScreen() {
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
     if (kind === 'persistent') {
+      if (values.max_input_tokens !== undefined) {
+        const parsed = parseNumber(values.max_input_tokens)
+        payload.max_input_tokens = parsed ?? null
+      }
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
       if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
       if (values.openrouterPreset !== undefined) payload.openrouter_preset = values.openrouterPreset.trim()

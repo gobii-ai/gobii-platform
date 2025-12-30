@@ -544,6 +544,18 @@ def _coerce_bool(value) -> bool:
 _REASONING_EFFORT_VALUES = set(PersistentModelEndpoint.ReasoningEffort.values)
 
 
+def _coerce_optional_int(value, *, field_name: str) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{field_name} must be an integer or null") from exc
+    if parsed <= 0:
+        raise ValueError(f"{field_name} must be greater than 0")
+    return parsed
+
+
 def _coerce_reasoning_effort(value) -> str | None:
     if value in (None, ""):
         return None
@@ -1730,11 +1742,16 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             reasoning_effort = _coerce_reasoning_effort(payload.get("reasoning_effort"))
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
+        try:
+            max_input_tokens = _coerce_optional_int(payload.get("max_input_tokens"), field_name="max_input_tokens")
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
 
         endpoint = PersistentModelEndpoint.objects.create(
             key=key,
             provider=provider,
             litellm_model=model,
+            max_input_tokens=max_input_tokens,
             temperature_override=temperature_override,
             supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_tool_choice=_coerce_bool(payload.get("supports_tool_choice", True)),
@@ -1788,6 +1805,14 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             except ValueError as exc:
                 return HttpResponseBadRequest(str(exc))
             endpoint.reasoning_effort = reasoning_effort
+        if "max_input_tokens" in payload:
+            try:
+                endpoint.max_input_tokens = _coerce_optional_int(
+                    payload.get("max_input_tokens"),
+                    field_name="max_input_tokens",
+                )
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
         if "api_base" in payload:
             endpoint.api_base = (payload.get("api_base") or "").strip()
         if "openrouter_preset" in payload:

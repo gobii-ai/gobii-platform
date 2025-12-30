@@ -1907,6 +1907,11 @@ class PersistentModelEndpoint(models.Model):
 
     # LiteLLM model string and options
     litellm_model = models.CharField(max_length=256)
+    max_input_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Optional override for the model's max input/context tokens.",
+    )
     temperature_override = models.FloatField(null=True, blank=True)
     supports_temperature = models.BooleanField(
         default=True,

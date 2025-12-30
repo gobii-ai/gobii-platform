@@ -59,6 +59,7 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
         {
             "key": endpoint.key,
             "model": endpoint.litellm_model,
+            "max_input_tokens": endpoint.max_input_tokens,
             "temperature_override": endpoint.temperature_override,
             "supports_temperature": endpoint.supports_temperature,
             "supports_tool_choice": endpoint.supports_tool_choice,

@@ -649,6 +649,7 @@ def build_prompt_context(
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
     routing_profile: Any = None,
+    token_budget_override: Optional[int] = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
     Return a system + user message for the LLM using promptree for token budget management.
@@ -661,6 +662,7 @@ def build_prompt_context(
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
+        token_budget_override: Optional override for the prompt token budget.
 
     Returns:
         Tuple of (messages, fitted_token_count, prompt_archive_id) where
@@ -966,7 +968,7 @@ def build_prompt_context(
             prompt.section_text("sms_guidelines", _get_sms_prompt_addendum(agent), weight=2, non_shrinkable=True)
     
     # Render the prompt within the token budget
-    token_budget = get_prompt_token_budget(agent)
+    token_budget = token_budget_override if token_budget_override is not None else get_prompt_token_budget(agent)
     user_content = prompt.render(token_budget)
 
     # Get token counts before and after fitting
