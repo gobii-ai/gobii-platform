@@ -133,7 +133,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
 
             judge_prompt = (
                 f"Analyze this HTTP request parameters: {json.dumps(params)}. "
-                f"Is this a request to a free/open weather API (like wttr.in, open-meteo, weather.gov, etc.) "
+                f"Is this a request to a free/open weather API (like open-meteo, weather.gov, etc.) "
                 f"that retrieves weather for Frederick, MD?"
             )
 
