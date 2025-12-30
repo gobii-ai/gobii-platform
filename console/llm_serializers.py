@@ -67,6 +67,7 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
             "supports_reasoning": endpoint.supports_reasoning,
             "reasoning_effort": endpoint.reasoning_effort,
             "api_base": endpoint.api_base,
+            "openrouter_preset": endpoint.openrouter_preset,
             "provider_id": str(endpoint.provider_id),
             "type": "persistent",
         }

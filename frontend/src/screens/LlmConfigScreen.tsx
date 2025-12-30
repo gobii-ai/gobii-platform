@@ -118,6 +118,7 @@ type ProviderEndpointCard = {
   use_parallel_tool_calls?: boolean
   supports_reasoning?: boolean
   reasoning_effort?: string | null
+  openrouter_preset?: string | null
   type: llmApi.ProviderEndpoint['type']
 }
 
@@ -160,6 +161,7 @@ type EndpointFormValues = {
   supportsVision?: boolean
   supportsReasoning?: boolean
   reasoningEffort?: string | null
+  openrouterPreset?: string
 }
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
@@ -471,6 +473,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       use_parallel_tool_calls: endpoint.use_parallel_tool_calls,
       supports_reasoning: endpoint.supports_reasoning,
       reasoning_effort: endpoint.reasoning_effort ?? null,
+      openrouter_preset: endpoint.openrouter_preset ?? null,
       type: endpoint.type,
     })),
   }))
@@ -1311,6 +1314,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
   const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
   const [reasoningEffort, setReasoningEffort] = useState(endpoint.reasoning_effort ?? '')
+  const [openrouterPreset, setOpenrouterPreset] = useState(endpoint.openrouter_preset ?? '')
 
   const handleSave = () => {
     const values: EndpointFormValues = {
@@ -1325,6 +1329,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsVision: supportsVision,
       supportsReasoning,
       reasoningEffort,
+      openrouterPreset,
     }
     onSave(values)
   }
@@ -1332,6 +1337,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
   const isFileHandler = endpoint.type === 'file_handler'
+  const isPersistent = endpoint.type === 'persistent'
   const isToolingEndpoint = !isEmbedding && !isFileHandler
 
   return (
@@ -1351,6 +1357,17 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">API base URL</label>
           <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
+        {isPersistent && (
+          <div className="md:col-span-2">
+            <label className="text-xs text-slate-500">OpenRouter preset</label>
+            <input
+              value={openrouterPreset}
+              onChange={(event) => setOpenrouterPreset(event.target.value)}
+              placeholder="Optional (OpenRouter only)"
+              className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            />
+          </div>
+        )}
         {isBrowser && (
           <div>
             <label className="text-xs text-slate-500">Max output tokens</label>
@@ -1439,6 +1456,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [supportsReasoning, setSupportsReasoning] = useState(false)
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
+  const [openrouterPreset, setOpenrouterPreset] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = busy || submitting
 
@@ -1465,6 +1483,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         temperature,
         supportsReasoning,
         reasoningEffort,
+        openrouterPreset,
       })
     } finally {
       setSubmitting(false)
@@ -1507,6 +1526,17 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <label className="text-xs text-slate-500">API base URL</label>
               <input value={apiBase} onChange={(event) => setApiBase(event.target.value)} placeholder="https://api.example.com/v1" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
             </div>
+            {type === 'persistent' && (
+              <div className="md:col-span-2">
+                <label className="text-xs text-slate-500">OpenRouter preset</label>
+                <input
+                  value={openrouterPreset}
+                  onChange={(event) => setOpenrouterPreset(event.target.value)}
+                  placeholder="Optional (OpenRouter only)"
+                  className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                />
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
             <label className="inline-flex items-center gap-2">
@@ -2372,6 +2402,9 @@ export function LlmConfigScreen() {
       payload.supports_vision = values.supportsVision ?? false
       payload.supports_reasoning = values.supportsReasoning ?? false
       payload.reasoning_effort = values.reasoningEffort ? values.reasoningEffort : null
+      if (values.openrouterPreset !== undefined) {
+        payload.openrouter_preset = values.openrouterPreset.trim()
+      }
       payload.enabled = true
     }
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
@@ -2421,6 +2454,7 @@ export function LlmConfigScreen() {
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
       if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
+      if (values.openrouterPreset !== undefined) payload.openrouter_preset = values.openrouterPreset.trim()
     }
     return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
       successMessage: 'Endpoint updated',

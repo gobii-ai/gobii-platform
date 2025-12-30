@@ -608,6 +608,9 @@ def _collect_failover_configs(
                 headers = get_attribution_headers()
                 if headers:
                     params["extra_headers"] = headers
+                openrouter_preset = (getattr(endpoint, "openrouter_preset", "") or "").strip()
+                if openrouter_preset:
+                    params["preset"] = openrouter_preset
 
             if effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
                 params["api_base"] = endpoint.api_base

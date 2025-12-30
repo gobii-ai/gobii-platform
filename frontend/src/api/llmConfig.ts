@@ -22,6 +22,7 @@ export type ProviderEndpoint = {
   max_output_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
+  openrouter_preset?: string | null
   type: 'persistent' | 'browser' | 'embedding' | 'file_handler'
   enabled: boolean
   provider_id: string

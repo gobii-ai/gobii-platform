@@ -1933,6 +1933,11 @@ class PersistentModelEndpoint(models.Model):
     # For OpenAI-compatible endpoints via LiteLLM (model startswith 'openai/...')
     # provide the custom base URL used by your proxy (e.g., http://vllm-host:port/v1)
     api_base = models.CharField(max_length=256, blank=True)
+    openrouter_preset = models.CharField(
+        max_length=128,
+        blank=True,
+        help_text="Optional OpenRouter preset identifier applied to this endpoint.",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

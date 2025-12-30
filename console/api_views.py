@@ -236,6 +236,10 @@ def _build_completion_params(
             effort = getattr(endpoint, "reasoning_effort", None)
             if effort:
                 params["reasoning_effort"] = effort
+    if provider.key == "openrouter":
+        openrouter_preset = (getattr(endpoint, "openrouter_preset", "") or "").strip()
+        if openrouter_preset:
+            params["preset"] = openrouter_preset
 
     if api_base:
         params["api_base"] = api_base
@@ -1739,6 +1743,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             supports_reasoning=_coerce_bool(payload.get("supports_reasoning", False)),
             reasoning_effort=reasoning_effort,
             api_base=(payload.get("api_base") or "").strip(),
+            openrouter_preset=(payload.get("openrouter_preset") or "").strip(),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
         invalidate_llm_bootstrap_cache()
@@ -1785,6 +1790,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.reasoning_effort = reasoning_effort
         if "api_base" in payload:
             endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "openrouter_preset" in payload:
+            endpoint.openrouter_preset = (payload.get("openrouter_preset") or "").strip()
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         endpoint.save()
