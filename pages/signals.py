@@ -65,7 +65,7 @@ UTM_MAPPING = {
 CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid')
 
 
-def _get_customer_with_subscriber(customer_id: str | None):
+def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
     """Fetch a Stripe customer with subscriber eagerly loaded.
 
     This is used by webhook handlers when the invoice payload is missing
