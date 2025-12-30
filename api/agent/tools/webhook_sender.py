@@ -52,6 +52,10 @@ def get_send_webhook_tool() -> Dict[str, Any]:
                         ),
                         "additionalProperties": {"type": "string"},
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+                    },
                 },
                 "required": ["webhook_id", "payload"],
             },
@@ -166,6 +170,15 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
     webhook_id = params.get("webhook_id")
     payload = params.get("payload")
     headers = _coerce_headers(params.get("headers"))
+    will_continue_work_raw = params.get("will_continue_work", None)
+    if will_continue_work_raw is None:
+        will_continue_work = None
+    elif isinstance(will_continue_work_raw, bool):
+        will_continue_work = will_continue_work_raw
+    elif isinstance(will_continue_work_raw, str):
+        will_continue_work = will_continue_work_raw.lower() == "true"
+    else:
+        will_continue_work = None
 
     if not webhook_id or not isinstance(webhook_id, str):
         return {"status": "error", "message": "Missing or invalid webhook_id parameter."}
@@ -268,13 +281,16 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
             payload_keys=payload_keys,
             custom_header_count=custom_header_count,
         )
-        return _build_webhook_response(
+        response = _build_webhook_response(
             status="success",
             webhook=webhook,
             message=f"Delivered payload to webhook '{webhook.name}' (status {status_code}).",
             status_code=status_code,
             response_preview=response_preview,
         )
+        if will_continue_work is False:
+            response["auto_sleep_ok"] = True
+        return response
 
     _record_delivery_attempt(
         agent,

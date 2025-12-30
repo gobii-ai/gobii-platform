@@ -9,6 +9,10 @@ import os
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+import sqlparse
+from sqlparse import tokens as sql_tokens
+from sqlparse.sql import Statement
+
 from ...models import PersistentAgent
 from .sqlite_helpers import is_write_statement
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
@@ -23,6 +27,40 @@ def _get_db_size_mb(db_path: str) -> float:
     except Exception:
         pass
     return 0.0
+
+
+def _clean_statement(statement: str) -> Optional[str]:
+    trimmed = statement.strip()
+    if not trimmed:
+        return None
+    while trimmed.endswith(";"):
+        trimmed = trimmed[:-1].rstrip()
+    return trimmed or None
+
+
+def _statement_has_sql(statement: Statement) -> bool:
+    for token in statement.flatten():
+        if token.is_whitespace:
+            continue
+        if token.ttype in sql_tokens.Comment:
+            continue
+        if token.ttype in sql_tokens.Punctuation and token.value == ";":
+            continue
+        return True
+    return False
+
+
+def _split_sqlite_statements(sql: str) -> List[str]:
+    """Split SQL into statements using sqlparse."""
+    statements: List[str] = []
+    for statement in sqlparse.parse(sql):
+        if not _statement_has_sql(statement):
+            continue
+        cleaned = _clean_statement(str(statement))
+        if cleaned:
+            statements.append(cleaned)
+
+    return statements
 
 
 def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -40,9 +78,11 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
 
     queries: List[str] = []
     for item in items:
-        if not isinstance(item, str) or not item.strip():
+        if not isinstance(item, str):
             return None
-        queries.append(item)
+        split_items = _split_sqlite_statements(item)
+        if split_items:
+            queries.extend(split_items)
 
     return queries if queries else None
 
@@ -57,9 +97,14 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         }
 
     will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is not None and not isinstance(will_continue_work_raw, bool):
-        return {"status": "error", "message": "'will_continue_work' must be a boolean when provided."}
-    will_continue_work = will_continue_work_raw
+    if will_continue_work_raw is None:
+        will_continue_work = None
+    elif isinstance(will_continue_work_raw, bool):
+        will_continue_work = will_continue_work_raw
+    elif isinstance(will_continue_work_raw, str):
+        will_continue_work = will_continue_work_raw.lower() == "true"
+    else:
+        will_continue_work = None
 
     db_path = _sqlite_db_path_var.get(None)
     if not db_path:
@@ -145,7 +190,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
-                "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially. "
+                "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially; "
+                "multiple statements in one string are split using sqlparse. "
                 "REMEMBER TO PROPERLY ESCAPE STRINGS IN SQL STATEMENTS. "
             ),
             "parameters": {

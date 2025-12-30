@@ -11,15 +11,23 @@ type StreamingReplyCardProps = {
 export function StreamingReplyCard({ content, agentFirstName, isStreaming }: StreamingReplyCardProps) {
   const hasContent = content.trim().length > 0
 
-  const htmlContent = useMemo(() => {
-    if (!hasContent || isStreaming) {
-      return null
+  const hasHtmlPrefix = useMemo(() => {
+    const trimmed = content.trimStart()
+    if (!trimmed.startsWith('<')) {
+      return false
     }
-    if (!looksLikeHtml(content)) {
+    const nextChar = trimmed.charAt(1)
+    return /[a-zA-Z!?\/]/.test(nextChar)
+  }, [content])
+
+  const shouldRenderHtml = hasContent && (looksLikeHtml(content) || (isStreaming && hasHtmlPrefix))
+
+  const htmlContent = useMemo(() => {
+    if (!shouldRenderHtml) {
       return null
     }
     return sanitizeHtml(content)
-  }, [content, hasContent, isStreaming])
+  }, [content, shouldRenderHtml])
 
   if (!hasContent) {
     return null

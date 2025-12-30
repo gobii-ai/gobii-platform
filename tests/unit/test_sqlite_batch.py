@@ -94,6 +94,53 @@ class SqliteBatchToolTests(TestCase):
             result = out["results"][0]
             self.assertEqual(result["result"][0]["answer"], 42)
 
+    def test_splits_multi_statement_string(self):
+        with self._with_temp_db():
+            query = "CREATE TABLE t(a INTEGER); INSERT INTO t(a) VALUES (1),(2); SELECT a FROM t ORDER BY a;"
+            out = execute_sqlite_batch(self.agent, {"queries": query})
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(len(results), 3)
+            self.assertEqual(results[-1]["result"], [{"a": 1}, {"a": 2}])
+
+    def test_splits_statements_with_extra_separators(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t(a INTEGER); INSERT INTO t(a) VALUES (1);",
+                "  ",
+                "INSERT INTO t(a) VALUES (2);; SELECT a FROM t ORDER BY a;",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(len(results), 4)
+            self.assertEqual(results[-1]["result"], [{"a": 1}, {"a": 2}])
+
+    def test_handles_semicolons_in_string_literals(self):
+        with self._with_temp_db():
+            query = "CREATE TABLE t(a TEXT); INSERT INTO t(a) VALUES ('a; b'); SELECT a FROM t;"
+            out = execute_sqlite_batch(self.agent, {"queries": query})
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(results[-1]["result"], [{"a": "a; b"}])
+
+    def test_handles_trigger_with_internal_semicolons(self):
+        with self._with_temp_db():
+            query = (
+                "CREATE TABLE t(a INTEGER);"
+                "CREATE TABLE log(x INTEGER);"
+                "CREATE TRIGGER t_ai AFTER INSERT ON t BEGIN "
+                "INSERT INTO log(x) VALUES (NEW.a); "
+                "INSERT INTO log(x) VALUES (NEW.a + 1); "
+                "END;"
+                "INSERT INTO t(a) VALUES (5);"
+                "SELECT x FROM log ORDER BY x;"
+            )
+            out = execute_sqlite_batch(self.agent, {"queries": query})
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(results[-1]["result"], [{"x": 5}, {"x": 6}])
+
     def test_will_continue_work_false_sets_auto_sleep(self):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": "SELECT 1", "will_continue_work": False})

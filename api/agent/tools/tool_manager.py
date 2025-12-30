@@ -28,6 +28,43 @@ from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
+
+def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Coerce parameter values to match expected types from JSON schema.
+
+    Handles common LLM mistakes like passing "true"/"false" strings for booleans,
+    or string numbers for integers/numbers.
+    """
+    if not schema or not isinstance(params, dict):
+        return params
+
+    properties = schema.get("properties", {})
+    if not properties:
+        return params
+
+    coerced = dict(params)
+    for key, value in params.items():
+        if key not in properties or value is None:
+            continue
+
+        prop_schema = properties[key]
+        expected_type = prop_schema.get("type")
+
+        if expected_type == "boolean" and isinstance(value, str):
+            coerced[key] = value.lower() == "true"
+        elif expected_type == "integer" and isinstance(value, str):
+            try:
+                coerced[key] = int(value)
+            except ValueError:
+                pass
+        elif expected_type == "number" and isinstance(value, str):
+            try:
+                coerced[key] = float(value)
+            except ValueError:
+                pass
+
+    return coerced
+
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
@@ -316,6 +353,50 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
         "already_enabled": already_enabled,
         "evicted": evicted,
         "invalid": invalid,
+    }
+
+
+def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEntry) -> Dict[str, Any]:
+    """Enable a tool just in time without recording usage (execution will handle usage)."""
+    tool_name = entry.full_name
+    if entry.provider == "mcp":
+        manager = _get_manager()
+        if manager.is_tool_blacklisted(tool_name):
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' is blacklisted and cannot be enabled",
+            }
+
+    try:
+        row, created = PersistentAgentEnabledTool.objects.get_or_create(
+            agent=agent,
+            tool_full_name=tool_name,
+        )
+    except Exception:
+        logger.exception("Failed to auto-enable tool %s for agent %s", tool_name, getattr(agent, "id", None))
+        return {"status": "error", "message": f"Failed to enable tool '{tool_name}'"}
+
+    metadata_updates = _apply_tool_metadata(row, entry)
+    if metadata_updates:
+        row.save(update_fields=metadata_updates)
+
+    evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=get_enabled_tool_limit(agent))
+    if created:
+        logger.info("Auto-enabled tool '%s' for agent %s", tool_name, agent.id)
+    if evicted:
+        logger.info(
+            "Auto-enabled tool '%s' evicted %d tool(s) for agent %s: %s",
+            tool_name,
+            len(evicted),
+            agent.id,
+            ", ".join(evicted),
+        )
+
+    return {
+        "status": "success",
+        "enabled": tool_name,
+        "already_enabled": not created,
+        "evicted": evicted,
     }
 
 
@@ -637,6 +718,9 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
+    # Coerce params to match expected types (handles LLM passing "true" instead of true, etc.)
+    params = _coerce_params_to_schema(params, entry.parameters)
+
     # Block sqlite execution for ineligible agents (even if previously enabled)
     if tool_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
         message = "Database tool is not available for this deployment."
@@ -651,7 +735,12 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
         }
 
     if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
-        return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
+        auto_enable = _auto_enable_tool_for_execution(agent, entry)
+        if auto_enable.get("status") != "success":
+            return {
+                "status": "error",
+                "message": auto_enable.get("message", f"Tool '{tool_name}' is not enabled for this agent"),
+            }
 
     if entry.provider == "mcp":
         return execute_mcp_tool(agent, tool_name, params)

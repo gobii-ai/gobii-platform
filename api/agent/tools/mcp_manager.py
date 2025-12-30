@@ -70,6 +70,33 @@ def _use_mcp_proxy(proxy_url: Optional[str]):
         yield
 
 
+MCP_WILL_CONTINUE_TOOL_NAMES = {
+    "search_engine",
+    "search_engine_batch",
+}
+
+
+def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(parameters, dict):
+        return parameters
+    if parameters.get("type") != "object":
+        return parameters
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict):
+        return parameters
+    if "will_continue_work" in properties:
+        return parameters
+
+    updated_parameters = dict(parameters)
+    updated_properties = dict(properties)
+    updated_properties["will_continue_work"] = {
+        "type": "boolean",
+        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+    }
+    updated_parameters["properties"] = updated_properties
+    return updated_parameters
+
+
 @dataclass
 class MCPServerRuntime:
     """Runtime representation of an MCP server configuration."""
@@ -1035,13 +1062,16 @@ class MCPToolManager:
         enabled_set = set(enabled_names)
         for tool_info in self.get_tools_for_agent(agent):
             if tool_info.full_name in enabled_set:
+                parameters = tool_info.parameters
+                if tool_info.tool_name in MCP_WILL_CONTINUE_TOOL_NAMES:
+                    parameters = _inject_will_continue_work_param(parameters)
                 definitions.append(
                     {
                         "type": "function",
                         "function": {
                             "name": tool_info.full_name,
                             "description": tool_info.description,
-                            "parameters": tool_info.parameters,
+                            "parameters": parameters,
                         },
                     }
                 )
@@ -1174,6 +1204,19 @@ class MCPToolManager:
             }
 
         owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+
+        will_continue_work_raw = params.get("will_continue_work", None)
+        if will_continue_work_raw is None:
+            will_continue_work = None
+        elif isinstance(will_continue_work_raw, bool):
+            will_continue_work = will_continue_work_raw
+        elif isinstance(will_continue_work_raw, str):
+            will_continue_work = will_continue_work_raw.lower() == "true"
+        else:
+            will_continue_work = None
+        if "will_continue_work" in params:
+            params = dict(params)
+            params.pop("will_continue_work", None)
 
         param_error = self._param_guards.validate(server_name, actual_tool_name, params, owner)
         if param_error:
@@ -1355,7 +1398,10 @@ class MCPToolManager:
                             "connect_url": connect_url,
                         }
 
-            return {"status": "success", "result": content or "Tool executed successfully"}
+            response = {"status": "success", "result": content or "Tool executed successfully"}
+            if will_continue_work is False:
+                response["auto_sleep_ok"] = True
+            return response
             
         except Exception as e:
             logger.error(f"Failed to execute MCP tool {tool_name}: {e}")
