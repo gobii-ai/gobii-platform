@@ -1235,6 +1235,7 @@ class MCPToolExecutorsTests(TestCase):
         
         self.assertEqual(tool_def["function"]["name"], "search_tools")
         self.assertIn("query", tool_def["function"]["parameters"]["properties"])
+        self.assertIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertIn("query", tool_def["function"]["parameters"]["required"])
         
     @patch('api.agent.tools.search_tools.search_tools')
@@ -1252,6 +1253,18 @@ class MCPToolExecutorsTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertIn("Enabled: mcp_tool_a", result["message"]) 
         mock_search.assert_called_once_with(self.agent, "test query")
+
+    @patch('api.agent.tools.search_tools.search_tools')
+    def test_execute_search_tools_auto_sleep(self, mock_search):
+        """search_tools should opt into auto-sleep when will_continue_work is False."""
+        mock_search.return_value = {
+            "status": "success",
+            "message": "Enabled: mcp_tool_a",
+            "enabled_tools": ["mcp_tool_a"],
+        }
+        result = execute_search_tools(self.agent, {"query": "test query", "will_continue_work": False})
+        self.assertEqual(result["status"], "success")
+        self.assertTrue(result.get("auto_sleep_ok"))
         
     def test_execute_search_tools_missing_query(self):
         """Test search_tools with missing query."""

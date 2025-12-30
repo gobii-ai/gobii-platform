@@ -1803,7 +1803,8 @@ def _get_system_instruction(
         "Implied send combines naturally with other tool calls. Example: respond to user + update_charter + spawn_web_task—all in one response. The text becomes the message; the tools execute normally. This is the ideal pattern: acknowledge/respond to the user while simultaneously taking action, maximizing work per cycle. "
         "Use implied send for: ongoing conversations, follow-ups, quick responses where recipient is obvious. "
         "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line). "
-        "IMPLICIT SLEEP: A response without any tool calls signals you're done for now—the system will automatically sleep until the next trigger. This means a text-only reply (via implied send) with no additional tool calls is a complete, self-contained response that naturally closes the cycle. No explicit sleep_until_next_trigger needed."
+        "IMPLICIT SLEEP: A response without any tool calls signals you're done for now—the system will automatically sleep until the next trigger. This means a text-only reply (via implied send) with no additional tool calls is a complete, self-contained response that naturally closes the cycle. No explicit sleep_until_next_trigger needed. "
+        "CRITICAL: Any text you write becomes a message to the user. NEVER write meta-commentary like 'No tool calls needed', 'I'll wait for the next trigger', or 'The conversation has paused'. If you have nothing to say to the user, write NOTHING—just make your tool calls (or none). Empty responses are fine."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
         "ITS OK TO TELL THE USER YOU HAVE DONE SOME OF THE WORK AND WILL KEEP WORKING ON IT OVER TIME. JUST BE TRANSPARENT, AUTHENTIC, HONEST. "
@@ -1860,7 +1861,8 @@ def _get_system_instruction(
                     "4. Inform the user they can contact you at any time to give new instructions, ask questions, or just chat. Hint or let them know that they can just reply to this message with anything they want. e.g. 'You can reply to this email now, or contact me at any time.' "
                     "This is your opportunity to decide what your personality and writing style will be --it could be anything-- you'll generally adapt this based on the user's initial request and what you know about them. THIS IS YOUR CHANCE to create a new and exciting personality. "
                     "Immediately after sending your welcome message, ENSURE 'will_continue_work' IS SET TO TRUE and then call search_tools to find and automatically enable the best tools to efficiently and accurately complete your task with the most timely information. You can run search_tools again later as your job evolves. "
-                    "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'."
+                    "Use phrasing like 'I'm your new agent' vs just 'I'm an agent' or 'I'm an assistant'. "
+                    "After your welcome message and initial setup (charter, search_tools, etc.), DO NOT write any additional text. Your response should end with tool calls only—no meta-commentary about waiting, sleeping, or what happens next."
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 

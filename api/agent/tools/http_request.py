@@ -40,7 +40,11 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "url": {"type": "string", "description": "Full URL to request."},
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
                     "body": {"type": "string", "description": "Optional request body (for POST/PUT)."},
-                    "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."}
+                    "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+                    },
                 },
                 "required": ["method", "url"],
             },
@@ -70,6 +74,11 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     url = params.get("url")
     if not url:
         return {"status": "error", "message": "Missing required parameter: url"}
+
+    will_continue_work_raw = params.get("will_continue_work", None)
+    if will_continue_work_raw is not None and not isinstance(will_continue_work_raw, bool):
+        return {"status": "error", "message": "'will_continue_work' must be a boolean when provided."}
+    will_continue_work = will_continue_work_raw
 
     # Log original request details (before secret substitution)
     logger.info(
@@ -292,10 +301,13 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         " (truncated)" if truncated else ""
     )
     
-    return {
+    response = {
         "status": "ok",
         "status_code": resp.status_code,
         "headers": dict(resp.headers),
         "content": content_str,
         "proxy_used": str(proxy_server) if proxy_server else None,
     }
+    if will_continue_work is False:
+        response["auto_sleep_ok"] = True
+    return response
