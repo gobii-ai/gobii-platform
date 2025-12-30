@@ -21,7 +21,7 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import strip_control_chars
 from ..files.attachment_helpers import (
     AttachmentResolutionError,
-    build_filespace_download_url,
+    build_signed_filespace_download_url,
     create_message_attachments,
     resolve_filespace_attachments,
 )
@@ -153,7 +153,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         if resolved_attachments:
             attachment_lines = []
             for attachment in resolved_attachments:
-                download_url = build_filespace_download_url(agent.id, attachment.node.id)
+                download_url = build_signed_filespace_download_url(agent.id, attachment.node.id)
                 attachment_lines.append(f"{attachment.filename}: {download_url}")
             if attachment_lines:
                 body = body.rstrip()

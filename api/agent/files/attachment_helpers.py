@@ -4,6 +4,7 @@ from urllib.parse import urlencode
 
 from django.conf import settings
 from django.contrib.sites.models import Site
+from django.core import signing
 from django.urls import reverse
 
 from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgentMessageAttachment
@@ -12,6 +13,10 @@ from .filespace_service import get_or_create_default_filespace
 
 class AttachmentResolutionError(Exception):
     pass
+
+
+SIGNED_FILES_DOWNLOAD_SALT = "agent-filespace-download"
+SIGNED_FILES_DOWNLOAD_TTL_SECONDS = 7 * 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -127,3 +132,29 @@ def build_filespace_download_url(agent_id, node_id) -> str:
     path = reverse("console_agent_fs_download", kwargs={"agent_id": agent_id})
     query = urlencode({"node_id": node_id})
     return f"{base}{path}?{query}"
+
+
+def build_signed_filespace_download_url(agent_id, node_id) -> str:
+    token = signing.dumps(
+        {"agent_id": str(agent_id), "node_id": str(node_id)},
+        salt=SIGNED_FILES_DOWNLOAD_SALT,
+        compress=True,
+    )
+    current_site = Site.objects.get_current()
+    base = f"https://{current_site.domain}"
+    path = reverse("signed_agent_fs_download", kwargs={"token": token})
+    return f"{base}{path}"
+
+
+def load_signed_filespace_download_payload(token: str) -> dict | None:
+    try:
+        payload = signing.loads(
+            token,
+            salt=SIGNED_FILES_DOWNLOAD_SALT,
+            max_age=SIGNED_FILES_DOWNLOAD_TTL_SECONDS,
+        )
+    except signing.BadSignature:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
