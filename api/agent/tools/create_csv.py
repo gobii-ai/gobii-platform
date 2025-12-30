@@ -1,5 +1,7 @@
 from typing import Any, Dict
 
+from django.conf import settings
+
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_exports
 
@@ -39,6 +41,14 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {"status": "error", "message": "filename must be a string when provided"}
 
     content_bytes = csv_text.encode("utf-8")
+    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    if max_size and len(content_bytes) > max_size:
+        return {
+            "status": "error",
+            "message": (
+                f"CSV exceeds maximum allowed size ({len(content_bytes)} bytes > {max_size} bytes)."
+            ),
+        }
     return write_bytes_to_exports(
         agent=agent,
         content_bytes=content_bytes,

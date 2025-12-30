@@ -18,6 +18,13 @@ DEFAULT_FILENAME = "export.pdf"
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
+PDFKIT_OPTIONS = {
+    "disable-local-file-access": "",
+    "disable-javascript": "",
+    "encoding": "utf-8",
+    "quiet": "",
+}
+
 CSS_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?P<url>[^)\"'\s]+)", re.IGNORECASE)
 CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\()?['\"]?\s*(?P<url>[^'\"\)\s]+)", re.IGNORECASE)
 META_REFRESH_URL_RE = re.compile(r"url\s*=\s*(?P<url>[^;]+)", re.IGNORECASE)
@@ -250,15 +257,8 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if filename is not None and not isinstance(filename, str):
         return {"status": "error", "message": "filename must be a string when provided"}
 
-    options = {
-        "disable-local-file-access": "",
-        "disable-javascript": "",
-        "encoding": "utf-8",
-        "quiet": "",
-    }
-
     try:
-        pdf_bytes = pdfkit.from_string(html, False, options=options)
+        pdf_bytes = pdfkit.from_string(html, False, options=PDFKIT_OPTIONS)
     except OSError as exc:
         logger.exception("wkhtmltopdf is required to generate PDFs: %s", exc)
         return {
