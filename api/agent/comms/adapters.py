@@ -127,7 +127,10 @@ class TwilioSmsAdapter(SmsAdapter):
             for i in range(num_media):
                 media_url = data.get(f"MediaUrl{i}")
                 if media_url:
-                    attachments.append(media_url)
+                    attachments.append({
+                        "url": media_url,
+                        "content_type": data.get(f"MediaContentType{i}", ""),
+                    })
 
         return ParsedMessage(
             sender=data.get("From", ""),
