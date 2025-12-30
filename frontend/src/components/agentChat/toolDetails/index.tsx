@@ -729,6 +729,37 @@ export function FileWriteDetail({ entry }: ToolDetailProps) {
   )
 }
 
+export function FileExportDetail({ entry }: ToolDetailProps) {
+  const params = entry.parameters || {}
+  const result = parseResultObject(entry.result)
+  const status = isNonEmptyString(result?.status) ? result?.status : null
+  const message = isNonEmptyString(result?.message) ? result?.message : null
+  const filename =
+    (isNonEmptyString(result?.filename) ? result?.filename : null) ||
+    (isNonEmptyString(params.filename) ? params.filename : null)
+  const path = isNonEmptyString(result?.path) ? result?.path : null
+  const nodeId = isNonEmptyString(result?.node_id) ? result?.node_id : null
+  const statusLabel = status ? status.toUpperCase() : null
+
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <KeyValueList
+        items={[
+          statusLabel ? { label: 'Status', value: statusLabel } : null,
+          filename ? { label: 'File', value: filename } : null,
+          path ? { label: 'Path', value: path } : null,
+          nodeId ? { label: 'Node', value: nodeId } : null,
+        ]}
+      />
+      {message ? (
+        <Section title={status?.toLowerCase() === 'error' ? 'Error' : 'Message'}>
+          <p className="text-slate-700">{message}</p>
+        </Section>
+      ) : null}
+    </div>
+  )
+}
+
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
   const params = entry.parameters || {}
   let prompt = (params.prompt as string) || null
@@ -1026,6 +1057,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   apiRequest: ApiRequestDetail,
   fileRead: FileReadDetail,
   fileWrite: FileWriteDetail,
+  fileExport: FileExportDetail,
   browserTask: BrowserTaskDetail,
   contactPermission: RequestContactPermissionDetail,
   secureCredentials: SecureCredentialsDetail,
