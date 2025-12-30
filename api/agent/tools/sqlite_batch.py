@@ -9,6 +9,10 @@ import os
 import sqlite3
 from typing import Any, Dict, List, Optional
 
+import sqlparse
+from sqlparse import tokens as sql_tokens
+from sqlparse.sql import Statement
+
 from ...models import PersistentAgent
 from .sqlite_helpers import is_write_statement
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
@@ -34,24 +38,27 @@ def _clean_statement(statement: str) -> Optional[str]:
     return trimmed or None
 
 
+def _statement_has_sql(statement: Statement) -> bool:
+    for token in statement.flatten():
+        if token.is_whitespace:
+            continue
+        if token.ttype in sql_tokens.Comment:
+            continue
+        if token.ttype in sql_tokens.Punctuation and token.value == ";":
+            continue
+        return True
+    return False
+
+
 def _split_sqlite_statements(sql: str) -> List[str]:
-    """Split SQL into statements using SQLite's parser boundaries."""
+    """Split SQL into statements using sqlparse."""
     statements: List[str] = []
-    buffer: List[str] = []
-
-    for ch in sql:
-        buffer.append(ch)
-        if ch == ";":
-            candidate = "".join(buffer)
-            if sqlite3.complete_statement(candidate):
-                cleaned = _clean_statement(candidate)
-                if cleaned:
-                    statements.append(cleaned)
-                buffer = []
-
-    tail = _clean_statement("".join(buffer))
-    if tail:
-        statements.append(tail)
+    for statement in sqlparse.parse(sql):
+        if not _statement_has_sql(statement):
+            continue
+        cleaned = _clean_statement(str(statement))
+        if cleaned:
+            statements.append(cleaned)
 
     return statements
 
@@ -184,7 +191,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "description": (
                 "Durable SQLite memory for structured data. "
                 "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially; "
-                "multiple statements in one string are split using SQLite parsing. "
+                "multiple statements in one string are split using sqlparse. "
                 "REMEMBER TO PROPERLY ESCAPE STRINGS IN SQL STATEMENTS. "
             ),
             "parameters": {
