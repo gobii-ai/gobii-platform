@@ -344,20 +344,6 @@ def _get_latest_active_web_session(agent: PersistentAgent):
     return None
 
 
-def _get_last_message_tool_call(agent: PersistentAgent) -> Optional[Tuple[str, dict]]:
-    call = (
-        PersistentAgentToolCall.objects.select_related("step")
-        .filter(step__agent=agent, tool_name__in=MESSAGE_TOOL_NAMES)
-        .order_by("-step__created_at")
-        .first()
-    )
-    if not call:
-        return None
-
-    params = call.tool_params if isinstance(call.tool_params, dict) else {}
-    return call.tool_name, dict(params)
-
-
 def _build_implied_send_tool_call(
     agent: PersistentAgent,
     message_text: str,
@@ -365,72 +351,20 @@ def _build_implied_send_tool_call(
     will_continue_work: bool,
 ) -> Tuple[Optional[dict], Optional[str]]:
     web_session = _get_latest_active_web_session(agent)
-    if web_session:
-        tool_params = {
-            "to_address": build_web_user_address(web_session.user_id, agent.id),
-            "body": message_text,
-        }
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
-        return (
-            {
-                "id": "implied_send",
-                "function": {
-                    "name": "send_chat_message",
-                    "arguments": json.dumps(tool_params),
-                },
-            },
-            None,
-        )
+    if not web_session:
+        return None, "Implied send failed: no active web chat session."
 
-    last_call = _get_last_message_tool_call(agent)
-    if last_call:
-        tool_name, tool_params = last_call
-        if tool_name == "send_chat_message":
-            body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name, "body")
-            tool_params = dict(tool_params or {})
-            tool_params[body_key] = message_text
-            if will_continue_work:
-                tool_params["will_continue_work"] = True
-            else:
-                tool_params.pop("will_continue_work", None)
-            return (
-                {
-                    "id": "implied_send",
-                    "function": {
-                        "name": tool_name,
-                        "arguments": json.dumps(tool_params),
-                    },
-                },
-                None,
-            )
-
-    endpoint = agent.preferred_contact_endpoint
-    if not endpoint:
-        return (
-            None,
-            "Implied send failed: no active web chat session, prior chat message, or web chat endpoint.",
-        )
-
-    channel = endpoint.channel
-    address = endpoint.address
-    if channel == CommsChannel.WEB:
-        tool_name = "send_chat_message"
-        tool_params = {"to_address": address, "body": message_text}
-    else:
-        return (
-            None,
-            "Implied send failed: preferred contact endpoint is not web chat.",
-        )
-
+    tool_params = {
+        "to_address": build_web_user_address(web_session.user_id, agent.id),
+        "body": message_text,
+    }
     if will_continue_work:
         tool_params["will_continue_work"] = True
-
     return (
         {
             "id": "implied_send",
             "function": {
-                "name": tool_name,
+                "name": "send_chat_message",
                 "arguments": json.dumps(tool_params),
             },
         },
