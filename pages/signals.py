@@ -65,6 +65,22 @@ UTM_MAPPING = {
 CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid')
 
 
+def _get_customer_with_subscriber(customer_id: str | None) -> Customer | None:
+    """Fetch a Stripe customer with subscriber eagerly loaded.
+
+    This is used by webhook handlers when the invoice payload is missing
+    subscriber details but we still have a customer ID to resolve the actor.
+    """
+    if not customer_id:
+        return None
+
+    try:
+        return Customer.objects.select_related("subscriber").filter(id=customer_id).first()
+    except Exception:
+        logger.debug("Failed to load customer %s for owner resolution", customer_id, exc_info=True)
+        return None
+
+
 def _get_stripe_data_value(container: Any, key: str) -> Any:
     """Fetch a key from Stripe payloads regardless of dict/object shape."""
     if not container:
@@ -217,12 +233,19 @@ def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
     if not customer_id:
         customer_id = payload.get("customer")
 
+    resolved_customer = customer
+    if customer_id and (resolved_customer is None or not getattr(resolved_customer, "subscriber", None)):
+        resolved_customer = _get_customer_with_subscriber(customer_id) or resolved_customer
+
+    if resolved_customer and getattr(resolved_customer, "id", None):
+        customer_id = getattr(resolved_customer, "id")
+
     owner = None
     owner_type = ""
     organization_billing: OrganizationBilling | None = None
 
-    if customer and getattr(customer, "subscriber", None):
-        owner = customer.subscriber
+    if resolved_customer and getattr(resolved_customer, "subscriber", None):
+        owner = resolved_customer.subscriber
         owner_type = "user"
     elif customer_id:
         organization_billing = (
@@ -989,8 +1012,10 @@ def handle_invoice_payment_failed(event, **kwargs):
 
         try:
             if owner_type == "user" and owner:
+                track_user_id = getattr(owner, "id", None)
+
                 Analytics.track_event(
-                    user_id=owner.id,
+                    user_id=track_user_id,
                     event=AnalyticsEvent.BILLING_PAYMENT_FAILED,
                     source=AnalyticsSource.API,
                     properties=properties,
@@ -1087,8 +1112,10 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
         try:
             if owner_type == "user" and owner:
+                track_user_id = getattr(owner, "id", None)
+
                 Analytics.track_event(
-                    user_id=owner.id,
+                    user_id=track_user_id,
                     event=AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED,
                     source=AnalyticsSource.API,
                     properties=properties,

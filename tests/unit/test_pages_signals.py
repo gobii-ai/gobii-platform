@@ -1136,6 +1136,38 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(props["organization_id"], str(org.id))
         self.assertEqual(props["plan"], PlanNamesChoices.ORG_TEAM.value)
 
+    def test_invoice_payment_failed_resolves_user_from_customer_lookup_when_missing_subscriber(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_lookup_failed",
+            subscription_id="sub_lookup_failed",
+            attempt_count=1,
+            next_payment_attempt=None,
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_failed")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_lookup_failed", subscriber=None),
+            subscription=SimpleNamespace(id="sub_lookup_failed"),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals._get_customer_with_subscriber", return_value=SimpleNamespace(id="cus_lookup_failed", subscriber=self.user)), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
+            patch("pages.signals.get_plan_by_product_id", return_value=None):
+
+            handle_invoice_payment_failed(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
+
 
 @tag("batch_pages")
 class PaymentSucceededSignalTests(TestCase):
@@ -1230,3 +1262,37 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["organization_id"], str(org.id))
         self.assertEqual(props["plan"], PlanNamesChoices.ORG_TEAM.value)
         self.assertEqual(props["amount_paid"], 35.0)
+
+    def test_invoice_payment_succeeded_resolves_user_from_customer_lookup_when_missing_subscriber(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_lookup_succeeded",
+            subscription_id="sub_lookup_succeeded",
+            attempt_count=1,
+            next_payment_attempt=None,
+            amount_paid=3200,
+            status="paid",
+        )
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_lookup_succeeded", subscriber=None),
+            subscription=SimpleNamespace(id="sub_lookup_succeeded"),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals._get_customer_with_subscriber", return_value=SimpleNamespace(id="cus_lookup_succeeded", subscriber=self.user)), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.Analytics.track_event_anonymous") as mock_track_anonymous, \
+            patch("pages.signals.get_plan_by_product_id", return_value=None):
+
+            handle_invoice_payment_succeeded(event)
+
+        mock_track_anonymous.assert_not_called()
+        mock_track_event.assert_called_once()
+        kwargs = mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED)
