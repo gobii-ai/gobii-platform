@@ -101,7 +101,9 @@ def get_read_file_tool() -> Dict[str, Any]:
         "function": {
             "name": "read_file",
             "description": (
-                "Read a file or image from the agent filesystem and return markdown. "
+                "Read a file from the agent filesystem and return the text content as markdown. "
+                "Uses OCR for images to return a detailed description. "
+                "Supports images, PDFs, text files, office documents, and more."
             ),
             "parameters": {
                 "type": "object",
