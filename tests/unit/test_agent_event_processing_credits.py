@@ -815,7 +815,10 @@ class PersistentAgentToolCreditTests(TestCase):
              patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2), \
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", side_effect=next_burn_state) as burn_state_fn, \
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
-             patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[{}]), \
+             patch(
+                 "api.agent.core.event_processing.get_llm_config_with_failover",
+                 return_value=[("mock", "mock-model", {})],
+             ), \
              patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
              patch(
                  "api.agent.core.event_processing.process_agent_events_task",
