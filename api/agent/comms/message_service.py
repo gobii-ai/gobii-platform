@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from uuid import UUID
+from urllib.parse import urlparse
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.tool_costs import get_tool_credit_cost_for_channel
@@ -12,6 +13,8 @@ from decimal import Decimal
 from typing import Iterable, Any, Tuple
 
 import logging
+import mimetypes
+import os
 import requests
 from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned
@@ -106,13 +109,68 @@ def _ensure_participant(conv: PersistentAgentConversation, ep: PersistentAgentCo
         defaults={"role": role},
     )
 
+_CONTENT_TYPE_EXTENSIONS = {
+    "image/jpeg": ".jpg",
+    "image/jpg": ".jpg",
+    "image/png": ".png",
+    "image/gif": ".gif",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/ogg": ".ogg",
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+}
+
+def _filename_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    name = (parsed.path or "").rsplit("/", 1)[-1]
+    return name or "attachment"
+
+def _normalize_content_type(content_type: str) -> str:
+    return content_type.split(";", 1)[0].strip().lower()
+
+def _extension_for_content_type(content_type: str) -> str:
+    normalized = _normalize_content_type(content_type)
+    if not normalized:
+        return ""
+    ext = _CONTENT_TYPE_EXTENSIONS.get(normalized)
+    if ext:
+        return ext
+    guessed = mimetypes.guess_extension(normalized) or ""
+    if guessed == ".jpe":
+        return ".jpg"
+    return guessed
+
+def _append_extension(filename: str, content_type: str) -> str:
+    if not content_type:
+        return filename
+    _, ext = os.path.splitext(filename)
+    if ext:
+        return filename
+    guessed = _extension_for_content_type(content_type)
+    if not guessed:
+        return filename
+    return f"{filename}{guessed}"
+
+def _is_twilio_media_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+    if not parsed.hostname or parsed.hostname.lower() != "api.twilio.com":
+        return False
+    path = parsed.path or ""
+    return "/Media/" in path
+
 @tracer.start_as_current_span("_save_attachments")
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
     for att in attachments:
         file_obj: File | None = None
         content_type = ""
         filename = "attachment"
+        size = None
         max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
+        url = None
+        content_type_hint = ""
         if hasattr(att, "read"):
             file_obj = att  # type: ignore[assignment]
             filename = getattr(att, "name", filename)
@@ -126,16 +184,37 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
             except Exception:
                 logging.warning(f"Could not process '{filename}' file size.")
                 pass
+        elif isinstance(att, dict):
+            url = att.get("url") or att.get("media_url")
+            if not isinstance(url, str) or not url:
+                continue
+            filename = att.get("filename") or filename
+            content_type_hint = att.get("content_type") or ""
         elif isinstance(att, str):
-            try:
-                resp = requests.get(att, timeout=30, allow_redirects=True)
-                resp.raise_for_status()
-                filename = att.rsplit("/", 1)[-1]
+            url = att
+        else:
+            continue
 
-                # Try HEAD to check size without downloading
+        if url:
+            try:
+                auth = None
+                if _is_twilio_media_url(url):
+                    if settings.TWILIO_ACCOUNT_SID and settings.TWILIO_AUTH_TOKEN:
+                        auth = (settings.TWILIO_ACCOUNT_SID, settings.TWILIO_AUTH_TOKEN)
+                    else:
+                        logging.warning(
+                            "Twilio media URL provided but TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN not configured; "
+                            "skipping download."
+                        )
+                        continue
+
+                if filename == "attachment":
+                    filename = _filename_from_url(url)
+
+                # Try HEAD to check size before downloading
                 if max_bytes:
                     try:
-                        h = requests.head(att, allow_redirects=True, timeout=15)
+                        h = requests.head(url, allow_redirects=True, timeout=15, auth=auth)
                         clen = int(h.headers.get("Content-Length", "0")) if h is not None else 0
                         if clen and clen > int(max_bytes):
                             logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
@@ -144,18 +223,20 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                         logging.warning(f"Could not process '{filename}' file size.")
                         pass
 
+                resp = requests.get(url, timeout=30, allow_redirects=True, auth=auth)
+                resp.raise_for_status()
+
                 content = resp.content
-                content_type = resp.headers.get("Content-Type", "")
+                content_type = resp.headers.get("Content-Type", "") or content_type_hint
+                filename = _append_extension(filename, content_type_hint or content_type)
                 size = len(content)
                 if max_bytes and size > int(max_bytes):
                     logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
                     continue
                 file_obj = ContentFile(content, name=filename)
             except Exception as exc:
-                logging.warning("Failed to download attachment from '%s': %s", att, exc)
+                logging.warning("Failed to download attachment from '%s': %s", url, exc)
                 continue
-        else:
-            continue
 
         if file_obj:
             if size is None:
