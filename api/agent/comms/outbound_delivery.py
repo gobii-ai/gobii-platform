@@ -284,7 +284,7 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                     max_bytes,
                 )
                 continue
-        except Exception:
+        except (TypeError, ValueError):
             logger.warning(
                 "Skipping attachment %s for message %s (failed size validation)",
                 att.id,

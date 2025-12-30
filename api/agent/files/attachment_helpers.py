@@ -84,7 +84,7 @@ def resolve_filespace_attachments(agent, raw_paths: object) -> List[ResolvedAtta
         if size_bytes is None and hasattr(file_field, "size"):
             try:
                 size_bytes = int(file_field.size)
-            except Exception:
+            except (TypeError, ValueError):
                 size_bytes = None
         if max_bytes and size_bytes and int(size_bytes) > int(max_bytes):
             raise AttachmentResolutionError(
@@ -109,7 +109,7 @@ def create_message_attachments(message, attachments: Iterable[ResolvedAttachment
     for att in attachments:
         try:
             size_bytes = int(att.size_bytes or 0)
-        except Exception:
+        except (TypeError, ValueError):
             size_bytes = 0
         PersistentAgentMessageAttachment.objects.create(
             message=message,
