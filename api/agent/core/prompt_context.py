@@ -1733,6 +1733,7 @@ def _get_system_instruction(
         "TEXT = MESSAGE: Any text you write gets sent to the user. Only write what you want them to read. "
         "Tool calls are silent actions. You can combine text + tools: 'Got it!' + [update_charter]. "
         "After tool calls, write nothing—the tools speak for themselves. "
+        "IMPORTANT: Tool calls MUST use JSON format, NOT XML. Never output tool calls as XML tags. "
 
         "CORE RESPONSIBILITY: Maintain an accurate charter. If your charter is unknown, unclear, generic (e.g., 'test agent'), or needs to change based on new user input/intent, call 'update_charter' IMMEDIATELY. Do this right away when a user gives you a specific request—ideally in the same tool batch as your greeting. This is your primary memory of your purpose. "
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
