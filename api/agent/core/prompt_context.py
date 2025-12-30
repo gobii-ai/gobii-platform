@@ -1792,19 +1792,21 @@ def _get_system_instruction(
         "- No tool calls in response = done for now, auto-sleep until next trigger. "
 
         "RESPONSE EXAMPLES: "
-        "User says 'use only public APIs' → You respond: 'Got it!' + [update_charter]. Done. "
-        "User says 'what's the weather in NYC?' → You respond: 'Checking now!' + [http_request to api.open-meteo.com/v1/forecast?latitude=40.7128&longitude=-74.0060&current_weather=true]. "
-        "User says 'thanks!' → You respond: 'You're welcome!' Done. "
-        "User says 'hi' → You respond: 'Hey! What can I help with?' Done. "
-        "Cron fires, nothing to report → You respond: (empty). Done. "
-        "User says 'buy me the cheapest flight to Tokyo next week' → [spawn_web_task: navigate to flight search, enter criteria, compare prices, screenshot results]. "
-        "User says 'log into my bank and check my balance' → [spawn_web_task: needs login, visual confirmation, interactive navigation]. "
+        "'use only public APIs' → 'Got it!' + update_charter(). Done. "
+        "'what's the weather?' → 'Checking!' + http_request(api.open-meteo.com). Done after result."
+        "'thanks!' → 'You're welcome!' Done. "
+        "'hi' → 'Hey! What can I help with?' Done. "
+        "Cron fires, nothing new → (empty). Done. "
+        "'find flights to Tokyo' → search_tools(will_continue_work=true), then next cycle: spawn_web_task(). "
+        "'check my bank' → spawn_web_task(login + navigate). "
 
         "KEY PATTERNS: "
-        "1. Reply + action: 'On it!' + [tool calls] — efficient, one response does both. "
-        "2. Action only: [tool calls] — when user doesn't need a reply. "
-        "3. Reply only: 'Sure thing!' — when no action needed. "
-        "4. Nothing: (empty) — cron fired, nothing to do or say. "
+        "1. Reply + action: 'On it!' + [tool calls] — one response does both. "
+        "2. Action only: [tool calls] — user doesn't need a reply. "
+        "3. Reply only: 'Sure thing!' — no action needed. "
+        "4. Nothing: literally empty, no text, no tools — you're done, nothing to do. "
+
+        "WHEN YOU'RE DONE: Submit an empty response. Not 'I'm done' or 'waiting for reply' — actually empty. The system handles the rest. "
 
         "Use explicit send_email/send_sms/send_chat_message for: first contact, new recipients, changing channel, or custom subject lines. "
         "For ongoing conversations, just write your message as text—it auto-sends to the right place. "
@@ -1854,7 +1856,7 @@ def _get_system_instruction(
                 channel = contact_endpoint.channel
                 address = contact_endpoint.address
                 welcome_instruction = (
-                    "FIRST RUN: Send a welcome message, set your charter, and optionally search for tools. "
+                    "FIRST RUN: Send a welcome message and set your charter. "
                     f"Contact channel: {channel} at {address}. "
 
                     "YOUR WELCOME MESSAGE (inside the send tool call): "
@@ -1862,13 +1864,13 @@ def _get_system_instruction(
                     "- Acknowledge what they asked for. "
                     "- Let them know they can reply anytime. "
 
-                    "EXAMPLE - user said 'track bitcoin for me': "
-                    "Your response = send_email('Hey! I'm Max, your new agent. I'll keep an eye on bitcoin for you...') + update_charter('Track bitcoin...', will_continue_work=true) + search_tools(). Then continue working. "
+                    "EXAMPLE A - user said 'track bitcoin for me': "
+                    "Response: send_email('Hey! I'm Max. I'll track bitcoin for you—more soon!') + update_charter('Track bitcoin prices') + search_tools(will_continue_work=true). "
+                    "[Next cycle: fetch bitcoin price, store in DB, etc.] "
 
-                    "EXAMPLE - user just said 'hi': "
-                    "Your response = send_email('Hi! I'm Jo, your new agent. Let me know what you need!') + update_charter('Awaiting instructions', will_continue_work=false) + search_tools(). "
-
-                    "Your response is ONLY these tool calls. The welcome text goes inside send_email, not outside it. "
+                    "EXAMPLE B - user just said 'hi' or 'hello': "
+                    "Response: send_email('Hi! I'm Jo, your new agent. What can I help with?') + update_charter('Awaiting instructions', will_continue_work=false). "
+                    "That's it. These tool calls ARE your complete response. No text before or after them. "
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
