@@ -358,13 +358,6 @@ def _get_last_message_tool_call(agent: PersistentAgent) -> Optional[Tuple[str, d
     return call.tool_name, dict(params)
 
 
-def _default_implied_email_subject(agent: PersistentAgent) -> str:
-    name = (agent.name or "").strip()
-    if name:
-        return f"Update from {name}"
-    return "Update"
-
-
 def _build_implied_send_tool_call(
     agent: PersistentAgent,
     message_text: str,
@@ -391,50 +384,44 @@ def _build_implied_send_tool_call(
         )
 
     last_call = _get_last_message_tool_call(agent)
-    if last_call and last_call[0] == "send_chat_message":
-        last_call = None
     if last_call:
         tool_name, tool_params = last_call
-        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
-        if not body_key:
-            return None, f"Implied send does not support tool {tool_name}."
-        tool_params[body_key] = message_text
-        if will_continue_work:
-            tool_params["will_continue_work"] = True
-        else:
-            tool_params.pop("will_continue_work", None)
-        return (
-            {
-                "id": "implied_send",
-                "function": {
-                    "name": tool_name,
-                    "arguments": json.dumps(tool_params),
+        if tool_name == "send_chat_message":
+            body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name, "body")
+            tool_params = dict(tool_params or {})
+            tool_params[body_key] = message_text
+            if will_continue_work:
+                tool_params["will_continue_work"] = True
+            else:
+                tool_params.pop("will_continue_work", None)
+            return (
+                {
+                    "id": "implied_send",
+                    "function": {
+                        "name": tool_name,
+                        "arguments": json.dumps(tool_params),
+                    },
                 },
-            },
-            None,
-        )
+                None,
+            )
 
     endpoint = agent.preferred_contact_endpoint
     if not endpoint:
-        return None, "Implied send failed: no prior message tool call or preferred contact endpoint."
+        return (
+            None,
+            "Implied send failed: no active web chat session, prior chat message, or web chat endpoint.",
+        )
 
     channel = endpoint.channel
     address = endpoint.address
-    if channel == CommsChannel.EMAIL:
-        tool_name = "send_email"
-        tool_params = {
-            "to_address": address,
-            "subject": _default_implied_email_subject(agent),
-            "mobile_first_html": message_text,
-        }
-    elif channel == CommsChannel.SMS:
-        tool_name = "send_sms"
-        tool_params = {"to_number": address, "body": message_text}
-    elif channel == CommsChannel.WEB:
+    if channel == CommsChannel.WEB:
         tool_name = "send_chat_message"
         tool_params = {"to_address": address, "body": message_text}
     else:
-        return None, f"Implied send failed: unsupported preferred contact channel '{channel}'."
+        return (
+            None,
+            "Implied send failed: preferred contact endpoint is not web chat.",
+        )
 
     if will_continue_work:
         tool_params["will_continue_work"] = True
@@ -2290,8 +2277,8 @@ def _run_agent_loop(
                         step_kwargs = {
                             "agent": agent,
                             "description": (
-                                "Implied send failed. "
-                                "Please call send_email, send_sms, or send_chat_message with explicit parameters."
+                                "Implied send failed (web chat only). "
+                                "Please call send_chat_message for web chat, or send_email/send_sms with explicit parameters."
                             ),
                         }
                         _attach_completion(step_kwargs)
