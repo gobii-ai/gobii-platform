@@ -156,7 +156,7 @@ def _is_twilio_media_url(url: str) -> bool:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         return False
-    if parsed.hostname != "api.twilio.com":
+    if not parsed.hostname or parsed.hostname.lower() != "api.twilio.com":
         return False
     path = parsed.path or ""
     return "/Media/" in path
@@ -208,13 +208,10 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                         )
                         continue
 
-                resp = requests.get(url, timeout=30, allow_redirects=True, auth=auth)
-                resp.raise_for_status()
-
                 if filename == "attachment":
                     filename = _filename_from_url(url)
 
-                # Try HEAD to check size without downloading
+                # Try HEAD to check size before downloading
                 if max_bytes:
                     try:
                         h = requests.head(url, allow_redirects=True, timeout=15, auth=auth)
@@ -225,6 +222,9 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                     except Exception:
                         logging.warning(f"Could not process '{filename}' file size.")
                         pass
+
+                resp = requests.get(url, timeout=30, allow_redirects=True, auth=auth)
+                resp.raise_for_status()
 
                 content = resp.content
                 content_type = resp.headers.get("Content-Type", "") or content_type_hint
