@@ -1744,7 +1744,7 @@ def _get_system_instruction(
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
         "When you update your charter or schedule in response to a user request, keep working in the same cycle until you address the request (e.g., fetch data, browse, reply); do not sleep right after only a charter/schedule update. "
-        "'will_continue_work': Only set to true when you have an immediate next action planned (e.g., about to search, scrape, or mid-task). Otherwise, let the conversation pause naturally and sleep until the next trigger. "
+        "'will_continue_work': Only set to true when you have MORE TOOL CALLS to make after the current response. If your response already contains all the tool calls you need (message + update_charter, etc.), set it to false—you're done. Don't set it to true just because you're 'about to' do something; include that action in the current response instead."
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
@@ -1800,10 +1800,11 @@ def _get_system_instruction(
         "6. SILENCE IS GOLDEN: Do NOT send status updates just because you're sleeping. If a cron trigger fires and there's nothing new to report, just sleep—no message needed. The user doesn't need 'still monitoring' or 'nothing to report' messages. Only contact them with genuinely new, valuable information. "
 
         "IMPLIED SEND (efficient shortcut): When replying to the user without changing recipients or channel, just write your message as plain text in your response—no send tool call needed. The system auto-converts it to the appropriate send tool using: (1) active web chat session, (2) previous send_email/send_sms/send_agent_message parameters, or (3) your preferred contact endpoint. "
-        "Implied send combines naturally with other tool calls. Example: respond to user + update_charter + spawn_web_task—all in one response. The text becomes the message; the tools execute normally. This is the ideal pattern: acknowledge/respond to the user while simultaneously taking action, maximizing work per cycle. "
+        "Implied send combines naturally with other tool calls. Example: 'Got it, I've updated my preferences!' + update_charter—all in ONE response. The text becomes the message; the tools execute in the same cycle. This is the ideal pattern: act and acknowledge simultaneously, maximizing efficiency. "
         "Use implied send for: ongoing conversations, follow-ups, quick responses where recipient is obvious. "
         "Use explicit send tools for: first contact, new recipients, different channel, or custom parameters (e.g., specific subject line). "
         "IMPLICIT SLEEP: A response without any tool calls signals you're done for now—the system will automatically sleep until the next trigger. This means a text-only reply (via implied send) with no additional tool calls is a complete, self-contained response that naturally closes the cycle. No explicit sleep_until_next_trigger needed. "
+        "ONE MESSAGE PER INTERACTION: Never send multiple messages for a single user request. Don't preview intent ('I'll update...') then confirm ('I've updated...')—that's two messages. Instead, do the action and acknowledge it in ONE response: 'Done, I've noted your preference!' + tool calls. One cycle, one message, done. "
         "CRITICAL: Any text you write becomes a message to the user. NEVER write meta-commentary like 'No tool calls needed', 'I'll wait for the next trigger', or 'The conversation has paused'. If you have nothing to say to the user, write NOTHING—just make your tool calls (or none). Empty responses are fine."
 
         "EVERYTHING IS A WORK IN PROGRESS. DO YOUR WORK ITERATIVELY, IN SMALL CHUNKS. BE EXHAUSTIVE. USE YOUR SQLITE DB EXTENSIVELY WHEN APPROPRIATE. "
