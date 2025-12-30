@@ -9,6 +9,12 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from ..comms.message_service import _get_or_create_conversation, _ensure_participant
+from ..files.attachment_helpers import (
+    AttachmentResolutionError,
+    create_message_attachments,
+    resolve_filespace_attachments,
+)
+from ..files.filespace_service import broadcast_message_attachment_update
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -57,6 +63,11 @@ def get_send_chat_tool() -> Dict[str, Any]:
                             "If omitted, the agent will reply to the latest active chat participant or preferred web contact."
                         ),
                     },
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of filespace paths from the agent's default filespace to include.",
+                    },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "Set true when this is just a quick update and you'll keep working immediately.",
@@ -76,6 +87,11 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     if not body:
         return {"status": "error", "message": "Message body is required."}
     will_continue = _should_continue_work(params)
+    attachment_paths = params.get("attachments")
+    try:
+        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+    except AttachmentResolutionError as exc:
+        return {"status": "error", "message": str(exc)}
 
     max_len = getattr(settings, "WEB_CHAT_MESSAGE_MAX_LENGTH", 4000)
     if len(body) > max_len:
@@ -166,6 +182,9 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         body=body,
         raw_payload={"source": "web_chat_tool"},
     )
+    if resolved_attachments:
+        create_message_attachments(message, resolved_attachments)
+        broadcast_message_attachment_update(str(message.id))
 
     now = timezone.now()
     PersistentAgentMessage.objects.filter(pk=message.pk).update(

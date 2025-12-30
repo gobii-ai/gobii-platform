@@ -19,6 +19,13 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ..comms.outbound_delivery import deliver_agent_sms
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import strip_control_chars
+from ..files.attachment_helpers import (
+    AttachmentResolutionError,
+    build_signed_filespace_download_url,
+    create_message_attachments,
+    resolve_filespace_attachments,
+)
+from ..files.filespace_service import broadcast_message_attachment_update
 from ...models import (
     CommsChannel,
     PersistentAgent,
@@ -59,6 +66,11 @@ def get_send_sms_tool() -> Dict[str, Any]:
                         "description": "Additional E.164 phone numbers for group SMS (optional)"
                     },
                     "body": {"type": "string", "description": "SMS content."},
+                    "attachments": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of filespace paths from the agent's default filespace to include as download links.",
+                    },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "Set true if you're just updating the user and will continue working immediately.",
@@ -77,6 +89,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     body = strip_control_chars(params.get("body"))
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
     will_continue = _should_continue_work(params)
+    attachment_paths = params.get("attachments")
     
     # Temporary restriction on group SMS until Twilio Conversations API is implemented
     if cc_numbers:
@@ -88,18 +101,18 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     if not all([to_number, body]):
         return {"status": "error", "message": "Missing required parameters: to_number or body"}
 
-    if len(body) > settings.SMS_MAX_BODY_LENGTH:
-        return {
-            "status": "error",
-            "message": f"SMS body exceeds maximum length of {settings.SMS_MAX_BODY_LENGTH} characters. Please shorten it, or split it into multiple messages."
-        }
+    try:
+        resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
+    except AttachmentResolutionError as exc:
+        return {"status": "error", "message": str(exc)}
 
     # Log SMS attempt
     body_preview = body[:100] + "..." if len(body) > 100 else body
     group_info = f" (group with {len(cc_numbers)} others)" if cc_numbers else ""
+    attachment_info = f" (attachments: {len(resolved_attachments)})" if resolved_attachments else ""
     logger.info(
-        "Agent %s sending SMS to %s%s, body: %s",
-        agent.id, to_number, group_info, body_preview
+        "Agent %s sending SMS to %s%s%s, body: %s",
+        agent.id, to_number, group_info, attachment_info, body_preview
     )
 
     try:
@@ -137,8 +150,23 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             )
             cc_endpoint_objects.append(cc_endpoint)
 
+        if resolved_attachments:
+            attachment_lines = []
+            for attachment in resolved_attachments:
+                download_url = build_signed_filespace_download_url(agent.id, attachment.node.id)
+                attachment_lines.append(f"{attachment.filename}: {download_url}")
+            if attachment_lines:
+                body = body.rstrip()
+                body = f"{body}\n\nAttachments:\n" + "\n".join(attachment_lines)
+
         # Perform link shortening before duplicate detection so we compare canonical bodies
         body = shorten_links_in_body(body, user=agent.user)
+
+        if len(body) > settings.SMS_MAX_BODY_LENGTH:
+            return {
+                "status": "error",
+                "message": f"SMS body exceeds maximum length of {settings.SMS_MAX_BODY_LENGTH} characters. Please shorten it, or split it into multiple messages."
+            }
 
         duplicate = detect_recent_duplicate_message(
             agent,
@@ -161,6 +189,9 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
         # Add CC endpoints for group messaging
         if cc_endpoint_objects:
             message.cc_endpoints.set(cc_endpoint_objects)
+        if resolved_attachments:
+            create_message_attachments(message, resolved_attachments)
+            broadcast_message_attachment_update(str(message.id))
 
         deliver_agent_sms(message)
 

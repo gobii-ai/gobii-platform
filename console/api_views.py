@@ -26,6 +26,7 @@ from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.models import (
@@ -1169,6 +1170,31 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         return JsonResponse({"event": event}, status=201)
 
 
+def _build_filespace_download_response(node: AgentFsNode) -> FileResponse:
+    file_field = node.content
+    if not file_field or not getattr(file_field, "name", None):
+        raise Http404("File not found.")
+
+    storage = file_field.storage
+    name = file_field.name
+    if hasattr(storage, "exists") and not storage.exists(name):
+        raise Http404("File not found.")
+    try:
+        file_handle = storage.open(name, "rb")
+    except (FileNotFoundError, OSError):
+        raise Http404("File not found.")
+
+    content_type = node.mime_type or mimetypes.guess_type(node.name or "")[0] or "application/octet-stream"
+    response = FileResponse(
+        file_handle,
+        as_attachment=True,
+        filename=node.name or "download",
+        content_type=content_type,
+    )
+    response["Cache-Control"] = "private, max-age=300"
+    return response
+
+
 class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
@@ -1223,28 +1249,42 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
         if not node:
             raise Http404("File not found.")
 
-        file_field = node.content
-        if not file_field or not getattr(file_field, "name", None):
+        return _build_filespace_download_response(node)
+
+
+class SignedAgentFsNodeDownloadAPIView(View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, token: str, *args: Any, **kwargs: Any):
+        payload = load_signed_filespace_download_payload(token)
+        if not payload:
             raise Http404("File not found.")
 
-        storage = file_field.storage
-        name = file_field.name
-        if hasattr(storage, "exists") and not storage.exists(name):
-            raise Http404("File not found.")
+        agent_id = payload.get("agent_id")
+        node_id = payload.get("node_id")
         try:
-            file_handle = storage.open(name, "rb")
-        except (FileNotFoundError, OSError):
+            agent_uuid = uuid.UUID(str(agent_id))
+            node_uuid = uuid.UUID(str(node_id))
+        except (TypeError, ValueError):
             raise Http404("File not found.")
 
-        content_type = node.mime_type or mimetypes.guess_type(node.name or "")[0] or "application/octet-stream"
-        response = FileResponse(
-            file_handle,
-            as_attachment=True,
-            filename=node.name or "download",
-            content_type=content_type,
+        filespace_ids = AgentFileSpaceAccess.objects.filter(
+            agent_id=agent_uuid
+        ).values_list("filespace_id", flat=True)
+        node = (
+            AgentFsNode.objects
+            .filter(
+                id=node_uuid,
+                filespace_id__in=filespace_ids,
+                node_type=AgentFsNode.NodeType.FILE,
+                is_deleted=False,
+            )
+            .first()
         )
-        response["Cache-Control"] = "private, max-age=300"
-        return response
+        if not node:
+            raise Http404("File not found.")
+
+        return _build_filespace_download_response(node)
 
 
 def _serialize_agent_fs_node(node: AgentFsNode) -> dict[str, Any]:

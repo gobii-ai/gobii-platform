@@ -9,6 +9,7 @@ from drf_spectacular.views import (
 from console.api_views import (
     LLMEndpointTestAPIView,
     AgentFsNodeDownloadAPIView,
+    SignedAgentFsNodeDownloadAPIView,
     AgentFsNodeBulkDeleteAPIView,
     AgentFsNodeCreateDirAPIView,
     AgentFsNodeListAPIView,
@@ -181,6 +182,7 @@ urlpatterns = [
     path("setup/", include("setup.urls")),
 
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
+    path("d/<str:token>/", SignedAgentFsNodeDownloadAPIView.as_view(), name="signed_agent_fs_download"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
