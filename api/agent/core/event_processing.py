@@ -2241,6 +2241,18 @@ def _run_agent_loop(
                 completion_obj = _ensure_completion()
                 step_kwargs["completion"] = completion_obj
 
+            def _persist_reasoning_step(reasoning_source: Optional[str]) -> None:
+                reasoning_text = (reasoning_source or "").strip()
+                if not reasoning_text:
+                    return
+                step_kwargs = {
+                    "agent": agent,
+                    "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
+                }
+                _attach_completion(step_kwargs)
+                step = PersistentAgentStep.objects.create(**step_kwargs)
+                _attach_prompt_archive(step)
+
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
 
@@ -2273,6 +2285,7 @@ def _run_agent_loop(
                         agent.id,
                         implied_error or "unknown error",
                     )
+                    _persist_reasoning_step(thinking_content)
                     try:
                         step_kwargs = {
                             "agent": agent,
@@ -2293,15 +2306,7 @@ def _run_agent_loop(
             if not reasoning_source and not implied_send:
                 reasoning_source = msg_content
 
-            reasoning_text = (reasoning_source or "").strip()
-            if reasoning_text:
-                response_step_kwargs = {
-                    "agent": agent,
-                    "description": f"{INTERNAL_REASONING_PREFIX} {reasoning_text}",
-                }
-                _attach_completion(response_step_kwargs)
-                response_step = PersistentAgentStep.objects.create(**response_step_kwargs)
-                _attach_prompt_archive(response_step)
+            _persist_reasoning_step(reasoning_source)
 
             if not tool_calls:
                 reasoning_only_streak += 1
