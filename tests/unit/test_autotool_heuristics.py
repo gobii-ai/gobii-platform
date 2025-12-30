@@ -18,6 +18,8 @@ from api.agent.tools.autotool_heuristics import (
 )
 from api.agent.tools.tool_manager import (
     auto_enable_heuristic_tools,
+    CREATE_CSV_TOOL_NAME,
+    CREATE_PDF_TOOL_NAME,
     get_enabled_tool_limit,
 )
 from api.services.prompt_settings import invalidate_prompt_settings_cache
@@ -502,11 +504,12 @@ class TestHeuristicsRegistryCompleteness(TestCase):
             self.assertGreater(len(entry["tools"]), 0, f"Entry has no tools: {entry}")
 
     def test_all_tool_names_follow_convention(self):
-        """All tool names should follow the mcp_brightdata_ prefix convention."""
+        """All tool names should follow mcp_brightdata_ or known local tool names."""
+        local_tools = {CREATE_CSV_TOOL_NAME, CREATE_PDF_TOOL_NAME}
         for entry in AUTOTOOL_HEURISTICS:
             for tool in entry["tools"]:
                 self.assertTrue(
-                    tool.startswith("mcp_brightdata_"),
+                    tool.startswith("mcp_brightdata_") or tool in local_tools,
                     f"Tool name doesn't follow convention: {tool}",
                 )
 
