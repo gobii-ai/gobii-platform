@@ -1013,7 +1013,6 @@ def handle_invoice_payment_failed(event, **kwargs):
         try:
             if owner_type == "user" and owner:
                 track_user_id = getattr(owner, "id", None)
-                assert track_user_id is not None, "Billing analytics requires user.id for billing payment events"
 
                 Analytics.track_event(
                     user_id=track_user_id,
@@ -1114,7 +1113,6 @@ def handle_invoice_payment_succeeded(event, **kwargs):
         try:
             if owner_type == "user" and owner:
                 track_user_id = getattr(owner, "id", None)
-                assert track_user_id is not None, "Billing analytics requires user.id for billing payment events"
 
                 Analytics.track_event(
                     user_id=track_user_id,
