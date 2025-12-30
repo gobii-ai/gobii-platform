@@ -5,6 +5,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 from api.agent.core import event_processing as ep
+from api.agent.core.prompt_context import INTERNAL_REASONING_PREFIX
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -44,10 +45,12 @@ class ImpliedSendTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
-    def _mock_completion(self, content):
+    def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
         msg.tool_calls = None
         msg.content = content
+        if reasoning_content is not None:
+            msg.reasoning_content = reasoning_content
         choice = MagicMock()
         choice.message = msg
         resp = MagicMock()
@@ -264,3 +267,43 @@ class ImpliedSendTests(TestCase):
 
         self.assertTrue(mock_send_email.called)
         self.assertFalse(mock_send_chat.called)
+
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_failure_persists_reasoning_step(
+        self,
+        mock_completion,
+        mock_build_prompt,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        resp = self._mock_completion(
+            "Hello without destination",
+            reasoning_content="Need explicit send destination.",
+        )
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        reasoning_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith=INTERNAL_REASONING_PREFIX,
+        ).first()
+        self.assertIsNotNone(reasoning_step)
+        self.assertIn("Need explicit send destination.", reasoning_step.description)
+
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Implied send failed.",
+        ).first()
+        self.assertIsNotNone(correction_step)
