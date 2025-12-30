@@ -319,6 +319,50 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
     }
 
 
+def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEntry) -> Dict[str, Any]:
+    """Enable a tool just in time without recording usage (execution will handle usage)."""
+    tool_name = entry.full_name
+    if entry.provider == "mcp":
+        manager = _get_manager()
+        if manager.is_tool_blacklisted(tool_name):
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' is blacklisted and cannot be enabled",
+            }
+
+    try:
+        row, created = PersistentAgentEnabledTool.objects.get_or_create(
+            agent=agent,
+            tool_full_name=tool_name,
+        )
+    except Exception:
+        logger.exception("Failed to auto-enable tool %s for agent %s", tool_name, getattr(agent, "id", None))
+        return {"status": "error", "message": f"Failed to enable tool '{tool_name}'"}
+
+    metadata_updates = _apply_tool_metadata(row, entry)
+    if metadata_updates:
+        row.save(update_fields=metadata_updates)
+
+    evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=get_enabled_tool_limit(agent))
+    if created:
+        logger.info("Auto-enabled tool '%s' for agent %s", tool_name, agent.id)
+    if evicted:
+        logger.info(
+            "Auto-enabled tool '%s' evicted %d tool(s) for agent %s: %s",
+            tool_name,
+            len(evicted),
+            agent.id,
+            ", ".join(evicted),
+        )
+
+    return {
+        "status": "success",
+        "enabled": tool_name,
+        "already_enabled": not created,
+        "evicted": evicted,
+    }
+
+
 def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     """Enable a single MCP tool for the agent (with LRU eviction if needed)."""
     catalog = _build_available_tool_index(agent)
@@ -651,7 +695,12 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
         }
 
     if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
-        return {"status": "error", "message": f"Tool '{tool_name}' is not enabled for this agent"}
+        auto_enable = _auto_enable_tool_for_execution(agent, entry)
+        if auto_enable.get("status") != "success":
+            return {
+                "status": "error",
+                "message": auto_enable.get("message", f"Tool '{tool_name}' is not enabled for this agent"),
+            }
 
     if entry.provider == "mcp":
         return execute_mcp_tool(agent, tool_name, params)

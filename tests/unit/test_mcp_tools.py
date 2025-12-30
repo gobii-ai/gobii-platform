@@ -1396,6 +1396,34 @@ class MCPToolIntegrationTests(TestCase):
                 if first_time is not None:
                     self.assertGreater(second_time, first_time)
 
+    @patch('api.agent.tools.tool_manager._get_manager')
+    @patch('api.agent.tools.tool_manager.execute_mcp_tool')
+    def test_execute_enabled_tool_auto_enables_mcp(self, mock_execute, mock_get_manager):
+        """Tool execution should auto-enable MCP tools when missing."""
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test", {})
+        ]
+        mock_manager.is_tool_blacklisted.return_value = False
+        mock_get_manager.return_value = mock_manager
+
+        mock_execute.return_value = {"status": "success", "result": "ok"}
+
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent, tool_full_name="mcp_test_tool"
+            ).exists()
+        )
+        result = execute_enabled_tool(self.agent, "mcp_test_tool", {"foo": "bar"})
+
+        self.assertEqual(result["status"], "success")
+        mock_execute.assert_called_once_with(self.agent, "mcp_test_tool", {"foo": "bar"})
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent, tool_full_name="mcp_test_tool"
+            ).exists()
+        )
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_builtin_execution_updates_usage(self, mock_init, mock_get_tools):
@@ -1429,6 +1457,29 @@ class MCPToolIntegrationTests(TestCase):
         self.assertEqual(result["status"], "ok")
         mock_sqlite.assert_called_once_with(self.agent, {"queries": ["select 1"]})
         row.refresh_from_db()
+        self.assertIsNotNone(row.last_used_at)
+        self.assertEqual(row.usage_count, 1)
+
+    @patch('api.agent.tools.tool_manager._get_manager')
+    def test_execute_enabled_tool_auto_enables_builtin(self, mock_get_manager):
+        """Tool execution should auto-enable builtin tools when missing."""
+        from api.agent.tools import tool_manager as tm
+
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+
+        mock_executor = MagicMock(return_value={"status": "ok"})
+        original_executor = tm.BUILTIN_TOOL_REGISTRY["read_file"]["executor"]
+        try:
+            tm.BUILTIN_TOOL_REGISTRY["read_file"]["executor"] = mock_executor
+            result = execute_enabled_tool(self.agent, "read_file", {"path": "notes.md"})
+        finally:
+            tm.BUILTIN_TOOL_REGISTRY["read_file"]["executor"] = original_executor
+
+        self.assertEqual(result["status"], "ok")
+        mock_executor.assert_called_once_with(self.agent, {"path": "notes.md"})
+        row = PersistentAgentEnabledTool.objects.get(agent=self.agent, tool_full_name="read_file")
         self.assertIsNotNone(row.last_used_at)
         self.assertEqual(row.usage_count, 1)
 
