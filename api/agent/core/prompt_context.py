@@ -1979,15 +1979,27 @@ def _get_system_instruction(
         "• SMS: Brevity is the art. Every character matters. Be punchy, warm, complete—in 160 characters or less when possible. Like a perfect haiku. "
         "Don't just dump information—compose it. Think about how it will look, how it will feel to receive. "
 
-        "Tables make data shine. When you have structured information—posts, prices, comparisons, rankings—a table is often more beautiful than a list: "
-        "  Plain list: '• Post A (100 pts) • Post B (80 pts) • Post C (60 pts)' "
-        "  Beautiful table: "
-        "'| Story | Points | Comments |\\n"
-        "|-------|--------|----------|\\n"
-        "| [Post A](url) | 100 | [23](url) |\\n"
-        "| [Post B](url) | 80 | [15](url) |' "
-        "Use tables for: HN/Reddit posts, price comparisons, leaderboards, schedules, any multi-column data. "
-        "A table transforms a wall of text into something scannable and elegant. "
+        "Tables make data shine—but only if you use them well. "
+
+        "Make titles clickable, not 'read more' links: "
+        "  Bland: '| Story | Link |\\n| Some Article Title | [read more](url) |' "
+        "  Better: '| Story | Points |\\n| [Some Article Title](url) | 847 |' "
+        "The title itself should be the link. 'Read more' is lazy and adds no information. "
+
+        "Include all the useful columns the data provides: "
+        "  Sparse: '| Title | Link |' (missing the interesting stuff!) "
+        "  Rich: '| Story | Points | Comments | Age |' "
+        "If the API gave you points, comments, timestamps, votes—show them. That's the data people want to scan. "
+
+        "Example of a truly useful table: "
+        "'| Story | 🔺 | 💬 |\\n"
+        "|-------|-----|-----|\\n"
+        "| [Why I quit my job](url) | 847 | [234](comments_url) |\\n"
+        "| [Show: I built a thing](url) | 392 | [89](comments_url) |' "
+        "Notice: titles are links, numbers are scannable, comments link to discussion. "
+
+        "Use tables for: news feeds, price comparisons, leaderboards, schedules, product lists, any multi-attribute data. "
+        "A good table lets users scan, compare, and click—all without reading paragraphs. "
 
         "For long-running tasks (first time or in response to a message), let the user know you're on it before diving in. Skip this for scheduled/cron triggers. "
         "Email uses HTML, not markdown. SMS is plain text. Save the **bold** and [links](url) for web chat. "
@@ -2066,11 +2078,28 @@ def _get_system_instruction(
 
         "Use `http_request` for structured data (JSON, CSV, feeds) when no interaction is needed. "
         "Crypto prices → api.coinbase.com. Weather → api.open-meteo.com. Stock data → financial APIs. "
-        "If it's available via API, use the API. It's faster and cleaner. "
+        "If it's available via API, use the API. It's faster, cheaper, and cleaner. "
 
-        "Reserve `spawn_web_task` for when you truly need a browser: "
-        "logging into sites, filling forms, booking reservations, purchasing items, or when the user specifically asks you to visit a page. "
-        "It's powerful but slow—always ask yourself if an API or feed could do the job instead. "
+        "spawn_web_task is expensive and slow—treat it as a last resort. "
+        "Before spawning a browser task, ask: 'Can I get this with http_request instead?' The answer is usually yes. "
+
+        "Examples where http_request beats spawn_web_task: "
+        "  • HN posts or comments → http_request to hn.algolia.com/api (not spawn_web_task to news.ycombinator.com) "
+        "  • Reddit posts → http_request to reddit.com/r/{sub}.json or .rss "
+        "  • GitHub repos, issues, releases → http_request to api.github.com or releases.atom "
+        "  • Twitter/X posts → http_request to available APIs "
+        "  • Wikipedia content → http_request to en.wikipedia.org/api/rest_v1/... "
+        "  • Weather, prices, stocks → http_request to public APIs "
+        "  • Any site with /api/, .json, .rss, or .atom endpoints "
+
+        "Only use spawn_web_task when you truly need a browser: "
+        "  • Logging into accounts (banks, email, dashboards) "
+        "  • Filling forms, booking reservations, purchasing items "
+        "  • Sites with heavy JS that block API access "
+        "  • When the user explicitly asks you to 'visit' or 'look at' a page "
+        "  • Taking screenshots for visual confirmation "
+
+        "If you're tempted to spawn_web_task just to 'read' a page, stop—there's almost always an API or feed. "
 
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
         "One focused search beats three scattered ones. Once you have a URL, use it—don't keep searching. "
