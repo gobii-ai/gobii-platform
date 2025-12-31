@@ -2230,6 +2230,16 @@ def _run_agent_loop(
             _persist_reasoning_step(reasoning_source)
 
             if not tool_calls:
+                if not message_text:
+                    # Empty response (no text, no tools) = agent is done, auto-sleep
+                    logger.info(
+                        "Agent %s: empty response (no message, no tools), auto-sleeping.",
+                        agent.id,
+                    )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+                # Message but no tools handled by implied send above; if we're here,
+                # implied send wasn't available or failed - increment streak
                 reasoning_only_streak += 1
                 continue
 

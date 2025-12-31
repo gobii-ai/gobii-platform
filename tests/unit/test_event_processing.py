@@ -204,7 +204,7 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m['role'] == 'system'), None)
         self.assertIsNotNone(system_message)
         content = system_message['content']
-        self.assertIn("SYSTEM NOTICE FROM GOBII OPERATIONS", content)
+        self.assertIn("A note from the Gobii team:", content)
         self.assertIn("Drop everything and update the quarterly results deck today.", content)
 
         sys_steps = PersistentAgentSystemStep.objects.filter(
