@@ -820,6 +820,39 @@ def build_prompt_context(
         non_shrinkable=True,
     )
 
+    # Response patterns - explicit guidance on how output maps to behavior
+    important_group.section_text(
+        "response_patterns",
+        (
+            "YOUR RESPONSE PATTERN = YOUR INTENT:\n"
+            "Your output structure tells the system what you want to do. Learn these patterns:\n\n"
+            "PATTERN 1: Empty response (no text, no tools)\n"
+            "  Meaning: 'Nothing to do right now'\n"
+            "  Result: Auto-sleep until next trigger\n"
+            "  Use when: Schedule fired but nothing to report, no action needed\n"
+            "  Example: [return nothing]\n\n"
+            "PATTERN 2: Message only (no tools)\n"
+            "  Meaning: 'Here is my reply, I am done'\n"
+            "  Result: Message sends, then auto-sleep\n"
+            "  Use when: Answering a question, giving an update, done for now\n"
+            "  Example: 'Here are the results you asked for: ...'\n\n"
+            "PATTERN 3: Message + tools\n"
+            "  Meaning: 'Here is my reply, and I have more work'\n"
+            "  Result: Message sends, tools execute, may continue\n"
+            "  Use when: Acknowledging user + taking action\n"
+            "  Example: 'Got it, looking into that now!' + [http_request(...)]\n\n"
+            "PATTERN 4: Tools only (no message)\n"
+            "  Meaning: 'Working silently'\n"
+            "  Result: Tools execute, no message sent\n"
+            "  Use when: Background work, scheduled tasks with no user-facing update\n"
+            "  Example: [update_charter(...)] + [sleep_until_next_trigger(...)]\n\n"
+            "IMPORTANT: Message-only responses (Pattern 2) assume you are DONE. "
+            "If you need to do more work after replying, use Pattern 3 (message + tools)."
+        ),
+        weight=4,
+        non_shrinkable=True,
+    )
+
     # Secrets block
     secrets_block = _get_secrets_block(agent)
     important_group.section_text(
@@ -1690,15 +1723,19 @@ def _get_formatting_guidance(
     # Build guidance based on primary medium
     if primary_medium == "WEB":
         return (
-            "FORMAT FOR WEB CHAT (Markdown):\n"
-            "• Use **bold** for emphasis, headers for sections\n"
-            "• Use bullet lists for multiple items—never walls of text\n"
-            "• Keep paragraphs to 2-3 sentences max\n"
-            "Example:\n"
-            '  "**Here\'s what I found:**\n\n'
-            "  - BTC: $67k (+2.3%)\n"
-            "  - ETH: $3.4k (+1.8%)\n\n"
-            '  Want me to set up alerts?"'
+            "FORMAT FOR WEB CHAT (Rich Markdown):\n"
+            "Make your output beautiful and scannable:\n"
+            "• **Bold** for emphasis, ## headers for sections\n"
+            "• Bullet/numbered lists for multiple items\n"
+            "• Tables for comparative data (use | col1 | col2 | format)\n"
+            "• Short paragraphs (2-3 sentences max)\n"
+            "Example with table:\n"
+            '  "## Current Prices\n\n'
+            "  | Asset | Price | 24h |\n"
+            "  |-------|-------|-----|\n"
+            "  | BTC | $67k | +2.3% |\n"
+            "  | ETH | $3.4k | +1.8% |\n\n"
+            '  Looking bullish! Want alerts?"'
         )
     elif primary_medium == "SMS":
         return (
@@ -1711,22 +1748,28 @@ def _get_formatting_guidance(
         )
     elif primary_medium == "EMAIL":
         return (
-            "FORMAT FOR EMAIL (Lightweight HTML):\n"
-            "• Use semantic HTML: <p>, <ul>, <li>, <strong>\n"
-            "• NO markdown syntax in emails\n"
-            "• Use single quotes for HTML attributes\n"
-            "Example:\n"
+            "FORMAT FOR EMAIL (Rich HTML):\n"
+            "Craft beautiful, structured emails:\n"
+            "• Semantic HTML: <p>, <ul>, <li>, <strong>, <em>\n"
+            "• Tables for data: <table>, <tr>, <th>, <td>\n"
+            "• NO markdown—use HTML only\n"
+            "• Single quotes for attributes\n"
+            "Example with table:\n"
             "  \"<p>Here's your update:</p>\n"
-            "  <ul><li><strong>BTC</strong>: $67k (+2.3%)</li></ul>\n"
-            '  <p>Let me know if you want to adjust alerts.</p>"'
+            "  <table>\n"
+            "    <tr><th>Asset</th><th>Price</th><th>24h</th></tr>\n"
+            "    <tr><td>BTC</td><td>$67k</td><td>+2.3%</td></tr>\n"
+            "    <tr><td>ETH</td><td>$3.4k</td><td>+1.8%</td></tr>\n"
+            "  </table>\n"
+            '  <p>Looking bullish! Let me know if you want alerts.</p>"'
         )
     else:
         # Multiple channels or unknown—give compact reference for all
         return (
             "MESSAGE FORMATTING BY CHANNEL:\n"
-            "• WEB CHAT: Markdown (**bold**, bullets, headers)\n"
-            "• EMAIL: HTML (<p>, <ul>, <strong>)—NO markdown\n"
-            "• SMS: Plain text only, keep short (≤160 chars ideal)"
+            "• WEB CHAT: Rich markdown (**bold**, headers, tables, lists)\n"
+            "• EMAIL: Rich HTML (<table>, <ul>, <strong>)—NO markdown\n"
+            "• SMS: Plain text only, ≤160 chars ideal"
         )
 
 
@@ -1862,10 +1905,11 @@ def _get_system_instruction(
         "It is up to you to determine the cron schedule, if any, you need to execute on. "
         "Use the 'update_schedule' tool to update your cron schedule if you have a good reason to change it. "
         "Your schedule should only be as frequent as it needs to be to meet your goals - prefer a slower frequency. "
-        "'will_continue_work': DEFAULTS TO TRUE. You MUST explicitly set will_continue_work=false on your last tool call when you're done. If you don't, the system assumes you have more work and gives you another cycle. "
-        "CRITICAL: If you fetch data (http_request, search, RSS) that you need to REPORT to the user, you MUST use will_continue_work=true on the fetch—you still need another cycle to send the results! "
-        "Set false ONLY when: responding to 'hi', simple acknowledgments, storing info (update_charter), or when you have ALREADY reported everything to the user in this cycle. "
-        "Set true when: you fetched data that still needs to be reported, you need tools that aren't enabled yet, or multi-step tasks are in progress. "
+        "'will_continue_work' (for tool calls only): "
+        "Set TRUE when you fetched data that still needs to be reported, or multi-step work is in progress. "
+        "Set FALSE (or omit) when you're done—simple acknowledgments, storing info, or you've already reported everything. "
+        "CRITICAL: Fetching data (http_request, search) is NOT done—you still need to REPORT it! Use will_continue_work=true on the fetch. "
+        "Remember: Message-only responses (no tools) = done automatically. Empty responses = auto-sleep. "
         "RANDOMIZE SCHEDULE IF POSSIBLE TO AVOID THUNDERING HERD. "
         "REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISE TIMING --CONFIRM WITH THE USER. "
         "IF RELEVANT, ASK THE USER DETAILS SUCH AS TIMEZONE, etc. "
@@ -2009,41 +2053,22 @@ def _get_system_instruction(
 
         "search_tools enables integrations (not web search)—call it to unlock tools for Instagram, LinkedIn, Reddit, etc. "
 
-        "HOW RESPONSES WORK: "
-        "- Text you write (web chat only) = message sent to user. For SMS/email, send via tools. Tool calls = actions you take. "
-        "- You can combine both: text + tool calls in one response. "
-        "- No tool calls in response = done for now, auto-sleep until next trigger. "
+        "RESPONSE EXAMPLES (learn from these!): "
+        "'hi' → 'Hey! What can I help with?' — message only, done. "
+        "'thanks!' → 'You're welcome!' — message only, done. "
+        "'use only public APIs' → 'Got it!' + update_charter(...) — reply + tool, done. "
+        "'remember X' → update_charter(...) — tool only, done. "
+        "Cron fires, nothing new → (empty response) — auto-sleep. "
+        "'what's the weather?' → http_request(will_continue_work=true) → [next cycle] → 'The weather is...' — fetch then report. "
+        "'what's on HN?' → http_request(will_continue_work=true) → [next cycle] → 'Top stories: ...' — fetch then report. "
+        "'find flights to Tokyo' → search_tools(will_continue_work=true) → [next cycle] → spawn_web_task(...) — multi-step. "
+        "'check my bank' → spawn_web_task(...) — single action, done. "
 
-        "RESPONSE EXAMPLES: "
-        "'use only public APIs' → 'Got it!' + update_charter(will_continue_work=false). "
-        "'what's the weather?' → http_request(api.open-meteo.com, will_continue_work=true) → next cycle: report weather to user (will_continue_work=false). "
-        "'what's on HN?' → http_request(news.ycombinator.com/rss, will_continue_work=true) → next cycle: report stories with links (will_continue_work=false). "
-        "'thanks!' → 'You're welcome!' (no tools, will_continue_work=false is implicit). "
-        "'hi' → 'Hey! What can I help with?' (no tools needed). "
-        "Cron fires, nothing new → (empty response). "
-        "'find flights to Tokyo' → search_tools(will_continue_work=true) → next cycle: spawn_web_task(will_continue_work=false). "
-        "'check my bank' → spawn_web_task(will_continue_work=false). "
-
-        "KEY PATTERNS: "
-        "1. Reply + action (no data to report): 'Got it!' + update_charter(will_continue_work=false) — done. "
-        "2. Action only (no data to report): update_charter(will_continue_work=false) — done. "
-        "3. Reply only: 'Sure thing!' — no tools, done. "
-        "4. Nothing: empty response — nothing to do, done. "
-        "5. DATA FETCH → REPORT (most common!): http_request(will_continue_work=true) → next cycle: report to user (will_continue_work=false) — done after reporting. "
-        "6. Multi-step: tool(will_continue_work=true) → next cycle → tool(will_continue_work=false) — done after last step. "
-        "REMEMBER: Fetching data is NOT the end—reporting it to the user is! "
-
-        "will_continue_work: Set false when done, true when continuing. "
-        "After fetching data (http_request, search, etc.), you usually need will_continue_work: true to process/report the result. "
-        "DONE examples (will_continue_work: false): "
-        "- 'hi' → send_email + update_charter, both with will_continue_work: false. DONE. "
-        "- 'remember X' → update_charter with will_continue_work: false. DONE. "
-        "CONTINUING examples (will_continue_work: true then false): "
-        "- 'check bitcoin' → http_request(will_continue_work: true) → report price to user(will_continue_work: false). DONE. "
-        "- 'book flight' → search_tools(will_continue_work: true) → spawn_web_task(will_continue_work: false). DONE. "
-        "FIRST RUN 'hi': send_email (will_continue_work: false) + update_charter (will_continue_work: false). Tool calls only, no text after. "
-
-        "WHEN YOU'RE DONE: Your last tool call MUST have will_continue_work=false. Then submit empty response or no further text. "
+        "THE FETCH→REPORT PATTERN (most common!): "
+        "When you fetch data (http_request, search, RSS), you are NOT done—you still need to REPORT it to the user! "
+        "Step 1: http_request(..., will_continue_work=true) — fetching, need another cycle "
+        "Step 2: 'Here's what I found: ...' — reporting, now done "
+        "Fetching data without reporting it = incomplete work. Always report what you fetch. "
 
         "Use explicit send_email/send_sms/send_chat_message for: first contact, new recipients, changing channel, or custom subject lines. "
         "For ongoing web chat conversations, just write your message as text—it auto-sends in web chat. For SMS/email, always use explicit send_email/send_sms. "
