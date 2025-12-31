@@ -914,6 +914,10 @@ REDDIT_USER_AGENT = env("REDDIT_USER_AGENT", default="gobii-platform/1.0")
 REDDIT_TEST_EVENT_CODE = env("REDDIT_TEST_EVENT_CODE", default="")
 REDDIT_CAPI_TEST_MODE = env.bool("REDDIT_CAPI_TEST_MODE", default=False)
 
+# Marketing/CAPI value tuning
+CAPI_LTV_MULTIPLE = env.float("CAPI_LTV_MULTIPLE", default=5.0)
+CAPI_REGISTRATION_VALUE = env.float("CAPI_REGISTRATION_VALUE", default=10.0)
+
 LINKEDIN_SIGNUP_CONVERSION_ID = env(
     "LINKEDIN_SIGNUP_CONVERSION_ID",
     default=_proprietary_default("analytics", "LINKEDIN_SIGNUP_CONVERSION_ID"),

@@ -174,9 +174,11 @@ def _prepare_stripe_or_404() -> None:
 
 
 def _build_checkout_success_url(request, *, event_id: str, price: float) -> tuple[str, bool]:
+    ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
+    ltv_price = price * ltv_multiple
     success_params = {
         "subscribe_success": 1,
-        "p": f"{price:.2f}",
+        "p": f"{ltv_price:.2f}",
         "eid": event_id,
     }
     default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
