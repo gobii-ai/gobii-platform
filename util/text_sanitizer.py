@@ -3,7 +3,7 @@
 import re
 import unicodedata
 
-__all__ = ["strip_control_chars"]
+__all__ = ["strip_control_chars", "strip_markdown_for_sms", "normalize_whitespace"]
 
 
 _ALLOWABLE_CONTROL_CHARS = {"\n", "\r", "\t"}
@@ -39,3 +39,63 @@ def strip_control_chars(value: str | None) -> str:
         ch for ch in text
         if (unicodedata.category(ch)[0] != "C") or ch in _ALLOWABLE_CONTROL_CHARS
     )
+
+
+# Patterns for markdown stripping in SMS
+_MARKDOWN_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")  # **bold**
+_MARKDOWN_ITALIC_STAR_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")  # *italic*
+_MARKDOWN_BOLD_UNDER_RE = re.compile(r"__(.+?)__")  # __bold__
+_MARKDOWN_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")  # _italic_
+_MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")  # `code`
+_MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")  # [text](url)
+_MARKDOWN_HEADER_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)  # # Header
+
+
+def strip_markdown_for_sms(value: str | None) -> str:
+    """
+    Strip markdown formatting from SMS message bodies.
+
+    Converts markdown to plain text:
+    - **bold** or __bold__ → bold
+    - *italic* or _italic_ → italic
+    - `code` → code
+    - [text](url) → text (url)
+    - # Header → Header
+    """
+    if not isinstance(value, str):
+        return ""
+
+    text = value
+
+    # Order matters: bold before italic to avoid partial matches
+    text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_STAR_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_CODE_RE.sub(r"\1", text)
+    text = _MARKDOWN_LINK_RE.sub(r"\1 (\2)", text)
+    text = _MARKDOWN_HEADER_RE.sub("", text)
+
+    return text
+
+
+# Pattern for excessive newlines
+_EXCESSIVE_NEWLINES_RE = re.compile(r"\n{3,}")
+
+
+def normalize_whitespace(value: str | None) -> str:
+    """
+    Normalize whitespace in message bodies.
+
+    - Collapses 3+ consecutive newlines to 2 (preserves paragraph breaks)
+    - Strips trailing whitespace from each line
+    """
+    if not isinstance(value, str):
+        return ""
+
+    # Collapse excessive newlines (3+ → 2)
+    text = _EXCESSIVE_NEWLINES_RE.sub("\n\n", value)
+
+    # Strip trailing whitespace from each line
+    lines = [line.rstrip() for line in text.split("\n")]
+    return "\n".join(lines)

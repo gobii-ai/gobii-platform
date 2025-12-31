@@ -787,23 +787,15 @@ def build_prompt_context(
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
-    # Email formatting warning - important behavioral constraint
-    important_group.section_text(
-        "email_formatting_warning",
-        "YOU MUST NOT USE MARKDOWN FORMATTING IN EMAILS! ",
-        weight=2,
-        non_shrinkable=True
-    )
-
-    # Implied send status - shows agent whether text auto-sends to web chat
+    # Implied send status and formatting guidance
     implied_send_active, implied_send_address = _get_implied_send_status(agent)
     if implied_send_active:
         important_group.section_text(
             "implied_send_status",
             (
-                f"IMPLIED SEND ACTIVE: Your text output will automatically call "
+                f"IMPLIED SEND ACTIVE → WEB CHAT: Your text output will automatically call "
                 f"send_chat_message(to_address=\"{implied_send_address}\", body=<your text>). "
-                f"Just write your message—no explicit send_chat_message needed for web chat."
+                f"Just write your message—no explicit send_chat_message needed."
             ),
             weight=2,
             non_shrinkable=True,
@@ -818,6 +810,15 @@ def build_prompt_context(
             weight=2,
             non_shrinkable=True,
         )
+
+    # Dynamic formatting guidance based on current medium context
+    formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
+    important_group.section_text(
+        "formatting_guidance",
+        formatting_guidance,
+        weight=3,
+        non_shrinkable=True,
+    )
 
     # Secrets block
     secrets_block = _get_secrets_block(agent)
@@ -1665,6 +1666,68 @@ def _get_implied_send_status(agent: PersistentAgent) -> tuple[bool, str | None]:
             exc_info=True,
         )
     return False, None
+
+
+def _get_formatting_guidance(
+    agent: PersistentAgent,
+    implied_send_active: bool,
+) -> str:
+    """
+    Build formatting guidance based on the agent's current context.
+
+    Determines primary medium from:
+    1. Implied send active → web chat
+    2. Preferred contact endpoint → that channel
+    3. Fallback → general guidance for all channels
+    """
+    # Determine primary medium
+    primary_medium = None
+    if implied_send_active:
+        primary_medium = "WEB"
+    elif agent.preferred_contact_endpoint:
+        primary_medium = agent.preferred_contact_endpoint.channel
+
+    # Build guidance based on primary medium
+    if primary_medium == "WEB":
+        return (
+            "FORMAT FOR WEB CHAT (Markdown):\n"
+            "• Use **bold** for emphasis, headers for sections\n"
+            "• Use bullet lists for multiple items—never walls of text\n"
+            "• Keep paragraphs to 2-3 sentences max\n"
+            "Example:\n"
+            '  "**Here\'s what I found:**\n\n'
+            "  - BTC: $67k (+2.3%)\n"
+            "  - ETH: $3.4k (+1.8%)\n\n"
+            '  Want me to set up alerts?"'
+        )
+    elif primary_medium == "SMS":
+        return (
+            "FORMAT FOR SMS (Plain text, short):\n"
+            "• No markdown, no formatting—plain text only\n"
+            "• Aim for ≤160 chars when possible\n"
+            "• Be punchy and direct\n"
+            "Example:\n"
+            '  "BTC $67k (+2.3%), ETH $3.4k (+1.8%). Looking bullish today!"'
+        )
+    elif primary_medium == "EMAIL":
+        return (
+            "FORMAT FOR EMAIL (Lightweight HTML):\n"
+            "• Use semantic HTML: <p>, <ul>, <li>, <strong>\n"
+            "• NO markdown syntax in emails\n"
+            "• Use single quotes for HTML attributes\n"
+            "Example:\n"
+            "  \"<p>Here's your update:</p>\n"
+            "  <ul><li><strong>BTC</strong>: $67k (+2.3%)</li></ul>\n"
+            '  <p>Let me know if you want to adjust alerts.</p>"'
+        )
+    else:
+        # Multiple channels or unknown—give compact reference for all
+        return (
+            "MESSAGE FORMATTING BY CHANNEL:\n"
+            "• WEB CHAT: Markdown (**bold**, bullets, headers)\n"
+            "• EMAIL: HTML (<p>, <ul>, <strong>)—NO markdown\n"
+            "• SMS: Plain text only, keep short (≤160 chars ideal)"
+        )
 
 
 def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
