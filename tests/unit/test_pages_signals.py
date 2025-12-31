@@ -483,17 +483,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_RENEWED)
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
 
-        self.mock_capi.assert_called_once()
-        capi_kwargs = self.mock_capi.call_args.kwargs
-        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
-        props = capi_kwargs["properties"]
-        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
-        self.assertEqual(props["subscription_id"], "sub_123")
-        self.assertTrue(props.get("renewal"))
-        self.assertAlmostEqual(props["value"], 29.99, places=2)
-        self.assertEqual(props["currency"], "USD")
-        self.assertTrue(capi_kwargs["context"].get("consent"))
-        self.assertNotIn("event_id", props)
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
