@@ -77,6 +77,8 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
 
         self.assertEqual(cleaned["items"][0]["p"], 1)
         self.assertEqual(cleaned["items"][1]["p"], 2)  # Auto-generated
+        nested = cleaned["organic"][0]
+        self.assertNotIn("images", nested)
 
     def test_batch_adapter_strips_nested_images(self):
         payload = [
