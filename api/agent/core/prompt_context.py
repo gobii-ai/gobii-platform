@@ -39,6 +39,7 @@ from ...models import (
     AgentPeerLink,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    build_web_user_address,
     CommsAllowlistEntry,
     CommsChannel,
     PersistentAgent,
@@ -53,6 +54,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentEnabledTool,
 )
+from ...services.web_sessions import get_active_web_sessions
 
 from .budget import AgentBudgetManager, get_current_context as get_budget_context
 from .compaction import ensure_comms_compacted, ensure_steps_compacted, llm_summarise_comms
@@ -792,6 +794,30 @@ def build_prompt_context(
         weight=2,
         non_shrinkable=True
     )
+
+    # Implied send status - shows agent whether text auto-sends to web chat
+    implied_send_active, implied_send_address = _get_implied_send_status(agent)
+    if implied_send_active:
+        important_group.section_text(
+            "implied_send_status",
+            (
+                f"IMPLIED SEND ACTIVE: Your text output will automatically call "
+                f"send_chat_message(to_address=\"{implied_send_address}\", body=<your text>). "
+                f"Just write your message—no explicit send_chat_message needed for web chat."
+            ),
+            weight=2,
+            non_shrinkable=True,
+        )
+    else:
+        important_group.section_text(
+            "implied_send_status",
+            (
+                "IMPLIED SEND INACTIVE (no live web session). "
+                "Use explicit send_chat_message, send_email, or send_sms with full parameters."
+            ),
+            weight=2,
+            non_shrinkable=True,
+        )
 
     # Secrets block
     secrets_block = _get_secrets_block(agent)
@@ -1618,6 +1644,27 @@ def add_budget_awareness_sections(
         )
 
     return True
+
+
+def _get_implied_send_status(agent: PersistentAgent) -> tuple[bool, str | None]:
+    """
+    Check if implied send is active and return the target address if so.
+
+    Returns:
+        Tuple of (is_active, to_address). If inactive, to_address is None.
+    """
+    try:
+        for session in get_active_web_sessions(agent):
+            if session.user_id is not None:
+                to_address = build_web_user_address(session.user_id, agent.id)
+                return True, to_address
+    except Exception:
+        logger.debug(
+            "Failed to check implied send status for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+    return False, None
 
 
 def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
