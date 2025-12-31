@@ -143,7 +143,12 @@ def message_history_limit(agent: PersistentAgent) -> int:
 
 
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
-    """Return the configured prompt token budget for the agent's LLM tier."""
+    """Return the configured prompt token budget for the agent's LLM tier.
+
+    This budget is capped by the minimum max_input_tokens across all enabled
+    endpoints (minus headroom) to prevent "too many input tokens" errors.
+    """
+    from api.agent.core.llm_config import get_min_endpoint_input_tokens, INPUT_TOKEN_HEADROOM
 
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
@@ -151,7 +156,15 @@ def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
         AgentLLMTier.MAX: settings.max_prompt_token_budget,
         AgentLLMTier.PREMIUM: settings.premium_prompt_token_budget,
     }
-    return limit_map.get(tier, settings.standard_prompt_token_budget)
+    tier_budget = limit_map.get(tier, settings.standard_prompt_token_budget)
+
+    # Apply endpoint input token limit if any endpoint has one
+    min_endpoint_limit = get_min_endpoint_input_tokens()
+    if min_endpoint_limit is not None:
+        endpoint_budget = min_endpoint_limit - INPUT_TOKEN_HEADROOM
+        return min(tier_budget, endpoint_budget)
+
+    return tier_budget
 
 
 def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:

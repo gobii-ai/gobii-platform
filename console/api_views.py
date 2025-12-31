@@ -1992,10 +1992,22 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.api_base = (payload.get("api_base") or "").strip()
         if "openrouter_preset" in payload:
             endpoint.openrouter_preset = (payload.get("openrouter_preset") or "").strip()
+        if "max_input_tokens" in payload:
+            val = payload.get("max_input_tokens")
+            if val in (None, "", "auto", "automatic"):
+                endpoint.max_input_tokens = None
+            else:
+                try:
+                    endpoint.max_input_tokens = int(val)
+                except (TypeError, ValueError):
+                    return HttpResponseBadRequest("max_input_tokens must be an integer or 'automatic'")
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         endpoint.save()
         invalidate_llm_bootstrap_cache()
+        # Invalidate the min endpoint input tokens cache when max_input_tokens changes
+        from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
+        invalidate_min_endpoint_input_tokens_cache()
         return _json_ok(endpoint_id=str(endpoint.id))
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
@@ -2004,6 +2016,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
         endpoint.delete()
         invalidate_llm_bootstrap_cache()
+        from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
+        invalidate_min_endpoint_input_tokens_cache()
         return _json_ok()
 
 

@@ -20,6 +20,7 @@ export type ProviderEndpoint = {
   supports_vision?: boolean
   browser_base_url?: string
   max_output_tokens?: number | null
+  max_input_tokens?: number | null
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null

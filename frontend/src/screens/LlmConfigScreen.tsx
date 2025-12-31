@@ -111,6 +111,7 @@ type ProviderEndpointCard = {
   api_base?: string
   browser_base_url?: string
   max_output_tokens?: number | null
+  max_input_tokens?: number | null
   temperature?: number | null
   supports_temperature?: boolean
   supports_vision?: boolean
@@ -156,6 +157,7 @@ type EndpointFormValues = {
   api_base?: string
   browser_base_url?: string
   max_output_tokens?: string
+  max_input_tokens?: string
   supportsToolChoice?: boolean
   useParallelToolCalls?: boolean
   supportsVision?: boolean
@@ -466,6 +468,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       api_base: endpoint.api_base,
       browser_base_url: endpoint.browser_base_url,
       max_output_tokens: endpoint.max_output_tokens ?? null,
+      max_input_tokens: endpoint.max_input_tokens ?? null,
       temperature: endpoint.temperature_override ?? null,
       supports_temperature: endpoint.supports_temperature ?? true,
       supports_vision: endpoint.supports_vision,
@@ -1309,6 +1312,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   )
   const [apiBase, setApiBase] = useState(endpoint.api_base || endpoint.browser_base_url || '')
   const [maxTokens, setMaxTokens] = useState(endpoint.max_output_tokens?.toString() ?? '')
+  const [maxInputTokens, setMaxInputTokens] = useState(endpoint.max_input_tokens?.toString() ?? '')
   const [supportsVision, setSupportsVision] = useState(Boolean(endpoint.supports_vision))
   const [supportsToolChoice, setSupportsToolChoice] = useState(Boolean(endpoint.supports_tool_choice))
   const [parallelTools, setParallelTools] = useState(Boolean(endpoint.use_parallel_tool_calls))
@@ -1323,6 +1327,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       api_base: apiBase,
       browser_base_url: apiBase,
       max_output_tokens: maxTokens,
+      max_input_tokens: maxInputTokens,
       supportsTemperature,
       supportsToolChoice: supportsToolChoice,
       useParallelToolCalls: parallelTools,
@@ -1372,6 +1377,12 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <div>
             <label className="text-xs text-slate-500">Max output tokens</label>
             <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+          </div>
+        )}
+        {isPersistent && (
+          <div>
+            <label className="text-xs text-slate-500">Max input tokens</label>
+            <input type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
           </div>
         )}
       </div>
@@ -1449,6 +1460,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [model, setModel] = useState('')
   const [apiBase, setApiBase] = useState('')
   const [maxTokens, setMaxTokens] = useState('')
+  const [maxInputTokens, setMaxInputTokens] = useState('')
   const [supportsVision, setSupportsVision] = useState(false)
   const [supportsTemperature, setSupportsTemperature] = useState(true)
   const [supportsTools, setSupportsTools] = useState(true)
@@ -1476,6 +1488,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         api_base: apiBase,
         browser_base_url: apiBase,
         max_output_tokens: maxTokens,
+        max_input_tokens: maxInputTokens,
         supportsTemperature,
         supportsVision,
         supportsToolChoice: supportsTools,
@@ -1520,6 +1533,12 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <div>
                 <label className="text-xs text-slate-500">Max output tokens</label>
                 <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
+              </div>
+            )}
+            {type === 'persistent' && (
+              <div>
+                <label className="text-xs text-slate-500">Max input tokens</label>
+                <input type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
               </div>
             )}
             <div className="md:col-span-2">
@@ -2405,6 +2424,8 @@ export function LlmConfigScreen() {
       if (values.openrouterPreset !== undefined) {
         payload.openrouter_preset = values.openrouterPreset.trim()
       }
+      const maxInput = parseNumber(values.max_input_tokens)
+      if (maxInput !== undefined) payload.max_input_tokens = maxInput
       payload.enabled = true
     }
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
@@ -2455,6 +2476,10 @@ export function LlmConfigScreen() {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
       if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
       if (values.openrouterPreset !== undefined) payload.openrouter_preset = values.openrouterPreset.trim()
+      if (values.max_input_tokens !== undefined) {
+        const parsed = parseNumber(values.max_input_tokens)
+        payload.max_input_tokens = parsed ?? null
+      }
     }
     return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
       successMessage: 'Endpoint updated',
