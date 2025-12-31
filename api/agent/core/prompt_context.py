@@ -745,6 +745,28 @@ def build_prompt_context(
         non_shrinkable=True,
     )
 
+    # User's name for personalization
+    user_display_name = None
+    if agent.user:
+        user_display_name = (
+            agent.user.first_name.strip()
+            if agent.user.first_name
+            else None
+        )
+    if user_display_name:
+        important_group.section_text(
+            "user_identity",
+            (
+                f"The user's name is {user_display_name}. "
+                "Use their name occasionally to build rapport—not every message, but naturally. "
+                "Good: 'Hey {name}, found it!' or 'Here's your update, {name}.' "
+                "Bad: Using their name in every sentence (forced, robotic). "
+                "Use it for: greetings, celebrating wins, checking in after a while, or when it feels warm and natural."
+            ).format(name=user_display_name),
+            weight=2,
+            non_shrinkable=True,
+        )
+
     # Schedule block
     schedule_str = agent.schedule if agent.schedule else "No schedule configured"
     # Provide the schedule details and a helpful note as separate sections so Prompt can
