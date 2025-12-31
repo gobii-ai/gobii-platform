@@ -1314,6 +1314,49 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self.assertEqual(mock_write.call_args.kwargs["mime_type"], "application/pdf")
         self.assertEqual(mock_write.call_args.kwargs["dir_name"], DOWNLOADS_DIR_NAME)
 
+    @override_settings(ALLOW_FILE_DOWNLOAD=False)
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_http_request_download_disabled_returns_error(self, mock_proxy, mock_request):
+        params = {
+            "method": "GET",
+            "url": "https://files.example.com/report.pdf",
+            "download": True,
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "error", result)
+        self.assertEqual(result["message"], "File downloads are disabled.")
+        mock_proxy.assert_not_called()
+        mock_request.assert_not_called()
+
+    @patch('api.agent.tools.http_request.write_bytes_to_dir')
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_http_request_download_non_success_returns_error(self, mock_proxy, mock_request, mock_write):
+        mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
+        mock_response = type('Response', (), {
+            'status_code': 404,
+            'headers': {'Content-Type': 'text/plain'},
+            'iter_content': lambda self, chunk_size: [b'not found'],
+            'close': lambda self: None,
+        })()
+        mock_request.return_value = mock_response
+
+        params = {
+            "method": "GET",
+            "url": "https://files.example.com/missing.pdf",
+            "download": True,
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "error", result)
+        self.assertEqual(result["status_code"], 404)
+        mock_request.assert_called_once()
+        mock_write.assert_not_called()
+
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
     def test_no_secrets_no_substitution(self, mock_proxy, mock_request):

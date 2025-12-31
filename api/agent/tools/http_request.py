@@ -27,6 +27,22 @@ PREVIEW_MAX_BYTES = 30 * 1024
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
 
+class _ResponseBodyResult:
+    def __init__(
+        self,
+        content_bytes: bytes,
+        preview_bytes: bytes,
+        total_bytes: int,
+        truncated: bool,
+        over_limit: bool,
+    ) -> None:
+        self.content_bytes = content_bytes
+        self.preview_bytes = preview_bytes
+        self.total_bytes = total_bytes
+        self.truncated = truncated
+        self.over_limit = over_limit
+
+
 def _coerce_optional_bool(value: Any) -> bool | None:
     if value is None:
         return None
@@ -35,6 +51,19 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     if isinstance(value, str):
         return value.lower() == "true"
     return None
+
+
+def _decode_filename_star(value: str) -> str:
+    value = value.strip().strip('"')
+    charset, sep, encoded = value.partition("''")
+    if sep:
+        if not charset:
+            return urllib.parse.unquote(encoded)
+        try:
+            return urllib.parse.unquote(encoded, encoding=charset)
+        except (LookupError, UnicodeDecodeError):
+            return urllib.parse.unquote(encoded)
+    return urllib.parse.unquote(value)
 
 
 def _extract_filename_from_disposition(content_disposition: str | None) -> str | None:
@@ -47,11 +76,7 @@ def _extract_filename_from_disposition(content_disposition: str | None) -> str |
         lower = part.lower()
         if lower.startswith("filename*="):
             value = part.split("=", 1)[1].strip().strip('"')
-            if "''" in value:
-                _, encoded = value.split("''", 1)
-                filename_star = urllib.parse.unquote(encoded)
-            else:
-                filename_star = urllib.parse.unquote(value)
+            filename_star = _decode_filename_star(value)
         elif lower.startswith("filename="):
             filename = part.split("=", 1)[1].strip().strip('"')
     return filename_star or filename
@@ -63,10 +88,71 @@ def _resolve_download_name(url: str, content_disposition: str | None) -> str | N
         return filename
     try:
         path = urllib.parse.urlparse(url).path
-    except Exception:
+    except ValueError:
         return None
     base = os.path.basename(path)
     return base or None
+
+
+def _read_response_body(
+    resp: requests.Response,
+    download_requested: bool,
+    max_download_bytes: int | None,
+    content_length: int | None,
+) -> _ResponseBodyResult:
+    total_bytes = 0
+    if download_requested:
+        download_chunks = []
+        preview_chunks = []
+        preview_read = 0
+        for chunk in resp.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+            if not chunk:
+                break
+            next_total = total_bytes + len(chunk)
+            if max_download_bytes and next_total > max_download_bytes:
+                total_bytes = next_total
+                return _ResponseBodyResult(
+                    content_bytes=b"".join(download_chunks),
+                    preview_bytes=b"".join(preview_chunks),
+                    total_bytes=total_bytes,
+                    truncated=total_bytes > PREVIEW_MAX_BYTES,
+                    over_limit=True,
+                )
+            download_chunks.append(chunk)
+            total_bytes = next_total
+            if preview_read < PREVIEW_MAX_BYTES:
+                take = min(len(chunk), PREVIEW_MAX_BYTES - preview_read)
+                preview_chunks.append(chunk[:take])
+                preview_read += take
+        return _ResponseBodyResult(
+            content_bytes=b"".join(download_chunks),
+            preview_bytes=b"".join(preview_chunks),
+            total_bytes=total_bytes,
+            truncated=total_bytes > PREVIEW_MAX_BYTES,
+            over_limit=False,
+        )
+
+    preview_chunks = []
+    bytes_read = 0
+    for chunk in resp.iter_content(chunk_size=1024):
+        if not chunk:
+            break
+        if bytes_read + len(chunk) > PREVIEW_MAX_BYTES:
+            chunk = chunk[: PREVIEW_MAX_BYTES - bytes_read]
+        preview_chunks.append(chunk)
+        bytes_read += len(chunk)
+        if bytes_read >= PREVIEW_MAX_BYTES:
+            break
+    truncated = bytes_read >= PREVIEW_MAX_BYTES or (
+        content_length is not None and content_length > bytes_read
+    )
+    return _ResponseBodyResult(
+        content_bytes=b"",
+        preview_bytes=b"".join(preview_chunks),
+        total_bytes=bytes_read,
+        truncated=truncated,
+        over_limit=False,
+    )
 
 
 def get_http_request_tool() -> Dict[str, Any]:
@@ -129,6 +215,8 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     download_requested = _coerce_optional_bool(params.get("download")) is True
+    if download_requested and not getattr(settings, "ALLOW_FILE_DOWNLOAD", False):
+        return {"status": "error", "message": "File downloads are disabled."}
 
     # Log original request details (before secret substitution)
     logger.info(
@@ -299,6 +387,14 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     except RequestException as e:
         return {"status": "error", "message": f"HTTP request failed: {e}"}
 
+    if download_requested and (resp.status_code < 200 or resp.status_code >= 300):
+        resp.close()
+        return {
+            "status": "error",
+            "message": f"Download failed with status {resp.status_code}.",
+            "status_code": resp.status_code,
+        }
+
     content_length = resp.headers.get("Content-Length")
     try:
         content_length = int(content_length) if content_length else None
@@ -316,60 +412,29 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             ),
         }
 
-    content_bytes = b""
-    preview_bytes = b""
-    total_bytes = 0
-    truncated = False
     try:
-        if download_requested:
-            download_chunks = []
-            preview_chunks = []
-            preview_read = 0
-            download_over_limit = False
-            for chunk in resp.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
-                if not chunk:
-                    break
-                next_total = total_bytes + len(chunk)
-                if max_download_bytes and next_total > max_download_bytes:
-                    total_bytes = next_total
-                    download_over_limit = True
-                    break
-                download_chunks.append(chunk)
-                total_bytes = next_total
-                if preview_read < PREVIEW_MAX_BYTES:
-                    take = min(len(chunk), PREVIEW_MAX_BYTES - preview_read)
-                    preview_chunks.append(chunk[:take])
-                    preview_read += take
-            content_bytes = b"".join(download_chunks)
-            preview_bytes = b"".join(preview_chunks)
-            truncated = total_bytes > PREVIEW_MAX_BYTES
-            if download_over_limit:
-                return {
-                    "status": "error",
-                    "message": (
-                        f"File exceeds maximum allowed size ({total_bytes} bytes > "
-                        f"{max_download_bytes} bytes)."
-                    ),
-                }
-        else:
-            preview_chunks = []
-            bytes_read = 0
-            for chunk in resp.iter_content(chunk_size=1024):
-                if not chunk:
-                    break
-                if bytes_read + len(chunk) > PREVIEW_MAX_BYTES:
-                    chunk = chunk[: PREVIEW_MAX_BYTES - bytes_read]
-                preview_chunks.append(chunk)
-                bytes_read += len(chunk)
-                if bytes_read >= PREVIEW_MAX_BYTES:
-                    break
-            preview_bytes = b"".join(preview_chunks)
-            total_bytes = bytes_read
-            truncated = bytes_read >= PREVIEW_MAX_BYTES or (
-                content_length and content_length > bytes_read
-            )
+        body_result = _read_response_body(
+            resp,
+            download_requested=download_requested,
+            max_download_bytes=max_download_bytes,
+            content_length=content_length,
+        )
     finally:
         resp.close()
+
+    if download_requested and body_result.over_limit:
+        return {
+            "status": "error",
+            "message": (
+                f"File exceeds maximum allowed size ({body_result.total_bytes} bytes > "
+                f"{max_download_bytes} bytes)."
+            ),
+        }
+
+    content_bytes = body_result.content_bytes
+    preview_bytes = body_result.preview_bytes
+    total_bytes = body_result.total_bytes
+    truncated = body_result.truncated
 
     # Determine if we should treat content as text
     content_type = (resp.headers.get("Content-Type") or "").lower()
