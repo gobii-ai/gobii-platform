@@ -26,6 +26,7 @@ from api.agent.core.prompt_context import (
 from api.admin import PersistentAgentPromptArchiveAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
+from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
 from api.agent.tools.tool_manager import enable_tools
 from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
 from api.models import (
@@ -1040,7 +1041,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         result = _execute_http_request(self.agent, params)
         
         # Verify request was made
-        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status"], "ok", result)
         mock_request.assert_called_once()
         
         # Verify headers were substituted correctly
@@ -1076,7 +1077,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         result = _execute_http_request(self.agent, params)
         
         # Verify request was made with substituted URL
-        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status"], "ok", result)
         mock_request.assert_called_once()
         
         call_args = mock_request.call_args
@@ -1118,7 +1119,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
 
         result = _execute_http_request(self.agent, params)
 
-        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status"], "ok", result)
         mock_proxy_selector.assert_called_once()
         proxies = mock_request.call_args[1]["proxies"]
         self.assertEqual(proxies, {"http": proxy.proxy_url, "https": proxy.proxy_url})
@@ -1271,6 +1272,47 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         headers = call_args[1]["headers"]
         self.assertEqual(headers["Real-Key"], "real_value")
         self.assertEqual(headers["Fake-Key"], "<<<fake_secret>>>")  # Unchanged
+
+    @patch('api.agent.tools.http_request.write_bytes_to_dir')
+    @patch('requests.request')
+    @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
+    def test_http_request_download_saves_to_filespace(self, mock_proxy, mock_request, mock_write):
+        """Download requests should persist the response body to filespace."""
+        mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
+        mock_response = type('Response', (), {
+            'status_code': 200,
+            'headers': {
+                'Content-Type': 'application/pdf',
+                'Content-Disposition': 'attachment; filename="report.pdf"',
+            },
+            'iter_content': lambda self, chunk_size: [b'file-bytes'],
+            'close': lambda self: None
+        })()
+        mock_request.return_value = mock_response
+        mock_write.return_value = {
+            "status": "ok",
+            "path": "/downloads/report.pdf",
+            "node_id": "node-123",
+            "filename": "report.pdf",
+        }
+
+        params = {
+            "method": "GET",
+            "url": "https://files.example.com/report.pdf",
+            "download": True,
+        }
+
+        result = _execute_http_request(self.agent, params)
+
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(result["path"], "/downloads/report.pdf")
+        self.assertEqual(result["node_id"], "node-123")
+        self.assertEqual(result["filename"], "report.pdf")
+        mock_write.assert_called_once()
+        self.assertEqual(mock_write.call_args.kwargs["content_bytes"], b"file-bytes")
+        self.assertEqual(mock_write.call_args.kwargs["filename"], "report.pdf")
+        self.assertEqual(mock_write.call_args.kwargs["mime_type"], "application/pdf")
+        self.assertEqual(mock_write.call_args.kwargs["dir_name"], DOWNLOADS_DIR_NAME)
 
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
