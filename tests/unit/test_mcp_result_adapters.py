@@ -76,10 +76,8 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         adapted = adapter.adapt(result)
         cleaned = json.loads(adapted.content[0].text)
 
-        nested = cleaned["organic"][0]["images"][0]
-        self.assertNotIn("image", nested)
-        self.assertNotIn("image_base64", nested)
-        self.assertEqual(nested["caption"], "keep")
+        nested = cleaned["organic"][0]
+        self.assertNotIn("images", nested)
 
     def test_batch_adapter_strips_nested_images(self):
         payload = [
