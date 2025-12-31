@@ -545,7 +545,7 @@ class MarketingMetaTests(TestCase):
 
         self.assertEqual(parsed.path, "/console/billing/")
         self.assertEqual(params.get("subscribe_success"), ["1"])
-        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertEqual(params.get("p"), ["1250.00"])
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
@@ -635,7 +635,7 @@ class SubscriptionPriceParsingTests(TestCase):
 
         self.assertEqual(parsed.path, "/console/billing/")
         self.assertEqual(params.get("subscribe_success"), ["1"])
-        self.assertEqual(params.get("p"), ["250.00"])
+        self.assertEqual(params.get("p"), ["1250.00"])
         self.assertTrue(params.get("eid"))
         self.assertTrue(params["eid"][0].startswith("scale-sub-"))
         mock_ensure.assert_called_once()
