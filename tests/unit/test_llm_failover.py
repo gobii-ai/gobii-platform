@@ -602,3 +602,179 @@ class TestTokenBasedTierSelection(TestCase):
                 if first in counts:
                     counts[first] += 1
             self.assertGreater(sum(counts.values()), 0)
+
+
+@tag("batch_event_llm")
+class TestMaxInputTokens(TestCase):
+    """Tests for max_input_tokens field on PersistentModelEndpoint."""
+
+    def setUp(self):
+        super().setUp()
+        invalidate_llm_bootstrap_cache()
+        from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
+        invalidate_min_endpoint_input_tokens_cache()
+        clear_llm_db()
+
+    def tearDown(self):
+        from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
+        invalidate_min_endpoint_input_tokens_cache()
+        clear_llm_db()
+        super().tearDown()
+
+    def test_get_min_endpoint_input_tokens_returns_minimum(self):
+        """get_min_endpoint_input_tokens returns the minimum across enabled endpoints."""
+        from api.agent.core.llm_config import get_min_endpoint_input_tokens, invalidate_min_endpoint_input_tokens_cache
+
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='test_provider',
+            display_name='Test Provider',
+            enabled=True,
+            env_var_name='TEST_API_KEY',
+            browser_backend='OPENAI',
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_32k',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-32k',
+            max_input_tokens=32000,
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_128k',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-128k',
+            max_input_tokens=128000,
+        )
+        invalidate_min_endpoint_input_tokens_cache()
+
+        result = get_min_endpoint_input_tokens()
+        self.assertEqual(result, 32000)
+
+    def test_get_min_endpoint_input_tokens_returns_none_when_no_limits(self):
+        """get_min_endpoint_input_tokens returns None when no endpoints have limits."""
+        from api.agent.core.llm_config import get_min_endpoint_input_tokens, invalidate_min_endpoint_input_tokens_cache
+
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='test_provider',
+            display_name='Test Provider',
+            enabled=True,
+            env_var_name='TEST_API_KEY',
+            browser_backend='OPENAI',
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_auto',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-auto',
+            max_input_tokens=None,  # No limit
+        )
+        invalidate_min_endpoint_input_tokens_cache()
+
+        result = get_min_endpoint_input_tokens()
+        self.assertIsNone(result)
+
+    def test_get_min_endpoint_input_tokens_ignores_disabled(self):
+        """get_min_endpoint_input_tokens ignores disabled endpoints."""
+        from api.agent.core.llm_config import get_min_endpoint_input_tokens, invalidate_min_endpoint_input_tokens_cache
+
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='test_provider',
+            display_name='Test Provider',
+            enabled=True,
+            env_var_name='TEST_API_KEY',
+            browser_backend='OPENAI',
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_disabled',
+            provider=provider,
+            enabled=False,  # Disabled
+            litellm_model='test/model-disabled',
+            max_input_tokens=8000,  # Would be minimum if enabled
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_enabled',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-enabled',
+            max_input_tokens=32000,
+        )
+        invalidate_min_endpoint_input_tokens_cache()
+
+        result = get_min_endpoint_input_tokens()
+        self.assertEqual(result, 32000)  # Ignores the disabled 8k endpoint
+
+    def test_get_prompt_token_budget_respects_endpoint_limit(self):
+        """get_prompt_token_budget caps budget to endpoint limit minus headroom."""
+        from api.agent.core.llm_config import (
+            get_min_endpoint_input_tokens,
+            invalidate_min_endpoint_input_tokens_cache,
+            INPUT_TOKEN_HEADROOM,
+        )
+        from api.agent.core.prompt_context import get_prompt_token_budget
+
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='test_provider',
+            display_name='Test Provider',
+            enabled=True,
+            env_var_name='TEST_API_KEY',
+            browser_backend='OPENAI',
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_32k',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-32k',
+            max_input_tokens=32000,
+        )
+        invalidate_min_endpoint_input_tokens_cache()
+
+        # Verify endpoint limit is 32k
+        self.assertEqual(get_min_endpoint_input_tokens(), 32000)
+
+        # Budget should be capped to 32000 - 2000 = 30000
+        budget = get_prompt_token_budget(None)
+        expected_budget = 32000 - INPUT_TOKEN_HEADROOM
+        self.assertEqual(budget, expected_budget)
+
+    def test_get_prompt_token_budget_uses_tier_when_no_limit(self):
+        """get_prompt_token_budget uses tier budget when no endpoint limits exist."""
+        from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
+        from api.agent.core.prompt_context import get_prompt_token_budget
+        from api.services.prompt_settings import get_prompt_settings
+
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='test_provider',
+            display_name='Test Provider',
+            enabled=True,
+            env_var_name='TEST_API_KEY',
+            browser_backend='OPENAI',
+        )
+        PersistentModelEndpoint.objects.create(
+            key='endpoint_auto',
+            provider=provider,
+            enabled=True,
+            litellm_model='test/model-auto',
+            max_input_tokens=None,  # No limit
+        )
+        invalidate_min_endpoint_input_tokens_cache()
+
+        settings = get_prompt_settings()
+        budget = get_prompt_token_budget(None)
+        # Should use tier budget since no endpoint limit
+        self.assertEqual(budget, settings.standard_prompt_token_budget)

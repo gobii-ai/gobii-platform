@@ -176,6 +176,43 @@ def invalidate_llm_tier_multiplier_cache() -> None:
     cache.delete(_TIER_MULTIPLIER_CACHE_KEY)
 
 
+# Headroom subtracted from max_input_tokens to account for tokenizer differences
+INPUT_TOKEN_HEADROOM = 2000
+
+_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY = "persistent_llm_min_endpoint_input_tokens:v1"
+
+
+def get_min_endpoint_input_tokens() -> Optional[int]:
+    """Return minimum max_input_tokens across all enabled endpoints, or None if unlimited.
+
+    This value is used to cap prompt rendering to ensure the prompt fits in any
+    endpoint that might be selected. The result is cached for 60 seconds.
+    """
+    cached = cache.get(_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY)
+    if cached is not None:
+        return cached if cached != -1 else None
+
+    PersistentModelEndpoint = apps.get_model("api", "PersistentModelEndpoint")
+    endpoints_with_limit = list(
+        PersistentModelEndpoint.objects.filter(
+            enabled=True,
+            max_input_tokens__isnull=False,
+        ).values_list("max_input_tokens", flat=True)
+    )
+
+    if not endpoints_with_limit:
+        cache.set(_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY, -1, timeout=60)
+        return None
+
+    result = min(endpoints_with_limit)
+    cache.set(_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY, result, timeout=60)
+    return result
+
+
+def invalidate_min_endpoint_input_tokens_cache() -> None:
+    cache.delete(_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY)
+
+
 def _normalize_tier_value(tier: AgentLLMTier | str) -> AgentLLMTier:
     if isinstance(tier, AgentLLMTier):
         return tier

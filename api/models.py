@@ -1938,6 +1938,11 @@ class PersistentModelEndpoint(models.Model):
         blank=True,
         help_text="Optional OpenRouter preset identifier applied to this endpoint.",
     )
+    max_input_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum input tokens for this endpoint. Leave blank for automatic (no limit).",
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
