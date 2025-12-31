@@ -159,7 +159,11 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "search_engine"
-    strip_keys = ("image", "image_base64")
+    strip_keys = ("image", "image_base64", "image_alt", "display_link", "images")
+    strip_key_prefixes = (
+        "snippet_",
+        "display_link_",
+    )
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
