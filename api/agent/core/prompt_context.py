@@ -817,9 +817,17 @@ def build_prompt_context(
             (
                 f"IMPLIED SEND ACTIVE → WEB CHAT: Your text output will automatically call "
                 f"send_chat_message(to_address=\"{implied_send_address}\", body=<your text>). "
-                f"Just write your message—no explicit send_chat_message needed."
+                f"Just write your message—no explicit send_chat_message needed.\n\n"
+                "CRITICAL: Your text goes DIRECTLY to the user. Write TO them, not ABOUT them.\n"
+                "BAD (internal monologue): 'The user asked me to check the weather. I will fetch it now.'\n"
+                "GOOD (direct to user): 'Checking the weather now!'\n"
+                "BAD: 'I need to help the user find flights to Tokyo.'\n"
+                "GOOD: 'Looking up flights to Tokyo for you!'\n"
+                "BAD: 'The user wants bitcoin prices, so I should call the API.'\n"
+                "GOOD: 'Let me grab the latest bitcoin prices.'\n"
+                "Never say 'the user' — you ARE talking to them. Write like a text message to a friend."
             ),
-            weight=2,
+            weight=3,
             non_shrinkable=True,
         )
     else:
