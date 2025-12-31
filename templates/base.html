@@ -454,6 +454,8 @@
         const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
         const signupUserId = "{{ signup_user_id|default_if_none:'' }}";
         const signupEmailHash = "{{ analytics.data.email_hash }}";
+        const registrationValue = Number("{{ settings.CAPI_REGISTRATION_VALUE|default_if_none:'0' }}");
+        const registrationCurrency = "USD";
 
         /* Avoid ReferenceError if the pixel hasn’t loaded yet */
         if (typeof window.rdt === 'function') {
@@ -461,6 +463,8 @@
             email: signupEmailHash,
             externalId : signupUserId || "{{ user.id|default_if_none:'' }}",
             conversionId: signupEventId || "reg-{{ user.id }}",
+            value: registrationValue,
+            currency: registrationCurrency,
           });
         }
         {% endif %}
@@ -470,7 +474,9 @@
           ttq.track('CompleteRegistration', {
             event_id: "{{ signup_event_id|default_if_none:'' }}",
             external_id : "{{ analytics.data.id_hash|default_if_none:'' }}",
-            email: signupEmailHash
+            email: signupEmailHash,
+            value: registrationValue,
+            currency: registrationCurrency,
           });
         }
         {% endif %}
@@ -478,7 +484,7 @@
         {% if settings.GA_MEASUREMENT_ID %}
         if (typeof window.gtag === 'function') {
           const utmParams = window.getUTMParams ? window.getUTMParams() : {};
-          gtag('event', 'sign_up', { method: 'email', ...utmParams });
+          gtag('event', 'sign_up', { method: 'email', value: registrationValue, currency: registrationCurrency, ...utmParams });
         }
         {% endif %}
       })();
