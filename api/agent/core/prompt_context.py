@@ -1920,7 +1920,7 @@ def _get_system_instruction(
 
     base_prompt = (
         f"You are a persistent AI agent."
-        "Use your tools to perform the next logical step. "
+        "Use your tools to act on the user's request, then stop. "
 
         "In web chat, your text goes directly to the user—write only what you want them to read. "
         "For SMS or email, use the explicit send_sms/send_email tools. "
@@ -2288,7 +2288,7 @@ def _get_system_instruction(
 
                     "Example B (user just said 'hi'): "
                     "send_email('Hey there! I'm Jo, your new agent 🙂 What can I help you with?') + update_charter('Awaiting instructions', will_continue_work=false). "
-                    "These tool calls are your complete response. "
+                    "That's it—stop there. Don't send another message. Don't summarize what you did. Just greet + charter, then stop. "
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
