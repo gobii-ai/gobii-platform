@@ -56,7 +56,7 @@ def _strip_keys(
 
     if isinstance(node, dict):
         for key in list(node.keys()):
-            if key in keys or key.startswith(prefixes) or key.endswith(suffixes):
+            if key in keys or (prefixes and key.startswith(prefixes)) or (suffixes and key.endswith(suffixes)):
                 node.pop(key, None)
             else:
                 _strip_keys(node[key], strip_keys=keys, strip_key_prefixes=prefixes, strip_key_suffixes=suffixes)
@@ -273,7 +273,7 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
 
     server_name = "brightdata"
     tool_name = "search_engine_batch"
-    strip_keys = ("image", "image_base64")
+    strip_keys = ("image", "image_base64", "extensions", "display_link", "images")
 
     def adapt(self, result: Any) -> Any:
         parsed = self._extract_json_payload(result)
