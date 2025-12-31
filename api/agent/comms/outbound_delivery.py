@@ -16,6 +16,7 @@ from api.models import (
     OutboundMessageAttempt,
     PersistentAgentMessage,
 )
+from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
 from django.template.loader import render_to_string
@@ -251,6 +252,10 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
     if not attachments:
         return 0
 
+    agent = getattr(message, "owner_agent", None)
+    message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
+    channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
+    user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
     max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
     attached = 0
     for att in attachments:
@@ -271,6 +276,18 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
 
         if not file_field or not getattr(file_field, "name", None):
             logger.warning("Skipping attachment %s for message %s (missing file content)", att.id, message.id)
+            track_file_send_failed(
+                agent,
+                node=getattr(att, "filespace_node", None),
+                path=getattr(getattr(att, "filespace_node", None), "path", None),
+                filename=filename,
+                size_bytes=getattr(att, "file_size", None),
+                mime_type=content_type,
+                channel=channel,
+                message_id=message_id,
+                reason_code="missing_blob",
+                user_initiated=user_initiated,
+            )
             continue
 
         size_bytes = att.file_size or getattr(file_field, "size", None)
@@ -283,6 +300,18 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                     size_bytes,
                     max_bytes,
                 )
+                track_file_unsupported(
+                    agent,
+                    node=getattr(att, "filespace_node", None),
+                    path=getattr(getattr(att, "filespace_node", None), "path", None),
+                    filename=filename,
+                    size_bytes=int(size_bytes),
+                    mime_type=content_type,
+                    channel=channel,
+                    message_id=message_id,
+                    reason_code="too_large",
+                    user_initiated=user_initiated,
+                )
                 continue
         except (TypeError, ValueError):
             logger.warning(
@@ -290,12 +319,36 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                 att.id,
                 message.id,
             )
+            track_file_send_failed(
+                agent,
+                node=getattr(att, "filespace_node", None),
+                path=getattr(getattr(att, "filespace_node", None), "path", None),
+                filename=filename,
+                size_bytes=None,
+                mime_type=content_type,
+                channel=channel,
+                message_id=message_id,
+                reason_code="validation_failed",
+                user_initiated=user_initiated,
+            )
             continue
 
         storage = file_field.storage
         name = file_field.name
         if hasattr(storage, "exists") and not storage.exists(name):
             logger.warning("Skipping attachment %s for message %s (missing storage blob)", att.id, message.id)
+            track_file_send_failed(
+                agent,
+                node=getattr(att, "filespace_node", None),
+                path=getattr(getattr(att, "filespace_node", None), "path", None),
+                filename=filename,
+                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                mime_type=content_type,
+                channel=channel,
+                message_id=message_id,
+                reason_code="missing_blob",
+                user_initiated=user_initiated,
+            )
             continue
 
         try:
@@ -305,6 +358,18 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
             attached += 1
         except Exception:
             logger.exception("Failed attaching file %s to message %s", att.id, message.id)
+            track_file_send_failed(
+                agent,
+                node=getattr(att, "filespace_node", None),
+                path=getattr(getattr(att, "filespace_node", None), "path", None),
+                filename=filename,
+                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                mime_type=content_type,
+                channel=channel,
+                message_id=message_id,
+                reason_code="validation_failed",
+                user_initiated=user_initiated,
+            )
 
     return attached
 

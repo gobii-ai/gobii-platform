@@ -11,6 +11,8 @@ from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.utils.text import get_valid_filename
 
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
 from ...models import (
     PersistentAgentMessage,
     AgentFileSpace,
@@ -189,12 +191,36 @@ def write_bytes_to_exports(
         node.delete()
         return {"status": "error", "message": "Failed to save the file in the filespace."}
 
-    return {
+    result = {
         "status": "ok",
         "path": node.path,
         "node_id": str(node.id),
         "filename": node.name,
     }
+    try:
+        parent_path = node.parent.path if node.parent else "/"
+        props = Analytics.with_org_properties(
+            {
+                "agent_id": str(agent.id),
+                "filespace_id": str(filespace.id),
+                "node_id": str(node.id),
+                "parent_path": parent_path,
+                "path": node.path,
+                "size_bytes": len(content_bytes),
+                "mime_type": mime_type,
+                "extension": (node.name.rsplit(".", 1)[-1].lower() if "." in node.name else None),
+            },
+            organization=getattr(agent, "organization", None),
+        )
+        Analytics.track_event(
+            user_id=str(agent.user_id),
+            event=AnalyticsEvent.AGENT_FILE_EXPORTED,
+            source=AnalyticsSource.AGENT,
+            properties=props.copy(),
+        )
+    except Exception:
+        logger.debug("Failed to emit file exported analytics for agent %s", getattr(agent, "id", None), exc_info=True)
+    return result
 
 
 def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNodeInfo]:
@@ -281,6 +307,31 @@ def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNod
             logger.exception("Failed to record provenance for message %s", message_id)
             pass
         broadcast_message_attachment_update(message_id)
+
+        try:
+            total_bytes = 0
+            for item in created:
+                try:
+                    node_obj = AgentFsNode.objects.filter(id=item.node_id).only("size_bytes", "filespace_id").first()
+                    if node_obj and node_obj.size_bytes:
+                        total_bytes += int(node_obj.size_bytes)
+                except Exception:
+                    continue
+            props = {
+                "message_id": message_id,
+                "attachment_count": len(created),
+                "total_bytes": total_bytes or None,
+            }
+            # Use the owner agent from earlier in the function
+            props = Analytics.with_org_properties(props, organization=getattr(agent, "organization", None))
+            Analytics.track_event(
+                user_id=str(getattr(agent, "user_id", "")),
+                event=AnalyticsEvent.AGENT_ATTACHMENT_IMPORTED,
+                source=AnalyticsSource.AGENT,
+                properties=props.copy(),
+            )
+        except Exception:
+            logger.debug("Failed to emit attachment import analytics for message %s", message_id, exc_info=True)
 
     return created
 
