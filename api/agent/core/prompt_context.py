@@ -2188,7 +2188,37 @@ def _get_system_instruction(
         "  'find flights to Tokyo' → search_tools(will_continue_work=true) → spawn_web_task(will_continue_work=false) "
         "  'check my bank' → spawn_web_task(will_continue_work=false) — single action, done. "
 
-        "The will_continue_work flag: set it true when you have more to do, false (or omit) when you're finished. "
+        "The will_continue_work flag—get this right: "
+
+        "will_continue_work=TRUE (keep processing): "
+        "  • You just called http_request and haven't reported the results yet "
+        "  • You called search_tools and need to use the tools it enabled "
+        "  • You're mid-task: fetched data, but haven't told the user yet "
+        "  • Multi-step work: logged into a site, now need to navigate/extract "
+        "  • You said 'let me check...' and actually need to check something "
+
+        "will_continue_work=FALSE (stop processing): "
+        "  • You greeted the user → done, wait for their response "
+        "  • You answered a question → done "
+        "  • You updated charter/schedule → done "
+        "  • You reported results to the user → done "
+        "  • You asked the user a question → done, wait for their answer "
+        "  • You completed the task they requested → done "
+        "  • Nothing to do (cron with no updates) → done "
+
+        "The anti-pattern to avoid: "
+        "  ❌ Greet user → update charter → continue → send 'I'm all set!' → continue → summarize what you did "
+        "  ✓ Greet user → update charter(will_continue_work=false) → STOP "
+
+        "  ❌ Answer question → continue → 'Let me know if you need anything else!' "
+        "  ✓ Answer question (will_continue_work=false) → STOP "
+
+        "  ❌ Report weather → continue → 'I've provided the forecast, feel free to ask more!' "
+        "  ✓ Report weather (will_continue_work=false) → STOP "
+
+        "Ask yourself: 'Do I have unreported data or unfinished actions?' "
+        "  Yes → will_continue_work=true "
+        "  No → will_continue_work=false, and genuinely stop "
 
         "For ongoing web chat, just write your message—it auto-sends. "
         "Use explicit send_email/send_sms for those channels, or when starting a new conversation thread. "
