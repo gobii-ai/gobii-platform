@@ -40,6 +40,7 @@ from ...models import (
 )
 
 from .adapters import ParsedMessage
+from .attachment_filters import is_signature_image_attachment
 from .outbound_delivery import deliver_agent_sms
 from observability import traced
 from opentelemetry import baggage
@@ -152,6 +153,8 @@ def _append_extension(filename: str, content_type: str) -> str:
         return filename
     return f"{filename}{guessed}"
 
+
+
 def _is_twilio_media_url(url: str) -> bool:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -184,12 +187,18 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
             except Exception:
                 logging.warning(f"Could not process '{filename}' file size.")
                 pass
+            if is_signature_image_attachment(filename, content_type):
+                logging.debug("Skipping signature image attachment '%s'.", filename)
+                continue
         elif isinstance(att, dict):
             url = att.get("url") or att.get("media_url")
             if not isinstance(url, str) or not url:
                 continue
             filename = att.get("filename") or filename
             content_type_hint = att.get("content_type") or ""
+            if is_signature_image_attachment(filename, content_type_hint):
+                logging.debug("Skipping signature image attachment '%s'.", filename)
+                continue
         elif isinstance(att, str):
             url = att
         else:
@@ -210,6 +219,9 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
 
                 if filename == "attachment":
                     filename = _filename_from_url(url)
+                if is_signature_image_attachment(filename, content_type_hint):
+                    logging.debug("Skipping signature image attachment '%s'.", filename)
+                    continue
 
                 # Try HEAD to check size before downloading
                 if max_bytes:
@@ -232,6 +244,9 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 size = len(content)
                 if max_bytes and size > int(max_bytes):
                     logging.warning(f"File '{filename} exceeds max size of {max_bytes} bytes, skipping.")
+                    continue
+                if is_signature_image_attachment(filename, content_type):
+                    logging.debug("Skipping signature image attachment '%s'.", filename)
                     continue
                 file_obj = ContentFile(content, name=filename)
             except Exception as exc:

@@ -27,23 +27,55 @@ class FileExportToolTests(TestCase):
             browser_use_agent=cls.browser_agent,
         )
 
-    def test_create_csv_writes_exports_file(self):
+    def test_create_csv_writes_file(self):
         result = execute_create_csv(
             self.agent,
-            {"csv_text": "col1,col2\n1,2\n", "filename": "report.csv"},
+            {"csv_text": "col1,col2\n1,2\n", "file_path": "/exports/report.csv"},
         )
 
         self.assertEqual(result["status"], "ok")
         node = AgentFsNode.objects.get(id=result["node_id"])
-        self.assertTrue(node.path.startswith("/exports/"))
+        self.assertEqual(node.path, "/exports/report.csv")
         self.assertEqual(node.mime_type, "text/csv")
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), b"col1,col2\n1,2\n")
 
+    def test_create_csv_overwrites_exports_path(self):
+        first = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n1,2\n", "file_path": "/exports/report.csv", "overwrite": True},
+        )
+        second = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n3,4\n", "file_path": "/exports/report.csv", "overwrite": True},
+        )
+
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        self.assertEqual(first["node_id"], second["node_id"])
+        node = AgentFsNode.objects.get(id=first["node_id"])
+        self.assertEqual(node.path, "/exports/report.csv")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"col1,col2\n3,4\n")
+
+    def test_create_csv_path_requires_overwrite_to_replace(self):
+        first = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n1,2\n", "file_path": "/exports/report.csv"},
+        )
+        second = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n3,4\n", "file_path": "/exports/report.csv"},
+        )
+
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "error")
+        self.assertIn("already exists", second["message"].lower())
+
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(
             self.agent,
-            {"html": "<img src='https://example.com/x.png'>"},
+            {"html": "<img src='https://example.com/x.png'>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -52,7 +84,7 @@ class FileExportToolTests(TestCase):
     def test_create_pdf_blocks_object_data(self):
         result = execute_create_pdf(
             self.agent,
-            {"html": "<object data='https://example.com/file.pdf'></object>"},
+            {"html": "<object data='https://example.com/file.pdf'></object>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -61,7 +93,7 @@ class FileExportToolTests(TestCase):
     def test_create_pdf_blocks_meta_refresh(self):
         result = execute_create_pdf(
             self.agent,
-            {"html": "<meta http-equiv='refresh' content='0; url=https://example.com'>"},
+            {"html": "<meta http-equiv='refresh' content='0; url=https://example.com'>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -72,7 +104,7 @@ class FileExportToolTests(TestCase):
         css_b64 = base64.b64encode(css_payload.encode("utf-8")).decode("ascii")
         result = execute_create_pdf(
             self.agent,
-            {"html": f"<link rel='stylesheet' href='data:text/css;base64,{css_b64}'>"},
+            {"html": f"<link rel='stylesheet' href='data:text/css;base64,{css_b64}'>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -87,7 +119,7 @@ class FileExportToolTests(TestCase):
         svg_b64 = base64.b64encode(svg_payload.encode("utf-8")).decode("ascii")
         result = execute_create_pdf(
             self.agent,
-            {"html": f"<img src='data:image/svg+xml;base64,{svg_b64}'>"},
+            {"html": f"<img src='data:image/svg+xml;base64,{svg_b64}'>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -97,7 +129,7 @@ class FileExportToolTests(TestCase):
     def test_create_pdf_rejects_oversized_html(self):
         result = execute_create_pdf(
             self.agent,
-            {"html": "<html><body>this is too large</body></html>"},
+            {"html": "<html><body>this is too large</body></html>", "file_path": "/exports/block.pdf"},
         )
 
         self.assertEqual(result["status"], "error")
@@ -111,22 +143,40 @@ class FileExportToolTests(TestCase):
                 "html": (
                     "<img srcset='data:image/png;base64,AAAA 1x, "
                     "data:image/png;base64,BBBB 2x'>"
-                )
+                ),
+                "file_path": "/exports/srcset.pdf",
             },
         )
 
         self.assertEqual(result["status"], "ok")
 
     @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
-    def test_create_pdf_writes_exports_file(self, mock_pdf):
+    def test_create_pdf_writes_file(self, mock_pdf):
         result = execute_create_pdf(
             self.agent,
-            {"html": "<html><body>Hello</body></html>", "filename": "hello.pdf"},
+            {"html": "<html><body>Hello</body></html>", "file_path": "/exports/hello.pdf"},
         )
 
         self.assertEqual(result["status"], "ok")
         node = AgentFsNode.objects.get(id=result["node_id"])
-        self.assertTrue(node.path.startswith("/exports/"))
+        self.assertEqual(node.path, "/exports/hello.pdf")
         self.assertEqual(node.mime_type, "application/pdf")
         with node.content.open("rb") as handle:
             self.assertTrue(handle.read().startswith(b"%PDF-1.4"))
+
+    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
+    def test_create_pdf_overwrites_exports_path(self, mock_pdf):
+        first = execute_create_pdf(
+            self.agent,
+            {"html": "<html><body>Hello</body></html>", "file_path": "/exports/report.pdf", "overwrite": True},
+        )
+        second = execute_create_pdf(
+            self.agent,
+            {"html": "<html><body>Updated</body></html>", "file_path": "/exports/report.pdf", "overwrite": True},
+        )
+
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        self.assertEqual(first["node_id"], second["node_id"])
+        node = AgentFsNode.objects.get(id=first["node_id"])
+        self.assertEqual(node.path, "/exports/report.pdf")

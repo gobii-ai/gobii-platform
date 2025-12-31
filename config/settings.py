@@ -1055,6 +1055,19 @@ if PIPEDREAM_GC_ENABLED:
 MAX_FILE_SIZE = env.int("MAX_FILE_SIZE", default=10 * 1024 * 1024)
 ALLOW_FILE_DOWNLOAD = env.bool("ALLOW_FILE_DOWNLOAD", default=True)
 ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=True)
+SIGNATURE_IMAGE_ATTACHMENT_PREFIXES = tuple(
+    prefix.strip().lower()
+    for prefix in env.list("SIGNATURE_IMAGE_ATTACHMENT_PREFIXES", default=["Outlook-"])
+    if prefix and prefix.strip()
+)
+SIGNATURE_IMAGE_ATTACHMENT_EXTENSIONS = tuple(
+    ext.strip().lower()
+    for ext in env.list(
+        "SIGNATURE_IMAGE_ATTACHMENT_EXTENSIONS",
+        default=[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff"],
+    )
+    if ext and ext.strip()
+)
 
 # Manual whitelist limits
 # Maximum number of manual allowlist entries per agent. Configurable via env.

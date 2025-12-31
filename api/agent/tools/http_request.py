@@ -531,14 +531,15 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             extension = (ext or "").lower()
         if not extension:
             extension = (mimetypes.guess_extension(mime_type) or "").lower()
+        download_basename = os.path.basename(download_name or "download") or "download"
+        download_path = f"/{DOWNLOADS_DIR_NAME}/{download_basename}"
         download_result = write_bytes_to_dir(
             agent=agent,
             content_bytes=content_bytes,
-            filename=download_name,
-            fallback_name="download",
+            path=download_path,
             extension=extension,
             mime_type=mime_type,
-            dir_name=DOWNLOADS_DIR_NAME,
+            allow_unique=True,
         )
         if download_result.get("status") != "ok":
             return download_result
