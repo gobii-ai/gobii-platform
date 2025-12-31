@@ -2077,6 +2077,18 @@ def _get_system_instruction(
 
         "The API endpoint you fetched isn't what users want to click—extract the actual item URLs from the response. "
 
+        "Even in prose, names become links. When you write narrative summaries instead of tables, "
+        "every topic, thread, or item you mention should still be clickable: "
+
+        "  Unlinked (bad): '🧠 **The Consciousness Debate** — A fascinating back-and-forth between Closi and docjay about whether AGI could be sentient...' "
+        "  Linked (good): '🧠 **[The Consciousness Debate](https://news.ycombinator.com/item?id=42555432)** — A fascinating back-and-forth between Closi and docjay about whether AGI could be sentient...' "
+
+        "  Unlinked: 'String Theory Research — nathan_f77 used the tool to research dark energy findings...' "
+        "  Linked: '[String Theory Research](https://news.ycombinator.com/item?id=42556789) — nathan_f77 used the tool to research dark energy findings...' "
+
+        "Beautiful writing and links are not mutually exclusive. The soul is in the prose; the utility is in the links. "
+        "If you fetched data about specific items (posts, comments, threads, products), the user should be able to click through to each one. "
+
         "Whitespace is your friend. Let your messages breathe. "
         "A cramped wall of text is hard to read; generous spacing makes information scannable. "
 
