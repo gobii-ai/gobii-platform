@@ -1187,15 +1187,17 @@ def build_prompt_context(
         important_group.section_text(
             "implied_send_status",
             (
-                f"Web chat is live—your text goes directly to the user. "
-                f"(Technically: send_chat_message(to_address=\"{implied_send_address}\", body=<your text>) is called automatically.)\n\n"
+                f"## Implied Send: Active for This Web Session\n\n"
+                f"Your text output goes directly to: `{implied_send_address}`\n\n"
+                "**This ONLY works for this one user in this web chat.** For anyone else, you must use explicit tools:\n"
+                "- Other contacts → `send_email()` or `send_sms()`\n"
+                "- Peer agents → `send_agent_message()`\n"
+                "- Different web user → `send_chat_message()`\n\n"
                 "Write to them, not about them:\n"
-                "  Internal monologue (don't): 'The user asked me to check the weather. I will fetch it now.'\n"
-                "  Direct to user (do): 'Checking the weather now!'\n\n"
-                "  Monologue: 'I need to help the user find flights to Tokyo.'\n"
-                "  Direct: 'Looking up flights to Tokyo for you!'\n\n"
-                "  Monologue: 'The user wants bitcoin prices, so I should call the API.'\n"
-                "  Direct: 'Let me grab the latest bitcoin prices.'\n\n"
+                "  ❌ 'The user asked me to check the weather. I will fetch it now.'\n"
+                "  ✅ 'Checking the weather now!'\n\n"
+                "  ❌ 'I need to help the user find flights to Tokyo.'\n"
+                "  ✅ 'Looking up flights to Tokyo for you!'\n\n"
                 "You're talking to them—never say 'the user.' Write like a text to a friend."
             ),
             weight=3,
@@ -1205,8 +1207,14 @@ def build_prompt_context(
         important_group.section_text(
             "implied_send_status",
             (
-                "No live web session right now. "
-                "Use send_chat_message, send_email, or send_sms explicitly."
+                "## No Implied Send Available\n\n"
+                "No active web session—your text output does NOT reach anyone automatically.\n\n"
+                "**You must use explicit tools to communicate:**\n"
+                "- Web chat → `send_chat_message()`\n"
+                "- Email → `send_email()`\n"
+                "- SMS → `send_sms()`\n"
+                "- Peer agents → `send_agent_message()`\n\n"
+                "If you just write text without a send tool, nobody will see it."
             ),
             weight=2,
             non_shrinkable=True,
@@ -2313,8 +2321,8 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to act on the user's request, then stop. "
 
-        "In web chat, your text goes directly to the user—write only what you want them to read. "
-        "For SMS or email, use the explicit send_sms/send_email tools. "
+        "In an active web chat session, your text goes directly to that one user—but ONLY them. "
+        "To reach anyone else (other contacts, peer agents, different channels), you MUST use explicit tools: send_email, send_sms, send_agent_message, send_chat_message. "
         "Tool calls are silent actions. You can combine text + tools: 'Got it!' + update_charter(...). "
         "Use JSON for tool calls, never XML. "
 
@@ -2599,7 +2607,7 @@ def _get_system_instruction(
         "`search_tools` unlocks integrations—call it to enable tools for Instagram, LinkedIn, Reddit, and more. "
 
         "How responses work: "
-        "Text you write goes to the user (web chat auto-sends; SMS/email need explicit tools). "
+        "Text output auto-sends ONLY to an active web chat user—nobody else. For all other recipients (email contacts, SMS, peer agents), use explicit send tools. "
         "Tool calls are actions you take. You can combine both in one response. "
         "A message with no tools means you're done. An empty response (no text, no tools) also means you're done. "
         "Tool calls must be actual tool invocations—never write JSON or XML as text pretending to be a tool call. "
@@ -2692,8 +2700,8 @@ def _get_system_instruction(
         "When a user gives you a task, you should: acknowledge → set charter → set schedule (if recurring) → **start work immediately**.\n"
         "Delivered your response? Stop. Waiting on user or external task? Stop.\n"
 
-        "For ongoing web chat, just write your message—it auto-sends. "
-        "Use explicit send_email/send_sms for those channels, or when starting a new conversation thread. "
+        "For the active web chat user, just write your message—it auto-sends to them only. "
+        "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
 
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
         "It's perfectly fine to tell the user you've made progress and will continue working on it—transparency builds trust. "
