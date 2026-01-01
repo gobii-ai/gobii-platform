@@ -8,6 +8,7 @@ __all__ = [
     "strip_markdown_for_sms",
     "normalize_whitespace",
     "decode_unicode_escapes",
+    "strip_llm_artifacts",
     "normalize_llm_output",
 ]
 
@@ -224,6 +225,53 @@ def decode_unicode_escapes(value: str | None) -> str:
     return "".join(result)
 
 
+# Patterns for stripping LLM reasoning/tool call artifacts that leak into output
+# These patterns match XML-style tags that some LLMs output when confused about tool calls
+_LLM_THINKING_TAG_RE = re.compile(r"</?think(?:ing)?>", re.IGNORECASE)
+_LLM_ARG_TAGS_RE = re.compile(
+    r"<arg_(?:key|value)>[^<]*</arg_(?:key|value)>|<arg_(?:key|value)>[^<]*$",
+    re.IGNORECASE,
+)
+# Match trailing incomplete tool call syntax: </think>, <arg_key>..., etc.
+_LLM_TRAILING_ARTIFACTS_RE = re.compile(
+    r"</think>.*$|<arg_\w+>.*$|<function_call>.*$|<tool_call>.*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def strip_llm_artifacts(value: str | None) -> str:
+    """
+    Strip LLM reasoning and tool call artifacts from message content.
+
+    Some LLMs occasionally leak internal reasoning tags or malformed tool call
+    syntax into their output. This function removes:
+    - <think>...</think> or </think> tags
+    - <arg_key>...</arg_key> and <arg_value>...</arg_value> patterns
+    - Trailing incomplete tool call fragments
+
+    Args:
+        value: Text potentially containing LLM artifacts
+
+    Returns:
+        Cleaned text with artifacts removed
+    """
+    if not isinstance(value, str):
+        return ""
+
+    text = value
+
+    # Remove trailing artifacts first (most common case - incomplete tool calls at end)
+    text = _LLM_TRAILING_ARTIFACTS_RE.sub("", text)
+
+    # Remove any remaining thinking tags
+    text = _LLM_THINKING_TAG_RE.sub("", text)
+
+    # Remove arg key/value tags
+    text = _LLM_ARG_TAGS_RE.sub("", text)
+
+    return text.strip()
+
+
 def normalize_llm_output(value: str | None) -> str:
     """
     Comprehensive normalization of LLM output for display.
@@ -233,9 +281,10 @@ def normalize_llm_output(value: str | None) -> str:
     correct order to produce clean, displayable text.
 
     Processing steps:
-    1. Decode unicode/string escape sequences (\\u2014 -> —, \\n -> newline)
-    2. Strip control characters (keeps \\n, \\r, \\t)
-    3. Normalize whitespace (collapse excessive newlines, strip trailing spaces)
+    1. Strip LLM artifacts (reasoning tags, malformed tool calls)
+    2. Decode unicode/string escape sequences (\\u2014 -> —, \\n -> newline)
+    3. Strip control characters (keeps \\n, \\r, \\t)
+    4. Normalize whitespace (collapse excessive newlines, strip trailing spaces)
 
     Args:
         value: Raw LLM output text
@@ -248,13 +297,16 @@ def normalize_llm_output(value: str | None) -> str:
 
     text = value
 
-    # Step 1: Decode escape sequences first (before control char stripping)
+    # Step 1: Strip LLM artifacts first (before they can be misinterpreted as HTML)
+    text = strip_llm_artifacts(text)
+
+    # Step 2: Decode escape sequences (before control char stripping)
     text = decode_unicode_escapes(text)
 
-    # Step 2: Strip control characters (preserves \n, \r, \t)
+    # Step 3: Strip control characters (preserves \n, \r, \t)
     text = strip_control_chars(text)
 
-    # Step 3: Normalize whitespace
+    # Step 4: Normalize whitespace
     text = normalize_whitespace(text)
 
     return text

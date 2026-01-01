@@ -5,6 +5,7 @@ from util.text_sanitizer import (
     strip_markdown_for_sms,
     normalize_whitespace,
     decode_unicode_escapes,
+    strip_llm_artifacts,
     normalize_llm_output,
 )
 
@@ -387,3 +388,81 @@ class NormalizeWhitespaceTests(TestCase):
     def test_handles_none_input(self):
         result = normalize_whitespace(None)
         self.assertEqual(result, "")
+
+
+@tag("batch_text_sanitization")
+class StripLlmArtifactsTests(TestCase):
+    """Tests for stripping LLM reasoning/tool call artifacts."""
+
+    def test_strip_trailing_think_tag_and_args(self):
+        """Real-world case: LLM outputs </think> and arg tags at end of message."""
+        text = (
+            "What jumps out at you?</think><arg_key>to_address</arg_key>"
+            "<arg_value>web://user/1/agent/abc123"
+        )
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "What jumps out at you?")
+
+    def test_strip_closing_think_tag(self):
+        """Closing think tag should be removed."""
+        text = "Here's my response</think>"
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "Here's my response")
+
+    def test_strip_thinking_tag_variant(self):
+        """<thinking> variant should also be removed."""
+        text = "Response here</thinking>"
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "Response here")
+
+    def test_strip_arg_key_value_pairs(self):
+        """Arg key/value tags should be removed."""
+        text = "Message<arg_key>param</arg_key><arg_value>value</arg_value>"
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "Message")
+
+    def test_preserves_normal_content(self):
+        """Normal content without artifacts should be preserved."""
+        text = "## Header\n\n**Bold** text with *emphasis*"
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "## Header\n\n**Bold** text with *emphasis*")
+
+    def test_preserves_legitimate_angle_brackets(self):
+        """Math expressions like 5 < 10 > 3 should be preserved."""
+        text = "The value is 5 < 10 and 10 > 3"
+        result = strip_llm_artifacts(text)
+        self.assertEqual(result, "The value is 5 < 10 and 10 > 3")
+
+    def test_handles_none_input(self):
+        """None input should return empty string."""
+        result = strip_llm_artifacts(None)
+        self.assertEqual(result, "")
+
+    def test_handles_empty_string(self):
+        """Empty string should return empty string."""
+        result = strip_llm_artifacts("")
+        self.assertEqual(result, "")
+
+    def test_full_message_with_artifacts(self):
+        """Full realistic message with trailing artifacts."""
+        text = (
+            "Oh wow, there's some *real* debate!\n\n"
+            "## The Big Debates\n\n"
+            "**Can LLMs Create?**\n\n"
+            "What do you think?</think><arg_key>to_address</arg_key>"
+            "<arg_value>web://user/1/agent/c9fbc1e1-221d-408e-80b4-8bdf99644851"
+        )
+        result = strip_llm_artifacts(text)
+        expected = (
+            "Oh wow, there's some *real* debate!\n\n"
+            "## The Big Debates\n\n"
+            "**Can LLMs Create?**\n\n"
+            "What do you think?"
+        )
+        self.assertEqual(result, expected)
+
+    def test_normalize_llm_output_strips_artifacts(self):
+        """normalize_llm_output should include artifact stripping."""
+        text = "Great response!</think><arg_key>test</arg_key>"
+        result = normalize_llm_output(text)
+        self.assertEqual(result, "Great response!")
