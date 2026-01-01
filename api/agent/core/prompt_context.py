@@ -1182,38 +1182,87 @@ def build_prompt_context(
     _build_mcp_servers_block(agent, important_group, span)
 
     # Implied send status and formatting guidance
-    implied_send_active, implied_send_address = _get_implied_send_status(agent)
-    if implied_send_active:
-        important_group.section_text(
-            "implied_send_status",
-            (
-                f"## Implied Send: Active for This Web Session\n\n"
-                f"Your text output goes directly to: `{implied_send_address}`\n\n"
-                "**This ONLY works for this one user in this web chat.** For anyone else, you must use explicit tools:\n"
-                "- Other contacts → `send_email()` or `send_sms()`\n"
-                "- Peer agents → `send_agent_message()`\n"
-                "- Different web user → `send_chat_message()`\n\n"
-                "Write to them, not about them:\n"
-                "  ❌ 'The user asked me to check the weather. I will fetch it now.'\n"
-                "  ✅ 'Checking the weather now!'\n\n"
-                "  ❌ 'I need to help the user find flights to Tokyo.'\n"
-                "  ✅ 'Looking up flights to Tokyo for you!'\n\n"
-                "You're talking to them—never say 'the user.' Write like a text to a friend."
-            ),
-            weight=3,
-            non_shrinkable=True,
-        )
+    implied_send_context = _get_implied_send_context(agent)
+    implied_send_active = implied_send_context is not None
+
+    if implied_send_context:
+        channel = implied_send_context["channel"]
+        display_name = implied_send_context["display_name"]
+        tool_example = implied_send_context["tool_example"]
+
+        if channel == "web":
+            # Active web session - simplest case
+            important_group.section_text(
+                "implied_send_status",
+                (
+                    f"## Implied Send → {display_name}\n\n"
+                    f"Your text output goes directly to the active web chat user.\n"
+                    f"Just write your message—no tool needed.\n\n"
+                    "**To reach someone else**, use explicit tools:\n"
+                    f"- `{tool_example}` ← what implied send does for you\n"
+                    "- Other contacts: `send_email()`, `send_sms()`\n"
+                    "- Peer agents: `send_agent_message()`\n\n"
+                    "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly."
+                ),
+                weight=3,
+                non_shrinkable=True,
+            )
+        elif channel == "peer_dm":
+            # Reply to peer agent
+            important_group.section_text(
+                "implied_send_status",
+                (
+                    f"## Implied Send → {display_name}\n\n"
+                    f"Your text output will reply to this peer agent.\n"
+                    f"Equivalent to: `{tool_example}`\n\n"
+                    "**To reach someone else**, use explicit tools:\n"
+                    "- Other peer agents: `send_agent_message(peer_agent_id=\"...\", message=\"...\")`\n"
+                    "- Contacts: `send_email()`, `send_sms()`, `send_chat_message()`"
+                ),
+                weight=3,
+                non_shrinkable=True,
+            )
+        elif channel == "email":
+            # Reply to email
+            important_group.section_text(
+                "implied_send_status",
+                (
+                    f"## Implied Send → {display_name}\n\n"
+                    f"Your text output will reply to this email sender.\n"
+                    f"Equivalent to: `{tool_example}`\n\n"
+                    "**To reach someone else**, use explicit tools:\n"
+                    "- Other emails: `send_email(to_address=\"...\", subject=\"...\", mobile_first_html=\"...\")`\n"
+                    "- SMS: `send_sms()`, Web: `send_chat_message()`, Peers: `send_agent_message()`"
+                ),
+                weight=3,
+                non_shrinkable=True,
+            )
+        elif channel == "sms":
+            # Reply to SMS
+            important_group.section_text(
+                "implied_send_status",
+                (
+                    f"## Implied Send → {display_name}\n\n"
+                    f"Your text output will reply to this SMS sender.\n"
+                    f"Equivalent to: `{tool_example}`\n\n"
+                    "**To reach someone else**, use explicit tools:\n"
+                    "- Other SMS: `send_sms(to_number=\"...\", body=\"...\")`\n"
+                    "- Email: `send_email()`, Web: `send_chat_message()`, Peers: `send_agent_message()`"
+                ),
+                weight=3,
+                non_shrinkable=True,
+            )
     else:
         important_group.section_text(
             "implied_send_status",
             (
                 "## No Implied Send Available\n\n"
-                "No active web session—your text output does NOT reach anyone automatically.\n\n"
+                "No active session or recent inbound message—your text output does NOT reach anyone.\n\n"
                 "**You must use explicit tools to communicate:**\n"
-                "- Web chat → `send_chat_message()`\n"
-                "- Email → `send_email()`\n"
-                "- SMS → `send_sms()`\n"
-                "- Peer agents → `send_agent_message()`\n\n"
+                "- Web chat: `send_chat_message(to_address=\"...\", body=\"...\")`\n"
+                "- Email: `send_email(to_address=\"...\", subject=\"...\", mobile_first_html=\"...\")`\n"
+                "- SMS: `send_sms(to_number=\"...\", body=\"...\")`\n"
+                "- Peer agents: `send_agent_message(peer_agent_id=\"...\", message=\"...\")`\n\n"
                 "If you just write text without a send tool, nobody will see it."
             ),
             weight=2,
@@ -2105,18 +2154,108 @@ def _get_implied_send_status(agent: PersistentAgent) -> tuple[bool, str | None]:
     Returns:
         Tuple of (is_active, to_address). If inactive, to_address is None.
     """
+    context = _get_implied_send_context(agent)
+    if context:
+        return True, context.get("to_address")
+    return False, None
+
+
+def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
+    """
+    Get the full context for implied send routing.
+
+    Priority order:
+    1. Active web chat session (synchronous, highest priority)
+    2. Most recent inbound message (reply to sender)
+
+    Returns:
+        dict with keys: channel, to_address, tool_name, display_name, tool_example
+        or None if no implied send target available.
+    """
+    # Priority 1: Active web chat session
     try:
         for session in get_active_web_sessions(agent):
             if session.user_id is not None:
                 to_address = build_web_user_address(session.user_id, agent.id)
-                return True, to_address
+                return {
+                    "channel": "web",
+                    "to_address": to_address,
+                    "tool_name": "send_chat_message",
+                    "display_name": "active web chat user",
+                    "tool_example": f'send_chat_message(to_address="{to_address}", body="...")',
+                }
     except Exception:
         logger.debug(
-            "Failed to check implied send status for agent %s",
+            "Failed to check web sessions for agent %s",
             agent.id,
             exc_info=True,
         )
-    return False, None
+
+    # Priority 2: Most recent inbound message (for reply context)
+    try:
+        last_inbound = (
+            PersistentAgentMessage.objects.filter(
+                owner_agent=agent,
+                is_outbound=False,
+            )
+            .select_related("from_endpoint", "conversation", "peer_agent")
+            .order_by("-timestamp")
+            .first()
+        )
+
+        if last_inbound and last_inbound.from_endpoint:
+            # Check if it's a peer DM
+            if last_inbound.conversation and getattr(last_inbound.conversation, "is_peer_dm", False):
+                peer_agent = last_inbound.peer_agent
+                if peer_agent:
+                    peer_name = peer_agent.name or "peer agent"
+                    return {
+                        "channel": "peer_dm",
+                        "to_address": str(peer_agent.id),
+                        "tool_name": "send_agent_message",
+                        "display_name": f"peer agent '{peer_name}'",
+                        "tool_example": f'send_agent_message(peer_agent_id="{peer_agent.id}", message="...")',
+                        "peer_agent_id": str(peer_agent.id),
+                        "peer_agent_name": peer_name,
+                    }
+
+            # Regular channel message
+            channel = last_inbound.from_endpoint.channel
+            from_address = last_inbound.from_endpoint.address
+
+            if channel == CommsChannel.EMAIL:
+                return {
+                    "channel": "email",
+                    "to_address": from_address,
+                    "tool_name": "send_email",
+                    "display_name": f"email to {from_address}",
+                    "tool_example": f'send_email(to_address="{from_address}", subject="...", mobile_first_html="...")',
+                }
+            elif channel == CommsChannel.SMS:
+                return {
+                    "channel": "sms",
+                    "to_address": from_address,
+                    "tool_name": "send_sms",
+                    "display_name": f"SMS to {from_address}",
+                    "tool_example": f'send_sms(to_number="{from_address}", body="...")',
+                }
+            elif channel == CommsChannel.WEB:
+                return {
+                    "channel": "web",
+                    "to_address": from_address,
+                    "tool_name": "send_chat_message",
+                    "display_name": f"web chat to {from_address}",
+                    "tool_example": f'send_chat_message(to_address="{from_address}", body="...")',
+                }
+
+    except Exception:
+        logger.debug(
+            "Failed to check last inbound for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+
+    return None
 
 
 def _get_formatting_guidance(
