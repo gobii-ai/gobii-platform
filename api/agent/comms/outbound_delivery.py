@@ -24,6 +24,7 @@ from django.template.loader import render_to_string
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.integrations import postmark_status
+from util.text_sanitizer import normalize_llm_output
 
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
@@ -56,6 +57,10 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
     import pypandoc  # type: ignore
 
     logger = logging.getLogger(__name__)
+
+    # Normalize LLM output first: decode escape sequences, strip control chars
+    # This handles cases where LLMs output \u2014 instead of —, \n instead of newlines, etc.
+    body = normalize_llm_output(body)
 
     body_length = len(body)
     body_preview = body[:200] + "..." if len(body) > 200 else body

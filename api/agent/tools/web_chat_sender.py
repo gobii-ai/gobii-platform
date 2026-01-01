@@ -15,7 +15,7 @@ from ..files.attachment_helpers import (
     resolve_filespace_attachments,
 )
 from ..files.filespace_service import broadcast_message_attachment_update
-from util.text_sanitizer import normalize_whitespace
+from util.text_sanitizer import normalize_llm_output
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -84,8 +84,8 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     """Persist an outbound web chat message for an agent."""
 
     raw_body = params.get("body", "")
-    # Normalize whitespace: collapse excessive newlines, strip trailing spaces
-    body = normalize_whitespace((raw_body or "").strip())
+    # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
+    body = normalize_llm_output((raw_body or "").strip())
     if not body:
         return {"status": "error", "message": "Message body is required."}
     will_continue = _should_continue_work(params)

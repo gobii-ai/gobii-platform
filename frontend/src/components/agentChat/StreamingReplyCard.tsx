@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
-import { looksLikeHtml, sanitizeHtml } from '../../util/sanitize'
+import { looksLikeHtml, sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 
 type StreamingReplyCardProps = {
   content: string
@@ -22,12 +22,15 @@ export function StreamingReplyCard({ content, agentFirstName, isStreaming }: Str
 
   const shouldRenderHtml = hasContent && (looksLikeHtml(content) || (isStreaming && hasHtmlPrefix))
 
+  // Strip redundant quotes from blockquotes (e.g., > "text" → > text)
+  const normalizedContent = useMemo(() => stripBlockquoteQuotes(content), [content])
+
   const htmlContent = useMemo(() => {
     if (!shouldRenderHtml) {
       return null
     }
-    return sanitizeHtml(content)
-  }, [content, shouldRenderHtml])
+    return sanitizeHtml(normalizedContent)
+  }, [normalizedContent, shouldRenderHtml])
 
   if (!hasContent) {
     return null
@@ -43,7 +46,7 @@ export function StreamingReplyCard({ content, agentFirstName, isStreaming }: Str
           {htmlContent ? (
             <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
           ) : (
-            <MarkdownViewer content={content} enableHighlight={!isStreaming} />
+            <MarkdownViewer content={normalizedContent} enableHighlight={!isStreaming} />
           )}
         </div>
       </div>

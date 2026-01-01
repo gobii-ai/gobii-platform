@@ -20,7 +20,7 @@ import os
 from ..comms.outbound_delivery import deliver_agent_email
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
-from util.text_sanitizer import strip_control_chars
+from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
 from ..files.attachment_helpers import (
     AttachmentResolutionError,
     create_message_attachments,
@@ -83,7 +83,9 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     """Execute the send_email tool for a persistent agent."""
     to_address = params.get("to_address")
     subject = params.get("subject")
-    mobile_first_html = strip_control_chars(params.get("mobile_first_html"))
+    # Decode escape sequences and strip control chars from HTML body
+    mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
+    mobile_first_html = strip_control_chars(mobile_first_html)
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
