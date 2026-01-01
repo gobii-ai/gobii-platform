@@ -41,3 +41,16 @@
     animation-duration: 1.2s;
   }
 }
+
+/*
+ * Disable Tailwind prose blockquote quotes.
+ * The blockquote styling (border, italic) already indicates a quote.
+ * Adding CSS quotes on top of any literal quotes from LLM output is redundant.
+ */
+.prose blockquote {
+  quotes: none;
+}
+.prose blockquote::before,
+.prose blockquote::after {
+  content: none;
+}
