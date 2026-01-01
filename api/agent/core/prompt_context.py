@@ -338,6 +338,35 @@ sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedba
 
 ---
 
+### Table Name Consistency — Critical!
+
+**Use the exact same table name in CREATE, INSERT, and SELECT.** Watch for singular vs plural typos.
+
+  ✗ Bad (created hn_comments, queried hn_comment):
+  CREATE TABLE IF NOT EXISTS hn_comments (...);
+  INSERT INTO hn_comment ...  -- FAILS: no such table
+
+  ✓ Good (same name everywhere):
+  CREATE TABLE IF NOT EXISTS hn_comments (...);
+  INSERT INTO hn_comments ...
+  SELECT * FROM hn_comments
+
+---
+
+### Avoid Reserved Words as Identifiers
+
+**Don't use SQL reserved words for table or column names.** Common traps: values, table, order, group, index, key, default, check, column, row, user, type, status, data, time, date.
+
+  ✗ Bad:
+  CREATE TABLE values (...)      -- "values" is reserved
+  CREATE TABLE data (order TEXT) -- "order" is reserved
+
+  ✓ Good:
+  CREATE TABLE price_values (...)
+  CREATE TABLE entries (sort_order TEXT)
+
+---
+
 ### Cleanup & Maintenance
 
 **Prune old data:**
