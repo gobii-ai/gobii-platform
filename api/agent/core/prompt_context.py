@@ -340,14 +340,19 @@ sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedba
 
 ### Table Name Consistency — Critical!
 
-**Use the exact same table name in CREATE, INSERT, and SELECT.** Watch for singular vs plural typos.
+**Use the exact same table name everywhere: CREATE TABLE, CREATE INDEX, INSERT, SELECT, UPDATE, DELETE.** Watch for singular vs plural typos (hn_comments vs hn_comment).
 
-  ✗ Bad (created hn_comments, queried hn_comment):
+  ✗ Bad (table is hn_comments, but index references hn_comment):
+  CREATE TABLE IF NOT EXISTS hn_comments (...);
+  CREATE INDEX idx_story ON hn_comment(story_id);  -- FAILS: no such table
+
+  ✗ Bad (same typo in INSERT):
   CREATE TABLE IF NOT EXISTS hn_comments (...);
   INSERT INTO hn_comment ...  -- FAILS: no such table
 
-  ✓ Good (same name everywhere):
+  ✓ Good (same name in all statements):
   CREATE TABLE IF NOT EXISTS hn_comments (...);
+  CREATE INDEX idx_story ON hn_comments(story_id);
   INSERT INTO hn_comments ...
   SELECT * FROM hn_comments
 
