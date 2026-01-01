@@ -13,6 +13,7 @@ _HINT_KEYS = (
     "supports_vision",
     "supports_reasoning",
     "reasoning_effort",
+    "low_latency",
 )
 
 

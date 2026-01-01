@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from api.openrouter import get_attribution_headers
 from api.llm.utils import normalize_model_name
+from api.services.web_sessions import has_active_web_session
 from util.subscription_helper import get_owner_plan
 from constants.plans import PlanNames
 
@@ -488,7 +489,14 @@ def get_llm_config() -> Tuple[str, dict]:
     params = {
         k: v
         for k, v in params.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_reasoning", "reasoning_effort")
+        if k not in (
+            "supports_tool_choice",
+            "use_parallel_tool_calls",
+            "supports_vision",
+            "supports_reasoning",
+            "reasoning_effort",
+            "low_latency",
+        )
     }
     return model, params
 
@@ -564,11 +572,114 @@ def get_available_providers(provider_tiers: List[List[Tuple[str, float]]] = None
     return available
 
 
+def _infer_low_latency_preference(
+    prefer_low_latency: Optional[bool],
+    agent: Any | None,
+) -> bool:
+    if prefer_low_latency is not None:
+        return bool(prefer_low_latency)
+    if agent is None:
+        return False
+    try:
+        return has_active_web_session(agent)
+    except Exception:
+        logger.debug("Failed to detect active web session for low-latency routing", exc_info=True)
+        return False
+
+
+def _build_weighted_failover_configs(
+    endpoints_with_weights: list[tuple[Any, Any, float, str, Optional[str]]],
+    *,
+    tier_label: str,
+) -> list[tuple[str, str, dict]]:
+    configs: list[tuple[str, str, dict]] = []
+    remaining = endpoints_with_weights.copy()
+    while remaining:
+        weights = [r[2] for r in remaining]
+        selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
+        endpoint, provider, _weight, effective_model, reasoning_effort_override = remaining.pop(selected_idx)
+
+        supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
+        params: Dict[str, Any] = {}
+        if supports_temperature:
+            params["temperature"] = 0.1
+        try:
+            effective_key = None
+            if provider.api_key_encrypted:
+                from api.encryption import SecretsEncryption
+                effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
+            if not effective_key and provider.env_var_name:
+                effective_key = os.getenv(provider.env_var_name)
+            if effective_key:
+                params["api_key"] = effective_key
+            else:
+                if endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+                    params["api_key"] = "sk-noauth"
+        except Exception:
+            logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
+        if supports_temperature and endpoint.temperature_override is not None:
+            params["temperature"] = float(endpoint.temperature_override)
+        if "google" in provider.key:
+            vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
+            vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
+            params.update(
+                {
+                    "vertex_project": vertex_project,
+                    "vertex_location": vertex_location,
+                }
+            )
+        if provider.key == "openrouter":
+            headers = get_attribution_headers()
+            if headers:
+                params["extra_headers"] = headers
+            openrouter_preset = (getattr(endpoint, "openrouter_preset", "") or "").strip()
+            if openrouter_preset:
+                params["preset"] = openrouter_preset
+
+        if effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
+            params["api_base"] = endpoint.api_base
+            logger.info(
+                "DB LLM endpoint configured with api_base: endpoint=%s provider=%s "
+                "model=%s api_base=%s has_key=%s tier_type=%s",
+                endpoint.key,
+                provider.key,
+                effective_model,
+                endpoint.api_base,
+                bool(params.get("api_key")),
+                tier_label,
+            )
+
+        if supports_temperature:
+            _apply_required_temperature(effective_model, params)
+        else:
+            params.pop("temperature", None)
+
+        supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
+        reasoning_effort = reasoning_effort_override or getattr(endpoint, "reasoning_effort", None)
+        if not supports_reasoning:
+            reasoning_effort = None
+
+        params_with_hints = dict(params)
+        params_with_hints["supports_temperature"] = supports_temperature
+        params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
+        params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
+        params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
+        params_with_hints["supports_reasoning"] = supports_reasoning
+        params_with_hints["low_latency"] = bool(getattr(endpoint, "low_latency", False))
+        if supports_reasoning and reasoning_effort:
+            params_with_hints["reasoning_effort"] = reasoning_effort
+
+        configs.append((endpoint.key, effective_model, params_with_hints))
+
+    return configs
+
+
 def _collect_failover_configs(
     tiers,
     *,
     token_range_name: str,
     tier_label: str,
+    prefer_low_latency: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """Build failover configurations from the provided tier queryset."""
 
@@ -601,88 +712,49 @@ def _collect_failover_configs(
                     getattr(endpoint, "api_base", "") or "",
                 )
                 continue
-            endpoints_with_weights.append((endpoint, provider, te.weight, effective_model))
+            endpoints_with_weights.append(
+                (
+                    endpoint,
+                    provider,
+                    te.weight,
+                    effective_model,
+                    te.reasoning_effort_override,
+                )
+            )
 
         if not endpoints_with_weights:
             continue
 
-        remaining = endpoints_with_weights.copy()
-        while remaining:
-            weights = [r[2] for r in remaining]
-            selected_idx = random.choices(range(len(remaining)), weights=weights, k=1)[0]
-            endpoint, provider, _weight, effective_model = remaining.pop(selected_idx)
-
-            supports_temperature = bool(getattr(endpoint, "supports_temperature", True))
-            params: Dict[str, Any] = {}
-            if supports_temperature:
-                params["temperature"] = 0.1
-            try:
-                effective_key = None
-                if provider.api_key_encrypted:
-                    from api.encryption import SecretsEncryption
-                    effective_key = SecretsEncryption.decrypt_value(provider.api_key_encrypted)
-                if not effective_key and provider.env_var_name:
-                    effective_key = os.getenv(provider.env_var_name)
-                if effective_key:
-                    params["api_key"] = effective_key
-                else:
-                    if endpoint.litellm_model.startswith("openai/") and getattr(endpoint, "api_base", None):
-                        params["api_key"] = "sk-noauth"
-            except Exception:
-                logger.debug("Unable to determine API key for endpoint %s", endpoint.key, exc_info=True)
-            if supports_temperature and endpoint.temperature_override is not None:
-                params["temperature"] = float(endpoint.temperature_override)
-            if "google" in provider.key:
-                vertex_project = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
-                vertex_location = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
-                params.update(
-                    {
-                        "vertex_project": vertex_project,
-                        "vertex_location": vertex_location,
-                    }
+        low_latency_endpoints = [
+            entry for entry in endpoints_with_weights
+            if bool(getattr(entry[0], "low_latency", False))
+        ]
+        if prefer_low_latency and low_latency_endpoints:
+            fallback_endpoints = [
+                entry for entry in endpoints_with_weights
+                if not bool(getattr(entry[0], "low_latency", False))
+            ]
+            failover_configs.extend(
+                _build_weighted_failover_configs(
+                    low_latency_endpoints,
+                    tier_label=tier_label,
                 )
-            if provider.key == "openrouter":
-                headers = get_attribution_headers()
-                if headers:
-                    params["extra_headers"] = headers
-                openrouter_preset = (getattr(endpoint, "openrouter_preset", "") or "").strip()
-                if openrouter_preset:
-                    params["preset"] = openrouter_preset
-
-            if effective_model.startswith("openai/") and getattr(endpoint, "api_base", None):
-                params["api_base"] = endpoint.api_base
-                logger.info(
-                    "DB LLM endpoint configured with api_base: endpoint=%s provider=%s "
-                    "model=%s api_base=%s has_key=%s tier_type=%s",
-                    endpoint.key,
-                    provider.key,
-                    effective_model,
-                    endpoint.api_base,
-                    bool(params.get("api_key")),
-                    tier_label,
+            )
+            if fallback_endpoints:
+                failover_configs.extend(
+                    _build_weighted_failover_configs(
+                        fallback_endpoints,
+                        tier_label=tier_label,
+                    )
                 )
+            continue
 
-            if supports_temperature:
-                _apply_required_temperature(effective_model, params)
-            else:
-                params.pop("temperature", None)
-
-            supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
-            tier_reasoning_override = getattr(te, "reasoning_effort_override", None)
-            reasoning_effort = tier_reasoning_override or getattr(endpoint, "reasoning_effort", None)
-            if not supports_reasoning:
-                reasoning_effort = None
-
-            params_with_hints = dict(params)
-            params_with_hints["supports_temperature"] = supports_temperature
-            params_with_hints["supports_tool_choice"] = bool(endpoint.supports_tool_choice)
-            params_with_hints["supports_vision"] = bool(getattr(endpoint, "supports_vision", False))
-            params_with_hints["use_parallel_tool_calls"] = bool(getattr(endpoint, "use_parallel_tool_calls", True))
-            params_with_hints["supports_reasoning"] = supports_reasoning
-            if supports_reasoning and reasoning_effort:
-                params_with_hints["reasoning_effort"] = reasoning_effort
-
-            failover_configs.append((endpoint.key, effective_model, params_with_hints))
+        failover_configs.extend(
+            _build_weighted_failover_configs(
+                endpoints_with_weights,
+                tier_label=tier_label,
+            )
+        )
 
     return failover_configs
 
@@ -696,6 +768,7 @@ def get_llm_config_with_failover(
     agent: Any | None = None,
     is_first_loop: bool | None = None,
     routing_profile: Any | None = None,
+    prefer_low_latency: Optional[bool] = None,
 ) -> List[Tuple[str, str, dict]]:
     """
     Get LLM configurations for tiered failover with token-based tier selection.
@@ -711,6 +784,8 @@ def get_llm_config_with_failover(
         is_first_loop: Whether this is the first run of the agent (brand-new)
         routing_profile: Optional LLMRoutingProfile instance. When provided, uses
             this profile's configuration instead of the active profile or legacy config.
+        prefer_low_latency: When true, prioritize low-latency endpoints within a tier.
+            When None, automatically prefers low latency for active web sessions.
 
     Returns:
         List of (provider_name, model_name, litellm_params) tuples in failover order
@@ -718,6 +793,8 @@ def get_llm_config_with_failover(
     Raises:
         LLMNotConfiguredError: If no providers are available with valid API keys (unless allow_unconfigured=True)
     """
+    prefer_low_latency = _infer_low_latency_preference(prefer_low_latency, agent)
+
     # Try routing profile first, then fall back to legacy config
     configs = _get_failover_configs_from_profile(
         token_count=token_count,
@@ -725,6 +802,7 @@ def get_llm_config_with_failover(
         agent=agent,
         is_first_loop=is_first_loop,
         routing_profile=routing_profile,
+        prefer_low_latency=prefer_low_latency,
     )
     if configs:
         _cache_bootstrap_status(False)
@@ -736,6 +814,7 @@ def get_llm_config_with_failover(
         agent_id=agent_id,
         agent=agent,
         is_first_loop=is_first_loop,
+        prefer_low_latency=prefer_low_latency,
     )
     if configs:
         _cache_bootstrap_status(False)
@@ -758,6 +837,7 @@ def _get_failover_configs_from_profile(
     agent: Any | None,
     is_first_loop: bool | None,
     routing_profile: Any | None,
+    prefer_low_latency: bool,
 ) -> List[Tuple[str, str, dict]]:
     """Get failover configs from an LLMRoutingProfile.
 
@@ -842,10 +922,11 @@ def _get_failover_configs_from_profile(
                 is_max=True,
             ).order_by("order")
             max_configs = _collect_failover_configs(
-                max_tiers,
-                token_range_name=f"{profile_name}:{token_range.name}",
-                tier_label="max",
-            )
+            max_tiers,
+            token_range_name=f"{profile_name}:{token_range.name}",
+            tier_label="max",
+            prefer_low_latency=prefer_low_latency,
+        )
             if max_configs:
                 combined_configs.extend(max_configs)
 
@@ -856,10 +937,11 @@ def _get_failover_configs_from_profile(
                 is_max=False,
             ).order_by("order")
             premium_configs = _collect_failover_configs(
-                premium_tiers,
-                token_range_name=f"{profile_name}:{token_range.name}",
-                tier_label="premium",
-            )
+            premium_tiers,
+            token_range_name=f"{profile_name}:{token_range.name}",
+            tier_label="premium",
+            prefer_low_latency=prefer_low_latency,
+        )
             if premium_configs:
                 combined_configs.extend(premium_configs)
 
@@ -869,10 +951,11 @@ def _get_failover_configs_from_profile(
             is_max=False,
         ).order_by("order")
         standard_configs = _collect_failover_configs(
-            standard_tiers,
-            token_range_name=f"{profile_name}:{token_range.name}",
-            tier_label="standard",
-        )
+        standard_tiers,
+        token_range_name=f"{profile_name}:{token_range.name}",
+        tier_label="standard",
+        prefer_low_latency=prefer_low_latency,
+    )
         if standard_configs:
             combined_configs.extend(standard_configs)
 
@@ -889,6 +972,7 @@ def _get_failover_configs_from_legacy(
     agent_id: str | None,
     agent: Any | None,
     is_first_loop: bool | None,
+    prefer_low_latency: bool,
 ) -> List[Tuple[str, str, dict]]:
     """Get failover configs from legacy PersistentTokenRange/PersistentLLMTier tables."""
     try:
@@ -957,10 +1041,11 @@ def _get_failover_configs_from_legacy(
             is_max=True,
         ).order_by("order")
         max_configs = _collect_failover_configs(
-            max_tiers,
-            token_range_name=token_range.name,
-            tier_label="max",
-        )
+        max_tiers,
+        token_range_name=token_range.name,
+        tier_label="max",
+        prefer_low_latency=prefer_low_latency,
+    )
         if max_configs:
             combined_configs.extend(max_configs)
 
@@ -971,10 +1056,11 @@ def _get_failover_configs_from_legacy(
             is_max=False,
         ).order_by("order")
         premium_configs = _collect_failover_configs(
-            premium_tiers,
-            token_range_name=token_range.name,
-            tier_label="premium",
-        )
+        premium_tiers,
+        token_range_name=token_range.name,
+        tier_label="premium",
+        prefer_low_latency=prefer_low_latency,
+    )
         if premium_configs:
             combined_configs.extend(premium_configs)
 
@@ -987,6 +1073,7 @@ def _get_failover_configs_from_legacy(
         standard_tiers,
         token_range_name=token_range.name,
         tier_label="standard",
+        prefer_low_latency=prefer_low_latency,
     )
     if standard_configs:
         combined_configs.extend(standard_configs)
@@ -1032,7 +1119,15 @@ def get_summarization_llm_config(
     supports_temperature = bool(params_with_hints.get("supports_temperature", True))
     params = {
         k: v for k, v in params_with_hints.items()
-        if k not in ("supports_tool_choice", "use_parallel_tool_calls", "supports_vision", "supports_temperature", "supports_reasoning", "reasoning_effort")
+        if k not in (
+            "supports_tool_choice",
+            "use_parallel_tool_calls",
+            "supports_vision",
+            "supports_temperature",
+            "supports_reasoning",
+            "reasoning_effort",
+            "low_latency",
+        )
     }
 
     # Default to deterministic temperature unless the endpoint already
