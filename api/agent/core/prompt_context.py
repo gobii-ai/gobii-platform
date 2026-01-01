@@ -198,6 +198,8 @@ def _get_sqlite_examples() -> str:
 
 Your database is persistent across runs. Design schemas that grow with your task.
 
+**CRITICAL: The `queries` parameter is a plain SQL string. Use semicolons to separate multiple statements. Never use brackets, quotes around the whole thing, or array syntax.**
+
 ---
 
 ### When to Use SQLite
@@ -216,146 +218,150 @@ Your database is persistent across runs. Design schemas that grow with your task
 
 ---
 
-### Schema Creation Patterns
+### Schema Creation
 
-**Start simple, evolve as needed:**
+**Single table:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS prices (symbol TEXT PRIMARY KEY, price REAL, fetched_at TEXT)")
+```
 
-→ sqlite_batch(queries="CREATE TABLE IF NOT EXISTS prices (symbol TEXT PRIMARY KEY, price REAL, fetched_at TEXT)")
+**Table with index** — use semicolons to separate statements:
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT); CREATE INDEX IF NOT EXISTS idx_price_symbol ON price_history(symbol, fetched_at DESC)")
+```
 
-*Tracking multiple entities with history:*
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT)",
-    "CREATE INDEX IF NOT EXISTS idx_price_symbol ON price_history(symbol, fetched_at DESC)"
-])
+**Multiple related tables:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, stage TEXT, last_checked TEXT, notes TEXT); CREATE TABLE IF NOT EXISTS funding_rounds (id INTEGER PRIMARY KEY, startup_id INTEGER, amount REAL, date TEXT, source TEXT)")
+```
 
-*Deduplication pattern:*
-→ sqlite_batch(queries="CREATE TABLE IF NOT EXISTS seen_urls (url TEXT PRIMARY KEY, first_seen TEXT, title TEXT)")
-
-*Rich entity tracking:*
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS startups (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, stage TEXT, last_checked TEXT, notes TEXT)",
-    "CREATE TABLE IF NOT EXISTS funding_rounds (id INTEGER PRIMARY KEY, startup_id INTEGER, amount REAL, date TEXT, source TEXT)"
-])
-
----
-
-### Batch Query Patterns
-
-**Insert + query in one call** — efficient for fetch→store→report cycles:
-
-→ sqlite_batch(queries=[
-    "INSERT INTO price_history (symbol, price, fetched_at) VALUES ('BTC', 67000.50, '2024-01-15T10:30:00Z')",
-    "INSERT INTO price_history (symbol, price, fetched_at) VALUES ('ETH', 3400.25, '2024-01-15T10:30:00Z')",
-    "SELECT symbol, price, fetched_at FROM price_history WHERE fetched_at > datetime('now', '-24 hours') ORDER BY fetched_at DESC"
-], will_continue_work=true)
-
-**Upsert pattern** — update if exists, insert if new:
-
-→ sqlite_batch(queries="INSERT INTO prices (symbol, price, fetched_at) VALUES ('BTC', 67500.00, '2024-01-15T12:00:00Z') ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, fetched_at=excluded.fetched_at")
-
-**Bulk insert with dedup check:**
-
-→ sqlite_batch(queries=[
-    "INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post1', '2024-01-15', 'Great Article')",
-    "INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post2', '2024-01-15', 'Another Post')",
-    "SELECT COUNT(*) as total_seen FROM seen_urls"
-])
+**Deduplication pattern:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS seen_urls (url TEXT PRIMARY KEY, first_seen TEXT, title TEXT)")
+```
 
 ---
 
-### Schema Evolution — Refactor as Requirements Change
+### Insert & Query Patterns
+
+**Insert multiple rows then query:**
+```
+sqlite_batch(queries="INSERT INTO price_history (symbol, price, fetched_at) VALUES ('BTC', 67000.50, '2024-01-15T10:30:00Z'); INSERT INTO price_history (symbol, price, fetched_at) VALUES ('ETH', 3400.25, '2024-01-15T10:30:00Z'); SELECT symbol, price, fetched_at FROM price_history WHERE fetched_at > datetime('now', '-24 hours') ORDER BY fetched_at DESC", will_continue_work=true)
+```
+
+**Upsert** — update if exists, insert if new:
+```
+sqlite_batch(queries="INSERT INTO prices (symbol, price, fetched_at) VALUES ('BTC', 67500.00, '2024-01-15T12:00:00Z') ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, fetched_at=excluded.fetched_at")
+```
+
+**Bulk insert with dedup:**
+```
+sqlite_batch(queries="INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post1', '2024-01-15', 'Great Article'); INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post2', '2024-01-15', 'Another Post'); SELECT COUNT(*) as total_seen FROM seen_urls")
+```
+
+---
+
+### Schema Evolution
 
 Schemas aren't static. Add columns, create new tables, migrate data as your task evolves.
 
-**Adding a column:**
-→ sqlite_batch(queries="ALTER TABLE startups ADD COLUMN sentiment TEXT")
+**Add a column:**
+```
+sqlite_batch(queries="ALTER TABLE startups ADD COLUMN sentiment TEXT")
+```
 
-**Creating a derived table for reporting:**
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS daily_summaries (date TEXT PRIMARY KEY, btc_high REAL, btc_low REAL, eth_high REAL, eth_low REAL)",
-    "INSERT OR REPLACE INTO daily_summaries (date, btc_high, btc_low, eth_high, eth_low) SELECT date(fetched_at), MAX(CASE WHEN symbol='BTC' THEN price END), MIN(CASE WHEN symbol='BTC' THEN price END), MAX(CASE WHEN symbol='ETH' THEN price END), MIN(CASE WHEN symbol='ETH' THEN price END) FROM price_history GROUP BY date(fetched_at)"
-])
+**Create derived table for reporting:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS daily_summaries (date TEXT PRIMARY KEY, btc_high REAL, btc_low REAL, eth_high REAL, eth_low REAL); INSERT OR REPLACE INTO daily_summaries (date, btc_high, btc_low, eth_high, eth_low) SELECT date(fetched_at), MAX(CASE WHEN symbol='BTC' THEN price END), MIN(CASE WHEN symbol='BTC' THEN price END), MAX(CASE WHEN symbol='ETH' THEN price END), MIN(CASE WHEN symbol='ETH' THEN price END) FROM price_history GROUP BY date(fetched_at)")
+```
 
-**Restructuring for new requirements:**
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS startups_v2 (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, category TEXT, stage TEXT, score INTEGER, last_checked TEXT)",
-    "INSERT INTO startups_v2 (name, url, stage, last_checked) SELECT name, url, stage, last_checked FROM startups",
-    "DROP TABLE startups",
-    "ALTER TABLE startups_v2 RENAME TO startups"
-])
+**Restructure a table:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups_v2 (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, category TEXT, stage TEXT, score INTEGER, last_checked TEXT); INSERT INTO startups_v2 (name, url, stage, last_checked) SELECT name, url, stage, last_checked FROM startups; DROP TABLE startups; ALTER TABLE startups_v2 RENAME TO startups")
+```
 
 ---
 
 ### Aggregation & Analysis
 
 **Trend detection:**
-→ sqlite_batch(queries="SELECT symbol, AVG(price) as avg_price, MIN(price) as low, MAX(price) as high FROM price_history WHERE fetched_at > datetime('now', '-7 days') GROUP BY symbol")
+```
+sqlite_batch(queries="SELECT symbol, AVG(price) as avg_price, MIN(price) as low, MAX(price) as high FROM price_history WHERE fetched_at > datetime('now', '-7 days') GROUP BY symbol")
+```
 
-**Change detection (for alerting):**
-→ sqlite_batch(queries="SELECT symbol, price, LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at) as prev_price, ((price - LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at)) / LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at)) * 100 as pct_change FROM price_history WHERE fetched_at > datetime('now', '-1 hour')")
+**Change detection for alerting:**
+```
+sqlite_batch(queries="SELECT symbol, price, LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at) as prev_price FROM price_history WHERE fetched_at > datetime('now', '-1 hour')")
+```
 
 **Top-N with ranking:**
-→ sqlite_batch(queries="SELECT name, score, RANK() OVER (ORDER BY score DESC) as rank FROM startups WHERE stage = 'seed' LIMIT 10")
+```
+sqlite_batch(queries="SELECT name, score, RANK() OVER (ORDER BY score DESC) as rank FROM startups WHERE stage = 'seed' LIMIT 10")
+```
 
 ---
 
 ### String Escaping — Critical!
 
-**Always escape single quotes by doubling them:**
+**Escape single quotes by doubling them:**
 
-  Bad:  VALUES ('McDonald's', ...)
-  Good: VALUES ('McDonald''s', ...)
+  ✗ Bad:  VALUES ('McDonald's', ...)
+  ✓ Good: VALUES ('McDonald''s', ...)
 
-  Bad:  VALUES ('It's raining', ...)
-  Good: VALUES ('It''s raining', ...)
+  ✗ Bad:  VALUES ('It's raining', ...)
+  ✓ Good: VALUES ('It''s raining', ...)
 
-**For user-provided content, escape carefully:**
-→ sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedback', 'They said: ''This is great!''')")
+**Example with escaped quotes:**
+```
+sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedback', 'They said: ''This is great!''')")
+```
 
 ---
 
 ### Cleanup & Maintenance
 
-**Prune old data to keep DB lean:**
-→ sqlite_batch(queries="DELETE FROM price_history WHERE fetched_at < datetime('now', '-30 days')", will_continue_work=false)
+**Prune old data:**
+```
+sqlite_batch(queries="DELETE FROM price_history WHERE fetched_at < datetime('now', '-30 days')", will_continue_work=false)
+```
 
 **Remove duplicates:**
-→ sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) FROM price_history GROUP BY symbol, fetched_at)")
-
-**Check DB health:**
-→ sqlite_batch(queries="SELECT name, (SELECT COUNT(*) FROM (SELECT * FROM sqlite_master WHERE type='table' AND name=m.name)) as row_count FROM sqlite_master m WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+```
+sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) FROM price_history GROUP BY symbol, fetched_at)")
+```
 
 ---
 
-### Agentic Decision Patterns
+### Agentic Patterns
 
-**First run → create schema:**
+**First run — create schema then fetch data:**
 User: 'Track bitcoin for me'
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT)",
-    "CREATE INDEX IF NOT EXISTS idx_symbol ON price_history(symbol)"
-], will_continue_work=true)
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT); CREATE INDEX IF NOT EXISTS idx_symbol ON price_history(symbol)", will_continue_work=true)
+```
 → http_request('coinbase-api', will_continue_work=true)
 [Next cycle: INSERT price, report to user]
 
-**Scheduled run → check for changes:**
+**Scheduled run — check for changes:**
 [Cron fires]
-→ sqlite_batch(queries="SELECT price FROM price_history WHERE symbol='BTC' ORDER BY fetched_at DESC LIMIT 1")
+```
+sqlite_batch(queries="SELECT price FROM price_history WHERE symbol='BTC' ORDER BY fetched_at DESC LIMIT 1")
+```
 → http_request('coinbase-api', will_continue_work=true)
 [Next cycle: compare prices, INSERT new price, alert if significant change]
 
-**Schema doesn't fit anymore → evolve it:**
+**Evolve schema when requirements change:**
 User: 'Also track the 24h volume'
-→ sqlite_batch(queries="ALTER TABLE price_history ADD COLUMN volume_24h REAL")
+```
+sqlite_batch(queries="ALTER TABLE price_history ADD COLUMN volume_24h REAL")
+```
 → update_charter('...now including 24h volume tracking')
-[Future inserts will include volume data]
 
-**Data getting large → aggregate and prune:**
+**Data getting large — aggregate and prune:**
 [DB size warning]
-→ sqlite_batch(queries=[
-    "INSERT INTO daily_summaries SELECT date(fetched_at), symbol, AVG(price), MIN(price), MAX(price) FROM price_history WHERE fetched_at < datetime('now', '-7 days') GROUP BY date(fetched_at), symbol",
-    "DELETE FROM price_history WHERE fetched_at < datetime('now', '-7 days')"
-])
+```
+sqlite_batch(queries="INSERT INTO daily_summaries SELECT date(fetched_at), symbol, AVG(price), MIN(price), MAX(price) FROM price_history WHERE fetched_at < datetime('now', '-7 days') GROUP BY date(fetched_at), symbol; DELETE FROM price_history WHERE fetched_at < datetime('now', '-7 days')")
+```
 """
 
 
@@ -439,17 +445,22 @@ User: 'Scout promising open source projects weekly'
 Thinking: "This needs deduplication (don't report same project twice) and tracking (compare stars over time)"
 
 **Step 2: Enable the database**
-→ enable_database(will_continue_work=true)
+```
+enable_database(will_continue_work=true)
+```
 
-**Step 3: Create your schema** (next cycle)
-→ sqlite_batch(queries=[
-    "CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, repo TEXT UNIQUE, name TEXT, stars INTEGER, first_seen TEXT, last_checked TEXT)",
-    "CREATE INDEX IF NOT EXISTS idx_stars ON projects(stars DESC)"
-])
+**Step 3: Create your schema** (next cycle — use semicolons for multiple statements)
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, repo TEXT UNIQUE, name TEXT, stars INTEGER, first_seen TEXT, last_checked TEXT); CREATE INDEX IF NOT EXISTS idx_stars ON projects(stars DESC)")
+```
 
 **Step 4: Use it in your workflow** (ongoing)
-→ sqlite_batch(queries="INSERT OR IGNORE INTO projects (repo, name, stars, first_seen, last_checked) VALUES ('user/repo', 'Cool Project', 1250, '2024-01-15', '2024-01-15')")
-→ sqlite_batch(queries="SELECT repo, name, stars FROM projects WHERE first_seen > datetime('now', '-7 days') ORDER BY stars DESC LIMIT 10")
+```
+sqlite_batch(queries="INSERT OR IGNORE INTO projects (repo, name, stars, first_seen, last_checked) VALUES ('user/repo', 'Cool Project', 1250, '2024-01-15', '2024-01-15')")
+```
+```
+sqlite_batch(queries="SELECT repo, name, stars FROM projects WHERE first_seen > datetime('now', '-7 days') ORDER BY stars DESC LIMIT 10")
+```
 
 ---
 
@@ -458,19 +469,25 @@ Thinking: "This needs deduplication (don't report same project twice) and tracki
 **Upgrading a simple task to tracked:**
 User: 'Actually, keep tracking those startups over time'
 Thinking: "They want ongoing tracking — I need persistence now"
-→ enable_database(will_continue_work=true)
+```
+enable_database(will_continue_work=true)
+```
 → update_charter('Track startups over time, maintain database of candidates')
 
 **Recognizing scale:**
 User: 'Find all restaurants in downtown Seattle with ratings'
 Thinking: "This will be hundreds of entries — database for sure"
-→ enable_database(will_continue_work=true)
+```
+enable_database(will_continue_work=true)
+```
 
 **Charter implies persistence:**
 Charter: 'Monitor competitor pricing and alert on changes'
 [Cron fires for first time]
 Thinking: "I need to store baselines to detect changes"
-→ enable_database(will_continue_work=true)
+```
+enable_database(will_continue_work=true)
+```
 [Next: create schema, store first snapshot]
 """
 
