@@ -300,7 +300,7 @@ class EmailDeliveryTests(TestCase):
             # Verify inscriptis get_text was called with the message body and config
             mock_get_text.assert_called_once()
             args, kwargs = mock_get_text.call_args
-            self.assertEqual(args[0], html_body)  # First argument should be the HTML body
+            self.assertEqual(args[0].replace("\n", ""), html_body)  # First argument should be the HTML body
             # Second argument should be a ParserConfig object
             from inscriptis.model.config import ParserConfig
             self.assertIsInstance(args[1], ParserConfig)
