@@ -186,6 +186,295 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
         int(hyst_map.get(tier, prompt_settings.standard_unified_history_hysteresis)),
     )
 
+
+def _get_sqlite_examples() -> str:
+    """Return in-context learning examples for sqlite_batch usage.
+
+    These examples teach the agent when and how to use SQLite effectively,
+    including schema design, batch operations, and schema evolution patterns.
+    """
+    return """
+## SQLite In-Context Learning
+
+Your database is persistent across runs. Design schemas that grow with your task.
+
+---
+
+### When to Use SQLite
+
+**Use sqlite_batch for:**
+- Tracking entities over time (prices, rankings, mentions, events)
+- Deduplicating data across runs (seen URLs, processed items)
+- Complex filtering, sorting, or aggregation
+- Storing structured results for comparison or reporting
+- Any data that needs to survive across cycles
+
+**Skip SQLite for:**
+- One-off calculations → just reason inline
+- Simple lists under ~20 items → keep in working memory
+- Data you'll never reference again → don't persist
+
+---
+
+### Schema Creation Patterns
+
+**Start simple, evolve as needed:**
+
+→ sqlite_batch(queries="CREATE TABLE IF NOT EXISTS prices (symbol TEXT PRIMARY KEY, price REAL, fetched_at TEXT)")
+
+*Tracking multiple entities with history:*
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_price_symbol ON price_history(symbol, fetched_at DESC)"
+])
+
+*Deduplication pattern:*
+→ sqlite_batch(queries="CREATE TABLE IF NOT EXISTS seen_urls (url TEXT PRIMARY KEY, first_seen TEXT, title TEXT)")
+
+*Rich entity tracking:*
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS startups (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, stage TEXT, last_checked TEXT, notes TEXT)",
+    "CREATE TABLE IF NOT EXISTS funding_rounds (id INTEGER PRIMARY KEY, startup_id INTEGER, amount REAL, date TEXT, source TEXT)"
+])
+
+---
+
+### Batch Query Patterns
+
+**Insert + query in one call** — efficient for fetch→store→report cycles:
+
+→ sqlite_batch(queries=[
+    "INSERT INTO price_history (symbol, price, fetched_at) VALUES ('BTC', 67000.50, '2024-01-15T10:30:00Z')",
+    "INSERT INTO price_history (symbol, price, fetched_at) VALUES ('ETH', 3400.25, '2024-01-15T10:30:00Z')",
+    "SELECT symbol, price, fetched_at FROM price_history WHERE fetched_at > datetime('now', '-24 hours') ORDER BY fetched_at DESC"
+], will_continue_work=true)
+
+**Upsert pattern** — update if exists, insert if new:
+
+→ sqlite_batch(queries="INSERT INTO prices (symbol, price, fetched_at) VALUES ('BTC', 67500.00, '2024-01-15T12:00:00Z') ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, fetched_at=excluded.fetched_at")
+
+**Bulk insert with dedup check:**
+
+→ sqlite_batch(queries=[
+    "INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post1', '2024-01-15', 'Great Article')",
+    "INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post2', '2024-01-15', 'Another Post')",
+    "SELECT COUNT(*) as total_seen FROM seen_urls"
+])
+
+---
+
+### Schema Evolution — Refactor as Requirements Change
+
+Schemas aren't static. Add columns, create new tables, migrate data as your task evolves.
+
+**Adding a column:**
+→ sqlite_batch(queries="ALTER TABLE startups ADD COLUMN sentiment TEXT")
+
+**Creating a derived table for reporting:**
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS daily_summaries (date TEXT PRIMARY KEY, btc_high REAL, btc_low REAL, eth_high REAL, eth_low REAL)",
+    "INSERT OR REPLACE INTO daily_summaries (date, btc_high, btc_low, eth_high, eth_low) SELECT date(fetched_at), MAX(CASE WHEN symbol='BTC' THEN price END), MIN(CASE WHEN symbol='BTC' THEN price END), MAX(CASE WHEN symbol='ETH' THEN price END), MIN(CASE WHEN symbol='ETH' THEN price END) FROM price_history GROUP BY date(fetched_at)"
+])
+
+**Restructuring for new requirements:**
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS startups_v2 (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, category TEXT, stage TEXT, score INTEGER, last_checked TEXT)",
+    "INSERT INTO startups_v2 (name, url, stage, last_checked) SELECT name, url, stage, last_checked FROM startups",
+    "DROP TABLE startups",
+    "ALTER TABLE startups_v2 RENAME TO startups"
+])
+
+---
+
+### Aggregation & Analysis
+
+**Trend detection:**
+→ sqlite_batch(queries="SELECT symbol, AVG(price) as avg_price, MIN(price) as low, MAX(price) as high FROM price_history WHERE fetched_at > datetime('now', '-7 days') GROUP BY symbol")
+
+**Change detection (for alerting):**
+→ sqlite_batch(queries="SELECT symbol, price, LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at) as prev_price, ((price - LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at)) / LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at)) * 100 as pct_change FROM price_history WHERE fetched_at > datetime('now', '-1 hour')")
+
+**Top-N with ranking:**
+→ sqlite_batch(queries="SELECT name, score, RANK() OVER (ORDER BY score DESC) as rank FROM startups WHERE stage = 'seed' LIMIT 10")
+
+---
+
+### String Escaping — Critical!
+
+**Always escape single quotes by doubling them:**
+
+  Bad:  VALUES ('McDonald's', ...)
+  Good: VALUES ('McDonald''s', ...)
+
+  Bad:  VALUES ('It's raining', ...)
+  Good: VALUES ('It''s raining', ...)
+
+**For user-provided content, escape carefully:**
+→ sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedback', 'They said: ''This is great!''')")
+
+---
+
+### Cleanup & Maintenance
+
+**Prune old data to keep DB lean:**
+→ sqlite_batch(queries="DELETE FROM price_history WHERE fetched_at < datetime('now', '-30 days')", will_continue_work=false)
+
+**Remove duplicates:**
+→ sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) FROM price_history GROUP BY symbol, fetched_at)")
+
+**Check DB health:**
+→ sqlite_batch(queries="SELECT name, (SELECT COUNT(*) FROM (SELECT * FROM sqlite_master WHERE type='table' AND name=m.name)) as row_count FROM sqlite_master m WHERE type='table' AND name NOT LIKE 'sqlite_%'")
+
+---
+
+### Agentic Decision Patterns
+
+**First run → create schema:**
+User: 'Track bitcoin for me'
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_symbol ON price_history(symbol)"
+], will_continue_work=true)
+→ http_request('coinbase-api', will_continue_work=true)
+[Next cycle: INSERT price, report to user]
+
+**Scheduled run → check for changes:**
+[Cron fires]
+→ sqlite_batch(queries="SELECT price FROM price_history WHERE symbol='BTC' ORDER BY fetched_at DESC LIMIT 1")
+→ http_request('coinbase-api', will_continue_work=true)
+[Next cycle: compare prices, INSERT new price, alert if significant change]
+
+**Schema doesn't fit anymore → evolve it:**
+User: 'Also track the 24h volume'
+→ sqlite_batch(queries="ALTER TABLE price_history ADD COLUMN volume_24h REAL")
+→ update_charter('...now including 24h volume tracking')
+[Future inserts will include volume data]
+
+**Data getting large → aggregate and prune:**
+[DB size warning]
+→ sqlite_batch(queries=[
+    "INSERT INTO daily_summaries SELECT date(fetched_at), symbol, AVG(price), MIN(price), MAX(price) FROM price_history WHERE fetched_at < datetime('now', '-7 days') GROUP BY date(fetched_at), symbol",
+    "DELETE FROM price_history WHERE fetched_at < datetime('now', '-7 days')"
+])
+"""
+
+
+def _get_enable_database_examples() -> str:
+    """Return in-context learning examples for when to call enable_database.
+
+    These examples help the agent recognize tasks that benefit from SQLite
+    and show the pattern of enabling → schema creation → usage.
+    """
+    return """
+## When to Enable Your Database
+
+You have access to a persistent SQLite database. Call `enable_database` when your task would benefit from structured, durable storage.
+
+---
+
+### Tasks That Need a Database
+
+**Tracking over time** — prices, rankings, mentions, metrics:
+User: 'Monitor bitcoin price and alert me on big swings'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE price_history..., fetch price, INSERT, compare to baseline]
+
+**Deduplication across runs** — seen items, processed URLs:
+User: 'Watch HN for AI posts, but don't repeat yourself'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE seen_posts..., fetch HN, INSERT OR IGNORE new ones, report only unseen]
+
+**Building lists or datasets** — restaurants, startups, candidates:
+User: 'Compile a list of AI startups in the YC W24 batch'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE startups..., research and INSERT each one, query for final report]
+
+**Comparison and change detection** — competitor prices, job listings:
+User: 'Track my competitor's pricing page and alert on changes'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE price_snapshots..., scrape current, compare to last, alert if different]
+
+**Aggregation and analysis** — trends, summaries, statistics:
+User: 'Give me weekly summaries of my portfolio performance'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE daily_values..., store daily data, query for weekly aggregates]
+
+**Multi-entity tracking** — multiple stocks, several competitors:
+User: 'Track AAPL, GOOGL, and MSFT for me'
+→ enable_database(will_continue_work=true)
+[Next cycle: CREATE TABLE stock_prices(symbol, price, fetched_at)..., track all three]
+
+---
+
+### Tasks That Don't Need a Database
+
+**One-off questions** — no persistence needed:
+User: 'What's the weather in Tokyo?'
+→ http_request(weather-api)
+→ 'It's 72°F and sunny in Tokyo!'
+(No database — just fetch and respond)
+
+**Simple calculations** — reason inline:
+User: 'What's 15% of 847?'
+→ '15% of 847 is **127.05**'
+(No database — mental math)
+
+**Short lists** — keep in working memory:
+User: 'Give me 5 book recommendations on AI'
+→ Search, compile list, respond
+(No database — small enough to hold in context)
+
+**Immediate lookups** — no history needed:
+User: 'What's Apple's current stock price?'
+→ http_request(finance-api)
+→ 'AAPL is at **$198.50** ([Yahoo Finance](url))'
+(No database — unless they want tracking)
+
+---
+
+### The Enable → Schema → Use Pattern
+
+**Step 1: Recognize the need**
+User: 'Scout promising open source projects weekly'
+Thinking: "This needs deduplication (don't report same project twice) and tracking (compare stars over time)"
+
+**Step 2: Enable the database**
+→ enable_database(will_continue_work=true)
+
+**Step 3: Create your schema** (next cycle)
+→ sqlite_batch(queries=[
+    "CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, repo TEXT UNIQUE, name TEXT, stars INTEGER, first_seen TEXT, last_checked TEXT)",
+    "CREATE INDEX IF NOT EXISTS idx_stars ON projects(stars DESC)"
+])
+
+**Step 4: Use it in your workflow** (ongoing)
+→ sqlite_batch(queries="INSERT OR IGNORE INTO projects (repo, name, stars, first_seen, last_checked) VALUES ('user/repo', 'Cool Project', 1250, '2024-01-15', '2024-01-15')")
+→ sqlite_batch(queries="SELECT repo, name, stars FROM projects WHERE first_seen > datetime('now', '-7 days') ORDER BY stars DESC LIMIT 10")
+
+---
+
+### Agentic Decision Examples
+
+**Upgrading a simple task to tracked:**
+User: 'Actually, keep tracking those startups over time'
+Thinking: "They want ongoing tracking — I need persistence now"
+→ enable_database(will_continue_work=true)
+→ update_charter('Track startups over time, maintain database of candidates')
+
+**Recognizing scale:**
+User: 'Find all restaurants in downtown Seattle with ratings'
+Thinking: "This will be hundreds of entries — database for sure"
+→ enable_database(will_continue_work=true)
+
+**Charter implies persistence:**
+Charter: 'Monitor competitor pricing and alert on changes'
+[Cron fires for first time]
+Thinking: "I need to store baselines to detect changes"
+→ enable_database(will_continue_work=true)
+[Next: create schema, store first snapshot]
+"""
+
+
 def _archive_rendered_prompt(
     agent: PersistentAgent,
     system_prompt: str,
@@ -969,6 +1258,23 @@ def build_prompt_context(
             weight=1,
             non_shrinkable=True
         )
+        # Add in-context learning examples based on SQLite state
+        if sqlite_active:
+            # Database is enabled — show usage examples
+            variable_group.section_text(
+                "sqlite_examples",
+                _get_sqlite_examples(),
+                weight=2,  # Higher weight = shrinks before critical content
+                shrinker="hmt"  # Can be truncated if token budget is tight
+            )
+        else:
+            # Database is available but not enabled — show when/how to enable
+            variable_group.section_text(
+                "enable_database_examples",
+                _get_enable_database_examples(),
+                weight=2,
+                shrinker="hmt"
+            )
     # For ineligible agents, no sqlite_note is added - they don't have access to the feature
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
