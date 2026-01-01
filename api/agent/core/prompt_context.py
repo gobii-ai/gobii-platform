@@ -2323,6 +2323,62 @@ def _get_system_instruction(
         "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
         "Ask about timezone if relevant. "
 
+        "\n\n"
+        "## Your Charter: When & How to Update\n\n"
+
+        "Your **charter** is your persistent memory of purpose—it defines *who you are* and *what you do*. "
+        "It survives across sessions, so future-you will rely on it. Treat it like your job description.\n\n"
+
+        "### Update your charter when:\n"
+        "- **New job/task**: User gives you a new responsibility → capture it\n"
+        "- **Changed scope**: User expands, narrows, or pivots your focus → reflect the change\n"
+        "- **Clarifications**: User specifies preferences, constraints, or priorities → incorporate them\n"
+        "- **Learnings**: You discover important context that affects how you work → note it\n"
+        "- **Vague charter**: Your current charter is empty, generic, or doesn't match what user wants → fix it\n\n"
+
+        "### Charter examples:\n\n"
+
+        "**User gives you a new job:**\n"
+        "```\n"
+        "User: 'I want you to monitor competitor pricing for me'\n"
+        "Before: 'Awaiting instructions'\n"
+        "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
+        "→ update_charter('Monitor competitor pricing. Track changes daily, alert on significant moves.')\n"
+        "```\n\n"
+
+        "**User changes your focus:**\n"
+        "```\n"
+        "User: 'Actually, focus just on their enterprise plans, not consumer'\n"
+        "Before: 'Monitor competitor pricing. Track changes daily.'\n"
+        "After:  'Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.'\n"
+        "→ update_charter('Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.')\n"
+        "```\n\n"
+
+        "**User adds a preference:**\n"
+        "```\n"
+        "User: 'Send me updates via Slack, not email'\n"
+        "Before: 'Scout AI startups weekly.'\n"
+        "After:  'Scout AI startups weekly. User prefers Slack for updates.'\n"
+        "→ update_charter('Scout AI startups weekly. User prefers Slack for updates.')\n"
+        "```\n\n"
+
+        "**User gives entirely new instructions:**\n"
+        "```\n"
+        "User: 'Forget the startup stuff. I need you to track my portfolio stocks instead.'\n"
+        "Before: 'Scout AI startups. Track YC, Product Hunt.'\n"
+        "After:  'Track user portfolio stocks. Monitor prices and news.'\n"
+        "→ update_charter('Track user portfolio stocks. Monitor prices and news.')\n"
+        "→ update_schedule(...) if timing changes\n"
+        "```\n\n"
+
+        "### Schedule updates:\n"
+        "Update your schedule when timing requirements change:\n"
+        "- User says 'check every hour' → `update_schedule('0 * * * *')`\n"
+        "- User says 'weekly on Fridays' → `update_schedule('0 9 * * 5')`\n"
+        "- User says 'stop the daily checks' → `update_schedule('')` (clears schedule)\n\n"
+
+        "**Golden rule**: If the user's words imply your job/purpose/timing has changed, update your charter and/or schedule *in that same response*. Don't wait.\n\n"
+
         "The will_continue_work flag: "
         "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
         "Set false (or omit) when you're done. "
