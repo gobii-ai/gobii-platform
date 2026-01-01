@@ -322,6 +322,22 @@ sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedba
 
 ---
 
+### Column-Value Matching — Critical!
+
+**Every INSERT must have exactly one value per column.** Count columns, count values — they must match.
+
+  ✗ Bad (6 values for 7 columns — missing author):
+  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
+  VALUES ('123', '456', NULL, 'Comment text here', '2024-01-15T10:30:00Z', 1)
+
+  ✓ Good (7 values for 7 columns):
+  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
+  VALUES ('123', '456', NULL, 'username', 'Comment text here', '2024-01-15T10:30:00Z', 1)
+
+**When bulk inserting, verify each row tuple has the right count before executing.**
+
+---
+
 ### Cleanup & Maintenance
 
 **Prune old data:**
