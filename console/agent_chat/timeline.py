@@ -52,6 +52,15 @@ def _build_html_cleaner() -> Cleaner:
             "ol",
             "li",
             "pre",
+            # Table tags for rich data display
+            "table",
+            "thead",
+            "tbody",
+            "tfoot",
+            "tr",
+            "th",
+            "td",
+            "caption",
         }
     )
 
@@ -59,6 +68,10 @@ def _build_html_cleaner() -> Cleaner:
     anchor_attrs = set(allowed_attributes.get("a", ())).union({"href", "title", "target", "rel"})
     allowed_attributes["a"] = sorted(anchor_attrs)
     allowed_attributes.setdefault("span", [])
+    # Table cell attributes
+    allowed_attributes["th"] = ["colspan", "rowspan", "scope", "headers"]
+    allowed_attributes["td"] = ["colspan", "rowspan", "headers"]
+    allowed_attributes["table"] = ["style"]
 
     allowed_protocols = set(BLEACH_ALLOWED_PROTOCOLS_BASE).union({"mailto", "tel"})
 

@@ -29,6 +29,38 @@ from inscriptis.css_profiles import CSS_PROFILES
 import markdown
 
 
+# Inline styles for email-safe HTML (email clients strip most CSS)
+TABLE_STYLE = "border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px;"
+TH_STYLE = "padding: 10px 12px; text-align: left; background: #f8fafc; border-bottom: 2px solid #e2e8f0; font-weight: 600; color: #1e293b;"
+TD_STYLE = "padding: 10px 12px; text-align: left; border-bottom: 1px solid #e2e8f0; color: #334155;"
+
+
+def _add_table_styles(html_content: str) -> str:
+    """Add inline styles to table elements for email compatibility."""
+    # Style tables
+    html_content = re.sub(
+        r'<table(?![^>]*style=)([^>]*)>',
+        f'<table style="{TABLE_STYLE}"\\1>',
+        html_content,
+        flags=re.IGNORECASE
+    )
+    # Style th elements
+    html_content = re.sub(
+        r'<th(?![^>]*style=)([^>]*)>',
+        f'<th style="{TH_STYLE}"\\1>',
+        html_content,
+        flags=re.IGNORECASE
+    )
+    # Style td elements
+    html_content = re.sub(
+        r'<td(?![^>]*style=)([^>]*)>',
+        f'<td style="{TD_STYLE}"\\1>',
+        html_content,
+        flags=re.IGNORECASE
+    )
+    return html_content
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,8 +83,8 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
         body_preview,
     )
 
-    # Detect HTML
-    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote)\b[^>]*>"
+    # Detect HTML (including tables)
+    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote|table|thead|tbody|tr|th|td)\b[^>]*>"
     html_match = re.search(html_tag_pattern, body or "", re.IGNORECASE)
     if html_match:
         logger.info(
@@ -60,7 +92,7 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
             html_match.group(0),
             html_match.start(),
         )
-        html_snippet = body or ""
+        html_snippet = _add_table_styles(body or "")
         plaintext = get_text(html_snippet, config).strip()
         logger.info(
             "HTML processing complete. Original HTML length: %d, extracted plaintext length: %d.",
@@ -83,6 +115,7 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
     detected = any(re.search(pat, body or "", flags=re.MULTILINE) for pat, _ in markdown_patterns)
     if detected:
         html_snippet = markdown.markdown(body or "", extensions=["extra", "sane_lists", "smarty"])
+        html_snippet = _add_table_styles(html_snippet)
         plaintext = get_text(html_snippet, config).strip()
         logger.info(
             "Markdown processing complete. Rendered HTML length: %d, plaintext length: %d.",

@@ -67,7 +67,7 @@ def _convert_sms_body_to_plaintext(body: str) -> str:
 
     # ------------------------------------------------------------------ Detect HTML
     logger.info("=== SMS HTML DETECTION START ===")
-    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote)\b[^>]*>"
+    html_tag_pattern = r"</?(?:p|br|div|span|a|ul|ol|li|h[1-6]|strong|em|b|i|code|pre|blockquote|table|thead|tbody|tr|th|td)\b[^>]*>"
     html_match = re.search(html_tag_pattern, body, re.IGNORECASE)
     
     if html_match:

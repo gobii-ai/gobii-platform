@@ -800,6 +800,41 @@
   word-break: break-word;
 }
 
+/* Table styling for agent-generated HTML tables */
+.chat-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+}
+
+.chat-content th,
+.chat-content td {
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.chat-content th {
+  font-weight: 600;
+  color: #1e293b;
+  background: rgba(248, 250, 252, 0.8);
+  border-bottom: 2px solid rgba(99, 102, 241, 0.2);
+}
+
+.chat-content tr:hover {
+  background: rgba(248, 250, 252, 0.5);
+}
+
+.chat-content td a {
+  color: #4338ca;
+  text-decoration: none;
+}
+
+.chat-content td a:hover {
+  text-decoration: underline;
+}
+
 .chat-bubble--user .chat-content {
   color: var(--user-content-color, var(--user-bubble-text, #fbfbff));
 }
