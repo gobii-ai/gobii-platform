@@ -10,6 +10,7 @@ from django.utils import timezone
 from api.agent.core import event_processing as event_processing_module
 from api.agent.core.event_processing import (
     _completion_with_failover,
+    _filter_preferred_config_for_low_latency,
     _get_recent_preferred_config,
 )
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCompletion
@@ -154,6 +155,26 @@ class TestEventProcessingLLMSelection(TestCase):
         self.assertEqual(first_call.kwargs["model"], "model-preferred")
         self.assertEqual(token_usage["provider"], "preferred")
         self.assertEqual(token_usage["model"], "model-preferred")
+
+    def test_preferred_config_skipped_when_not_low_latency(self):
+        preferred = ("endpoint_slow", "model-slow")
+        failover_configs = [
+            ("endpoint_fast", "model-fast", {"low_latency": True}),
+            ("endpoint_slow", "model-slow", {"low_latency": False}),
+        ]
+
+        filtered = _filter_preferred_config_for_low_latency(preferred, failover_configs, agent_id="agent-1")
+        self.assertIsNone(filtered)
+
+    def test_preferred_config_retained_when_low_latency(self):
+        preferred = ("endpoint_fast", "model-fast")
+        failover_configs = [
+            ("endpoint_fast", "model-fast", {"low_latency": True}),
+            ("endpoint_slow", "model-slow", {"low_latency": False}),
+        ]
+
+        filtered = _filter_preferred_config_for_low_latency(preferred, failover_configs, agent_id="agent-1")
+        self.assertEqual(filtered, preferred)
 
     def test_get_recent_preferred_config_uses_recent_completion(self):
         """Helper should return (provider, model) for a fresh completion."""

@@ -137,6 +137,55 @@ class TestLLMFailover(TestCase):
             self.assertIn("openrouter/z-ai/glm-4.5", models)
             self.assertEqual(len(configs), 3)
 
+    def test_low_latency_preference_orders_endpoints(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+        PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='anthropic',
+            display_name='Anthropic',
+            enabled=True,
+            env_var_name='ANTHROPIC_API_KEY',
+            browser_backend='ANTHROPIC',
+        )
+        fast_endpoint = PersistentModelEndpoint.objects.create(
+            key='anthropic_fast',
+            provider=provider,
+            enabled=True,
+            litellm_model='anthropic/fast-model',
+            supports_tool_choice=True,
+            low_latency=True,
+        )
+        slow_endpoint = PersistentModelEndpoint.objects.create(
+            key='anthropic_slow',
+            provider=provider,
+            enabled=True,
+            litellm_model='anthropic/slow-model',
+            supports_tool_choice=True,
+            low_latency=False,
+        )
+
+        token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
+        tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        PersistentTierEndpoint.objects.create(tier=tier, endpoint=slow_endpoint, weight=0.5)
+        PersistentTierEndpoint.objects.create(tier=tier, endpoint=fast_endpoint, weight=0.5)
+
+        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-test"}, clear=True):
+            configs = get_llm_config_with_failover(token_count=0, prefer_low_latency=True)
+
+        endpoint_order = [cfg[0] for cfg in configs]
+        self.assertEqual(set(endpoint_order), {fast_endpoint.key, slow_endpoint.key})
+        seen_non_low_latency = False
+        for endpoint_key in endpoint_order:
+            if endpoint_key == slow_endpoint.key:
+                seen_non_low_latency = True
+            if endpoint_key == fast_endpoint.key:
+                self.assertFalse(seen_non_low_latency)
+
     def test_provider_config_structure(self):
         """Provider config contains expected keys."""
         required_providers = ["anthropic", "google", "openai", "openai_gpt5", "openrouter_glm", "fireworks_qwen3_235b_a22b"]

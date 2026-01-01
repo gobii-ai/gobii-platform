@@ -305,6 +305,23 @@ def get_active_web_sessions(
             _mark_session_ended(session)
 
 
+def has_active_web_session(
+    agent: PersistentAgent,
+    *,
+    ttl_seconds: int = WEB_SESSION_TTL_SECONDS,
+) -> bool:
+    if not isinstance(agent, PersistentAgent):
+        return False
+    if not getattr(agent, "id", None):
+        return False
+    threshold = _now() - timedelta(seconds=ttl_seconds)
+    return PersistentAgentWebSession.objects.filter(
+        agent=agent,
+        ended_at__isnull=True,
+        last_seen_at__gte=threshold,
+    ).exists()
+
+
 def delete_expired_sessions(
     *,
     batch_size: int = 500,
@@ -356,5 +373,6 @@ __all__ = [
     "touch_web_session",
     "get_active_web_session",
     "get_active_web_sessions",
+    "has_active_web_session",
     "delete_expired_sessions",
 ]

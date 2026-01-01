@@ -116,7 +116,7 @@ from ...models import (
     build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
-from api.services.web_sessions import get_active_web_sessions
+from api.services.web_sessions import get_active_web_sessions, has_active_web_session
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -818,6 +818,29 @@ def _get_recent_preferred_config(
         "Agent %s missing provider/model data for preferred config",
         agent_id,
     )
+    return None
+
+
+def _filter_preferred_config_for_low_latency(
+    preferred_config: Optional[Tuple[str, str]],
+    failover_configs: List[Tuple[str, str, dict]],
+    *,
+    agent_id: Optional[str] = None,
+) -> Optional[Tuple[str, str]]:
+    if not preferred_config:
+        return None
+    pref_provider, pref_model = preferred_config
+    for provider, model, params in failover_configs:
+        if provider == pref_provider and model == pref_model:
+            if params.get("low_latency"):
+                return preferred_config
+            logger.info(
+                "Agent %s skipping preferred provider/model %s/%s due to low-latency routing",
+                agent_id or "unknown",
+                pref_provider,
+                pref_model,
+            )
+            return None
     return None
 
 
@@ -2079,6 +2102,7 @@ def _run_agent_loop(
             )
             
             # Select provider tiers based on the fitted token count
+            prefer_low_latency = has_active_web_session(agent)
             try:
                 failover_configs = get_llm_config_with_failover(
                     agent_id=str(agent.id),
@@ -2086,6 +2110,7 @@ def _run_agent_loop(
                     agent=agent,
                     is_first_loop=is_first_run,
                     routing_profile=get_current_eval_routing_profile(),
+                    prefer_low_latency=prefer_low_latency,
                 )
             except LLMNotConfiguredError:
                 logger.warning(
@@ -2096,6 +2121,12 @@ def _run_agent_loop(
                 break
 
             preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
+            if prefer_low_latency:
+                preferred_config = _filter_preferred_config_for_low_latency(
+                    preferred_config,
+                    failover_configs,
+                    agent_id=str(agent.id),
+                )
             stream_broadcaster = None
             try:
                 stream_target = resolve_web_stream_target(agent)

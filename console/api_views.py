@@ -1944,6 +1944,7 @@ class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
             reasoning_effort=reasoning_effort,
             api_base=(payload.get("api_base") or "").strip(),
             openrouter_preset=(payload.get("openrouter_preset") or "").strip(),
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
         invalidate_llm_bootstrap_cache()
@@ -1980,6 +1981,8 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.use_parallel_tool_calls = _coerce_bool(payload.get("use_parallel_tool_calls"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
         if "supports_reasoning" in payload:
             endpoint.supports_reasoning = _coerce_bool(payload.get("supports_reasoning"))
         if "reasoning_effort" in payload:
@@ -2276,6 +2279,7 @@ class BrowserEndpointListCreateAPIView(SystemAdminAPIView):
             max_output_tokens=max_output_tokens,
             supports_temperature=_coerce_bool(payload.get("supports_temperature", True)),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
         return _json_ok(endpoint_id=str(endpoint.id))
@@ -2320,6 +2324,8 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.supports_temperature = _coerce_bool(payload.get("supports_temperature"))
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         endpoint.save()
@@ -2359,6 +2365,7 @@ class EmbeddingEndpointListCreateAPIView(SystemAdminAPIView):
             provider=provider,
             litellm_model=model,
             api_base=(payload.get("api_base") or "").strip(),
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
         return _json_ok(endpoint_id=str(endpoint.id))
@@ -2380,6 +2387,8 @@ class EmbeddingEndpointDetailAPIView(SystemAdminAPIView):
                 endpoint.litellm_model = model
         if "api_base" in payload:
             endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         if "provider_id" in payload:
@@ -2633,6 +2642,7 @@ class FileHandlerEndpointListCreateAPIView(SystemAdminAPIView):
             litellm_model=model,
             api_base=(payload.get("api_base") or "").strip(),
             supports_vision=_coerce_bool(payload.get("supports_vision", False)),
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
             enabled=_coerce_bool(payload.get("enabled", True)),
         )
         return _json_ok(endpoint_id=str(endpoint.id))
@@ -2656,6 +2666,8 @@ class FileHandlerEndpointDetailAPIView(SystemAdminAPIView):
             endpoint.api_base = (payload.get("api_base") or "").strip()
         if "supports_vision" in payload:
             endpoint.supports_vision = _coerce_bool(payload.get("supports_vision"))
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         if "provider_id" in payload:

@@ -3843,6 +3843,7 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "openrouter_preset",
         "max_input_tokens",
         "enabled",
+        "low_latency",
         "supports_temperature",
         "supports_tool_choice",
         "use_parallel_tool_calls",
@@ -3850,12 +3851,13 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
         "supports_reasoning",
         "reasoning_effort",
     )
-    list_filter = ("enabled", "provider", "supports_vision", "supports_reasoning")
+    list_filter = ("enabled", "low_latency", "provider", "supports_vision", "supports_reasoning")
     search_fields = ("key", "litellm_model")
     fields = (
         "key",
         "provider",
         "enabled",
+        "low_latency",
         "litellm_model",
         "api_base",
         "openrouter_preset",
@@ -3872,13 +3874,14 @@ class PersistentModelEndpointAdmin(admin.ModelAdmin):
 
 @admin.register(EmbeddingsModelEndpoint)
 class EmbeddingsModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "enabled")
-    list_filter = ("enabled", "provider")
+    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "enabled")
+    list_filter = ("enabled", "low_latency", "provider")
     search_fields = ("key", "litellm_model", "api_base")
     fields = (
         "key",
         "provider",
         "enabled",
+        "low_latency",
         "litellm_model",
         "api_base",
     )
@@ -3900,13 +3903,14 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 
 @admin.register(FileHandlerModelEndpoint)
 class FileHandlerModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "supports_vision", "enabled")
-    list_filter = ("enabled", "provider", "supports_vision")
+    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "supports_vision", "enabled")
+    list_filter = ("enabled", "low_latency", "provider", "supports_vision")
     search_fields = ("key", "litellm_model", "api_base")
     fields = (
         "key",
         "provider",
         "enabled",
+        "low_latency",
         "litellm_model",
         "api_base",
         "supports_vision",
@@ -3995,15 +3999,17 @@ class BrowserModelEndpointAdmin(admin.ModelAdmin):
         "browser_base_url",
         "max_output_tokens",
         "enabled",
+        "low_latency",
         "supports_temperature",
         "supports_vision",
     )
-    list_filter = ("enabled", "provider", "supports_vision")
+    list_filter = ("enabled", "low_latency", "provider", "supports_vision")
     search_fields = ("key", "browser_model", "browser_base_url")
     fields = (
         "key",
         "provider",
         "enabled",
+        "low_latency",
         "browser_model",
         "browser_base_url",
         "max_output_tokens",

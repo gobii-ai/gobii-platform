@@ -49,6 +49,7 @@ def _serialize_endpoint_common(endpoint, *, label: str) -> dict[str, Any]:
         "id": str(endpoint.id),
         "label": label,
         "enabled": bool(endpoint.enabled),
+        "low_latency": bool(getattr(endpoint, "low_latency", False)),
     }
 
 

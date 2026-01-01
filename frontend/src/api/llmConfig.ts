@@ -25,6 +25,7 @@ export type ProviderEndpoint = {
   reasoning_effort?: string | null
   openrouter_preset?: string | null
   type: 'persistent' | 'browser' | 'embedding' | 'file_handler'
+  low_latency?: boolean
   enabled: boolean
   provider_id: string
 }
