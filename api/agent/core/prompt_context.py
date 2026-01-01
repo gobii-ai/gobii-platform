@@ -1100,11 +1100,14 @@ def build_prompt_context(
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
+    implied_send_context = _get_implied_send_context(agent)
+    implied_send_active = implied_send_context is not None
     system_prompt = _get_system_instruction(
         agent,
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
+        implied_send_active=implied_send_active,
     )
     
     # Medium priority sections (weight=6) - important but can be shrunk if needed
@@ -1182,9 +1185,6 @@ def build_prompt_context(
     _build_mcp_servers_block(agent, important_group, span)
 
     # Implied send status and formatting guidance
-    implied_send_context = _get_implied_send_context(agent)
-    implied_send_active = implied_send_context is not None
-
     if implied_send_context:
         channel = implied_send_context["channel"]
         display_name = implied_send_context["display_name"]
@@ -1207,67 +1207,6 @@ def build_prompt_context(
                 weight=3,
                 non_shrinkable=True,
             )
-        elif channel == "peer_dm":
-            # Reply to peer agent
-            important_group.section_text(
-                "implied_send_status",
-                (
-                    f"## Implied Send → {display_name}\n\n"
-                    f"Your text output will reply to this peer agent.\n"
-                    f"Equivalent to: `{tool_example}`\n\n"
-                    "**To reach someone else**, use explicit tools:\n"
-                    "- Other peer agents: `send_agent_message(peer_agent_id=\"...\", message=\"...\")`\n"
-                    "- Contacts: `send_email()`, `send_sms()`, `send_chat_message()`"
-                ),
-                weight=3,
-                non_shrinkable=True,
-            )
-        elif channel == "email":
-            # Reply to email
-            important_group.section_text(
-                "implied_send_status",
-                (
-                    f"## Implied Send → {display_name}\n\n"
-                    f"Your text output will reply to this email sender.\n"
-                    f"Equivalent to: `{tool_example}`\n\n"
-                    "**To reach someone else**, use explicit tools:\n"
-                    "- Other emails: `send_email(to_address=\"...\", subject=\"...\", mobile_first_html=\"...\")`\n"
-                    "- SMS: `send_sms()`, Web: `send_chat_message()`, Peers: `send_agent_message()`"
-                ),
-                weight=3,
-                non_shrinkable=True,
-            )
-        elif channel == "sms":
-            # Reply to SMS
-            important_group.section_text(
-                "implied_send_status",
-                (
-                    f"## Implied Send → {display_name}\n\n"
-                    f"Your text output will reply to this SMS sender.\n"
-                    f"Equivalent to: `{tool_example}`\n\n"
-                    "**To reach someone else**, use explicit tools:\n"
-                    "- Other SMS: `send_sms(to_number=\"...\", body=\"...\")`\n"
-                    "- Email: `send_email()`, Web: `send_chat_message()`, Peers: `send_agent_message()`"
-                ),
-                weight=3,
-                non_shrinkable=True,
-            )
-    else:
-        important_group.section_text(
-            "implied_send_status",
-            (
-                "## No Implied Send Available\n\n"
-                "No active session or recent inbound message—your text output does NOT reach anyone.\n\n"
-                "**You must use explicit tools to communicate:**\n"
-                "- Web chat: `send_chat_message(to_address=\"...\", body=\"...\")`\n"
-                "- Email: `send_email(to_address=\"...\", subject=\"...\", mobile_first_html=\"...\")`\n"
-                "- SMS: `send_sms(to_number=\"...\", body=\"...\")`\n"
-                "- Peer agents: `send_agent_message(peer_agent_id=\"...\", message=\"...\")`\n\n"
-                "If you just write text without a send tool, nobody will see it."
-            ),
-            weight=2,
-            non_shrinkable=True,
-        )
 
     # Dynamic formatting guidance based on current medium context
     formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
@@ -1278,10 +1217,8 @@ def build_prompt_context(
         non_shrinkable=True,
     )
 
-    # Response patterns - explicit guidance on how output maps to behavior
-    important_group.section_text(
-        "response_patterns",
-        (
+    if implied_send_active:
+        response_patterns = (
             "Your response structure signals your intent:\n\n"
             "Empty response (no text, no tools)\n"
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
@@ -1300,7 +1237,30 @@ def build_prompt_context(
             "  Example: update_charter(...)\n\n"
             "Note: A message-only response means you're finished. "
             "If you still have work to do after replying, include a tool call."
-        ),
+        )
+    else:
+        response_patterns = (
+            "Your response structure signals your intent:\n\n"
+            "Empty response (no text, no tools)\n"
+            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
+            "  Use when: schedule fired but nothing to report\n\n"
+            "Message only (no tools)\n"
+            "  → Not delivered. Use explicit send tools when you need to communicate.\n"
+            "  Use when: never (avoid text-only replies)\n\n"
+            "Message + tools\n"
+            "  → Tools execute; if you need to communicate, include an explicit send tool\n"
+            "  Example: send_chat_message(...) + http_request(...)\n\n"
+            "Tools only (no message)\n"
+            "  → 'Working quietly' → tools execute, no message sent\n"
+            "  Use when: background work, scheduled tasks with nothing to announce\n"
+            "  Example: update_charter(...)\n\n"
+            "Note: Without an active web chat session, text-only output is never delivered."
+        )
+
+    # Response patterns - explicit guidance on how output maps to behavior
+    important_group.section_text(
+        "response_patterns",
+        response_patterns,
         weight=4,
         non_shrinkable=True,
     )
@@ -1430,7 +1390,10 @@ def build_prompt_context(
         agent=agent,
     )
 
-    reasoning_streak_text = _get_reasoning_streak_prompt(reasoning_only_streak)
+    reasoning_streak_text = _get_reasoning_streak_prompt(
+        reasoning_only_streak,
+        implied_send_active=implied_send_active,
+    )
     if reasoning_streak_text:
         critical_group.section_text(
             "tool_usage_warning",
@@ -2164,10 +2127,6 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
     """
     Get the full context for implied send routing.
 
-    Priority order:
-    1. Active web chat session (synchronous, highest priority)
-    2. Most recent inbound message (reply to sender)
-
     Returns:
         dict with keys: channel, to_address, tool_name, display_name, tool_example
         or None if no implied send target available.
@@ -2187,70 +2146,6 @@ def _get_implied_send_context(agent: PersistentAgent) -> dict | None:
     except Exception:
         logger.debug(
             "Failed to check web sessions for agent %s",
-            agent.id,
-            exc_info=True,
-        )
-
-    # Priority 2: Most recent inbound message (for reply context)
-    try:
-        last_inbound = (
-            PersistentAgentMessage.objects.filter(
-                owner_agent=agent,
-                is_outbound=False,
-            )
-            .select_related("from_endpoint", "conversation", "peer_agent")
-            .order_by("-timestamp")
-            .first()
-        )
-
-        if last_inbound and last_inbound.from_endpoint:
-            # Check if it's a peer DM
-            if last_inbound.conversation and getattr(last_inbound.conversation, "is_peer_dm", False):
-                peer_agent = last_inbound.peer_agent
-                if peer_agent:
-                    peer_name = peer_agent.name or "peer agent"
-                    return {
-                        "channel": "peer_dm",
-                        "to_address": str(peer_agent.id),
-                        "tool_name": "send_agent_message",
-                        "display_name": f"peer agent '{peer_name}'",
-                        "tool_example": f'send_agent_message(peer_agent_id="{peer_agent.id}", message="...")',
-                        "peer_agent_id": str(peer_agent.id),
-                        "peer_agent_name": peer_name,
-                    }
-
-            # Regular channel message
-            channel = last_inbound.from_endpoint.channel
-            from_address = last_inbound.from_endpoint.address
-
-            if channel == CommsChannel.EMAIL:
-                return {
-                    "channel": "email",
-                    "to_address": from_address,
-                    "tool_name": "send_email",
-                    "display_name": f"email to {from_address}",
-                    "tool_example": f'send_email(to_address="{from_address}", subject="...", mobile_first_html="...")',
-                }
-            elif channel == CommsChannel.SMS:
-                return {
-                    "channel": "sms",
-                    "to_address": from_address,
-                    "tool_name": "send_sms",
-                    "display_name": f"SMS to {from_address}",
-                    "tool_example": f'send_sms(to_number="{from_address}", body="...")',
-                }
-            elif channel == CommsChannel.WEB:
-                return {
-                    "channel": "web",
-                    "to_address": from_address,
-                    "tool_name": "send_chat_message",
-                    "display_name": f"web chat to {from_address}",
-                    "tool_example": f'send_chat_message(to_address="{from_address}", body="...")',
-                }
-
-    except Exception:
-        logger.debug(
-            "Failed to check last inbound for agent %s",
             agent.id,
             exc_info=True,
         )
@@ -2339,20 +2234,31 @@ def _get_formatting_guidance(
         )
 
 
-def _get_reasoning_streak_prompt(reasoning_only_streak: int) -> str:
+def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_active: bool) -> str:
     """Return a warning when the agent has responded without tool calls."""
 
     if reasoning_only_streak <= 0:
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
+    if implied_send_active:
+        patterns = (
+            "(1) Nothing to say? sleep_until_next_trigger with no text. "
+            "(2) Replying + taking action? Text (delivered to active web chat) + tool calls. "
+            "For SMS/email, use send_email/send_sms explicitly. "
+            "(3) Replying only? Text + sleep_until_next_trigger. "
+            "Avoid empty status updates like 'nothing to report'."
+        )
+    else:
+        patterns = (
+            "(1) Nothing to say? sleep_until_next_trigger with no text. "
+            "(2) Need to reply? Use explicit send tools like send_chat_message/send_email/send_sms/send_agent_message. "
+            "(3) Working quietly? tools only. "
+            "Avoid empty status updates like 'nothing to report'."
+        )
     return (
         f"Your previous {streak_label} had no tool calls—please include at least one this time. "
-        "Quick patterns: "
-        "(1) Nothing to say? sleep_until_next_trigger with no text. "
-        "(2) Replying + taking action? Text (auto-sends in web chat) + tool calls. For SMS/email, use send_email/send_sms explicitly. "
-        "(3) Replying only? Text + sleep_until_next_trigger. "
-        "Avoid empty status updates like 'nothing to report'."
+        f"Quick patterns: {patterns}"
     )
 
 
@@ -2453,15 +2359,49 @@ def _get_system_instruction(
     is_first_run: bool = False,
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
+    implied_send_active: bool = False,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
+
+    if implied_send_active:
+        send_guidance = (
+            "In an active web chat session, your text goes directly to that one user—but ONLY them. "
+            "To reach anyone else (other contacts, peer agents, different channels), you MUST use explicit tools: "
+            "send_email, send_sms, send_agent_message, send_chat_message. "
+        )
+        response_delivery_note = (
+            "Text output auto-sends ONLY to an active web chat user—nobody else. "
+            "For all other recipients (email contacts, SMS, peer agents), use explicit send tools. "
+        )
+        web_chat_delivery_note = (
+            "For the active web chat user, just write your message—it auto-sends to them only. "
+            "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
+        )
+        message_only_note = "Message-only responses mean you're done. Empty responses trigger auto-sleep. "
+    else:
+        send_guidance = (
+            "Text output is not delivered unless you use explicit send tools. "
+            "To reach anyone (contacts, peer agents, web chat), you MUST use send_email, send_sms, "
+            "send_agent_message, send_chat_message. "
+        )
+        response_delivery_note = (
+            "Text output is not delivered unless you use explicit send tools. "
+            "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
+        )
+        web_chat_delivery_note = (
+            "Text output is not delivered unless you use explicit send tools. "
+            "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
+        )
+        message_only_note = (
+            "Text-only responses are not delivered without an active web chat session. "
+            "Empty responses trigger auto-sleep. "
+        )
 
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to act on the user's request, then stop. "
 
-        "In an active web chat session, your text goes directly to that one user—but ONLY them. "
-        "To reach anyone else (other contacts, peer agents, different channels), you MUST use explicit tools: send_email, send_sms, send_agent_message, send_chat_message. "
+        f"{send_guidance}"
         "Tool calls are silent actions. You can combine text + tools: 'Got it!' + update_charter(...). "
         "Use JSON for tool calls, never XML. "
 
@@ -2530,7 +2470,7 @@ def _get_system_instruction(
         "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
         "Set false (or omit) when you're done. "
         "Fetching data is just step one—reporting it to the user completes the task. "
-        "Message-only responses mean you're done. Empty responses trigger auto-sleep. "
+        f"{message_only_note}"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
@@ -2746,7 +2686,7 @@ def _get_system_instruction(
         "`search_tools` unlocks integrations—call it to enable tools for Instagram, LinkedIn, Reddit, and more. "
 
         "How responses work: "
-        "Text output auto-sends ONLY to an active web chat user—nobody else. For all other recipients (email contacts, SMS, peer agents), use explicit send tools. "
+        f"{response_delivery_note}"
         "Tool calls are actions you take. You can combine both in one response. "
         "A message with no tools means you're done. An empty response (no text, no tools) also means you're done. "
         "Tool calls must be actual tool invocations—never write JSON or XML as text pretending to be a tool call. "
@@ -2839,8 +2779,7 @@ def _get_system_instruction(
         "When a user gives you a task, you should: acknowledge → set charter → set schedule (if recurring) → **start work immediately**.\n"
         "Delivered your response? Stop. Waiting on user or external task? Stop.\n"
 
-        "For the active web chat user, just write your message—it auto-sends to them only. "
-        "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
+        f"{web_chat_delivery_note}"
 
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
         "It's perfectly fine to tell the user you've made progress and will continue working on it—transparency builds trust. "

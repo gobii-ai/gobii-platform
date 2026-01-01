@@ -11,9 +11,12 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
     UserQuota,
+    build_web_agent_address,
     build_web_user_address,
 )
 from api.services.web_sessions import start_web_session
@@ -103,7 +106,70 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Implied send failed",
+            description__startswith="Message delivery requires explicit send tools",
+        ).first()
+        self.assertIsNotNone(correction_step)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_requires_active_web_session_for_inbound_web_message(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        user_address = build_web_user_address(self.user.id, self.agent.id)
+        agent_address = build_web_agent_address(self.agent.id)
+
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=agent_address,
+            is_primary=True,
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=user_address,
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body="Inbound web message",
+        )
+
+        resp = self._mock_completion("New implied web chat")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -146,7 +212,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_chat.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Implied send failed",
+            description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -262,7 +328,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_email.called)
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Implied send failed",
+            description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
 
@@ -312,7 +378,7 @@ class ImpliedSendTests(TestCase):
 
         correction_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
-            description__startswith="Implied send failed",
+            description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
         self.assertFalse(mock_send_email.called)

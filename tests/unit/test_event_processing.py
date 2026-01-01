@@ -56,6 +56,7 @@ from api.services.tool_settings import (
     get_tool_settings_for_plan,
     invalidate_tool_settings_cache,
 )
+from api.services.web_sessions import start_web_session
 
 User = get_user_model()
 
@@ -140,6 +141,32 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn('<pacing_guidance>', content)
         self.assertIn('<time_since_last_interaction>', content)
         self.assertIn('<burn_rate_status>', content)
+
+    def test_prompt_omits_implied_send_without_active_web_session(self):
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        combined = f"{system_message['content']}\n{user_message['content']}"
+        self.assertNotIn("Implied Send", combined)
+        self.assertNotIn("<implied_send_status>", combined)
+        self.assertNotIn("implied_send_status", combined)
+
+    def test_prompt_includes_implied_send_with_active_web_session(self):
+        start_web_session(self.agent, self.user)
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m['role'] == 'user'), None)
+        self.assertIsNotNone(user_message)
+        content = user_message['content']
+        self.assertIn("Implied Send", content)
+        self.assertIn("<implied_send_status>", content)
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""

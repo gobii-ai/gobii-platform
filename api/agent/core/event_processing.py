@@ -365,7 +365,10 @@ def _build_implied_send_tool_call(
 
     channel = ctx.get("channel")
     to_address = ctx.get("to_address")
-    tool_name = ctx.get("tool_name")
+    if not has_active_web_session(agent):
+        return None, "Implied send failed: no active web session."
+    if channel != "web":
+        return None, "Implied send failed: active web session required."
 
     if channel == "web":
         tool_params = {"to_address": to_address, "body": message_text}
@@ -2297,7 +2300,7 @@ def _run_agent_loop(
                         step_kwargs = {
                             "agent": agent,
                             "description": (
-                                "Implied send failed (web chat only). "
+                                "Message delivery requires explicit send tools when no active web chat session. "
                                 "Please call send_chat_message for web chat, or send_email/send_sms with explicit parameters."
                             ),
                         }
