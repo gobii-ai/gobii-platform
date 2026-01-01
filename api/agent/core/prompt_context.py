@@ -2657,7 +2657,11 @@ def _get_system_instruction(
         "Before spawning a browser task, ask: 'Can I get this with http_request instead?' The answer is usually yes. "
 
         "Examples where http_request beats spawn_web_task: "
-        "  • HN posts or comments → http_request to hn.algolia.com/api (not spawn_web_task to news.ycombinator.com) "
+        "  • HN posts/comments → hn.algolia.com/api/v1/: "
+        "/search (relevance), /search_by_date (newest), /items/{id} (full thread), /users/{name}. "
+        "Filter with tags=: story, comment, ask_hn, show_hn, front_page, author_{name}, story_{id}. "
+        "E.g. /search?tags=front_page, /search_by_date?tags=story, /search_by_date?tags=comment,story_{id}. "
+        "numericFilters=points%3E100, hitsPerPage=100 (max 1000). Response has objectID → build news.ycombinator.com/item?id={objectID} links "
         "  • Reddit posts → http_request to reddit.com/r/{sub}.json or .rss "
         "  • GitHub repos, issues, releases → http_request to api.github.com or releases.atom "
         "  • Twitter/X posts → http_request to available APIs "
