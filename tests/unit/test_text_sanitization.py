@@ -6,6 +6,7 @@ from util.text_sanitizer import (
     normalize_whitespace,
     decode_unicode_escapes,
     strip_llm_artifacts,
+    strip_redundant_blockquote_quotes,
     normalize_llm_output,
 )
 
@@ -466,3 +467,130 @@ class StripLlmArtifactsTests(TestCase):
         text = "Great response!</think><arg_key>test</arg_key>"
         result = normalize_llm_output(text)
         self.assertEqual(result, "Great response!")
+
+
+@tag("batch_text_sanitization")
+class StripRedundantBlockquoteQuotesTests(TestCase):
+    """Tests for stripping redundant quotes from markdown blockquotes."""
+
+    def test_single_line_straight_quotes(self):
+        """Single-line blockquote with straight double quotes."""
+        text = '> "The problem with sandboxing is that they have to provide solid guarantees."'
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> The problem with sandboxing is that they have to provide solid guarantees.")
+
+    def test_single_line_smart_quotes(self):
+        """Single-line blockquote with smart quotes."""
+        text = "> \u201cThis is a quoted statement.\u201d"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> This is a quoted statement.")
+
+    def test_multi_line_blockquote(self):
+        """Multi-line blockquote with quotes spanning first and last line."""
+        text = (
+            '> "The problem with sandboxing solutions is that\n'
+            "> they have to provide very solid guarantees\n"
+            '> that code can\'t escape."'
+        )
+        result = strip_redundant_blockquote_quotes(text)
+        expected = (
+            "> The problem with sandboxing solutions is that\n"
+            "> they have to provide very solid guarantees\n"
+            "> that code can't escape."
+        )
+        self.assertEqual(result, expected)
+
+    def test_preserves_blockquote_without_quotes(self):
+        """Blockquote without outer quotes should be unchanged."""
+        text = "> This is a normal blockquote without quotes"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> This is a normal blockquote without quotes")
+
+    def test_preserves_non_blockquote_content(self):
+        """Non-blockquote content should be unchanged."""
+        text = 'Regular text with "quotes" in it'
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, 'Regular text with "quotes" in it')
+
+    def test_mixed_content(self):
+        """Mixed blockquote and regular content."""
+        text = (
+            "Here's what they said:\n\n"
+            '> "Sandboxing is hard."\n\n'
+            "Key responses:"
+        )
+        result = strip_redundant_blockquote_quotes(text)
+        expected = (
+            "Here's what they said:\n\n"
+            "> Sandboxing is hard.\n\n"
+            "Key responses:"
+        )
+        self.assertEqual(result, expected)
+
+    def test_guillemets(self):
+        """French-style guillemet quotes should be stripped."""
+        text = "> «C'est magnifique!»"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> C'est magnifique!")
+
+    def test_german_quotes(self):
+        """German-style quotes should be stripped."""
+        text = "> \u201eDas ist interessant.\u201d"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> Das ist interessant.")
+
+    def test_single_quotes(self):
+        """Single quotes should be stripped."""
+        text = "> 'This is single-quoted.'"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> This is single-quoted.")
+
+    def test_mismatched_quotes_preserved(self):
+        """Mismatched quotes should be preserved (not stripped)."""
+        text = "> \"This starts with double but ends with single'"
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> \"This starts with double but ends with single'")
+
+    def test_internal_quotes_preserved(self):
+        """Internal quotes within blockquote should be preserved."""
+        text = '> "She said "hello" to him."'
+        result = strip_redundant_blockquote_quotes(text)
+        # Only outer quotes removed
+        self.assertEqual(result, '> She said "hello" to him.')
+
+    def test_empty_blockquote(self):
+        """Empty blockquote should be unchanged."""
+        text = "> "
+        result = strip_redundant_blockquote_quotes(text)
+        self.assertEqual(result, "> ")
+
+    def test_multiple_blockquote_blocks(self):
+        """Multiple separate blockquote blocks should each be processed."""
+        text = (
+            '> "First quote."\n\n'
+            "Some text in between.\n\n"
+            '> "Second quote."'
+        )
+        result = strip_redundant_blockquote_quotes(text)
+        expected = (
+            "> First quote.\n\n"
+            "Some text in between.\n\n"
+            "> Second quote."
+        )
+        self.assertEqual(result, expected)
+
+    def test_normalize_llm_output_strips_blockquote_quotes(self):
+        """normalize_llm_output should include blockquote quote stripping."""
+        text = '## Discussion\n\n> "The key insight is about security."'
+        result = normalize_llm_output(text)
+        self.assertEqual(result, "## Discussion\n\n> The key insight is about security.")
+
+    def test_handles_none_input(self):
+        """None input should return empty string."""
+        result = strip_redundant_blockquote_quotes(None)
+        self.assertEqual(result, "")
+
+    def test_handles_non_string_input(self):
+        """Non-string input should return empty string."""
+        result = strip_redundant_blockquote_quotes(123)
+        self.assertEqual(result, "")

@@ -9,6 +9,7 @@ __all__ = [
     "normalize_whitespace",
     "decode_unicode_escapes",
     "strip_llm_artifacts",
+    "strip_redundant_blockquote_quotes",
     "normalize_llm_output",
 ]
 
@@ -272,6 +273,140 @@ def strip_llm_artifacts(value: str | None) -> str:
     return text.strip()
 
 
+# Quote characters that might wrap blockquote content redundantly
+# Includes straight quotes, smart quotes, and various international quotation marks
+_OPENING_QUOTES = {'"', "\u201c", "\u201e", "\u00ab", "\u2039", "\u2018", "'"}
+_CLOSING_QUOTES = {'"', "\u201c", "\u201d", "\u00bb", "\u203a", "\u2019", "'"}
+_QUOTE_PAIRS = {
+    '"': '"',           # straight double
+    "\u201c": "\u201d",  # smart double " → "
+    "\u201e": "\u201d",  # German/Polish „ → "
+    "\u00ab": "\u00bb",  # guillemets « → »
+    "\u2039": "\u203a",  # single guillemets ‹ → ›
+    "'": "'",           # straight single
+    "\u2018": "\u2019",  # smart single ' → '
+}
+
+
+def strip_redundant_blockquote_quotes(value: str | None) -> str:
+    """
+    Strip redundant quotation marks from markdown blockquotes.
+
+    When LLMs write blockquotes like:
+        > "The problem with sandboxing..."
+
+    The blockquote styling (left border, italic) already indicates it's a quote,
+    so the literal "..." marks are redundant. This function removes them.
+
+    Handles:
+    - Single-line blockquotes: > "text"
+    - Multi-line blockquotes where first line starts and last line ends with quotes
+    - Various quote styles: "...", "...", «...», '...', etc.
+
+    Args:
+        value: Markdown text potentially containing blockquotes with redundant quotes
+
+    Returns:
+        Text with redundant quotes stripped from blockquotes
+    """
+    if not isinstance(value, str):
+        return ""
+
+    lines = value.split("\n")
+    result = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        # Check if this is a blockquote line
+        if line.lstrip().startswith(">"):
+            # Collect all consecutive blockquote lines
+            blockquote_lines = []
+            while i < len(lines) and lines[i].lstrip().startswith(">"):
+                blockquote_lines.append(lines[i])
+                i += 1
+
+            # Process the blockquote block
+            processed = _process_blockquote_block(blockquote_lines)
+            result.extend(processed)
+        else:
+            result.append(line)
+            i += 1
+
+    return "\n".join(result)
+
+
+def _process_blockquote_block(lines: list[str]) -> list[str]:
+    """Process a block of consecutive blockquote lines, stripping redundant quotes."""
+    if not lines:
+        return lines
+
+    # Extract the content after the > marker for each line
+    # Preserve the original prefix (spaces + > + space)
+    parsed = []
+    for line in lines:
+        # Find where the > is and extract prefix + content
+        stripped = line.lstrip()
+        prefix_spaces = line[:len(line) - len(stripped)]
+        if stripped.startswith(">"):
+            # Handle "> text" or ">text"
+            after_marker = stripped[1:]
+            if after_marker.startswith(" "):
+                prefix = prefix_spaces + "> "
+                content = after_marker[1:]
+            else:
+                prefix = prefix_spaces + ">"
+                content = after_marker
+        else:
+            # Shouldn't happen, but handle gracefully
+            prefix = ""
+            content = line
+        parsed.append((prefix, content))
+
+    # Check if first line content starts with an opening quote
+    first_content = parsed[0][1].lstrip()
+    if not first_content:
+        return lines  # Empty blockquote, leave as-is
+
+    first_char = first_content[0]
+    if first_char not in _OPENING_QUOTES:
+        return lines  # Doesn't start with a quote, leave as-is
+
+    # Find the expected closing quote
+    expected_close = _QUOTE_PAIRS.get(first_char, first_char)
+
+    # Check if last line content ends with the closing quote
+    last_content = parsed[-1][1].rstrip()
+    if not last_content or last_content[-1] != expected_close:
+        return lines  # Doesn't end with matching quote, leave as-is
+
+    # Strip the quotes
+    if len(parsed) == 1:
+        # Single line blockquote
+        prefix, content = parsed[0]
+        content = content.strip()
+        if len(content) >= 2 and content[0] == first_char and content[-1] == expected_close:
+            content = content[1:-1].strip()
+        return [prefix + content]
+    else:
+        # Multi-line blockquote
+        result = []
+        for idx, (prefix, content) in enumerate(parsed):
+            if idx == 0:
+                # Strip opening quote from first line
+                content = content.lstrip()
+                if content and content[0] == first_char:
+                    content = content[1:].lstrip()
+            if idx == len(parsed) - 1:
+                # Strip closing quote from last line
+                content = content.rstrip()
+                if content and content[-1] == expected_close:
+                    content = content[:-1].rstrip()
+            result.append(prefix + content)
+        return result
+
+
 def normalize_llm_output(value: str | None) -> str:
     """
     Comprehensive normalization of LLM output for display.
@@ -285,6 +420,7 @@ def normalize_llm_output(value: str | None) -> str:
     2. Decode unicode/string escape sequences (\\u2014 -> —, \\n -> newline)
     3. Strip control characters (keeps \\n, \\r, \\t)
     4. Normalize whitespace (collapse excessive newlines, strip trailing spaces)
+    5. Strip redundant quotes from blockquotes (> "text" -> > text)
 
     Args:
         value: Raw LLM output text
@@ -308,5 +444,8 @@ def normalize_llm_output(value: str | None) -> str:
 
     # Step 4: Normalize whitespace
     text = normalize_whitespace(text)
+
+    # Step 5: Strip redundant quotes from blockquotes
+    text = strip_redundant_blockquote_quotes(text)
 
     return text
