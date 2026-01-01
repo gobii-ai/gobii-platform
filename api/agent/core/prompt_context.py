@@ -200,6 +200,10 @@ Your database is persistent across runs. Design schemas that grow with your task
 
 **CRITICAL: The `queries` parameter is a plain SQL string. Use semicolons to separate multiple statements. Never use brackets, quotes around the whole thing, or array syntax.**
 
+**WORKFLOW: Fetch data BEFORE querying. Don't query an empty database — there's nothing there yet!**
+- First run: create schema → fetch external data → INSERT → report
+- Later runs: fetch new data → INSERT → query for comparison/aggregation → report
+
 ---
 
 ### When to Use SQLite
@@ -332,35 +336,47 @@ sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) 
 
 ---
 
+### The Golden Rule: Fetch Before You Query
+
+An empty database has nothing to SELECT. On first run:
+1. **Create schema** → 2. **Fetch external data** → 3. **INSERT** → 4. **Query/report**
+
+On later runs (DB has data):
+1. **Fetch new data** → 2. **INSERT** → 3. **Query to compare/aggregate** → 4. **Report**
+
+**✗ Wrong (querying empty DB):**
+```
+sqlite_batch(queries="SELECT * FROM items")  -- returns nothing!
+```
+→ http_request(api)  -- should have done this FIRST
+
+**✓ Right (fetch first, then store):**
+→ http_request(api, will_continue_work=true)
+[Next cycle: INSERT the results, THEN query if needed]
+
+---
+
 ### Agentic Patterns
 
-**First run — create schema then fetch data:**
-User: 'Track bitcoin for me'
+**First run — create schema, fetch, store:**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT); CREATE INDEX IF NOT EXISTS idx_symbol ON price_history(symbol)", will_continue_work=true)
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, external_id TEXT UNIQUE, name TEXT, value REAL, fetched_at TEXT)", will_continue_work=true)
 ```
-→ http_request('coinbase-api', will_continue_work=true)
-[Next cycle: INSERT price, report to user]
+→ http_request(external-api, will_continue_work=true)
+[Next cycle: INSERT results, report to user]
 
-**Scheduled run — check for changes:**
-[Cron fires]
-```
-sqlite_batch(queries="SELECT price FROM price_history WHERE symbol='BTC' ORDER BY fetched_at DESC LIMIT 1")
-```
-→ http_request('coinbase-api', will_continue_work=true)
-[Next cycle: compare prices, INSERT new price, alert if significant change]
+**Later runs — fetch new, insert, compare:**
+→ http_request(external-api, will_continue_work=true)
+[Next cycle: INSERT OR IGNORE new items, query for changes, report differences]
 
 **Evolve schema when requirements change:**
-User: 'Also track the 24h volume'
 ```
-sqlite_batch(queries="ALTER TABLE price_history ADD COLUMN volume_24h REAL")
+sqlite_batch(queries="ALTER TABLE items ADD COLUMN category TEXT")
 ```
-→ update_charter('...now including 24h volume tracking')
 
-**Data getting large — aggregate and prune:**
-[DB size warning]
+**Data getting large — prune old records:**
 ```
-sqlite_batch(queries="INSERT INTO daily_summaries SELECT date(fetched_at), symbol, AVG(price), MIN(price), MAX(price) FROM price_history WHERE fetched_at < datetime('now', '-7 days') GROUP BY date(fetched_at), symbol; DELETE FROM price_history WHERE fetched_at < datetime('now', '-7 days')")
+sqlite_batch(queries="DELETE FROM items WHERE fetched_at < datetime('now', '-30 days')")
 ```
 """
 
