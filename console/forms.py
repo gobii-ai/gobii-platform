@@ -936,6 +936,18 @@ class ContactRequestApprovalForm(forms.Form):
                 })
             )
 
+            # Configure permission checkbox
+            configure_field_name = f'configure_{request.id}'
+            self.fields[configure_field_name] = forms.BooleanField(
+                required=False,
+                initial=False,  # Default to no config authority
+                label="Allow configuration changes",
+                help_text="Can instruct agent to update charter/schedule",
+                widget=forms.CheckboxInput(attrs={
+                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
+                })
+            )
+
 
 class PhoneAddForm(forms.Form):
     phone_number = forms.CharField(

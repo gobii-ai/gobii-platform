@@ -5573,6 +5573,10 @@ class CommsAllowlistEntry(models.Model):
         default=True,
         help_text="Whether the agent can send messages to this contact"
     )
+    can_configure = models.BooleanField(
+        default=False,
+        help_text="Whether this contact can instruct the agent to update its charter or schedule"
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -5699,7 +5703,11 @@ class AgentAllowlistInvite(models.Model):
     responded_at = models.DateTimeField(null=True, blank=True, help_text="When they accepted/rejected")
     allow_inbound = models.BooleanField(default=True)
     allow_outbound = models.BooleanField(default=True)
-    
+    can_configure = models.BooleanField(
+        default=False,
+        help_text="Whether this contact can instruct the agent to update its charter or schedule"
+    )
+
     class Meta:
         constraints = [
             models.UniqueConstraint(
@@ -5788,6 +5796,7 @@ class AgentAllowlistInvite(models.Model):
                 "is_active": True,
                 "allow_inbound": self.allow_inbound,
                 "allow_outbound": self.allow_outbound,
+                "can_configure": self.can_configure,
             }
         )
         
@@ -5919,7 +5928,11 @@ class CommsAllowlistRequest(models.Model):
         default=True,
         help_text="Agent is requesting to send messages to this contact"
     )
-    
+    request_configure = models.BooleanField(
+        default=False,
+        help_text="Whether to grant this contact authority to update agent charter/schedule"
+    )
+
     # Status tracking
     status = models.CharField(
         max_length=16, 
@@ -6021,7 +6034,8 @@ class CommsAllowlistRequest(models.Model):
                 address=self.address,
                 is_active=True,
                 allow_inbound=self.request_inbound,
-                allow_outbound=self.request_outbound
+                allow_outbound=self.request_outbound,
+                can_configure=self.request_configure,
             )
             
             # Switch agent to manual allowlist mode if not already
@@ -6067,6 +6081,7 @@ class CommsAllowlistRequest(models.Model):
             invited_by=invited_by,
             allow_inbound=self.request_inbound,
             allow_outbound=self.request_outbound,
+            can_configure=self.request_configure,
             expires_at=timezone.now() + timedelta(days=7)
         )
         
