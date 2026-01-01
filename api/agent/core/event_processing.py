@@ -350,26 +350,81 @@ def _build_implied_send_tool_call(
     *,
     will_continue_work: bool,
 ) -> Tuple[Optional[dict], Optional[str]]:
-    web_session = _get_latest_active_web_session(agent)
-    if not web_session:
-        return None, "Implied send failed: no active web chat session."
+    """
+    Build an implied send tool call based on current context.
 
-    tool_params = {
-        "to_address": build_web_user_address(web_session.user_id, agent.id),
-        "body": message_text,
-    }
-    if will_continue_work:
-        tool_params["will_continue_work"] = True
-    return (
-        {
-            "id": "implied_send",
-            "function": {
-                "name": "send_chat_message",
-                "arguments": json.dumps(tool_params),
+    Routes to the appropriate channel:
+    - Active web chat session (highest priority)
+    - Most recent inbound message sender (email, SMS, web, or peer DM)
+    """
+    from .prompt_context import _get_implied_send_context
+
+    ctx = _get_implied_send_context(agent)
+    if not ctx:
+        return None, "Implied send failed: no active recipient context."
+
+    channel = ctx.get("channel")
+    to_address = ctx.get("to_address")
+    tool_name = ctx.get("tool_name")
+
+    if channel == "web":
+        tool_params = {"to_address": to_address, "body": message_text}
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        return (
+            {
+                "id": "implied_send",
+                "function": {"name": "send_chat_message", "arguments": json.dumps(tool_params)},
             },
-        },
-        None,
-    )
+            None,
+        )
+
+    elif channel == "sms":
+        tool_params = {"to_number": to_address, "body": message_text}
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        return (
+            {
+                "id": "implied_send",
+                "function": {"name": "send_sms", "arguments": json.dumps(tool_params)},
+            },
+            None,
+        )
+
+    elif channel == "email":
+        # Wrap plain text in simple HTML paragraph, auto-generate subject
+        html_body = f"<p>{message_text}</p>"
+        tool_params = {
+            "to_address": to_address,
+            "subject": "Re: Follow-up",
+            "mobile_first_html": html_body,
+        }
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        return (
+            {
+                "id": "implied_send",
+                "function": {"name": "send_email", "arguments": json.dumps(tool_params)},
+            },
+            None,
+        )
+
+    elif channel == "peer_dm":
+        peer_agent_id = ctx.get("peer_agent_id")
+        if not peer_agent_id:
+            return None, "Implied send failed: peer agent ID not available."
+        tool_params = {"peer_agent_id": peer_agent_id, "message": message_text}
+        if will_continue_work:
+            tool_params["will_continue_work"] = True
+        return (
+            {
+                "id": "implied_send",
+                "function": {"name": "send_agent_message", "arguments": json.dumps(tool_params)},
+            },
+            None,
+        )
+
+    return None, f"Implied send failed: unsupported channel '{channel}'."
 
 def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[BudgetContext]) -> None:
     """Best-effort attempt to close the budget cycle when the agent goes idle."""

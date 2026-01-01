@@ -6197,16 +6197,19 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         
                         try:
                             if should_approve:
-                                # Get the direction settings from the form
+                                # Get the direction and config settings from the form
                                 inbound_field = f'inbound_{request_obj.id}'
                                 outbound_field = f'outbound_{request_obj.id}'
+                                configure_field = f'configure_{request_obj.id}'
                                 allow_inbound = form.cleaned_data.get(inbound_field, True)
                                 allow_outbound = form.cleaned_data.get(outbound_field, True)
-                                
-                                # Update the request's direction settings before approving
+                                can_configure = form.cleaned_data.get(configure_field, False)
+
+                                # Update the request's settings before approving
                                 request_obj.request_inbound = allow_inbound
                                 request_obj.request_outbound = allow_outbound
-                                request_obj.save(update_fields=['request_inbound', 'request_outbound'])
+                                request_obj.request_configure = can_configure
+                                request_obj.save(update_fields=['request_inbound', 'request_outbound', 'request_configure'])
                                 
                                 # Try to approve (will directly add to allowlist, skipping invitation)
                                 result = request_obj.approve(invited_by=request.user, skip_invitation=True)
