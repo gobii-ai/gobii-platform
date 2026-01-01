@@ -20,6 +20,7 @@ from api.models import (
     BrowserUseAgent,
 )
 from api.agent.comms.outbound_delivery import deliver_agent_email, deliver_agent_sms, _convert_sms_body_to_plaintext
+from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from config import settings
 from inscriptis import get_text
 
@@ -313,6 +314,56 @@ class EmailDeliveryTests(TestCase):
             
             # Verify send was called
             mock_msg.send.assert_called_once_with(fail_silently=False)
+
+
+@tag("batch_outbound_delivery")
+class EmailContentRenderingTests(TestCase):
+    def test_markdown_with_inline_html_renders_cleanly(self):
+        body = (
+            "Today's scan\n\n"
+            "**Part A:** No relevant funding.\n\n"
+            "Sources: <a href='https://example.com'>Example</a>"
+        )
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<strong>Part A:</strong>", html_snippet)
+        self.assertNotIn("**Part A:", html_snippet)
+        self.assertRegex(
+            html_snippet,
+            r"<p>Sources:\s*<a href='https://example.com'>Example</a></p>",
+        )
+        self.assertIn("Part A:", plaintext)
+
+    def test_html_with_markdown_inside_tags_is_repaired(self):
+        body = "<p>**bold** inside</p>"
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<strong>bold</strong>", html_snippet)
+        self.assertNotIn("**bold**", html_snippet)
+
+    def test_html_block_with_markdown_list_is_converted(self):
+        body = "<div>\n- First\n- Second\n</div>"
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<ul>", html_snippet)
+        self.assertIn("<li>First</li>", html_snippet)
+        self.assertIn("<li>Second</li>", html_snippet)
+        self.assertNotIn("- First", html_snippet)
+
+    def test_plaintext_paragraphs_preserve_line_breaks(self):
+        body = "Line 1\nLine 2\n\nLine 3"
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<p>Line 1<br />Line 2</p>", html_snippet)
+        self.assertIn("<p>Line 3</p>", html_snippet)
+
+    def test_horizontal_rules_are_removed(self):
+        body = "Section 1\n\n---\n\nSection 2"
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertNotIn("<hr", html_snippet.lower())
+        self.assertIn("Section 1", html_snippet)
+        self.assertIn("Section 2", html_snippet)
 
 
 @tag("batch_outbound_delivery")

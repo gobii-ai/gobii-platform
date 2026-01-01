@@ -999,6 +999,9 @@ MIXPANEL_PROJECT_TOKEN = env(
 
 TWILIO_INCOMING_WEBHOOK_TOKEN = env("TWILIO_INCOMING_WEBHOOK_TOKEN", default="dummy-twilio-incoming-webhook-token")
 
+# Messaging limits
+WEB_CHAT_MESSAGE_MAX_LENGTH = env.int("WEB_CHAT_MESSAGE_MAX_LENGTH", default=100000)
+
 # SMS Config
 SMS_MAX_BODY_LENGTH = env.int("SMS_MAX_BODY_LENGTH", default=1450)  # Max length of SMS body
 
