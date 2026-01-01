@@ -870,6 +870,9 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'event_time': event_timestamp_unix,
                 }
             )
+            registration_value = float(getattr(settings, "CAPI_REGISTRATION_VALUE", 0.0) or 0.0)
+            marketing_properties["value"] = registration_value
+            marketing_properties.setdefault("currency", "USD")
             additional_click_ids = {
                 key: value
                 for key in CLICK_ID_PARAMS
@@ -1572,8 +1575,9 @@ def handle_subscription_event(event, **kwargs):
                         if isinstance(event_id_override, str) and event_id_override.strip():
                             marketing_properties["event_id"] = event_id_override.strip()
                     value, currency = _calculate_subscription_value(licensed_item)
+                    ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
                     if value is not None:
-                        marketing_properties["value"] = value
+                        marketing_properties["value"] = value * ltv_multiple
                     if currency:
                         marketing_properties["currency"] = currency
                     if analytics_event == AnalyticsEvent.SUBSCRIPTION_RENEWED:
@@ -1583,13 +1587,15 @@ def handle_subscription_event(event, **kwargs):
 
                     if not suppress_marketing_event:
                         try:
-                            capi(
-                                user=owner,
-                                event_name="Subscribe",
-                                properties=marketing_properties,
-                                request=None,
-                                context=marketing_context,
-                            )
+                            if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED:
+                                capi(
+                                    user=owner,
+                                    event_name="Subscribe",
+                                    properties=marketing_properties,
+                                    request=None,
+                                    context=marketing_context,
+                                )
+                            # Renewal marketing events temporarily disabled.
                         except Exception:
                             logger.exception(
                                 "Failed to enqueue marketing subscription event for user %s",

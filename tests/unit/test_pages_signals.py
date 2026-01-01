@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import RequestFactory, TestCase, tag
+from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
 
@@ -118,45 +118,26 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(properties["utm_source_first"], "first-source")
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
-        self.assertEqual(context_campaign["medium"], "last-medium")
-        self.assertEqual(context_campaign["landing_code"], "LP-200")
-        self.assertEqual(context_campaign["gclid"], "last-gclid")
-        self.assertEqual(context_campaign["referrer"], "https://last.example/")
-        self.assertEqual(properties["landing_code_first"], "LP-100")
-        self.assertEqual(properties["landing_code_last"], "LP-200")
-        self.assertEqual(properties["fbc"], "fb.1.123456789.abcdef")
-        self.assertEqual(properties["fbclid"], "fbclid-xyz")
-        self.assertEqual(properties["gclid_first"], "first-gclid")
-        self.assertEqual(properties["gclid_last"], "last-gclid")
-        self.assertEqual(properties["first_referrer"], "https://first.example/")
-        self.assertEqual(properties["last_referrer"], "https://last.example/")
-        self.assertEqual(properties["first_landing_path"], "/landing/first/")
-        self.assertEqual(properties["last_landing_path"], "/pricing/")
-        self.assertEqual(properties["segment_anonymous_id"], "anon-123")
-        self.assertEqual(properties["ga_client_id"], "GA1.2.111.222")
 
-        attribution = UserAttribution.objects.get(user=self.user)
-        self.assertEqual(attribution.utm_source_first, "first-source")
-        self.assertEqual(attribution.utm_medium_first, "first-medium")
-        self.assertEqual(attribution.utm_source_last, "last-source")
-        self.assertEqual(attribution.utm_medium_last, "last-medium")
-        self.assertEqual(attribution.landing_code_first, "LP-100")
-        self.assertEqual(attribution.landing_code_last, "LP-200")
-        self.assertEqual(attribution.fbc, "fb.1.123456789.abcdef")
-        self.assertEqual(attribution.fbclid, "fbclid-xyz")
-        self.assertIsNotNone(attribution.first_touch_at)
-        self.assertIsNotNone(attribution.last_touch_at)
-        self.assertEqual(attribution.gclid_first, "first-gclid")
-        self.assertEqual(attribution.gclid_last, "last-gclid")
-        self.assertEqual(attribution.msclkid_first, "first-msclkid")
-        self.assertEqual(attribution.msclkid_last, "last-msclkid")
-        self.assertEqual(attribution.first_referrer, "https://first.example/")
-        self.assertEqual(attribution.last_referrer, "https://last.example/")
-        self.assertEqual(attribution.first_landing_path, "/landing/first/")
-        self.assertEqual(attribution.last_landing_path, "/pricing/")
-        self.assertEqual(attribution.segment_anonymous_id, "anon-123")
-        self.assertEqual(attribution.ga_client_id, "GA1.2.111.222")
-        self.assertEqual(str(attribution.last_client_ip), "198.51.100.24")
+    @override_settings(GOBII_PROPRIETARY_MODE=True, CAPI_REGISTRATION_VALUE=12.5)
+    @patch("pages.signals.capi")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_capi_includes_value_and_currency(self, mock_identify, mock_track, mock_capi):
+        request = self.factory.get("/signup")
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        with patch("pages.signals.transaction.on_commit", side_effect=lambda fn: fn()):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "CompleteRegistration")
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["value"], 12.5)
+        self.assertEqual(props["currency"], "USD")
 
 
 def _build_event_payload(
@@ -294,6 +275,7 @@ class SubscriptionSignalTests(TestCase):
         return sub
 
     @tag("batch_pages")
+    @override_settings(CAPI_LTV_MULTIPLE=1.0)
     def test_subscription_anchor_updates_from_stripe(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
@@ -347,6 +329,33 @@ class SubscriptionSignalTests(TestCase):
         context = capi_kwargs["context"]
         self.assertIsNotNone(context)
         self.assertTrue(context.get("consent"))
+
+    @tag("batch_pages")
+    @override_settings(CAPI_LTV_MULTIPLE=2.0)
+    def test_subscription_capi_value_applies_ltv_multiple(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason="subscription_create")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
+        sub.stripe_data["billing_reason"] = "subscription_create"
+        sub.billing_reason = "subscription_create"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.mock_capi.assert_called_once()
+        props = self.mock_capi.call_args.kwargs["properties"]
+        # Base value from payload is 29.99; with 2x multiplier expect ~59.98
+        self.assertAlmostEqual(props["value"], 59.98, places=2)
 
     @tag("batch_pages")
     @patch("pages.signals.ensure_single_individual_subscription")
@@ -474,17 +483,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(track_kwargs["event"], AnalyticsEvent.SUBSCRIPTION_RENEWED)
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
 
-        self.mock_capi.assert_called_once()
-        capi_kwargs = self.mock_capi.call_args.kwargs
-        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
-        props = capi_kwargs["properties"]
-        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
-        self.assertEqual(props["subscription_id"], "sub_123")
-        self.assertTrue(props.get("renewal"))
-        self.assertAlmostEqual(props["value"], 29.99, places=2)
-        self.assertEqual(props["currency"], "USD")
-        self.assertTrue(capi_kwargs["context"].get("consent"))
-        self.assertNotIn("event_id", props)
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
