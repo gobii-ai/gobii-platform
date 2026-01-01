@@ -120,6 +120,7 @@ type ProviderEndpointCard = {
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
+  low_latency?: boolean
   type: llmApi.ProviderEndpoint['type']
 }
 
@@ -164,6 +165,7 @@ type EndpointFormValues = {
   supportsReasoning?: boolean
   reasoningEffort?: string | null
   openrouterPreset?: string
+  lowLatency?: boolean
 }
 
 const actionKey = (...parts: Array<string | number | null | undefined>) => parts.filter(Boolean).join(':')
@@ -477,6 +479,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       supports_reasoning: endpoint.supports_reasoning,
       reasoning_effort: endpoint.reasoning_effort ?? null,
       openrouter_preset: endpoint.openrouter_preset ?? null,
+      low_latency: endpoint.low_latency,
       type: endpoint.type,
     })),
   }))
@@ -1319,6 +1322,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const [supportsReasoning, setSupportsReasoning] = useState(Boolean(endpoint.supports_reasoning))
   const [reasoningEffort, setReasoningEffort] = useState(endpoint.reasoning_effort ?? '')
   const [openrouterPreset, setOpenrouterPreset] = useState(endpoint.openrouter_preset ?? '')
+  const [lowLatency, setLowLatency] = useState(Boolean(endpoint.low_latency))
 
   const handleSave = () => {
     const values: EndpointFormValues = {
@@ -1335,6 +1339,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
       supportsReasoning,
       reasoningEffort,
       openrouterPreset,
+      lowLatency,
     }
     onSave(values)
   }
@@ -1421,6 +1426,10 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
             Parallel calls
           </label>
         )}
+        <label className="inline-flex items-center gap-2">
+          <input type="checkbox" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+          Low latency
+        </label>
       </div>
       {!isBrowser && isToolingEndpoint && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
@@ -1469,6 +1478,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
   const [reasoningEffort, setReasoningEffort] = useState('')
   const [temperature, setTemperature] = useState('')
   const [openrouterPreset, setOpenrouterPreset] = useState('')
+  const [lowLatency, setLowLatency] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const isSubmitting = busy || submitting
 
@@ -1497,6 +1507,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
         supportsReasoning,
         reasoningEffort,
         openrouterPreset,
+        lowLatency,
       })
     } finally {
       setSubmitting(false)
@@ -1592,6 +1603,10 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 </label>
               </>
             )}
+            <label className="inline-flex items-center gap-2">
+              <input type="checkbox" checked={lowLatency} onChange={(event) => setLowLatency(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+              Low latency
+            </label>
           </div>
           {type === 'persistent' && (
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
@@ -2428,6 +2443,7 @@ export function LlmConfigScreen() {
       if (maxInput !== undefined) payload.max_input_tokens = maxInput
       payload.enabled = true
     }
+    payload.low_latency = values.lowLatency ?? false
     return runMutation(() => llmApi.createEndpoint(kind, payload), {
       successMessage: 'Endpoint added',
       label: 'Creating endpoint…',
@@ -2472,6 +2488,7 @@ export function LlmConfigScreen() {
     if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
       if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null

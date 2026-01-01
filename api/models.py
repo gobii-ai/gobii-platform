@@ -1904,6 +1904,10 @@ class PersistentModelEndpoint(models.Model):
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt5'")
     provider = models.ForeignKey(LLMProvider, on_delete=models.CASCADE, related_name="persistent_endpoints")
     enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
 
     # LiteLLM model string and options
     litellm_model = models.CharField(max_length=256)
@@ -2094,6 +2098,10 @@ class EmbeddingsModelEndpoint(models.Model):
         help_text="Optional link to the provider supplying credentials for this endpoint.",
     )
     enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM for embeddings.")
     api_base = models.CharField(
@@ -2176,6 +2184,10 @@ class FileHandlerModelEndpoint(models.Model):
         help_text="Optional link to the provider supplying credentials for this endpoint.",
     )
     enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
 
     litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
     api_base = models.CharField(
@@ -2255,6 +2267,10 @@ class BrowserModelEndpoint(models.Model):
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openrouter_glm_45'")
     provider = models.ForeignKey(LLMProvider, on_delete=models.CASCADE, related_name="browser_endpoints")
     enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
 
     browser_model = models.CharField(max_length=256)
     browser_base_url = models.CharField(max_length=256, blank=True, help_text="Base URL for OpenAI-compatible providers (optional)")
