@@ -25,6 +25,8 @@ from inscriptis.model.config import ParserConfig
 from inscriptis.css_profiles import CSS_PROFILES
 import markdown
 
+from util.text_sanitizer import normalize_llm_output
+
 
 # Inline styles for email-safe HTML (email clients strip most CSS)
 TABLE_STYLE = "border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px;"
@@ -271,7 +273,10 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
     strict_css = CSS_PROFILES["strict"].copy()
     config = ParserConfig(css=strict_css, display_links=True, display_anchors=True)
 
-    normalized_body = _normalize_newlines(body or "")
+    # Normalize LLM output: decode escape sequences, strip control chars, normalize whitespace
+    # This handles cases where LLMs output \u2014 instead of —, \n instead of newlines, etc.
+    normalized_body = normalize_llm_output(body or "")
+    normalized_body = _normalize_newlines(normalized_body)
     # Basic observability
     body_length = len(normalized_body)
     body_preview = normalized_body[:200] + ("..." if body_length > 200 else "")

@@ -125,3 +125,78 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("&lt;", html_snippet)
         self.assertIn("&gt;", html_snippet)
         self.assertEqual(plaintext.strip(), "Use <script> tag & other < > symbols")
+
+    def test_unicode_escape_em_dash_decoded(self):
+        """Unicode escape \\u2014 should be decoded to em dash."""
+        body = "Looking into benchmarks now \\u2014 I'll report back"
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        # Em dash should be in the output, not the escape sequence
+        self.assertIn("—", html_snippet)
+        self.assertIn("—", plaintext)
+        self.assertNotIn("\\u2014", html_snippet)
+        self.assertNotIn("\\u2014", plaintext)
+
+    def test_unicode_escape_bullet_with_markdown(self):
+        """Unicode bullet escapes combined with markdown should render correctly."""
+        body = (
+            "Got it! I'll report back with:\\n"
+            "\\u2022 **Top benchmark claims**\\n"
+            "\\u2022 **Head-to-head comparisons**"
+        )
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        # Bullets should be decoded
+        self.assertIn("•", html_snippet)
+        self.assertIn("•", plaintext)
+        # Markdown bold should be rendered
+        self.assertIn("<strong>", html_snippet)
+        # Escape sequences should not appear
+        self.assertNotIn("\\u2022", html_snippet)
+
+    def test_unicode_escape_smart_quotes_decoded(self):
+        """Smart quote escapes should be decoded properly."""
+        body = "He said \\u201cHello\\u201d"
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        # Check that left and right double quotes are present (decoded from escapes)
+        self.assertIn("\u201c", html_snippet)  # left double quote
+        self.assertIn("\u201d", html_snippet)  # right double quote
+        self.assertNotIn("\\u201c", html_snippet)
+
+    def test_unicode_escape_with_html_tags(self):
+        """Unicode escapes in HTML content should be decoded."""
+        body = "<p>Check this \\u2014 important</p>"
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("—", html_snippet)
+        self.assertIn("—", plaintext)
+
+    def test_real_world_llm_email_output(self):
+        """Test realistic LLM output that triggered the original bug."""
+        body = (
+            "Got it! Looking into GLM-4.7 benchmarks now \\u2014 I'll report back with:\\n"
+            "\\n"
+            "\\u2022 **Top benchmark claims** from Z.AI's official release\\n"
+            "\\u2022 **Head-to-head comparisons** vs Claude, GPT-4, Qwen, DeepSeek\\n"
+            "\\u2022 **Community validation** \\u2014 real-world tests from the r/LocalLLaMA crowd\\n"
+            "\\u2022 **Methodology notes** \\u2014 what benchmarks, how they were run\\n"
+            "\\n"
+            "I'll dig into the data and get you a comprehensive breakdown shortly.\\n"
+            "\\n"
+            "Roxie"
+        )
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        # All unicode escapes should be decoded
+        self.assertNotIn("\\u2014", html_snippet)
+        self.assertNotIn("\\u2022", html_snippet)
+        self.assertNotIn("\\u2014", plaintext)
+        self.assertNotIn("\\u2022", plaintext)
+
+        # Actual characters should be present
+        self.assertIn("—", plaintext)  # em dash
+        self.assertIn("•", plaintext)  # bullet
+
+        # Markdown should be rendered in HTML
+        self.assertIn("<strong>", html_snippet)
