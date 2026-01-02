@@ -13,9 +13,21 @@ from ..tools.tool_manager import SQLITE_TOOL_NAME
 
 logger = logging.getLogger(__name__)
 
-INLINE_RESULT_MAX_BYTES = 2048
-PREVIEW_MAX_BYTES = 512
-LAST_N_PREVIEW = 5
+# Tiered preview system - exponential taper by recency
+# Position 0: generous preview (active result)
+# Position 1-2: medium preview (recent context)
+# Position 3-4: small preview (memory jog)
+# Position 5+: meta only (query via sqlite if needed)
+PREVIEW_TIERS = [
+    4096,   # Position 0: 4KB - "I'm working with this now"
+    1024,   # Position 1: 1KB - "Recent context"
+    1024,   # Position 2: 1KB - "Recent context"
+    256,    # Position 3: 256B - "I remember this"
+    256,    # Position 4: 256B - "I remember this"
+    # Position 5+: None (meta only)
+]
+PREVIEW_TIER_COUNT = len(PREVIEW_TIERS)
+
 MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
 MAX_SCHEMA_BYTES = 1_000_000
@@ -48,7 +60,7 @@ class ToolResultPromptInfo:
 def prepare_tool_results_for_prompt(
     records: Sequence[ToolCallResultRecord],
     *,
-    recent_preview_ids: Set[str],
+    recency_positions: Dict[str, int],
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -72,10 +84,11 @@ def prepare_tool_results_for_prompt(
             stored_in_db=stored_in_db,
             is_json=meta["is_json"],  # For query hint - JSON vs text query syntax
         )
+        recency_position = recency_positions.get(record.step_id)
         preview_text, is_inline = _build_prompt_preview(
             result_text,
             meta["bytes"],
-            include_preview=record.step_id in recent_preview_ids,
+            recency_position=recency_position,
         )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
@@ -258,12 +271,21 @@ def _summarize_result(
     return meta, result_json, result_text_store, schema_text
 
 
-def _build_prompt_preview(result_text: str, full_bytes: int, *, include_preview: bool) -> Tuple[Optional[str], bool]:
-    if full_bytes <= INLINE_RESULT_MAX_BYTES:
-        return result_text, True
-    if not include_preview:
+def _build_prompt_preview(
+    result_text: str, full_bytes: int, *, recency_position: Optional[int]
+) -> Tuple[Optional[str], bool]:
+    # No position means meta only (old result beyond tier range)
+    if recency_position is None or recency_position >= PREVIEW_TIER_COUNT:
         return None, False
-    preview_text, truncated_bytes = _truncate_to_bytes(result_text, PREVIEW_MAX_BYTES)
+
+    max_bytes = PREVIEW_TIERS[recency_position]
+
+    # If result fits within tier limit, show full (inline)
+    if full_bytes <= max_bytes:
+        return result_text, True
+
+    # Otherwise truncate to tier limit
+    preview_text, truncated_bytes = _truncate_to_bytes(result_text, max_bytes)
     if truncated_bytes > 0:
         preview_text = (
             f"{preview_text}\n... (truncated, {truncated_bytes} more bytes)"
@@ -303,8 +325,8 @@ def _format_meta_text(
         ]
     )
     meta_line = ", ".join(parts)
-    # Add query hint for large results stored in DB
-    if stored_in_db and meta["bytes"] > INLINE_RESULT_MAX_BYTES:
+    # Add query hint for large results stored in DB (exceeds most generous tier)
+    if stored_in_db and meta["bytes"] > PREVIEW_TIERS[0]:
         if is_json:
             meta_line += (
                 f"\n→ Use sqlite_batch to query/analyze this result: "

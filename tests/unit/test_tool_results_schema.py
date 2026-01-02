@@ -125,7 +125,7 @@ class ToolResultSchemaTests(SimpleTestCase):
         )
         info = tool_results.prepare_tool_results_for_prompt(
             [record],
-            recent_preview_ids=set(),
+            recency_positions={},
         )
 
         prompt_info = info.get("step-1")
@@ -141,7 +141,7 @@ class ToolResultSchemaTests(SimpleTestCase):
         )
         info = tool_results.prepare_tool_results_for_prompt(
             [non_json_record],
-            recent_preview_ids=set(),
+            recency_positions={},
         )
         prompt_info = info.get("step-2")
         self.assertIsNotNone(prompt_info)

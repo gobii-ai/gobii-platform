@@ -88,7 +88,7 @@ from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
 from .tool_results import (
-    LAST_N_PREVIEW,
+    PREVIEW_TIER_COUNT,
     ToolCallResultRecord,
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
@@ -3384,7 +3384,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
-    recent_preview_ids: set[str] = set()
+    recency_positions: Dict[str, int] = {}
     if steps:
         step_lookup = {str(step.id): step for step in steps}
         tool_call_results = (
@@ -3409,13 +3409,13 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
             )
         if tool_call_records:
-            ordered_records = sorted(tool_call_records, key=lambda r: r.created_at)
-            recent_preview_ids = {
-                record.step_id for record in ordered_records[-LAST_N_PREVIEW:]
-            }
+            # Build recency position map: most recent = 0, then 1, 2, etc.
+            ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
+            for position, record in enumerate(ordered_records[:PREVIEW_TIER_COUNT]):
+                recency_positions[record.step_id] = position
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
-        recent_preview_ids=recent_preview_ids,
+        recency_positions=recency_positions,
     )
 
     # format steps (group meta/params/result components together)
