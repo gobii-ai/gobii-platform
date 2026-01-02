@@ -5,32 +5,44 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from genson import SchemaBuilder
-
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
+from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict
 
 logger = logging.getLogger(__name__)
 
-# Tiered preview system - exponential taper by recency
-# Position 0: generous preview (active result)
-# Position 1-2: medium preview (recent context)
-# Position 3-4: small preview (memory jog)
-# Position 5+: meta only (query via sqlite if needed)
-PREVIEW_TIERS = [
-    4096,   # Position 0: 4KB - "I'm working with this now"
-    1024,   # Position 1: 1KB - "Recent context"
-    1024,   # Position 2: 1KB - "Recent context"
-    256,    # Position 3: 256B - "I remember this"
-    256,    # Position 4: 256B - "I remember this"
-    # Position 5+: None (meta only)
+# Tiered preview system for EXTERNAL data (http_request, mcp_* tools)
+# These are structure hints only - agent must use SQLite to extract data.
+# Position 0: structure hint (active result)
+# Position 1-2: brief structure hint
+# Position 3+: meta only (query via sqlite)
+PREVIEW_TIERS_EXTERNAL = [
+    512,    # Position 0: 512B - Structure hint only
+    256,    # Position 1: 256B - Brief hint
+    256,    # Position 2: 256B - Brief hint
+    # Position 3+: None (meta only - use query)
 ]
-PREVIEW_TIER_COUNT = len(PREVIEW_TIERS)
+
+# For large external results, reduce preview even further to force query usage
+LARGE_RESULT_THRESHOLD = 10_000  # 10KB
+LARGE_RESULT_PREVIEW_CAP = 256   # Max 256 bytes for large external results
+
+# SQLite results get MUCH more generous previews - this IS the extracted data
+# the agent needs to work with. Show full results up to reasonable limits.
+PREVIEW_TIERS_SQLITE = [
+    16384,  # Position 0: 16KB - Show full query result
+    8192,   # Position 1: 8KB - Recent query results
+    4096,   # Position 2: 4KB - Older query results
+    2048,   # Position 3: 2KB
+    1024,   # Position 4: 1KB
+    # Position 5+: None (very old)
+]
+
+PREVIEW_TIER_COUNT = max(len(PREVIEW_TIERS_EXTERNAL), len(PREVIEW_TIERS_SQLITE))
 
 MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
-MAX_SCHEMA_BYTES = 1_000_000
 
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
 
@@ -72,33 +84,47 @@ def prepare_tool_results_for_prompt(
         if not result_text:
             continue
 
-        meta, stored_json, stored_text, stored_schema = _summarize_result(result_text)
+        meta, stored_json, stored_text, analysis = _summarize_result(
+            result_text, record.step_id
+        )
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
-        # Only show schema for tools that fetch external data with unknown structure
-        is_schema_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
-        prompt_schema = stored_schema if is_schema_eligible else None
+        # Only show rich analysis for tools that fetch external data with unknown structure
+        is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
 
         meta_text = _format_meta_text(
             record.step_id,
             meta,
+            analysis=analysis if is_analysis_eligible else None,
             stored_in_db=stored_in_db,
-            is_json=meta["is_json"],  # For query hint - JSON vs text query syntax
         )
         recency_position = recency_positions.get(record.step_id)
         preview_text, is_inline = _build_prompt_preview(
             result_text,
             meta["bytes"],
             recency_position=recency_position,
+            tool_name=record.tool_name,
         )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
             meta=meta_text,
             preview_text=preview_text,
             is_inline=is_inline,
-            schema_text=prompt_schema,
+            schema_text=None,  # Replaced by analysis in meta_text
         )
 
         if stored_in_db:
+            # Serialize analysis for storage
+            analysis_json_str = None
+            if analysis:
+                try:
+                    analysis_json_str = json.dumps(
+                        analysis_to_dict(analysis),
+                        ensure_ascii=True,
+                        separators=(",", ":"),
+                    )
+                except Exception:
+                    logger.debug("Failed to serialize analysis", exc_info=True)
+
             rows.append(
                 (
                     record.step_id,
@@ -115,7 +141,7 @@ def prepare_tool_results_for_prompt(
                     1 if meta["is_truncated"] else 0,
                     meta["truncated_bytes"],
                     stored_json,
-                    stored_schema,
+                    analysis_json_str,
                     stored_text,
                 )
             )
@@ -153,7 +179,7 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     is_truncated,
                     truncated_bytes,
                     result_json,
-                    json_schema,
+                    analysis_json,
                     result_text
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
@@ -191,7 +217,7 @@ def _ensure_tool_results_table(conn) -> None:
             is_truncated INTEGER,
             truncated_bytes INTEGER,
             result_json TEXT,
-            json_schema TEXT,
+            analysis_json TEXT,
             result_text TEXT
         )
         """
@@ -206,15 +232,22 @@ def _ensure_tool_results_columns(conn) -> None:
             f"PRAGMA table_info('{TOOL_RESULTS_TABLE}')"
         )
     }
-    if "json_schema" not in existing:
+    # Migration: add analysis_json column if missing
+    if "analysis_json" not in existing:
         conn.execute(
-            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN json_schema TEXT;'
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN analysis_json TEXT;'
         )
 
 
 def _summarize_result(
     result_text: str,
-) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[str]]:
+    result_id: str,
+) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[ResultAnalysis]]:
+    """Summarize a tool result and perform rich analysis.
+
+    Returns:
+        Tuple of (meta dict, result_json for storage, result_text for storage, analysis)
+    """
     encoded = result_text.encode("utf-8")
     full_bytes = len(encoded)
     line_count = result_text.count("\n") + 1 if result_text else 0
@@ -223,30 +256,35 @@ def _summarize_result(
     has_images = bool(_IMAGE_RE.search(result_text))
     has_base64 = bool(_BASE64_RE.search(result_text))
 
-    is_json = False
+    # Perform rich analysis
+    analysis: Optional[ResultAnalysis] = None
+    try:
+        analysis = analyze_result(result_text, result_id)
+    except Exception:
+        logger.debug("Failed to analyze tool result", exc_info=True)
+
+    # Extract basic JSON info
+    is_json = analysis.is_json if analysis else False
     json_type = ""
     top_keys: List[str] = []
-    parsed: object | None = None
-    schema_text: Optional[str] = None
-    schema_bytes = 0
-    schema_truncated = False
-    try:
-        parsed = json.loads(result_text)
-        is_json = True
-        json_type = _json_type(parsed)
-        if isinstance(parsed, dict):
-            top_keys = list(parsed.keys())[:MAX_TOP_KEYS]
-    except Exception:
-        pass
-    schema_target = _extract_json_payload_for_schema(parsed) if is_json else None
-    if schema_target is not None:
-        if isinstance(schema_target, dict):
-            top_keys = list(schema_target.keys())[:MAX_TOP_KEYS]
-        json_type = _json_type(schema_target)
+
+    if analysis and analysis.json_analysis:
+        ja = analysis.json_analysis
+        json_type = ja.pattern
+        # Get top keys from primary array or field types
+        if ja.primary_array and ja.primary_array.item_fields:
+            top_keys = ja.primary_array.item_fields[:MAX_TOP_KEYS]
+        elif ja.field_types:
+            top_keys = [ft.name for ft in ja.field_types[:MAX_TOP_KEYS]]
+    elif is_json:
+        # Fallback: parse and extract basic info
         try:
-            schema_text, schema_bytes, schema_truncated = _infer_json_schema(schema_target)
+            parsed = json.loads(result_text)
+            json_type = _json_type(parsed)
+            if isinstance(parsed, dict):
+                top_keys = list(parsed.keys())[:MAX_TOP_KEYS]
         except Exception:
-            logger.debug("Failed to infer JSON schema for tool result.", exc_info=True)
+            pass
 
     truncated_text, truncated_bytes = _truncate_to_bytes(result_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
@@ -265,31 +303,58 @@ def _summarize_result(
         "has_base64": has_base64,
         "is_truncated": is_truncated,
         "truncated_bytes": truncated_bytes,
-        "schema_bytes": schema_bytes,
-        "schema_truncated": schema_truncated,
     }
-    return meta, result_json, result_text_store, schema_text
+    return meta, result_json, result_text_store, analysis
 
 
 def _build_prompt_preview(
-    result_text: str, full_bytes: int, *, recency_position: Optional[int]
+    result_text: str,
+    full_bytes: int,
+    *,
+    recency_position: Optional[int],
+    tool_name: str,
 ) -> Tuple[Optional[str], bool]:
+    """Build a preview for the prompt.
+
+    For external data (http_request, mcp_*): small structure hints only.
+    For sqlite results: generous preview since this IS the extracted data.
+
+    Returns (preview_text, is_inline) where:
+    - preview_text is a sample of the result
+    - is_inline is True only for small results that fit entirely
+    """
+    # Determine which tier system to use
+    is_sqlite = tool_name in EXCLUDED_TOOL_NAMES or tool_name.startswith("sqlite")
+    tiers = PREVIEW_TIERS_SQLITE if is_sqlite else PREVIEW_TIERS_EXTERNAL
+    tier_count = len(tiers)
+
     # No position means meta only (old result beyond tier range)
-    if recency_position is None or recency_position >= PREVIEW_TIER_COUNT:
+    if recency_position is None or recency_position >= tier_count:
         return None, False
 
-    max_bytes = PREVIEW_TIERS[recency_position]
+    max_bytes = tiers[recency_position]
+
+    # For large EXTERNAL results, cap preview to force query usage
+    # (Don't cap sqlite results - agent needs to see query output)
+    if not is_sqlite and full_bytes >= LARGE_RESULT_THRESHOLD:
+        max_bytes = min(max_bytes, LARGE_RESULT_PREVIEW_CAP)
 
     # If result fits within tier limit, show full (inline)
     if full_bytes <= max_bytes:
         return result_text, True
 
-    # Otherwise truncate to tier limit
+    # Truncate with appropriate guidance
     preview_text, truncated_bytes = _truncate_to_bytes(result_text, max_bytes)
     if truncated_bytes > 0:
-        preview_text = (
-            f"{preview_text}\n... (truncated, {truncated_bytes} more bytes)"
-        )
+        if is_sqlite:
+            # SQLite result - just note truncation, no "use query" since this IS the query result
+            preview_text = f"{preview_text}\n... [{truncated_bytes} more bytes truncated]"
+        else:
+            # External data - remind to use query
+            preview_text = (
+                f"{preview_text}\n"
+                f"... [{truncated_bytes} more bytes - USE QUERY ABOVE to access full data]"
+            )
     return preview_text, False
 
 
@@ -297,143 +362,57 @@ def _format_meta_text(
     result_id: str,
     meta: Dict[str, object],
     *,
+    analysis: Optional[ResultAnalysis],
     stored_in_db: bool,
-    is_json: bool = False,
 ) -> str:
+    """Format metadata and analysis into actionable text for the prompt.
+
+    When analysis is available, uses the compact summary with ready-to-use
+    query patterns. Falls back to basic meta info otherwise.
+    """
+    # Basic meta line (always present)
     parts = [
         f"result_id={result_id}",
         f"in_db={1 if stored_in_db else 0}",
         f"bytes={meta['bytes']}",
-        f"lines={meta['line_count']}",
-        f"is_json={1 if meta['is_json'] else 0}",
-        f"json_type={meta['json_type'] or 'unknown'}",
     ]
-    top_keys = meta.get("top_keys") or ""
-    if top_keys:
-        parts.append(f"top_keys={top_keys}")
-    schema_bytes = meta.get("schema_bytes") or 0
-    if schema_bytes:
-        parts.append(f"schema_bytes={schema_bytes}")
-    if meta.get("schema_truncated"):
-        parts.append("schema_truncated=1")
-    parts.extend(
-        [
-            f"is_binary={1 if meta['is_binary'] else 0}",
-            f"has_images={1 if meta['has_images'] else 0}",
-            f"has_base64={1 if meta['has_base64'] else 0}",
-            f"truncated_bytes={meta['truncated_bytes']}",
-        ]
-    )
+
+    # Add binary/image flags only if present
+    if meta.get("is_binary"):
+        parts.append("is_binary=1")
+    if meta.get("has_images"):
+        parts.append("has_images=1")
+    if meta.get("has_base64"):
+        parts.append("has_base64=1")
+    if meta.get("is_truncated") and meta.get("truncated_bytes"):
+        parts.append(f"truncated_bytes={meta['truncated_bytes']}")
+
     meta_line = ", ".join(parts)
-    # Add query hint for large results stored in DB (exceeds most generous tier)
-    if stored_in_db and meta["bytes"] > PREVIEW_TIERS[0]:
-        if is_json:
+
+    # If we have rich analysis, use the compact summary
+    if analysis and analysis.compact_summary and stored_in_db:
+        meta_line += "\n" + analysis.compact_summary
+    elif stored_in_db and meta["bytes"] > PREVIEW_TIERS_EXTERNAL[0]:
+        # Fallback: basic query hints for large results without analysis
+        if meta.get("is_json"):
             meta_line += (
-                f"\n→ Use sqlite_batch to query/analyze this result: "
-                f"SELECT json_extract(result_json, '$.key') FROM __tool_results WHERE result_id='{result_id}'"
+                f"\n[JSON: {meta.get('json_type', 'unknown')}]"
+            )
+            top_keys = meta.get("top_keys") or ""
+            if top_keys:
+                meta_line += f"\nfields: {top_keys}"
+            meta_line += (
+                f"\n-> json_extract(result_json,'$.field') or json_each(result_json,'$.array')"
+                f"\n-> FROM __tool_results WHERE result_id='{result_id}'"
             )
         else:
             meta_line += (
-                f"\n→ Use sqlite_batch to query/analyze this result: "
-                f"SELECT substr(result_text, 1, 500), instr(result_text, 'keyword') FROM __tool_results WHERE result_id='{result_id}'"
+                f"\n[Text: ~{meta.get('line_count', '?')} lines]"
+                f"\n-> instr(result_text,'keyword') to find, substr() to extract"
+                f"\n-> FROM __tool_results WHERE result_id='{result_id}'"
             )
+
     return meta_line
-
-
-def _infer_json_schema(value: object) -> Tuple[Optional[str], int, bool]:
-    builder = SchemaBuilder()
-    builder.add_object(value)
-    schema = builder.to_schema()
-    schema_text = json.dumps(
-        schema,
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    schema_bytes = len(schema_text.encode("utf-8"))
-    if schema_bytes > MAX_SCHEMA_BYTES:
-        return None, schema_bytes, True
-    return schema_text, schema_bytes, False
-
-
-def _extract_json_payload_for_schema(value: object | None) -> object | None:
-    def unwrap_json_container(candidate: object | None) -> object | None:
-        if isinstance(candidate, (dict, list)):
-            return candidate
-        if isinstance(candidate, str):
-            stripped = candidate.lstrip()
-            if not stripped or stripped[0] not in "{[":
-                return None
-            try:
-                parsed = json.loads(candidate)
-            except Exception:
-                return None
-            if isinstance(parsed, (dict, list)):
-                return parsed
-        return None
-
-    def looks_like_sqlite_envelope(container: dict) -> bool:
-        if "db_size_mb" in container:
-            return True
-        results = container.get("results")
-        if not isinstance(results, list) or not results:
-            return False
-        for item in results:
-            if not isinstance(item, dict):
-                return False
-            item_keys = set(item.keys())
-            if not item_keys or item_keys - {"message", "result", "error"}:
-                return False
-        return True
-
-    def looks_like_status_envelope(container: dict) -> bool:
-        if "status" not in container:
-            return False
-        envelope_keys = {
-            "status",
-            "message",
-            "message_id",
-            "error",
-            "errors",
-            "details",
-            "results",
-            "db_size_mb",
-            "headers",
-            "status_code",
-            "proxy_used",
-            "auto_sleep_ok",
-            "tool_manager",
-            "created_count",
-            "already_allowed_count",
-            "already_pending_count",
-            "approval_url",
-            "filename",
-            "path",
-            "node_id",
-            "task_id",
-            "conversation_id",
-            "step_id",
-        }
-        return not (set(container.keys()) - envelope_keys)
-
-    payload_keys = ("content", "data", "result", "payload", "response")
-
-    if isinstance(value, str):
-        value = unwrap_json_container(value)
-        if value is None:
-            return None
-    if isinstance(value, dict):
-        for key in payload_keys:
-            if key in value:
-                candidate = unwrap_json_container(value.get(key))
-                if candidate is not None:
-                    return candidate
-        if looks_like_sqlite_envelope(value) or looks_like_status_envelope(value):
-            return None
-        return value
-    if isinstance(value, list):
-        return value
-    return None
 
 
 def _truncate_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:
