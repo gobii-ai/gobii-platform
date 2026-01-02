@@ -452,6 +452,12 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             content_str = preview_bytes.decode(errors="replace")
         if truncated:
             content_str += "\n\n[Content truncated to 30KB]"
+        # Parse JSON content so agents can query it directly without double extraction
+        if "json" in content_type:
+            try:
+                content_str = json.loads(content_str)
+            except Exception:
+                pass  # Keep as string if parse fails
     else:
         size_hint = content_length if content_length is not None else total_bytes
         content_str = (

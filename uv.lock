@@ -1274,6 +1274,12 @@ wheels = [
 ]
 
 [[package]]
+name = "genson"
+version = "1.2.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/71/fbd2f1ad9695c92ad756b91f5a570f809c4959d3bd82266788cf222e5c5c/genson-1.2.2.tar.gz", hash = "sha256:8caf69aa10af7aee0e1a1351d1d06801f4696e005f06cedef438635384346a16", size = 34387, upload-time = "2020-08-19T17:04:45.09Z" }
+
+[[package]]
 name = "gobii-platform"
 version = "0.1.0"
 source = { editable = "." }
@@ -1304,6 +1310,7 @@ dependencies = [
     { name = "drf-spectacular" },
     { name = "exa-py" },
     { name = "fastmcp" },
+    { name = "genson" },
     { name = "google-cloud-storage" },
     { name = "gunicorn" },
     { name = "imapclient" },
@@ -1427,6 +1434,7 @@ requires-dist = [
     { name = "drf-spectacular", specifier = "~=0.28" },
     { name = "exa-py", specifier = "==1.14.16" },
     { name = "fastmcp", specifier = ">=2.11.3" },
+    { name = "genson", specifier = "~=1.2.2" },
     { name = "google-cloud-storage", specifier = "~=3.1.0" },
     { name = "gunicorn", specifier = "==23.0.0" },
     { name = "imapclient", specifier = "~=2.3" },

@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from genson import SchemaBuilder
+
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
@@ -16,6 +18,7 @@ PREVIEW_MAX_BYTES = 512
 LAST_N_PREVIEW = 5
 MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
+MAX_SCHEMA_BYTES = 1_000_000
 
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
 
@@ -36,6 +39,7 @@ class ToolResultPromptInfo:
     meta: str
     preview_text: Optional[str]
     is_inline: bool
+    schema_text: Optional[str]
 
 
 def prepare_tool_results_for_prompt(
@@ -53,7 +57,7 @@ def prepare_tool_results_for_prompt(
         if not result_text:
             continue
 
-        meta, stored_json, stored_text = _summarize_result(result_text)
+        meta, stored_json, stored_text, stored_schema = _summarize_result(result_text)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
 
         meta_text = _format_meta_text(
@@ -71,6 +75,7 @@ def prepare_tool_results_for_prompt(
             meta=meta_text,
             preview_text=preview_text,
             is_inline=is_inline,
+            schema_text=stored_schema,
         )
 
         if stored_in_db:
@@ -90,6 +95,7 @@ def prepare_tool_results_for_prompt(
                     1 if meta["is_truncated"] else 0,
                     meta["truncated_bytes"],
                     stored_json,
+                    stored_schema,
                     stored_text,
                 )
             )
@@ -127,9 +133,10 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     is_truncated,
                     truncated_bytes,
                     result_json,
+                    json_schema,
                     result_text
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -164,13 +171,30 @@ def _ensure_tool_results_table(conn) -> None:
             is_truncated INTEGER,
             truncated_bytes INTEGER,
             result_json TEXT,
+            json_schema TEXT,
             result_text TEXT
         )
         """
     )
+    _ensure_tool_results_columns(conn)
 
 
-def _summarize_result(result_text: str) -> Tuple[Dict[str, object], Optional[str], Optional[str]]:
+def _ensure_tool_results_columns(conn) -> None:
+    existing = {
+        row[1]
+        for row in conn.execute(
+            f"PRAGMA table_info('{TOOL_RESULTS_TABLE}')"
+        )
+    }
+    if "json_schema" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN json_schema TEXT;'
+        )
+
+
+def _summarize_result(
+    result_text: str,
+) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[str]]:
     encoded = result_text.encode("utf-8")
     full_bytes = len(encoded)
     line_count = result_text.count("\n") + 1 if result_text else 0
@@ -182,6 +206,10 @@ def _summarize_result(result_text: str) -> Tuple[Dict[str, object], Optional[str
     is_json = False
     json_type = ""
     top_keys: List[str] = []
+    parsed: object | None = None
+    schema_text: Optional[str] = None
+    schema_bytes = 0
+    schema_truncated = False
     try:
         parsed = json.loads(result_text)
         is_json = True
@@ -190,6 +218,11 @@ def _summarize_result(result_text: str) -> Tuple[Dict[str, object], Optional[str
             top_keys = list(parsed.keys())[:MAX_TOP_KEYS]
     except Exception:
         pass
+    if is_json and parsed is not None:
+        try:
+            schema_text, schema_bytes, schema_truncated = _infer_json_schema(parsed)
+        except Exception:
+            logger.debug("Failed to infer JSON schema for tool result.", exc_info=True)
 
     truncated_text, truncated_bytes = _truncate_to_bytes(result_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
@@ -208,8 +241,10 @@ def _summarize_result(result_text: str) -> Tuple[Dict[str, object], Optional[str
         "has_base64": has_base64,
         "is_truncated": is_truncated,
         "truncated_bytes": truncated_bytes,
+        "schema_bytes": schema_bytes,
+        "schema_truncated": schema_truncated,
     }
-    return meta, result_json, result_text_store
+    return meta, result_json, result_text_store, schema_text
 
 
 def _build_prompt_preview(result_text: str, full_bytes: int, *, include_preview: bool) -> Tuple[Optional[str], bool]:
@@ -237,6 +272,11 @@ def _format_meta_text(result_id: str, meta: Dict[str, object], *, stored_in_db: 
     top_keys = meta.get("top_keys") or ""
     if top_keys:
         parts.append(f"top_keys={top_keys}")
+    schema_bytes = meta.get("schema_bytes") or 0
+    if schema_bytes:
+        parts.append(f"schema_bytes={schema_bytes}")
+    if meta.get("schema_truncated"):
+        parts.append("schema_truncated=1")
     parts.extend(
         [
             f"is_binary={1 if meta['is_binary'] else 0}",
@@ -246,6 +286,22 @@ def _format_meta_text(result_id: str, meta: Dict[str, object], *, stored_in_db: 
         ]
     )
     return ", ".join(parts)
+
+
+def _infer_json_schema(value: object) -> Tuple[Optional[str], int, bool]:
+    builder = SchemaBuilder()
+    builder.add_object(value)
+    schema = builder.to_schema()
+    schema_text = json.dumps(
+        schema,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    schema_bytes = len(schema_text.encode("utf-8"))
+    if schema_bytes > MAX_SCHEMA_BYTES:
+        return None, schema_bytes, True
+    return schema_text, schema_bytes, False
 
 
 def _truncate_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:

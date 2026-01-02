@@ -200,7 +200,7 @@ def _get_sqlite_examples() -> str:
 Your database is persistent across runs. The `__tool_results` table holds tool outputs for THIS CYCLE ONLY — extract what matters into durable tables.
 
 **Critical workflow for large results:**
-1. Tool returns large result → 2. Inspect metadata (bytes, is_json, array length) → 3. Sample structure → 4. Extract only needed fields → 5. Persist if needed
+1. Tool returns large result → 2. Inspect metadata (bytes, is_json, array length, schema size) → 3. Sample structure → 4. Extract only needed fields → 5. Persist if needed
 
 **Syntax:** The `queries` parameter is a plain SQL string. Use semicolons to separate statements.
 
@@ -218,21 +218,21 @@ http_request(url="https://api.example.com/products", will_continue_work=true)
 
 **Step 2: Inspect what came back (ALWAYS DO THIS FIRST)**
 ```
-sqlite_batch(queries="SELECT result_id, bytes, is_json, json_type, json_array_length(result_json, '$.products') AS item_count FROM __tool_results WHERE result_id='call_abc123'")
+sqlite_batch(queries="SELECT result_id, bytes, is_json, json_type, json_array_length(result_json, '$.content.products') AS item_count FROM __tool_results WHERE result_id='call_abc123'")
 ```
 → Result: bytes=48201, is_json=1, json_type=object, item_count=342
 → Now you know: 48KB, JSON object, 342 products. Don't dump it all!
 
 **Step 3: Sample 2-3 items to understand structure**
 ```
-sqlite_batch(queries="SELECT json_extract(value, '$') FROM __tool_results, json_each(result_json, '$.products') WHERE result_id='call_abc123' LIMIT 2")
+sqlite_batch(queries="SELECT json_extract(item.value, '$') FROM __tool_results, json_each(result_json, '$.content.products') AS item WHERE result_id='call_abc123' LIMIT 2")
 ```
 → Shows: {id, name, price, category, stock, description, images...}
 → Now you know which fields exist. Pick only what you need.
 
 **Step 4: Extract only needed fields into durable table**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT, price REAL, category TEXT); INSERT OR REPLACE INTO products (id, name, price, category) SELECT json_extract(value,'$.id'), json_extract(value,'$.name'), json_extract(value,'$.price'), json_extract(value,'$.category') FROM __tool_results, json_each(result_json,'$.products') WHERE result_id='call_abc123'")
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT, price REAL, category TEXT); INSERT OR REPLACE INTO products (id, name, price, category) SELECT json_extract(item.value,'$.id'), json_extract(item.value,'$.name'), json_extract(item.value,'$.price'), json_extract(item.value,'$.category') FROM __tool_results, json_each(result_json,'$.content.products') AS item WHERE result_id='call_abc123'")
 ```
 → 342 rows, ~8KB stored vs 48KB raw. Now queryable forever.
 
@@ -306,19 +306,19 @@ http_request(url="https://api.github.com/repos/org/repo/pulls", will_continue_wo
 
 **Step 2: Check structure**
 ```
-sqlite_batch(queries="SELECT bytes, json_array_length(result_json) AS pr_count FROM __tool_results WHERE result_id='call_prs1'")
+sqlite_batch(queries="SELECT bytes, json_array_length(result_json, '$.content') AS pr_count FROM __tool_results WHERE result_id='call_prs1'")
 ```
 → 47 PRs, 120KB — each PR has user object, head/base objects, labels array...
 
-**Step 3: See what top-level keys exist**
+**Step 3: See what top-level keys exist in each PR**
 ```
-sqlite_batch(queries="SELECT DISTINCT key FROM __tool_results, json_each(result_json) AS arr, json_each(arr.value) WHERE result_id='call_prs1' LIMIT 15")
+sqlite_batch(queries="SELECT DISTINCT key FROM __tool_results, json_each(result_json, '$.content') AS pr, json_each(pr.value) WHERE result_id='call_prs1' LIMIT 15")
 ```
 → id, number, title, user, state, created_at, merged_at, head, base...
 
 **Step 4: Extract flattened view (reach into nested objects)**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS pull_requests AS SELECT json_extract(value,'$.number') AS pr_num, json_extract(value,'$.title') AS title, json_extract(value,'$.user.login') AS author, json_extract(value,'$.state') AS state, json_extract(value,'$.created_at') AS created, json_extract(value,'$.merged_at') AS merged FROM __tool_results, json_each(result_json) WHERE result_id='call_prs1'")
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS pull_requests AS SELECT json_extract(pr.value,'$.number') AS pr_num, json_extract(pr.value,'$.title') AS title, json_extract(pr.value,'$.user.login') AS author, json_extract(pr.value,'$.state') AS state, json_extract(pr.value,'$.created_at') AS created, json_extract(pr.value,'$.merged_at') AS merged FROM __tool_results, json_each(result_json, '$.content') AS pr WHERE result_id='call_prs1'")
 ```
 → 47 rows, ~4KB vs 120KB
 
@@ -376,13 +376,13 @@ http_request(url="https://api.store.com/orders?days=30", will_continue_work=true
 
 **Step 2: Aggregate by status BEFORE extracting details**
 ```
-sqlite_batch(queries="SELECT json_extract(value,'$.status') AS status, COUNT(*) AS cnt FROM __tool_results, json_each(result_json,'$.orders') WHERE result_id='call_orders1' GROUP BY 1")
+sqlite_batch(queries="SELECT json_extract(o.value,'$.status') AS status, COUNT(*) AS cnt FROM __tool_results, json_each(result_json,'$.content.orders') AS o WHERE result_id='call_orders1' GROUP BY 1")
 ```
 → pending=12, processing=45, shipped=2756, failed=34
 
 **Step 3: Extract ONLY the failed ones**
 ```
-sqlite_batch(queries="SELECT json_extract(value,'$.id') AS order_id, json_extract(value,'$.error') AS error, json_extract(value,'$.customer.email') AS email FROM __tool_results, json_each(result_json,'$.orders') WHERE result_id='call_orders1' AND json_extract(value,'$.status')='failed'")
+sqlite_batch(queries="SELECT json_extract(o.value,'$.id') AS order_id, json_extract(o.value,'$.error') AS error, json_extract(o.value,'$.customer.email') AS email FROM __tool_results, json_each(result_json,'$.content.orders') AS o WHERE result_id='call_orders1' AND json_extract(o.value,'$.status')='failed'")
 ```
 → 34 rows with actionable data (not 2847 rows / 340KB)
 
@@ -406,45 +406,68 @@ sqlite_batch(queries="SELECT r.url, r.title, substr(t.result_text, 1, 500) AS pr
 
 ## Key Techniques Reference
 
+### http_request Results
+http_request wraps responses: `{"status":"ok", "status_code":200, "content":{...}}`. For JSON APIs, `content` is already parsed:
+```
+SELECT json_extract(item.value, '$.name') FROM __tool_results, json_each(result_json, '$.content.items') AS item WHERE result_id='X'
+```
+
+### Always Alias json_each()
+When using json_each, ALWAYS alias it. When using multiple json_each, each needs a UNIQUE alias:
+```
+✗ SELECT value FROM t, json_each(col1), json_each(col2)  -- ambiguous 'value'
+✓ SELECT a.value, b.value FROM t, json_each(col1) AS a, json_each(col2) AS b
+```
+
+### Access json_each Columns Correctly
+json_each produces columns: key, value, type, atom, id, parent, fullkey, path
+```
+✓ SELECT item.key, item.value FROM t, json_each(data) AS item
+✗ SELECT item FROM t, json_each(data) AS item  -- 'item' is the alias, not a column
+```
+
 ### Inspect Metadata First
 ```
-SELECT result_id, bytes, is_json, json_type, line_count, top_keys FROM __tool_results WHERE result_id='X'
+SELECT result_id, bytes, is_json, json_type, top_keys FROM __tool_results WHERE result_id='X'
 ```
 
 ### Count Array Elements
 ```
-SELECT json_array_length(result_json, '$.items') FROM __tool_results WHERE result_id='X'
+SELECT json_array_length(result_json, '$.content.items') FROM __tool_results WHERE result_id='X'
 ```
 
-### Sample Without Extracting All
+### Sample Before Bulk Extract
 ```
-SELECT json_extract(value,'$') FROM __tool_results, json_each(result_json,'$.items') WHERE result_id='X' LIMIT 3
+SELECT json_extract(item.value, '$') FROM __tool_results, json_each(result_json, '$.content.items') AS item WHERE result_id='X' LIMIT 2
 ```
 
 ### Create Table Directly From JSON
 ```
-CREATE TABLE items AS SELECT json_extract(value,'$.id') AS id, json_extract(value,'$.name') AS name FROM __tool_results, json_each(result_json,'$.data') WHERE result_id='X'
+CREATE TABLE items AS SELECT json_extract(item.value,'$.id') AS id, json_extract(item.value,'$.name') AS name FROM __tool_results, json_each(result_json,'$.content.data') AS item WHERE result_id='X'
 ```
 
-### Reach Into Nested Objects
+### Text Position + Extraction
 ```
-json_extract(value, '$.user.profile.email')
-json_extract(value, '$.items[0].price')
-```
-
-### Text Position Finding
-```
-SELECT instr(result_text, 'keyword') AS pos FROM __tool_results WHERE result_id='X'
+SELECT substr(result_text, instr(result_text, 'ERROR') - 50, 300) AS context FROM __tool_results WHERE result_id='X' AND instr(result_text, 'ERROR') > 0
 ```
 
-### Text Extraction Around Position
+---
+
+## CTE Best Practices
+
+CTEs (WITH clauses) help with complex queries but require discipline:
+
+**1. Name CTEs distinctly - avoid typos**
 ```
-SELECT substr(result_text, pos - 100, 500) FROM ...
+✗ WITH my_items AS (...) SELECT * FROM my_item  -- typo: my_item vs my_items
+✓ WITH my_items AS (...) SELECT * FROM my_items
 ```
 
-### Pattern Matching in Text
+**2. Reference CTE columns correctly**
 ```
-WHERE result_text LIKE '%error%' OR result_text GLOB '*Exception*'
+WITH parsed AS (SELECT result_json AS data FROM __tool_results WHERE result_id='X')
+✗ SELECT json_extract(data, '$.name') FROM parsed, json_each(data)  -- data is column, need parsed.data
+✓ SELECT json_extract(item.value, '$.name') FROM parsed, json_each(parsed.data, '$.content.items') AS item
 ```
 
 ---
@@ -463,16 +486,22 @@ WHERE result_text LIKE '%error%' OR result_text GLOB '*Exception*'
 ✓ INSERT INTO t (a, b, c) VALUES (1, 2, 3)
 ```
 
-### Table Name Typos
+### Table/CTE Name Typos
 ```
-✗ CREATE TABLE items (...); INSERT INTO item ...
-✓ CREATE TABLE items (...); INSERT INTO items ...
+✗ WITH items AS (...) SELECT * FROM item  -- typo!
+✓ WITH items AS (...) SELECT * FROM items
 ```
 
-### Reserved Words
+### Ambiguous Column References
 ```
-✗ CREATE TABLE order (...)
-✓ CREATE TABLE orders (...)
+✗ SELECT value FROM t, json_each(a), json_each(b)  -- which value?
+✓ SELECT x.value, y.value FROM t, json_each(a) AS x, json_each(b) AS y
+```
+
+### Wrong json_each Column Access
+```
+✗ SELECT item FROM json_each(data) AS item  -- item is alias, not column
+✓ SELECT item.value FROM json_each(data) AS item
 ```
 
 ### Querying Empty Tables
@@ -3110,6 +3139,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 if result_info.preview_text:
                     key = "result" if result_info.is_inline else "result_preview"
                     components[key] = result_info.preview_text
+                if result_info.schema_text:
+                    components["result_schema"] = result_info.schema_text
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
@@ -3285,6 +3316,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
             "result_meta": 2, # Medium priority - supports tool result lookup
+            "result_schema": 1, # Low priority - schema can be shrunk aggressively
             "result_preview": 1, # Low priority - preview only
             "content": 2,     # Medium priority for message content (SMS, etc.)
             "attachments": 2, # Medium priority for message attachment paths
@@ -3312,7 +3344,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if (
-                    component_name in ("params", "result", "result_preview", "body") or
+                    component_name in ("params", "result", "result_preview", "result_schema", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"
