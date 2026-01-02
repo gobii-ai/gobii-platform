@@ -263,6 +263,20 @@ code_block = True
         self.assertGreater(len(analysis.doc_structure.sections), 0)
         self.assertTrue(analysis.doc_structure.has_tables)
 
+    def test_detects_xml_format(self):
+        text = """<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <item id="1">Alpha</item>
+  <item id="2">Beta</item>
+</root>"""
+
+        analysis = analyze_text(text)
+
+        self.assertEqual(analysis.format, "xml")
+        self.assertIsNotNone(analysis.xml_info)
+        self.assertEqual(analysis.xml_info.root_tag, "root")
+        self.assertGreater(analysis.xml_info.element_count, 0)
+
     def test_detects_log_format(self):
         text = """2024-01-15T10:30:00Z INFO Starting application
 2024-01-15T10:30:01Z DEBUG Loading configuration
@@ -614,6 +628,38 @@ class EdgeCaseTests(SimpleTestCase):
             "COLUMNS" in analysis.compact_summary
         )
         self.assertIn("GET CSV", analysis.compact_summary)
+
+    def test_detects_embedded_json_string(self):
+        """Detect JSON embedded in string fields and expose query hints."""
+        payload = {
+            "status": "success",
+            "result": "{\"items\": [{\"id\": 1, \"name\": \"Alpha\"}, {\"id\": 2, \"name\": \"Beta\"}]}",
+        }
+        analysis = analyze_result(json.dumps(payload), "json-embedded")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.embedded_content)
+        emb = analysis.json_analysis.embedded_content
+        self.assertEqual(emb.path, "$.result")
+        self.assertEqual(emb.format, "json")
+        self.assertIsNotNone(emb.json_info)
+        self.assertEqual(emb.json_info.primary_array_path, "$.items")
+        self.assertIn("GET JSON", analysis.compact_summary)
+
+    def test_detects_embedded_csv_in_nested_list(self):
+        """Detect CSV embedded under list items with wildcard paths."""
+        payload = {
+            "results": [
+                {"payload": "id,name\n1,Alice\n2,Bob"},
+            ],
+        }
+        analysis = analyze_result(json.dumps(payload), "csv-nested")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.embedded_content)
+        emb = analysis.json_analysis.embedded_content
+        self.assertEqual(emb.format, "csv")
+        self.assertEqual(emb.path, "$.results[*].payload")
 
     def test_csv_in_json_serialization(self):
         """Verify embedded CSV info is serialized correctly."""

@@ -188,6 +188,26 @@ class HttpRequestJsonParsingTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_json_with_xssi_prefix_is_parsed(self, mock_request, mock_proxy):
+        """Common XSSI prefixes should be stripped before JSON parsing."""
+        mock_proxy.return_value = None
+
+        json_bytes = b")]}',\n{\"ok\": true, \"items\": [1, 2, 3]}"
+
+        mock_request.return_value = _make_mock_response(
+            content=json_bytes,
+            content_type="text/plain",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/xssi"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["content"], dict)
+        self.assertEqual(result["content"]["ok"], True)
+        self.assertEqual(result["content"]["items"][0], 1)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_large_json_is_parsed(self, mock_request, mock_proxy):
         """Large JSON responses (under 5MB limit) should be parsed as objects."""
         mock_proxy.return_value = None

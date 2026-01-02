@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
-from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict
+from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, normalize_json_text
 
 logger = logging.getLogger(__name__)
 
@@ -256,10 +256,13 @@ def _summarize_result(
     has_images = bool(_IMAGE_RE.search(result_text))
     has_base64 = bool(_BASE64_RE.search(result_text))
 
+    normalized_json = normalize_json_text(result_text)
+    analysis_text = normalized_json if normalized_json is not None else result_text
+
     # Perform rich analysis
     analysis: Optional[ResultAnalysis] = None
     try:
-        analysis = analyze_result(result_text, result_id)
+        analysis = analyze_result(analysis_text, result_id)
     except Exception:
         logger.debug("Failed to analyze tool result", exc_info=True)
 
@@ -286,7 +289,8 @@ def _summarize_result(
         except Exception:
             pass
 
-    truncated_text, truncated_bytes = _truncate_to_bytes(result_text, MAX_TOOL_RESULT_BYTES)
+    storage_text = analysis_text if is_json else result_text
+    truncated_text, truncated_bytes = _truncate_to_bytes(storage_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
 
     result_json = truncated_text if is_json and not is_truncated else None
