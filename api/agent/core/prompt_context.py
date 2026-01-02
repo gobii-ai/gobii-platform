@@ -52,7 +52,7 @@ from ...models import (
     PersistentAgentStepSnapshot,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
-    PersistentAgentEnabledTool,
+    PersistentAgentToolCall,
 )
 from ...services.web_sessions import get_active_web_sessions
 
@@ -72,7 +72,6 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from ..tools.charter_updater import get_update_charter_tool
-from ..tools.database_enabler import get_enable_database_tool
 from ..tools.email_sender import get_send_email_tool
 from ..tools.peer_dm import get_send_agent_message_tool
 from ..tools.request_contact_permission import get_request_contact_permission_tool
@@ -85,14 +84,15 @@ from ..tools.spawn_web_task import (
     get_spawn_web_task_tool,
 )
 from ..tools.sqlite_state import get_sqlite_schema_prompt
-from ..tools.tool_manager import (
-    SQLITE_TOOL_NAME,
-    ensure_default_tools_enabled,
-    get_enabled_tool_definitions,
-    is_sqlite_enabled_for_agent,
-)
+from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
+from .tool_results import (
+    PREVIEW_TIER_COUNT,
+    ToolCallResultRecord,
+    ToolResultPromptInfo,
+    prepare_tool_results_for_prompt,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -188,373 +188,387 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 
 
 def _get_sqlite_examples() -> str:
-    """Return in-context learning examples for sqlite_batch usage.
-
-    These examples teach the agent when and how to use SQLite effectively,
-    including schema design, batch operations, and schema evolution patterns.
-    """
+    """Return complete agent trajectories demonstrating data retrieval, storage, and analysis."""
     return """
-## SQLite In-Context Learning
+## Working with External Data
 
-Your database is persistent across runs. Design schemas that grow with your task.
-
-**Important:** The `queries` parameter is a plain SQL string. Use semicolons to separate multiple statements. Never use brackets, quotes around the whole thing, or array syntax.
-
-**Workflow:** Fetch data before querying. Don't query an empty database — there's nothing there yet!
-- First run: create schema → fetch external data → INSERT → report
-- Later runs: fetch new data → INSERT → query for comparison/aggregation → report
+When you fetch data from APIs or web sources, results are stored in `__tool_results`.
+Use the QUERY shown in the result metadata - it has the correct paths.
 
 ---
 
-### When to Use SQLite
+## Trajectory 1: API Data → Storage → Multi-faceted Analysis
 
-**Use sqlite_batch for:**
-- Tracking entities over time (prices, rankings, mentions, events)
-- Deduplicating data across runs (seen URLs, processed items)
-- Complex filtering, sorting, or aggregation
-- Storing structured results for comparison or reporting
-- Any data that needs to survive across cycles
+User asks: "What are the top categories in our product catalog and their price distributions?"
 
-**Skip SQLite for:**
-- One-off calculations → just reason inline
-- Simple lists under ~20 items → keep in working memory
-- Data you'll never reference again → don't persist
+```
+Step 1: Fetch the data
+  http_request(url="https://api.example.com/products", will_continue_work=true)
 
----
+  Result meta shows:
+    QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category'), json_extract(p.value,'$.price')
+           FROM __tool_results, json_each(result_json,'$.content.products') AS p
+           WHERE result_id='a1b2c3' LIMIT 25
+    PATH: $.content.products (847 items)
+    FIELDS: id, name, category, price, stock, created_at
 
-### Schema Creation
+Step 2: Since we need multiple analyses, store in a table first
+  sqlite_batch(queries="
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
+    );
+    INSERT OR REPLACE INTO products (id, name, category, price, stock)
+      SELECT json_extract(p.value,'$.id'), json_extract(p.value,'$.name'),
+             json_extract(p.value,'$.category'), json_extract(p.value,'$.price'),
+             json_extract(p.value,'$.stock')
+      FROM __tool_results, json_each(result_json,'$.content.products') AS p
+      WHERE result_id='a1b2c3'", will_continue_work=true)
 
-**Single table:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS prices (symbol TEXT PRIMARY KEY, price REAL, fetched_at TEXT)")
-```
+  Result: Query 1 affected 847 rows
 
-**Table with index** — use semicolons to separate statements:
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT); CREATE INDEX IF NOT EXISTS idx_price_symbol ON price_history(symbol, fetched_at DESC)")
-```
+Step 3: Category breakdown
+  sqlite_batch(queries="
+    SELECT category, COUNT(*) as count,
+           ROUND(AVG(price),2) as avg_price,
+           ROUND(MIN(price),2) as min_price,
+           ROUND(MAX(price),2) as max_price
+    FROM products GROUP BY category ORDER BY count DESC", will_continue_work=true)
 
-**Multiple related tables:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, stage TEXT, last_checked TEXT, notes TEXT); CREATE TABLE IF NOT EXISTS funding_rounds (id INTEGER PRIMARY KEY, startup_id INTEGER, amount REAL, date TEXT, source TEXT)")
-```
+  Result: Electronics|312|149.99|9.99|899.99, Clothing|245|45.50|12.00|299.00, ...
 
-**Deduplication pattern:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS seen_urls (url TEXT PRIMARY KEY, first_seen TEXT, title TEXT)")
-```
+Step 4: Find outliers - products priced unusually high or low for their category
+  sqlite_batch(queries="
+    SELECT p.name, p.category, p.price, cat.avg_price
+    FROM products p
+    JOIN (SELECT category, AVG(price) as avg_price FROM products GROUP BY category) cat
+      ON p.category = cat.category
+    WHERE p.price > cat.avg_price * 2 OR p.price < cat.avg_price * 0.3
+    ORDER BY p.category, p.price DESC LIMIT 20", will_continue_work=false)
 
----
-
-### Insert & Query Patterns
-
-**Insert multiple rows then query:**
-```
-sqlite_batch(queries="INSERT INTO price_history (symbol, price, fetched_at) VALUES ('BTC', 67000.50, '2024-01-15T10:30:00Z'); INSERT INTO price_history (symbol, price, fetched_at) VALUES ('ETH', 3400.25, '2024-01-15T10:30:00Z'); SELECT symbol, price, fetched_at FROM price_history WHERE fetched_at > datetime('now', '-24 hours') ORDER BY fetched_at DESC", will_continue_work=true)
-```
-
-**Upsert** — update if exists, insert if new:
-```
-sqlite_batch(queries="INSERT INTO prices (symbol, price, fetched_at) VALUES ('BTC', 67500.00, '2024-01-15T12:00:00Z') ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, fetched_at=excluded.fetched_at")
-```
-
-**Bulk insert with dedup:**
-```
-sqlite_batch(queries="INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post1', '2024-01-15', 'Great Article'); INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post2', '2024-01-15', 'Another Post'); SELECT COUNT(*) as total_seen FROM seen_urls")
+Step 5: Present findings
+  "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
+   averaging $149.99. Found 23 pricing outliers that may need review..."
 ```
 
 ---
 
-### Schema Evolution
+## Trajectory 2: CSV Data → Parse into Table → Analysis
 
-Schemas aren't static. Add columns, create new tables, migrate data as your task evolves.
+User asks: "Analyze this dataset and find any interesting patterns"
 
-**Add a column:**
 ```
-sqlite_batch(queries="ALTER TABLE startups ADD COLUMN sentiment TEXT")
-```
+Step 1: Fetch the CSV
+  http_request(url="https://data.example.org/sensors.csv", will_continue_work=true)
 
-**Create derived table for reporting:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS daily_summaries (date TEXT PRIMARY KEY, btc_high REAL, btc_low REAL, eth_high REAL, eth_low REAL); INSERT OR REPLACE INTO daily_summaries (date, btc_high, btc_low, eth_high, eth_low) SELECT date(fetched_at), MAX(CASE WHEN symbol='BTC' THEN price END), MIN(CASE WHEN symbol='BTC' THEN price END), MAX(CASE WHEN symbol='ETH' THEN price END), MIN(CASE WHEN symbol='ETH' THEN price END) FROM price_history GROUP BY date(fetched_at)")
-```
+  Result meta shows:
+    CSV DATA in $.content (500 rows, 4 columns)
+    SCHEMA: sensor_id:int, temp:float, humidity:float, location:text
+    SAMPLE: 101,22.5,45.2,Building-A
+    GET CSV: SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='d4e5f6'
 
-**Restructure a table:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups_v2 (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, category TEXT, stage TEXT, score INTEGER, last_checked TEXT); INSERT INTO startups_v2 (name, url, stage, last_checked) SELECT name, url, stage, last_checked FROM startups; DROP TABLE startups; ALTER TABLE startups_v2 RENAME TO startups")
-```
+Step 2: Create table and parse CSV using sequential field extraction
+  sqlite_batch(queries="
+    CREATE TABLE sensors (sensor_id INT, temp REAL, humidity REAL, location TEXT);
 
----
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='d4e5f6'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL
+        SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      -- 4 columns need 3 CTEs: p1 extracts c1, p2 extracts c2, p3 extracts c3 AND c4 (remainder)
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
+      p3 AS (SELECT c1,c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
+    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3",
+    will_continue_work=true)
 
-### Aggregation & Analysis
+  Result: Query 0 affected 0 rows. Query 1 affected 0 rows.
+  (Note: CTE-based INSERTs often report 0 rows - this is normal, data IS inserted)
 
-**Trend detection:**
-```
-sqlite_batch(queries="SELECT symbol, AVG(price) as avg_price, MIN(price) as low, MAX(price) as high FROM price_history WHERE fetched_at > datetime('now', '-7 days') GROUP BY symbol")
-```
+  sqlite_schema now shows:
+    Table sensors (rows: 500): CREATE TABLE sensors (...)
+      sample: (101, 22.5, 45.2, 'Building-A'), (298, 21.3, 51.8, 'Building-B')
+      stats: sensor_id[101-600], temp[18.20-28.90], humidity[35.10-62.40], location[Building-A, Building-B, Building-C]
 
-**Change detection for alerting:**
-```
-sqlite_batch(queries="SELECT symbol, price, LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at) as prev_price FROM price_history WHERE fetched_at > datetime('now', '-1 hour')")
-```
+  Schema confirms 500 rows with correct data - no verification query needed.
 
-**Top-N with ranking:**
-```
-sqlite_batch(queries="SELECT name, score, RANK() OVER (ORDER BY score DESC) as rank FROM startups WHERE stage = 'seed' LIMIT 10")
-```
+Step 3: Analyze (skip verification - schema already confirms data)
+  sqlite_batch(queries="
+    SELECT location, COUNT(*) as n,
+      ROUND(AVG(temp),1) as avg_temp,
+      ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
+      ROUND(AVG(humidity),1) as avg_hum
+    FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
 
----
+  Result: Building-A|245|23.1|2.31|48.2, Building-B|180|21.8|1.95|52.1, ...
 
-### String Escaping — Critical!
-
-**Escape single quotes by doubling them:**
-
-  ✗ Bad:  VALUES ('McDonald's', ...)
-  ✓ Good: VALUES ('McDonald''s', ...)
-
-  ✗ Bad:  VALUES ('It's raining', ...)
-  ✓ Good: VALUES ('It''s raining', ...)
-
-**Example with escaped quotes:**
-```
-sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedback', 'They said: ''This is great!''')")
-```
-
----
-
-### Column-Value Matching — Critical!
-
-**Every INSERT must have exactly one value per column.** Count columns, count values — they must match.
-
-  ✗ Bad (6 values for 7 columns — missing author):
-  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
-  VALUES ('123', '456', NULL, 'Comment text here', '2024-01-15T10:30:00Z', 1)
-
-  ✓ Good (7 values for 7 columns):
-  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
-  VALUES ('123', '456', NULL, 'username', 'Comment text here', '2024-01-15T10:30:00Z', 1)
-
-**When bulk inserting, verify each row tuple has the right count before executing.**
-
----
-
-### Table Name Consistency — Critical!
-
-**Use the exact same table name everywhere: CREATE TABLE, CREATE INDEX, INSERT, SELECT, UPDATE, DELETE.** Watch for singular vs plural typos (hn_comments vs hn_comment).
-
-  ✗ Bad (table is hn_comments, but index references hn_comment):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  CREATE INDEX idx_story ON hn_comment(story_id);  -- FAILS: no such table
-
-  ✗ Bad (same typo in INSERT):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  INSERT INTO hn_comment ...  -- FAILS: no such table
-
-  ✓ Good (same name in all statements):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  CREATE INDEX idx_story ON hn_comments(story_id);
-  INSERT INTO hn_comments ...
-  SELECT * FROM hn_comments
-
----
-
-### Avoid Reserved Words as Identifiers
-
-**Don't use SQL reserved words for table or column names.** Common traps: values, table, order, group, index, key, default, check, column, row, user, type, status, data, time, date.
-
-  ✗ Bad:
-  CREATE TABLE values (...)      -- "values" is reserved
-  CREATE TABLE data (order TEXT) -- "order" is reserved
-
-  ✓ Good:
-  CREATE TABLE price_values (...)
-  CREATE TABLE entries (sort_order TEXT)
-
----
-
-### Cleanup & Maintenance
-
-**Prune old data:**
-```
-sqlite_batch(queries="DELETE FROM price_history WHERE fetched_at < datetime('now', '-30 days')", will_continue_work=false)
-```
-
-**Remove duplicates:**
-```
-sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) FROM price_history GROUP BY symbol, fetched_at)")
+Step 4: Present findings with insights
 ```
 
 ---
 
-### The Golden Rule: Fetch Before You Query
+## Trajectory 3: Search → Scrape Multiple Sources → Synthesize
 
-An empty database has nothing to SELECT. On first run:
-1. **Create schema** → 2. **Fetch external data** → 3. **INSERT** → 4. **Query/report**
+User asks: "Research recent developments in quantum computing"
 
-On later runs (DB has data):
-1. **Fetch new data** → 2. **INSERT** → 3. **Query to compare/aggregate** → 4. **Report**
-
-**✗ Wrong (querying empty DB):**
 ```
-sqlite_batch(queries="SELECT * FROM items")  -- returns nothing!
-```
-→ http_request(api)  -- should have done this first
+Step 1: Search for relevant sources
+  mcp_bright_data_search_engine(query="quantum computing breakthroughs 2024", will_continue_work=true)
 
-**✓ Right (fetch first, then store):**
-→ http_request(api, will_continue_work=true)
-[Next cycle: insert the results, then query if needed]
+  Result meta shows QUERY for extracting search results
 
----
+Step 2: Store URLs with progress tracking
+  sqlite_batch(queries="
+    CREATE TABLE IF NOT EXISTS research (
+      url TEXT PRIMARY KEY, title TEXT, scraped INTEGER DEFAULT 0, summary TEXT
+    );
+    INSERT OR IGNORE INTO research (url, title)
+      SELECT json_extract(r.value,'$.link'), json_extract(r.value,'$.title')
+      FROM __tool_results, json_each(result_json,'$.organic') AS r
+      WHERE result_id='g7h8i9' LIMIT 5", will_continue_work=true)
 
-### Agentic Patterns
+Step 3: Get first unscraped URL
+  sqlite_batch(queries="SELECT url, title FROM research WHERE scraped=0 LIMIT 1", will_continue_work=true)
 
-**First run — create schema, fetch, store:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, external_id TEXT UNIQUE, name TEXT, value REAL, fetched_at TEXT)", will_continue_work=true)
-```
-→ http_request(external-api, will_continue_work=true)
-[Next cycle: INSERT results, report to user]
+  Result: https://example.com/quantum-news|"Major Quantum Breakthrough Announced"
 
-**Later runs — fetch new, insert, compare:**
-→ http_request(external-api, will_continue_work=true)
-[Next cycle: INSERT OR IGNORE new items, query for changes, report differences]
+Step 4: Scrape and extract key points
+  mcp_bright_data_scrape_as_markdown(url="https://example.com/quantum-news", will_continue_work=true)
 
-**Evolve schema when requirements change:**
-```
-sqlite_batch(queries="ALTER TABLE items ADD COLUMN category TEXT")
-```
+  sqlite_batch(queries="
+    SELECT substr(result_text, 1, 3000) FROM __tool_results WHERE result_id='j1k2l3'", will_continue_work=true)
 
-**Data getting large — prune old records:**
-```
-sqlite_batch(queries="DELETE FROM items WHERE fetched_at < datetime('now', '-30 days')")
-```
-"""
+  Read the content, identify key points about the quantum computing development.
 
+Step 5: Update progress and store findings
+  sqlite_batch(queries="
+    UPDATE research SET scraped=1, summary='IBM announces 1000-qubit processor...'
+    WHERE url='https://example.com/quantum-news'", will_continue_work=true)
 
-def _get_enable_database_examples() -> str:
-    """Return in-context learning examples for when to call enable_database.
+Step 6: Check remaining work
+  sqlite_batch(queries="SELECT COUNT(*) FROM research WHERE scraped=0", will_continue_work=true)
 
-    These examples help the agent recognize tasks that benefit from SQLite
-    and show the pattern of enabling → schema creation → usage.
-    """
-    return """
-## When to Enable Your Database
+  If more URLs remain, go back to Step 3.
 
-You have access to a persistent SQLite database. Call `enable_database` when your task would benefit from structured, durable storage.
+Step 7: Compile and present research
+  sqlite_batch(queries="SELECT title, summary FROM research WHERE scraped=1", will_continue_work=false)
 
----
-
-### Tasks That Need a Database
-
-**Tracking over time** — prices, rankings, mentions, metrics:
-User: 'Monitor bitcoin price and alert me on big swings'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE price_history..., fetch price, INSERT, compare to baseline]
-
-**Deduplication across runs** — seen items, processed URLs:
-User: 'Watch HN for AI posts, but don't repeat yourself'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE seen_posts..., fetch HN, INSERT OR IGNORE new ones, report only unseen]
-
-**Building lists or datasets** — restaurants, startups, candidates:
-User: 'Compile a list of AI startups in the YC W24 batch'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE startups..., research and INSERT each one, query for final report]
-
-**Comparison and change detection** — competitor prices, job listings:
-User: 'Track my competitor's pricing page and alert on changes'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE price_snapshots..., scrape current, compare to last, alert if different]
-
-**Aggregation and analysis** — trends, summaries, statistics:
-User: 'Give me weekly summaries of my portfolio performance'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE daily_values..., store daily data, query for weekly aggregates]
-
-**Multi-entity tracking** — multiple stocks, several competitors:
-User: 'Track AAPL, GOOGL, and MSFT for me'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE stock_prices(symbol, price, fetched_at)..., track all three]
-
----
-
-### Tasks That Don't Need a Database
-
-**One-off questions** — no persistence needed:
-User: 'What's the weather in Tokyo?'
-→ http_request(weather-api)
-→ 'It's 72°F and sunny in Tokyo!'
-(No database — just fetch and respond)
-
-**Simple calculations** — reason inline:
-User: 'What's 15% of 847?'
-→ '15% of 847 is **127.05**'
-(No database — mental math)
-
-**Short lists** — keep in working memory:
-User: 'Give me 5 book recommendations on AI'
-→ Search, compile list, respond
-(No database — small enough to hold in context)
-
-**Immediate lookups** — no history needed:
-User: 'What's Apple's current stock price?'
-→ http_request(finance-api)
-→ 'AAPL is at **$198.50** ([Yahoo Finance](url))'
-(No database — unless they want tracking)
-
----
-
-### The Enable → Schema → Use Pattern
-
-**Step 1: Recognize the need**
-User: 'Scout promising open source projects weekly'
-Thinking: "This needs deduplication (don't report same project twice) and tracking (compare stars over time)"
-
-**Step 2: Enable the database**
-```
-enable_database(will_continue_work=true)
-```
-
-**Step 3: Create your schema** (next cycle — use semicolons for multiple statements)
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, repo TEXT UNIQUE, name TEXT, stars INTEGER, first_seen TEXT, last_checked TEXT); CREATE INDEX IF NOT EXISTS idx_stars ON projects(stars DESC)")
-```
-
-**Step 4: Use it in your workflow** (ongoing)
-```
-sqlite_batch(queries="INSERT OR IGNORE INTO projects (repo, name, stars, first_seen, last_checked) VALUES ('user/repo', 'Cool Project', 1250, '2024-01-15', '2024-01-15')")
-```
-```
-sqlite_batch(queries="SELECT repo, name, stars FROM projects WHERE first_seen > datetime('now', '-7 days') ORDER BY stars DESC LIMIT 10")
+  Synthesize findings into a coherent summary for the user.
 ```
 
 ---
 
-### Agentic Decision Examples
+## Trajectory 4: JSON API + CSV Enrichment → Decision Making
 
-**Upgrading a simple task to tracked:**
-User: 'Actually, keep tracking those startups over time'
-Thinking: "They want ongoing tracking — I need persistence now"
-```
-enable_database(will_continue_work=true)
-```
-→ update_charter('Track startups over time, maintain database of candidates')
+User asks: "Check our orders against the product catalog and flag any issues"
 
-**Recognizing scale:**
-User: 'Find all restaurants in downtown Seattle with ratings'
-Thinking: "This will be hundreds of entries — database for sure"
 ```
-enable_database(will_continue_work=true)
+Step 1: Fetch orders from API (JSON)
+  http_request(url="https://api.example.com/orders?status=pending", will_continue_work=true)
+
+  Result meta shows:
+    QUERY: json_each(result_json,'$.content.orders')
+    PATH: $.content.orders (47 items)
+    FIELDS: order_id:int, product_code:str, quantity:int, customer_id:int
+
+Step 2: Store orders in table
+  sqlite_batch(queries="
+    CREATE TABLE orders (order_id INT PRIMARY KEY, product_code TEXT, quantity INT, customer_id INT);
+    INSERT INTO orders SELECT
+      json_extract(o.value,'$.order_id'), json_extract(o.value,'$.product_code'),
+      json_extract(o.value,'$.quantity'), json_extract(o.value,'$.customer_id')
+    FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+    WHERE result_id='ord123'", will_continue_work=true)
+
+  Result: Query 1 affected 47 rows
+
+Step 3: Fetch product catalog (CSV)
+  http_request(url="https://data.example.com/catalog.csv", will_continue_work=true)
+
+  Result meta shows:
+    CSV DATA in $.content (1200 rows)
+    SCHEMA (4 columns): code:text, name:text, price:float, stock:int
+    SAMPLE: SKU-001,Widget Pro,29.99,150
+    PATTERN: 4 cols need 3 CTEs: p1→...→p3, where p3 extracts c3 AND c4
+
+Step 4: Parse CSV into products table
+  sqlite_batch(queries="
+    CREATE TABLE products (code TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='cat456'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      -- 4 columns need 3 CTEs: p1 extracts c1, p2 extracts c2, p3 extracts c3 AND c4
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0 AND line NOT LIKE 'code%'),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
+      p3 AS (SELECT c1, c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
+    INSERT OR IGNORE INTO products SELECT c1, c2, CAST(c3 AS REAL), CAST(c4 AS INT) FROM p3", will_continue_work=true)
+
+  Result: Query 1 affected 1200 rows
+
+Step 5: Join and identify issues - orders for products with insufficient stock
+  sqlite_batch(queries="
+    SELECT o.order_id, o.product_code, o.quantity, p.stock, p.name,
+           CASE WHEN p.code IS NULL THEN 'UNKNOWN_PRODUCT'
+                WHEN o.quantity > p.stock THEN 'INSUFFICIENT_STOCK'
+                ELSE 'OK' END as status
+    FROM orders o LEFT JOIN products p ON o.product_code = p.code
+    WHERE p.code IS NULL OR o.quantity > p.stock
+    ORDER BY status, o.order_id", will_continue_work=true)
+
+  Result: 101|SKU-999|5|NULL|NULL|UNKNOWN_PRODUCT, 102|SKU-042|200|45|Gadget X|INSUFFICIENT_STOCK, ...
+
+Step 6: Decision - report findings and recommend actions
+  Found 3 orders referencing unknown products (need catalog update or order correction).
+  Found 8 orders exceeding available stock (need restock or customer notification).
+  Present actionable summary to user.
 ```
 
-**Charter implies persistence:**
-Charter: 'Monitor competitor pricing and alert on changes'
-[Cron fires for first time]
-Thinking: "I need to store baselines to detect changes"
+---
+
+## Trajectory 5: Compare Multiple Sources → Detect Discrepancies → Act
+
+User asks: "Compare our inventory system with warehouse counts and find mismatches"
+
 ```
-enable_database(will_continue_work=true)
+Step 1: Fetch system inventory (JSON API)
+  http_request(url="https://api.internal/inventory", will_continue_work=true)
+
+  Result meta shows:
+    QUERY: json_each(result_json,'$.content.items')
+    PATH: $.content.items (500 items)
+    FIELDS: sku:str, system_count:int, location:str
+
+Step 2: Fetch warehouse physical counts (CSV export)
+  http_request(url="https://warehouse.internal/counts.csv", will_continue_work=true)
+
+  Result meta shows:
+    CSV DATA in $.content (520 rows)
+    SCHEMA (3 columns): sku:text, physical_count:int, counted_at:text
+    PATTERN: 3 cols need 2 CTEs: p1→...→p2, where p2 extracts c2 AND c3
+
+Step 3: Load both into tables for comparison
+  sqlite_batch(queries="
+    -- Table 1: System inventory from JSON
+    CREATE TABLE system_inv (sku TEXT PRIMARY KEY, system_count INT, location TEXT);
+    INSERT INTO system_inv SELECT
+      json_extract(i.value,'$.sku'), json_extract(i.value,'$.system_count'), json_extract(i.value,'$.location')
+    FROM __tool_results, json_each(result_json,'$.content.items') AS i
+    WHERE result_id='inv789';
+
+    -- Table 2: Warehouse counts from CSV
+    CREATE TABLE warehouse_counts (sku TEXT PRIMARY KEY, physical_count INT, counted_at TEXT);
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='wh012'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      -- 3 columns need 2 CTEs: p1 extracts c1, p2 extracts c2 AND c3
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0 AND line NOT LIKE 'sku%'),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as c3 FROM p1)
+    INSERT OR IGNORE INTO warehouse_counts SELECT c1, CAST(c2 AS INT), c3 FROM p2", will_continue_work=true)
+
+  Result: Query 0 affected 500 rows. Query 1 affected 520 rows.
+
+Step 4: Find discrepancies - items where counts don't match
+  sqlite_batch(queries="
+    SELECT COALESCE(s.sku, w.sku) as sku,
+           s.system_count, w.physical_count,
+           (COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance,
+           s.location,
+           CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
+                WHEN w.sku IS NULL THEN 'IN_SYSTEM_NOT_WAREHOUSE'
+                WHEN s.system_count != w.physical_count THEN 'COUNT_MISMATCH'
+           END as issue_type
+    FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
+    WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
+    ORDER BY ABS(variance) DESC LIMIT 25", will_continue_work=true)
+
+  Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
+
+Step 5: Summarize by issue type for decision making
+  sqlite_batch(queries="
+    SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
+    FROM (
+      SELECT CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
+                  WHEN w.sku IS NULL THEN 'IN_SYSTEM_NOT_WAREHOUSE'
+                  ELSE 'COUNT_MISMATCH' END as issue_type,
+             ABS(COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance
+      FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
+      WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
+    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=false)
+
+  Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
+
+Step 6: Present findings with prioritized recommendations
+  "Found 67 inventory discrepancies across 3 categories:
+   - 42 count mismatches (1,847 units total variance) - priority for recount
+   - 20 items in warehouse not in system - need to add to inventory
+   - 5 items in system not found in warehouse - investigate possible shrinkage
+   Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
 ```
-[Next: create schema, store first snapshot]
+
+---
+
+## Key Patterns
+
+Copy the QUERY from result metadata - it has the correct json paths.
+
+For JSON arrays, load into tables with INSERT...SELECT:
+```sql
+INSERT INTO mytable (col1, col2)
+  SELECT json_extract(r.value,'$.field1'), json_extract(r.value,'$.field2')
+  FROM __tool_results, json_each(result_json,'$.content.items') AS r
+  WHERE result_id='...'
+```
+
+For CSV data, the content is a text string (not JSON). Extract it first:
+```sql
+SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
+```
+
+http_request wraps responses in $.content, so paths are $.content.items not $.items.
+
+When analyzing data multiple ways, store in a table first, then run multiple queries.
+
+## Common Pitfalls
+
+**CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
+The data IS inserted - verify by checking sqlite_schema which shows sample rows and row counts.
+Don't run extra verification queries; trust the schema.
+
+**Query formatting**: Pass SQL as a plain string or array of strings to sqlite_batch.
+Wrong: `queries='["SELECT * FROM t"]'` (JSON-stringified array)
+Right: `queries='SELECT * FROM t'` or `queries=['SELECT * FROM t', 'SELECT * FROM t2']`
+Don't include empty strings in query arrays.
+
+**SQLite quirks**:
+- No STDEV/STDDEV - use: `sqrt(avg(x*x) - avg(x)*avg(x))`
+- No MEDIAN - use: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
+- Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
+- Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
+
+**Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
+```
+Table mytable (rows: 150): CREATE TABLE mytable (...)
+  sample: (5.1, 3.5, 1.4, 0.2, 'setosa'), (6.3, 2.5, 5.0, 1.9, 'virginica')
+  stats: col1[4.30-7.90], col2[setosa, versicolor, virginica]
+```
+This confirms data loaded correctly - no need for SELECT COUNT(*) verification.
 """
 
 
@@ -1307,24 +1321,14 @@ def build_prompt_context(
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
     
-    # SQLite schema - include only when agent is eligible AND sqlite_batch is enabled
-    sqlite_eligible = is_sqlite_enabled_for_agent(agent)
-    sqlite_db_enabled = PersistentAgentEnabledTool.objects.filter(
-        agent=agent,
-        tool_full_name=SQLITE_TOOL_NAME,
-    ).exists()
-    # Only show sqlite context if agent is eligible (paid + max intelligence)
-    sqlite_active = sqlite_eligible and sqlite_db_enabled
-
-    sqlite_schema_block = ""
-    if sqlite_active:
-        sqlite_schema_block = get_sqlite_schema_prompt()
-        variable_group.section_text(
-            "sqlite_schema",
-            sqlite_schema_block,
-            weight=1,
-            shrinker="hmt"
-        )
+    # SQLite schema - always available
+    sqlite_schema_block = get_sqlite_schema_prompt()
+    variable_group.section_text(
+        "sqlite_schema",
+        sqlite_schema_block,
+        weight=1,
+        shrinker="hmt"
+    )
 
     # Agent filesystem listing - simple list of accessible files
     files_listing_block = get_agent_filesystem_prompt(agent)
@@ -1335,47 +1339,23 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Contextual note - only show sqlite notes if agent is eligible
-    if sqlite_eligible:
-        if sqlite_active and any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
-            sqlite_note = (
-                "This is your current SQLite schema. Use sqlite_batch whenever you need durable structured memory, complex analysis, or set-based queries. "
-                "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
-            )
-        elif sqlite_active:
-            sqlite_note = (
-                "SQLite is enabled but no user tables exist yet. Use sqlite_batch to create whatever schema best supports your current task or charter."
-            )
-        else:
-            sqlite_note = (
-                "Call enable_database when you need durable structured memory, complex analysis, or set-based queries. "
-                "For quick math, short lists, or one-off comparisons, just reason inline. "
-                "Once enabled, you can create and evolve a SQLite schema to support your objectives."
-            )
-        variable_group.section_text(
-            "sqlite_note",
-            sqlite_note,
-            weight=1,
-            non_shrinkable=True
-        )
-        # Add in-context learning examples based on SQLite state
-        if sqlite_active:
-            # Database is enabled — show usage examples
-            variable_group.section_text(
-                "sqlite_examples",
-                _get_sqlite_examples(),
-                weight=2,  # Higher weight = shrinks before critical content
-                shrinker="hmt"  # Can be truncated if token budget is tight
-            )
-        else:
-            # Database is available but not enabled — show when/how to enable
-            variable_group.section_text(
-                "enable_database_examples",
-                _get_enable_database_examples(),
-                weight=2,
-                shrinker="hmt"
-            )
-    # For ineligible agents, no sqlite_note is added - they don't have access to the feature
+    sqlite_note = (
+        "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
+        "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
+        "to keep durable data across cycles."
+    )
+    variable_group.section_text(
+        "sqlite_note",
+        sqlite_note,
+        weight=1,
+        non_shrinkable=True
+    )
+    variable_group.section_text(
+        "sqlite_examples",
+        _get_sqlite_examples(),
+        weight=2,
+        shrinker="hmt"
+    )
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
@@ -3115,6 +3095,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             agent=agent, created_at__gt=step_cutoff
         )
         .select_related("tool_call", "system_step")
+        .defer("tool_call__result")
         .order_by("-created_at")[:limit_tool_history]
     )
     messages = list(
@@ -3154,6 +3135,42 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     else:
         completed_tasks = []
 
+    tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
+    tool_call_records: List[ToolCallResultRecord] = []
+    recency_positions: Dict[str, int] = {}
+    if steps:
+        step_lookup = {str(step.id): step for step in steps}
+        tool_call_results = (
+            PersistentAgentToolCall.objects
+            .filter(step_id__in=list(step_lookup.keys()))
+            .values("step_id", "result", "tool_name")
+        )
+        for row in tool_call_results:
+            step_id = str(row["step_id"])
+            step = step_lookup.get(step_id)
+            if step is None:
+                continue
+            result_text = row.get("result") or ""
+            if not result_text:
+                continue
+            tool_call_records.append(
+                ToolCallResultRecord(
+                    step_id=step_id,
+                    tool_name=row.get("tool_name") or "",
+                    created_at=step.created_at,
+                    result_text=result_text,
+                )
+            )
+        if tool_call_records:
+            # Build recency position map: most recent = 0, then 1, 2, etc.
+            ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
+            for position, record in enumerate(ordered_records[:PREVIEW_TIER_COUNT]):
+                recency_positions[record.step_id] = position
+    tool_result_prompt_info = prepare_tool_results_for_prompt(
+        tool_call_records,
+        recency_positions=recency_positions,
+    )
+
     # format steps (group meta/params/result components together)
     for s in steps:
         try:
@@ -3168,8 +3185,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             }
             if getattr(s, "credits_cost", None) is not None:
                 components["cost"] = f"{s.credits_cost} credits"
-            if tc.result:
-                components["result"] = str(tc.result)
+            result_info = tool_result_prompt_info.get(str(s.id))
+            if result_info:
+                components["result_meta"] = result_info.meta
+                if result_info.preview_text:
+                    key = "result" if result_info.is_inline else "result_preview"
+                    components[key] = result_info.preview_text
+                if result_info.schema_text:
+                    components["result_schema"] = result_info.schema_text
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
@@ -3344,6 +3367,9 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
+            "result_meta": 2, # Medium priority - supports tool result lookup
+            "result_schema": 1, # Low priority - schema can be shrunk aggressively
+            "result_preview": 1, # Low priority - preview only
             "content": 2,     # Medium priority for message content (SMS, etc.)
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
@@ -3370,7 +3396,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if (
-                    component_name in ("params", "result", "body") or
+                    component_name in ("params", "result", "result_preview", "result_schema", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"
@@ -3412,20 +3438,6 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
     ]
-
-    include_enable_db_tool = True
-    if agent:
-        # Only show enable_database if:
-        # 1. Agent is eligible for sqlite (paid + max intelligence)
-        # 2. sqlite_batch is not already enabled
-        sqlite_eligible = is_sqlite_enabled_for_agent(agent)
-        already_enabled = PersistentAgentEnabledTool.objects.filter(
-            agent=agent, tool_full_name=SQLITE_TOOL_NAME
-        ).exists()
-        include_enable_db_tool = sqlite_eligible and not already_enabled
-
-    if include_enable_db_tool:
-        static_tools.append(get_enable_database_tool())
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

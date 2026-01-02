@@ -439,15 +439,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertEqual(completion.llm_model, "mock-model")
         self.assertEqual(completion.llm_provider, "mock-provider")
 
-    def test_agent_loop_filters_enable_database_from_tools(self):
-        """LLM tool payload should hide enable_database once sqlite_batch is enabled."""
-        # Set up paid account with max intelligence (required for sqlite access)
-        billing, _ = UserBilling.objects.get_or_create(user=self.user)
-        billing.subscription = PlanNamesChoices.STARTUP
-        billing.save(update_fields=["subscription"])
-        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
-        self.agent.save(update_fields=["preferred_llm_tier"])
-
+    def test_agent_loop_excludes_enable_database_from_tools(self):
+        """LLM tool payload should not expose enable_database."""
         enable_tools(self.agent, ["sqlite_batch"])
 
         response_message = MagicMock()

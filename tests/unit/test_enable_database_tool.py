@@ -9,8 +9,6 @@ from api.agent.tools.database_enabler import execute_enable_database
 from api.agent.tools.tool_manager import (
     SQLITE_TOOL_NAME,
     is_sqlite_enabled_for_agent,
-    get_enabled_tool_definitions,
-    execute_enabled_tool,
 )
 from constants.plans import PlanNames
 
@@ -18,7 +16,7 @@ from constants.plans import PlanNames
 @tag("enable_database")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
 class EnableDatabaseToolTests(TestCase):
-    """Tests for enable_database tool with eligible (paid + max intelligence) agents."""
+    """Tests for enable_database tool with always-on sqlite."""
 
     @classmethod
     def setUpTestData(cls):
@@ -40,7 +38,7 @@ class EnableDatabaseToolTests(TestCase):
             charter="test enable database",
             browser_use_agent=cls.browser_agent,
             created_at=timezone.now(),
-            preferred_llm_tier=AgentLLMTier.MAX.value,  # Max intelligence required
+            preferred_llm_tier=AgentLLMTier.MAX.value,
         )
 
     def test_enable_database_creates_enabled_row(self):
@@ -65,32 +63,21 @@ class EnableDatabaseToolTests(TestCase):
             result["tool_manager"]["already_enabled"],
         )
 
-    def test_enable_database_tool_removed_once_sqlite_enabled(self):
-        """get_agent_tools should hide enable_database after sqlite_batch is enabled."""
-
-        tools_before = ep.get_agent_tools(self.agent)
-        tool_names_before = [
+    def test_enable_database_tool_hidden(self):
+        """get_agent_tools should not expose enable_database."""
+        tools = ep.get_agent_tools(self.agent)
+        tool_names = [
             entry.get("function", {}).get("name")
-            for entry in tools_before
+            for entry in tools
             if isinstance(entry, dict)
         ]
-        self.assertIn("enable_database", tool_names_before)
-
-        execute_enable_database(self.agent, {})
-
-        tools_after = ep.get_agent_tools(self.agent)
-        tool_names_after = [
-            entry.get("function", {}).get("name")
-            for entry in tools_after
-            if isinstance(entry, dict)
-        ]
-        self.assertNotIn("enable_database", tool_names_after)
+        self.assertNotIn("enable_database", tool_names)
 
 
 @tag("enable_database")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
-class SqliteToolRestrictionTests(TestCase):
-    """Tests for sqlite tool restrictions based on account type and intelligence tier."""
+class SqliteToolAvailabilityTests(TestCase):
+    """SQLite is always available for all agents."""
 
     @classmethod
     def setUpTestData(cls):
@@ -142,90 +129,27 @@ class SqliteToolRestrictionTests(TestCase):
             preferred_llm_tier=tier,
         )
 
-    # --- is_sqlite_enabled_for_agent tests ---
-
-    def test_free_account_not_eligible(self):
-        """Free accounts should never be eligible for sqlite."""
-        agent = self._create_agent(
-            self.free_user, self.free_browser, "FreeAgent", AgentLLMTier.MAX.value
-        )
-        self.assertFalse(is_sqlite_enabled_for_agent(agent))
-
-    def test_paid_standard_tier_not_eligible(self):
-        """Paid accounts with standard intelligence should not be eligible."""
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidStandard", AgentLLMTier.STANDARD.value
-        )
-        self.assertFalse(is_sqlite_enabled_for_agent(agent))
-
-    def test_paid_premium_tier_not_eligible(self):
-        """Paid accounts with premium intelligence should not be eligible."""
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidPremium", AgentLLMTier.PREMIUM.value
-        )
-        self.assertFalse(is_sqlite_enabled_for_agent(agent))
-
-    def test_paid_max_tier_is_eligible(self):
-        """Paid accounts with max intelligence should be eligible."""
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidMax", AgentLLMTier.MAX.value
-        )
-        self.assertTrue(is_sqlite_enabled_for_agent(agent))
-
-    def test_vip_user_is_always_eligible(self):
-        """VIP users are eligible regardless of plan/tier."""
-        agent = self._create_agent(
-            self.vip_user, self.vip_browser, "VipStandard", AgentLLMTier.STANDARD.value
-        )
-        self.assertTrue(is_sqlite_enabled_for_agent(agent))
-
-    def test_none_agent_not_eligible(self):
-        """None agent should not be eligible."""
+    def test_sqlite_enabled_for_all_agents(self):
+        agents = [
+            self._create_agent(self.free_user, self.free_browser, "FreeAgent", AgentLLMTier.STANDARD.value),
+            self._create_agent(self.paid_user, self.paid_browser, "PaidAgent", AgentLLMTier.PREMIUM.value),
+            self._create_agent(self.vip_user, self.vip_browser, "VipAgent", AgentLLMTier.MAX.value),
+        ]
+        for agent in agents:
+            self.assertTrue(is_sqlite_enabled_for_agent(agent))
         self.assertFalse(is_sqlite_enabled_for_agent(None))
 
-    # --- enable_database execution tests ---
-
-    def test_enable_database_rejected_for_free_account(self):
-        """enable_database should reject free accounts."""
+    def test_enable_database_allowed_for_all_accounts(self):
         agent = self._create_agent(
-            self.free_user, self.free_browser, "FreeAgentReject", AgentLLMTier.MAX.value
+            self.free_user, self.free_browser, "FreeAgentEnable", AgentLLMTier.STANDARD.value
         )
         result = execute_enable_database(agent, {})
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("not available", result["message"])
-        self.assertFalse(
-            PersistentAgentEnabledTool.objects.filter(
-                agent=agent, tool_full_name=SQLITE_TOOL_NAME
-            ).exists()
-        )
-
-    def test_enable_database_rejected_for_paid_non_max(self):
-        """enable_database should reject paid accounts without max intelligence."""
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidPremiumReject", AgentLLMTier.PREMIUM.value
-        )
-        result = execute_enable_database(agent, {})
-
-        self.assertEqual(result["status"], "error")
-        self.assertIn("not available", result["message"])
-
-    def test_enable_database_allowed_for_vip_on_free_standard(self):
-        """enable_database should allow VIP users even on free + standard tier."""
-        agent = self._create_agent(
-            self.vip_user, self.vip_browser, "VipFreeStandard", AgentLLMTier.STANDARD.value
-        )
-        result = execute_enable_database(agent, {})
-
         self.assertEqual(result["status"], "ok")
         self.assertIn(SQLITE_TOOL_NAME, result["tool_manager"]["enabled"])
 
-    # --- get_agent_tools visibility tests ---
-
-    def test_enable_database_hidden_for_ineligible_agents(self):
-        """enable_database tool should not appear for ineligible agents."""
+    def test_sqlite_batch_visible_in_agent_tools(self):
         agent = self._create_agent(
-            self.free_user, self.free_browser, "FreeToolsHidden", AgentLLMTier.MAX.value
+            self.paid_user, self.paid_browser, "ToolsVisible", AgentLLMTier.PREMIUM.value
         )
         tools = ep.get_agent_tools(agent)
         tool_names = [
@@ -233,64 +157,5 @@ class SqliteToolRestrictionTests(TestCase):
             for entry in tools
             if isinstance(entry, dict)
         ]
+        self.assertIn("sqlite_batch", tool_names)
         self.assertNotIn("enable_database", tool_names)
-
-    def test_enable_database_visible_for_eligible_agents(self):
-        """enable_database tool should appear for eligible agents."""
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PaidToolsVisible", AgentLLMTier.MAX.value
-        )
-        tools = ep.get_agent_tools(agent)
-        tool_names = [
-            entry.get("function", {}).get("name")
-            for entry in tools
-            if isinstance(entry, dict)
-        ]
-        self.assertIn("enable_database", tool_names)
-
-    # --- Previously enabled sqlite should be hidden ---
-
-    def test_previously_enabled_sqlite_hidden_for_ineligible(self):
-        """sqlite_batch should be hidden even if previously enabled when agent becomes ineligible."""
-        # Create eligible agent and enable sqlite
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "PreviouslyEnabled", AgentLLMTier.MAX.value
-        )
-        execute_enable_database(agent, {})
-
-        # Verify sqlite is enabled in DB
-        self.assertTrue(
-            PersistentAgentEnabledTool.objects.filter(
-                agent=agent, tool_full_name=SQLITE_TOOL_NAME
-            ).exists()
-        )
-
-        # Downgrade agent to premium tier
-        agent.preferred_llm_tier = AgentLLMTier.PREMIUM.value
-        agent.save(update_fields=["preferred_llm_tier"])
-
-        # sqlite_batch should not appear in tool definitions
-        definitions = get_enabled_tool_definitions(agent)
-        tool_names = [
-            d.get("function", {}).get("name")
-            for d in definitions
-            if isinstance(d, dict)
-        ]
-        self.assertNotIn("sqlite_batch", tool_names)
-
-    def test_previously_enabled_sqlite_execution_blocked(self):
-        """sqlite_batch execution should be blocked for ineligible agents even if previously enabled."""
-        # Create eligible agent and enable sqlite
-        agent = self._create_agent(
-            self.paid_user, self.paid_browser, "ExecutionBlocked", AgentLLMTier.MAX.value
-        )
-        execute_enable_database(agent, {})
-
-        # Downgrade agent to premium tier
-        agent.preferred_llm_tier = AgentLLMTier.PREMIUM.value
-        agent.save(update_fields=["preferred_llm_tier"])
-
-        # Execution should be blocked
-        result = execute_enabled_tool(agent, SQLITE_TOOL_NAME, {"queries": []})
-        self.assertEqual(result["status"], "error")
-        self.assertIn("not available", result["message"])

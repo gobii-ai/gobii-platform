@@ -490,6 +490,7 @@ def _estimate_message_tokens(messages: List[dict]) -> int:
 def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     """Estimate token count for agent context using simple heuristics."""
     total_length = 0
+    tool_result_overhead = 240
     
     # Charter length
     if agent.charter:
@@ -500,7 +501,7 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     recent_steps = (
         PersistentAgentStep.objects.filter(agent=agent)
         .select_related("tool_call")
-        .only("description", "tool_call__result")
+        .only("description", "tool_call__tool_name")
         .order_by('-created_at')[:10]
     )
     for step in recent_steps:
@@ -508,12 +509,11 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
         if step.description:
             total_length += len(step.description)
         
-        # Add tool call result if this step has one
+        # Account for tool result metadata (prompt stores metadata + small previews)
         try:
-            if step.tool_call and step.tool_call.result:
-                total_length += len(str(step.tool_call.result))
+            if step.tool_call:
+                total_length += tool_result_overhead
         except PersistentAgentToolCall.DoesNotExist:
-            # This step doesn't have a tool call, which is fine
             pass
     
     recent_comms = (
