@@ -22,6 +22,9 @@ MAX_SCHEMA_BYTES = 1_000_000
 
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
 
+# Tools that fetch external data with unknown structure - schema generation helps agent query it
+SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
+
 _BASE64_RE = re.compile(r"base64,", re.IGNORECASE)
 _IMAGE_RE = re.compile(r"data:image/|image_base64|image_url", re.IGNORECASE)
 
@@ -59,11 +62,15 @@ def prepare_tool_results_for_prompt(
 
         meta, stored_json, stored_text, stored_schema = _summarize_result(result_text)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
+        # Only show schema for tools that fetch external data with unknown structure
+        is_schema_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
+        prompt_schema = stored_schema if is_schema_eligible else None
 
         meta_text = _format_meta_text(
             record.step_id,
             meta,
             stored_in_db=stored_in_db,
+            is_json=meta["is_json"],  # For query hint - JSON vs text query syntax
         )
         preview_text, is_inline = _build_prompt_preview(
             result_text,
@@ -75,7 +82,7 @@ def prepare_tool_results_for_prompt(
             meta=meta_text,
             preview_text=preview_text,
             is_inline=is_inline,
-            schema_text=stored_schema,
+            schema_text=prompt_schema,
         )
 
         if stored_in_db:
@@ -264,7 +271,13 @@ def _build_prompt_preview(result_text: str, full_bytes: int, *, include_preview:
     return preview_text, False
 
 
-def _format_meta_text(result_id: str, meta: Dict[str, object], *, stored_in_db: bool) -> str:
+def _format_meta_text(
+    result_id: str,
+    meta: Dict[str, object],
+    *,
+    stored_in_db: bool,
+    is_json: bool = False,
+) -> str:
     parts = [
         f"result_id={result_id}",
         f"in_db={1 if stored_in_db else 0}",
@@ -289,7 +302,20 @@ def _format_meta_text(result_id: str, meta: Dict[str, object], *, stored_in_db: 
             f"truncated_bytes={meta['truncated_bytes']}",
         ]
     )
-    return ", ".join(parts)
+    meta_line = ", ".join(parts)
+    # Add query hint for large results stored in DB
+    if stored_in_db and meta["bytes"] > INLINE_RESULT_MAX_BYTES:
+        if is_json:
+            meta_line += (
+                f"\n→ Use sqlite_batch to query/analyze this result: "
+                f"SELECT json_extract(result_json, '$.key') FROM __tool_results WHERE result_id='{result_id}'"
+            )
+        else:
+            meta_line += (
+                f"\n→ Use sqlite_batch to query/analyze this result: "
+                f"SELECT substr(result_text, 1, 500), instr(result_text, 'keyword') FROM __tool_results WHERE result_id='{result_id}'"
+            )
+    return meta_line
 
 
 def _infer_json_schema(value: object) -> Tuple[Optional[str], int, bool]:
@@ -344,6 +370,7 @@ def _extract_json_payload_for_schema(value: object | None) -> object | None:
         envelope_keys = {
             "status",
             "message",
+            "message_id",
             "error",
             "errors",
             "details",
@@ -362,6 +389,8 @@ def _extract_json_payload_for_schema(value: object | None) -> object | None:
             "path",
             "node_id",
             "task_id",
+            "conversation_id",
+            "step_id",
         }
         return not (set(container.keys()) - envelope_keys)
 
