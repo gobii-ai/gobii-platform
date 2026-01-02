@@ -1,0 +1,212 @@
+"""Unit tests for http_request tool functionality."""
+
+import json
+from io import BytesIO
+from unittest.mock import patch, MagicMock
+
+from django.contrib.auth import get_user_model
+from django.test import TestCase, tag
+
+from api.models import BrowserUseAgent, PersistentAgent
+from api.agent.tools.http_request import execute_http_request
+
+
+def _make_mock_response(content: bytes, content_type: str, status_code: int = 200):
+    """Create a mock requests.Response object."""
+    resp = MagicMock()
+    resp.status_code = status_code
+    resp.headers = {"Content-Type": content_type, "Content-Length": str(len(content))}
+
+    # iter_content yields chunks
+    def iter_content(chunk_size=1024):
+        stream = BytesIO(content)
+        while True:
+            chunk = stream.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+    resp.iter_content = iter_content
+    resp.close = MagicMock()
+    return resp
+
+
+@tag("http_request_batch")
+class HttpRequestJsonParsingTests(TestCase):
+    """Tests for JSON content parsing in http_request tool."""
+
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="http-test@example.com",
+            email="http-test@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="HTTP Test Browser")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="HTTP Test Agent",
+            charter="test http_request JSON parsing",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def tearDown(self):
+        self.agent.delete()
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_json_content_is_parsed_as_object(self, mock_request, mock_proxy):
+        """When content-type is application/json, content should be a dict/list, not a string."""
+        mock_proxy.return_value = None
+
+        json_data = {"hits": [{"id": 1, "title": "Item 1"}, {"id": 2, "title": "Item 2"}]}
+        json_bytes = json.dumps(json_data).encode("utf-8")
+
+        mock_request.return_value = _make_mock_response(
+            content=json_bytes,
+            content_type="application/json",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://api.example.com/data"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["status_code"], 200)
+        # The key assertion: content should be a dict, not a string
+        self.assertIsInstance(result["content"], dict)
+        self.assertEqual(result["content"], json_data)
+        self.assertEqual(result["content"]["hits"][0]["title"], "Item 1")
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_json_array_content_is_parsed(self, mock_request, mock_proxy):
+        """JSON arrays should also be parsed correctly."""
+        mock_proxy.return_value = None
+
+        json_data = [{"id": 1}, {"id": 2}, {"id": 3}]
+        json_bytes = json.dumps(json_data).encode("utf-8")
+
+        mock_request.return_value = _make_mock_response(
+            content=json_bytes,
+            content_type="application/json; charset=utf-8",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://api.example.com/items"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["content"], list)
+        self.assertEqual(len(result["content"]), 3)
+        self.assertEqual(result["content"][0]["id"], 1)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_nested_json_is_directly_queryable(self, mock_request, mock_proxy):
+        """Nested JSON structures should be directly accessible without json.loads."""
+        mock_proxy.return_value = None
+
+        # Simulating a real API response with nested data
+        json_data = {
+            "status": "ok",
+            "data": {
+                "users": [
+                    {"name": "Alice", "email": "alice@example.com"},
+                    {"name": "Bob", "email": "bob@example.com"},
+                ],
+                "total": 2,
+            }
+        }
+        json_bytes = json.dumps(json_data).encode("utf-8")
+
+        mock_request.return_value = _make_mock_response(
+            content=json_bytes,
+            content_type="application/json",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://api.example.com/users"})
+
+        # Verify deep nesting is directly accessible
+        self.assertIsInstance(result["content"], dict)
+        self.assertEqual(result["content"]["data"]["users"][0]["name"], "Alice")
+        self.assertEqual(result["content"]["data"]["total"], 2)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_invalid_json_falls_back_to_string(self, mock_request, mock_proxy):
+        """If JSON parsing fails, content should remain as string."""
+        mock_proxy.return_value = None
+
+        invalid_json = b"{'not': 'valid json'}"  # Single quotes = invalid JSON
+
+        mock_request.return_value = _make_mock_response(
+            content=invalid_json,
+            content_type="application/json",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://api.example.com/bad"})
+
+        self.assertEqual(result["status"], "ok")
+        # Falls back to string since JSON parsing failed
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("not", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_text_html_remains_string(self, mock_request, mock_proxy):
+        """Non-JSON content types should remain as strings."""
+        mock_proxy.return_value = None
+
+        html_content = b"<html><body><h1>Hello</h1></body></html>"
+
+        mock_request.return_value = _make_mock_response(
+            content=html_content,
+            content_type="text/html; charset=utf-8",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("<h1>Hello</h1>", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_text_plain_with_json_content_is_parsed(self, mock_request, mock_proxy):
+        """JSON content should be parsed regardless of content-type header."""
+        mock_proxy.return_value = None
+
+        json_looking_content = b'{"key": "value"}'
+
+        mock_request.return_value = _make_mock_response(
+            content=json_looking_content,
+            content_type="text/plain",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/file.txt"})
+
+        self.assertEqual(result["status"], "ok")
+        # Should be parsed as JSON since content starts with { regardless of content-type
+        self.assertIsInstance(result["content"], dict)
+        self.assertEqual(result["content"]["key"], "value")
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_large_json_is_parsed(self, mock_request, mock_proxy):
+        """Large JSON responses (under 5MB limit) should be parsed as objects."""
+        mock_proxy.return_value = None
+
+        # Create a large JSON response (~100KB, well under 5MB limit)
+        large_data = {"items": [{"id": i, "data": "x" * 1000} for i in range(100)]}
+        json_bytes = json.dumps(large_data).encode("utf-8")
+        # Verify it's a decent size but under 5MB
+        self.assertGreater(len(json_bytes), 100 * 1024)
+        self.assertLess(len(json_bytes), 5 * 1024 * 1024)
+
+        mock_request.return_value = _make_mock_response(
+            content=json_bytes,
+            content_type="application/json",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://api.example.com/large"})
+
+        self.assertEqual(result["status"], "ok")
+        # Large JSON should be parsed as dict
+        self.assertIsInstance(result["content"], dict)
+        self.assertEqual(len(result["content"]["items"]), 100)

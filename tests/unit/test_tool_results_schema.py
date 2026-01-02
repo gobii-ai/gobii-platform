@@ -69,6 +69,53 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIsNotNone(stored_text)
         self.assertIsNone(schema_text)
 
+    def test_no_schema_for_json_string_result(self):
+        result_text = json.dumps("plain text")
+        meta, stored_json, stored_text, schema_text = tool_results._summarize_result(result_text)
+
+        self.assertTrue(meta["is_json"])
+        self.assertEqual(meta["json_type"], "string")
+        self.assertEqual(meta["schema_bytes"], 0)
+        self.assertFalse(meta["schema_truncated"])
+        self.assertIsNotNone(stored_json)
+        self.assertIsNone(schema_text)
+
+    def test_infers_schema_from_double_encoded_json(self):
+        payload = {"id": 7, "label": "alpha"}
+        result_text = json.dumps(json.dumps(payload))
+
+        meta, stored_json, stored_text, schema_text = tool_results._summarize_result(result_text)
+
+        self.assertTrue(meta["is_json"])
+        self.assertEqual(meta["json_type"], "object")
+        self.assertGreater(meta["schema_bytes"], 0)
+        self.assertIsNotNone(schema_text)
+        schema = json.loads(schema_text or "{}")
+        self.assertEqual(schema.get("type"), "object")
+        self.assertIn("id", schema.get("properties", {}))
+        self.assertIn("label", schema.get("properties", {}))
+
+    def test_no_schema_for_sqlite_envelope(self):
+        result_text = json.dumps({
+            "status": "ok",
+            "results": [
+                {
+                    "message": "Query 0 returned 1 rows.",
+                    "result": [{"id": 1, "name": "Alpha"}],
+                }
+            ],
+            "db_size_mb": 0.08,
+            "message": "Executed 1 queries.",
+        })
+
+        meta, stored_json, stored_text, schema_text = tool_results._summarize_result(result_text)
+
+        self.assertTrue(meta["is_json"])
+        self.assertEqual(meta["schema_bytes"], 0)
+        self.assertFalse(meta["schema_truncated"])
+        self.assertIsNotNone(stored_json)
+        self.assertIsNone(schema_text)
+
     def test_prompt_info_only_includes_schema_when_available(self):
         record = tool_results.ToolCallResultRecord(
             step_id="step-1",

@@ -24,6 +24,7 @@ from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
 
 logger = logging.getLogger(__name__)
 PREVIEW_MAX_BYTES = 30 * 1024
+RESPONSE_MAX_BYTES = 5 * 1024 * 1024
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
 
@@ -133,21 +134,30 @@ def _read_response_body(
         )
 
     preview_chunks = []
+    content_chunks = []
     bytes_read = 0
+    preview_read = 0
     for chunk in resp.iter_content(chunk_size=1024):
         if not chunk:
             break
-        if bytes_read + len(chunk) > PREVIEW_MAX_BYTES:
-            chunk = chunk[: PREVIEW_MAX_BYTES - bytes_read]
-        preview_chunks.append(chunk)
-        bytes_read += len(chunk)
-        if bytes_read >= PREVIEW_MAX_BYTES:
+        if bytes_read >= RESPONSE_MAX_BYTES:
             break
-    truncated = bytes_read >= PREVIEW_MAX_BYTES or (
+        remaining = RESPONSE_MAX_BYTES - bytes_read
+        if len(chunk) > remaining:
+            chunk = chunk[:remaining]
+        content_chunks.append(chunk)
+        bytes_read += len(chunk)
+        if preview_read < PREVIEW_MAX_BYTES:
+            take = min(len(chunk), PREVIEW_MAX_BYTES - preview_read)
+            preview_chunks.append(chunk[:take])
+            preview_read += take
+        if bytes_read >= RESPONSE_MAX_BYTES:
+            break
+    truncated = bytes_read >= RESPONSE_MAX_BYTES or (
         content_length is not None and content_length > bytes_read
     )
     return _ResponseBodyResult(
-        content_bytes=b"",
+        content_bytes=b"".join(content_chunks),
         preview_bytes=b"".join(preview_chunks),
         total_bytes=bytes_read,
         truncated=truncated,
@@ -165,7 +175,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
                 "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 30KB and binary bodies are omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
+                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB and binary bodies are omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
                 "type": "object",
@@ -197,7 +207,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     supply custom headers and an optional request body. To limit prompt size and
     avoid leaking binary data, we:
 
-    1. Cap the response body to 30 KB (first bytes only).
+    1. Cap the response body to 5 MB (first bytes only).
     2. Detect non-textual content via the Content-Type header (anything not
        starting with ``text/`` or common JSON / XML / JavaScript MIME types).
        Binary responses are replaced with a placeholder string indicating the
@@ -446,18 +456,25 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     )
 
     if is_textual:
+        decode_bytes = preview_bytes if download_requested else content_bytes
         try:
-            content_str = preview_bytes.decode("utf-8", errors="replace")
+            content_str = decode_bytes.decode("utf-8", errors="replace")
         except Exception:
-            content_str = preview_bytes.decode(errors="replace")
-        if truncated:
-            content_str += "\n\n[Content truncated to 30KB]"
-        # Parse JSON content so agents can query it directly without double extraction
-        if "json" in content_type:
+            content_str = decode_bytes.decode(errors="replace")
+        # Parse JSON content so agents can query it directly without double extraction.
+        # Try parsing regardless of content-type since some APIs return JSON with wrong headers.
+        # Quick check: only attempt parse if content looks like JSON (starts with { or [).
+        # IMPORTANT: Parse BEFORE adding truncation message, otherwise json.loads fails.
+        stripped = content_str.lstrip()
+        if stripped and stripped[0] in "{[":
             try:
                 content_str = json.loads(content_str)
             except Exception:
                 pass  # Keep as string if parse fails
+        # Add truncation notice for string content only (parsed JSON doesn't need it)
+        if truncated and isinstance(content_str, str):
+            truncation_label = "30KB" if download_requested else "5MB"
+            content_str += f"\n\n[Content truncated to {truncation_label}]"
     else:
         size_hint = content_length if content_length is not None else total_bytes
         content_str = (

@@ -218,9 +218,13 @@ def _summarize_result(
             top_keys = list(parsed.keys())[:MAX_TOP_KEYS]
     except Exception:
         pass
-    if is_json and parsed is not None:
+    schema_target = _extract_json_payload_for_schema(parsed) if is_json else None
+    if schema_target is not None:
+        if isinstance(schema_target, dict):
+            top_keys = list(schema_target.keys())[:MAX_TOP_KEYS]
+        json_type = _json_type(schema_target)
         try:
-            schema_text, schema_bytes, schema_truncated = _infer_json_schema(parsed)
+            schema_text, schema_bytes, schema_truncated = _infer_json_schema(schema_target)
         except Exception:
             logger.debug("Failed to infer JSON schema for tool result.", exc_info=True)
 
@@ -302,6 +306,83 @@ def _infer_json_schema(value: object) -> Tuple[Optional[str], int, bool]:
     if schema_bytes > MAX_SCHEMA_BYTES:
         return None, schema_bytes, True
     return schema_text, schema_bytes, False
+
+
+def _extract_json_payload_for_schema(value: object | None) -> object | None:
+    def unwrap_json_container(candidate: object | None) -> object | None:
+        if isinstance(candidate, (dict, list)):
+            return candidate
+        if isinstance(candidate, str):
+            stripped = candidate.lstrip()
+            if not stripped or stripped[0] not in "{[":
+                return None
+            try:
+                parsed = json.loads(candidate)
+            except Exception:
+                return None
+            if isinstance(parsed, (dict, list)):
+                return parsed
+        return None
+
+    def looks_like_sqlite_envelope(container: dict) -> bool:
+        if "db_size_mb" in container:
+            return True
+        results = container.get("results")
+        if not isinstance(results, list) or not results:
+            return False
+        for item in results:
+            if not isinstance(item, dict):
+                return False
+            item_keys = set(item.keys())
+            if not item_keys or item_keys - {"message", "result", "error"}:
+                return False
+        return True
+
+    def looks_like_status_envelope(container: dict) -> bool:
+        if "status" not in container:
+            return False
+        envelope_keys = {
+            "status",
+            "message",
+            "error",
+            "errors",
+            "details",
+            "results",
+            "db_size_mb",
+            "headers",
+            "status_code",
+            "proxy_used",
+            "auto_sleep_ok",
+            "tool_manager",
+            "created_count",
+            "already_allowed_count",
+            "already_pending_count",
+            "approval_url",
+            "filename",
+            "path",
+            "node_id",
+            "task_id",
+        }
+        return not (set(container.keys()) - envelope_keys)
+
+    payload_keys = ("content", "data", "result", "payload", "response")
+
+    if isinstance(value, str):
+        value = unwrap_json_container(value)
+        if value is None:
+            return None
+    if isinstance(value, dict):
+        for key in payload_keys:
+            if key in value:
+                candidate = unwrap_json_container(value.get(key))
+                if candidate is not None:
+                    return candidate
+        if looks_like_sqlite_envelope(value) or looks_like_status_envelope(value):
+            return None
+        return value
+    if isinstance(value, list):
+        return value
+    return None
 
 
 def _truncate_to_bytes(text: str, max_bytes: int) -> Tuple[str, int]:
