@@ -553,10 +553,11 @@ Wrong: `queries='["SELECT * FROM t"]'` (JSON-stringified array)
 Right: `queries='SELECT * FROM t'` or `queries=['SELECT * FROM t', 'SELECT * FROM t2']`
 Don't include empty strings in query arrays.
 
-**SQLite function limits**: SQLite lacks some common functions:
-- No STDEV/STDDEV - calculate manually: `sqrt(avg(x*x) - avg(x)*avg(x))`
+**SQLite quirks**:
+- No STDEV/STDDEV - use: `sqrt(avg(x*x) - avg(x)*avg(x))`
 - No MEDIAN - use: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
-- Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND
+- Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
+- Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
 **Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
 ```
