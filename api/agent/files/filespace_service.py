@@ -259,18 +259,10 @@ def write_bytes_to_dir(
         if existing.node_type != AgentFsNode.NodeType.FILE:
             return {"status": "error", "message": "Path points to a directory, not a file."}
         if overwrite:
-            try:
-                if existing.content and getattr(existing.content, "name", None):
-                    try:
-                        existing.content.storage.delete(existing.content.name)
-                    except Exception:
-                        logger.exception("Failed to delete existing content for node %s", existing.id)
-                existing.mime_type = mime_type
-                existing.checksum_sha256 = checksum
-                existing.size_bytes = len(content_bytes)
-            except Exception:
-                logger.exception("Failed to overwrite file %s for agent %s", full_path, agent.id)
-                return {"status": "error", "message": "Failed to overwrite the file in the filespace."}
+            old_content_name = getattr(existing.content, "name", None)
+            existing.mime_type = mime_type
+            existing.checksum_sha256 = checksum
+            existing.size_bytes = len(content_bytes)
             error = _save_node_content(
                 existing,
                 content_bytes,
@@ -280,6 +272,11 @@ def write_bytes_to_dir(
             )
             if error:
                 return error
+            if old_content_name and old_content_name != existing.content.name:
+                try:
+                    existing.content.storage.delete(old_content_name)
+                except Exception:
+                    logger.exception("Failed to delete prior content for node %s", existing.id)
             node = existing
             return {
                 "status": "ok",
