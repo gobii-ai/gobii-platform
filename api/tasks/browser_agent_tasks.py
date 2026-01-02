@@ -1130,6 +1130,9 @@ async def _run_agent(
                 "IF YOU GET A CAPTCHA CHALLENGE THAT YOU CANNOT PASS IN TWO ATTEMPTS AND THERE "
                 "IS AN ALTERNATIVE WAY TO GET THE JOB DONE, JUST DO THAT INSTEAD OF FIGHTING "
                 "THE CAPTCHA FOR MANY STEPS. "
+                "Files that you download will be saved in a virtual filespace that you cannot read directly. "
+                "The file download probably succeeded unless you see something specific that indicates otherwise. "
+                "If you cannot read the downloaded file, don't automatically take that as a failure. "
 
                 "If your task requries you to be logged in and you do not have the credentials/secrets available, simply exit early and return that as your response. "
 
