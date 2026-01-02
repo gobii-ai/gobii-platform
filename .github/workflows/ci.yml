@@ -182,6 +182,8 @@ jobs:
             tag: batch_tool_costs
           - batch: tool_results
             tag: batch_tool_results
+          - batch: result_analysis
+            tag: batch_result_analysis
           - batch: http_request
             tag: http_request_batch
           - batch: billing_rollup
