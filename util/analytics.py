@@ -308,7 +308,7 @@ class Analytics:
                 }
                 try:
                     analytics.track(user_id, event, properties, context)
-                except RuntimeError:
+                except Exception:
                     logger.exception(f"Failed to track event {event} for user {user_id}")
 
     @staticmethod
