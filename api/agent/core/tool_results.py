@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Sequence, Set, Tuple
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
-from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, normalize_json_text
+from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,9 @@ def prepare_tool_results_for_prompt(
             stored_in_db=stored_in_db,
         )
         recency_position = recency_positions.get(record.step_id)
+        preview_source = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
         preview_text, is_inline = _build_prompt_preview(
-            result_text,
+            preview_source,
             meta["bytes"],
             recency_position=recency_position,
             tool_name=record.tool_name,
@@ -248,23 +249,21 @@ def _summarize_result(
     Returns:
         Tuple of (meta dict, result_json for storage, result_text for storage, analysis)
     """
-    encoded = result_text.encode("utf-8")
-    full_bytes = len(encoded)
-    line_count = result_text.count("\n") + 1 if result_text else 0
-
-    is_binary = _is_probably_binary(result_text)
-    has_images = bool(_IMAGE_RE.search(result_text))
-    has_base64 = bool(_BASE64_RE.search(result_text))
-
-    normalized_json = normalize_json_text(result_text)
-    analysis_text = normalized_json if normalized_json is not None else result_text
-
     # Perform rich analysis
     analysis: Optional[ResultAnalysis] = None
     try:
-        analysis = analyze_result(analysis_text, result_id)
+        analysis = analyze_result(result_text, result_id)
     except Exception:
         logger.debug("Failed to analyze tool result", exc_info=True)
+
+    analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
+    encoded = analysis_text.encode("utf-8")
+    full_bytes = len(encoded)
+    line_count = analysis_text.count("\n") + 1 if analysis_text else 0
+
+    is_binary = _is_probably_binary(analysis_text)
+    has_images = bool(_IMAGE_RE.search(analysis_text))
+    has_base64 = bool(_BASE64_RE.search(result_text))
 
     # Extract basic JSON info
     is_json = analysis.is_json if analysis else False
@@ -277,6 +276,8 @@ def _summarize_result(
         # Get top keys from primary array or field types
         if ja.primary_array and ja.primary_array.item_fields:
             top_keys = ja.primary_array.item_fields[:MAX_TOP_KEYS]
+        elif ja.primary_array and ja.primary_array.table_info and ja.primary_array.table_info.columns:
+            top_keys = ja.primary_array.table_info.columns[:MAX_TOP_KEYS]
         elif ja.field_types:
             top_keys = [ft.name for ft in ja.field_types[:MAX_TOP_KEYS]]
     elif is_json:
@@ -289,7 +290,10 @@ def _summarize_result(
         except Exception:
             pass
 
-    storage_text = analysis_text if is_json else result_text
+    if is_json and analysis and analysis.normalized_json:
+        storage_text = analysis.normalized_json
+    else:
+        storage_text = analysis_text if is_json else analysis_text
     truncated_text, truncated_bytes = _truncate_to_bytes(storage_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
 
@@ -308,6 +312,13 @@ def _summarize_result(
         "is_truncated": is_truncated,
         "truncated_bytes": truncated_bytes,
     }
+    if analysis and analysis.decode_info and analysis.decode_info.steps:
+        meta["decoded_from"] = "+".join(analysis.decode_info.steps)
+        if analysis.decode_info.encoding:
+            meta["decoded_encoding"] = analysis.decode_info.encoding
+    if analysis and analysis.parse_info:
+        meta["parsed_from"] = analysis.parse_info.source
+        meta["parsed_with"] = analysis.parse_info.mode
     return meta, result_json, result_text_store, analysis
 
 
@@ -388,6 +399,14 @@ def _format_meta_text(
         parts.append("has_images=1")
     if meta.get("has_base64"):
         parts.append("has_base64=1")
+    if meta.get("decoded_from"):
+        parts.append(f"decoded_from={meta['decoded_from']}")
+    if meta.get("decoded_encoding"):
+        parts.append(f"decoded_encoding={meta['decoded_encoding']}")
+    if meta.get("parsed_from"):
+        parts.append(f"parsed_from={meta['parsed_from']}")
+    if meta.get("parsed_with"):
+        parts.append(f"parsed_with={meta['parsed_with']}")
     if meta.get("is_truncated") and meta.get("truncated_bytes"):
         parts.append(f"truncated_bytes={meta['truncated_bytes']}")
 

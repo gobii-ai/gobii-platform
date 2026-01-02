@@ -1,3 +1,4 @@
+import base64
 import json
 from datetime import datetime, timezone
 
@@ -178,6 +179,36 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("username", meta["top_keys"])
         self.assertIn("email", meta["top_keys"])
 
+    def test_json5_is_normalized_for_storage(self):
+        result_text = "{'id': 1,}"
+
+        meta, stored_json, stored_text, analysis = tool_results._summarize_result(
+            result_text, "test-id"
+        )
+
+        self.assertTrue(meta["is_json"])
+        self.assertIsNotNone(stored_json)
+        parsed = json.loads(stored_json)
+        self.assertEqual(parsed["id"], 1)
+        self.assertIsNotNone(analysis.parse_info)
+        self.assertEqual(analysis.parse_info.mode, "json5")
+
+    def test_base64_csv_stores_decoded_text(self):
+        csv_text = "id,name\n1,Alice\n2,Bob"
+        encoded = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+        result_text = f"data:text/csv;base64,{encoded}"
+
+        meta, stored_json, stored_text, analysis = tool_results._summarize_result(
+            result_text, "test-id"
+        )
+
+        self.assertFalse(meta["is_json"])
+        self.assertIsNone(stored_json)
+        self.assertIsNotNone(stored_text)
+        self.assertIn("id,name", stored_text)
+        self.assertIsNotNone(analysis.decode_info)
+        self.assertIn("base64", analysis.decode_info.steps)
+
 
 @tag("batch_tool_results")
 class MetaTextFormattingTests(SimpleTestCase):
@@ -288,3 +319,33 @@ class MetaTextFormattingTests(SimpleTestCase):
         # Small results don't need query hints
         self.assertIn("result_id=test-id", result)
         self.assertNotIn("json_extract", result)
+
+    def test_meta_includes_decode_and_parse_info(self):
+        meta = {
+            "bytes": 1000,
+            "line_count": 10,
+            "is_json": True,
+            "json_type": "array",
+            "top_keys": "id,name",
+            "is_binary": False,
+            "has_images": False,
+            "has_base64": False,
+            "is_truncated": False,
+            "truncated_bytes": 0,
+            "decoded_from": "base64+gzip",
+            "decoded_encoding": "utf-8",
+            "parsed_from": "jsonp",
+            "parsed_with": "json5",
+        }
+
+        result = tool_results._format_meta_text(
+            "test-id",
+            meta,
+            analysis=None,
+            stored_in_db=True,
+        )
+
+        self.assertIn("decoded_from=base64+gzip", result)
+        self.assertIn("decoded_encoding=utf-8", result)
+        self.assertIn("parsed_from=jsonp", result)
+        self.assertIn("parsed_with=json5", result)

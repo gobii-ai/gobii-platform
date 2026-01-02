@@ -36,6 +36,22 @@ def _get_db_size_mb(db_path: str) -> float:
     return 0.0
 
 
+def _get_error_hint(error_msg: str) -> str:
+    """Return a helpful hint for common SQLite errors."""
+    error_lower = error_msg.lower()
+    if "union" in error_lower and "column" in error_lower:
+        return " FIX: All SELECTs in UNION/UNION ALL must have the same number of columns."
+    if "no column named" in error_lower or "no such column" in error_lower:
+        return " FIX: Check column name spelling matches your table schema."
+    if "no such table" in error_lower:
+        return " FIX: Create the table first with CREATE TABLE before querying it."
+    if "syntax error" in error_lower:
+        return " FIX: Check SQL syntax - common issues: missing quotes, commas, or parentheses."
+    if "unique constraint" in error_lower:
+        return " FIX: Use INSERT OR REPLACE or INSERT OR IGNORE to handle duplicate keys."
+    return ""
+
+
 def _clean_statement(statement: str) -> Optional[str]:
     trimmed = statement.strip()
     if not trimmed:
@@ -159,14 +175,20 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     only_write_queries = False
                 else:
                     affected = cur.rowcount if cur.rowcount is not None else 0
+                    msg = f"Query {idx} affected {max(0, affected)} rows."
+                    # CTE-based INSERTs often report 0 rows affected even when data is inserted
+                    query_upper = query.upper()
+                    if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
+                        msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
                     results.append({
-                        "message": f"Query {idx} affected {max(0, affected)} rows.",
+                        "message": msg,
                     })
                 conn.commit()
             except Exception as exc:
                 conn.rollback()
                 had_error = True
-                error_message = f"Query {idx} failed: {exc}"
+                hint = _get_error_hint(str(exc))
+                error_message = f"Query {idx} failed: {exc}{hint}"
                 break
             finally:
                 stop_query_timer(conn)

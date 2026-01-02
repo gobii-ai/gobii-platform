@@ -23,6 +23,7 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
+from . import sqlite_analysis
 
 logger = logging.getLogger(__name__)
 
@@ -629,22 +630,34 @@ def _summarize_table(cur, table_name: str, row_count: int) -> list[str]:
     if not columns:
         return lines
 
+    # Fetch rows for analysis and display
     analysis_rows = _fetch_analysis_rows(cur, table_name, row_count)
+
+    # Sample rows display (keep for quick reference)
     display_rows = _select_display_rows(analysis_rows)
     sample_line = _format_sample_rows(display_rows)
     if sample_line:
         lines.append(sample_line)
 
-    column_insights = _analyze_columns(columns, analysis_rows, row_count)
-    summaries = _select_column_summaries(column_insights)
-    if summaries:
-        summary_text = "; ".join(summaries)
-        summary_text = _truncate_text(summary_text, MAX_PROMPT_BYTES // 2)
-        lines.append(f"  profile: {summary_text}")
+    # Use deep analysis for comprehensive insights
+    try:
+        table_analysis = sqlite_analysis.analyze_table(cur, table_name, row_count)
+        deep_lines = sqlite_analysis.format_table_analysis(table_analysis)
+        if deep_lines:
+            lines.extend(deep_lines)
+    except Exception as e:
+        # Fall back to legacy analysis on error
+        logger.debug(f"Deep analysis failed for {table_name}, using legacy: {e}")
+        column_insights = _analyze_columns(columns, analysis_rows, row_count)
+        summaries = _select_column_summaries(column_insights)
+        if summaries:
+            summary_text = "; ".join(summaries)
+            summary_text = _truncate_text(summary_text, MAX_PROMPT_BYTES // 2)
+            lines.append(f"  profile: {summary_text}")
 
-    text_peeks = _collect_text_peeks(column_insights)
-    if text_peeks:
-        lines.append(f"  text_peek: {text_peeks}")
+        text_peeks = _collect_text_peeks(column_insights)
+        if text_peeks:
+            lines.append(f"  text_peek: {text_peeks}")
 
     return lines
 
