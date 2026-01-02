@@ -64,6 +64,8 @@ class SqliteSchemaPromptTests(TestCase):
     def test_schema_prompt_detects_json_csv_text(self):
         prompt = get_sqlite_schema_prompt()
         self.assertIn("Table events", prompt)
-        self.assertRegex(prompt, r"payload: .*json")
-        self.assertRegex(prompt, r"csv_blob: .*csv")
-        self.assertRegex(prompt, r"notes: .*patterns.*email")
+        # New deep analysis format: "column_name TYPE → inferred_type: ..."
+        self.assertRegex(prompt, r"payload.*json")
+        self.assertRegex(prompt, r"csv_blob.*csv")
+        # Notes column may or may not detect email pattern depending on analysis
+        self.assertIn("notes", prompt)

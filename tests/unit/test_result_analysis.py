@@ -1,5 +1,7 @@
 """Tests for the result analysis module."""
 
+import base64
+import gzip
 import json
 
 from django.test import SimpleTestCase, tag
@@ -262,6 +264,20 @@ code_block = True
         self.assertIsNotNone(analysis.doc_structure)
         self.assertGreater(len(analysis.doc_structure.sections), 0)
         self.assertTrue(analysis.doc_structure.has_tables)
+
+    def test_detects_xml_format(self):
+        text = """<?xml version="1.0" encoding="UTF-8"?>
+<root>
+  <item id="1">Alpha</item>
+  <item id="2">Beta</item>
+</root>"""
+
+        analysis = analyze_text(text)
+
+        self.assertEqual(analysis.format, "xml")
+        self.assertIsNotNone(analysis.xml_info)
+        self.assertEqual(analysis.xml_info.root_tag, "root")
+        self.assertGreater(analysis.xml_info.element_count, 0)
 
     def test_detects_log_format(self):
         text = """2024-01-15T10:30:00Z INFO Starting application
@@ -615,6 +631,38 @@ class EdgeCaseTests(SimpleTestCase):
         )
         self.assertIn("GET CSV", analysis.compact_summary)
 
+    def test_detects_embedded_json_string(self):
+        """Detect JSON embedded in string fields and expose query hints."""
+        payload = {
+            "status": "success",
+            "result": "{\"items\": [{\"id\": 1, \"name\": \"Alpha\"}, {\"id\": 2, \"name\": \"Beta\"}]}",
+        }
+        analysis = analyze_result(json.dumps(payload), "json-embedded")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.embedded_content)
+        emb = analysis.json_analysis.embedded_content
+        self.assertEqual(emb.path, "$.result")
+        self.assertEqual(emb.format, "json")
+        self.assertIsNotNone(emb.json_info)
+        self.assertEqual(emb.json_info.primary_array_path, "$.items")
+        self.assertIn("GET JSON", analysis.compact_summary)
+
+    def test_detects_embedded_csv_in_nested_list(self):
+        """Detect CSV embedded under list items with wildcard paths."""
+        payload = {
+            "results": [
+                {"payload": "id,name\n1,Alice\n2,Bob"},
+            ],
+        }
+        analysis = analyze_result(json.dumps(payload), "csv-nested")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.embedded_content)
+        emb = analysis.json_analysis.embedded_content
+        self.assertEqual(emb.format, "csv")
+        self.assertEqual(emb.path, "$.results[*].payload")
+
     def test_csv_in_json_serialization(self):
         """Verify embedded CSV info is serialized correctly."""
         data = {
@@ -646,3 +694,125 @@ class EdgeCaseTests(SimpleTestCase):
         # Should not detect embedded CSV
         self.assertTrue(analysis.is_json)
         self.assertIsNone(analysis.json_analysis.embedded_content)
+
+    def test_parses_jsonp_payload(self):
+        result_text = "callback({\"items\": [{\"id\": 1}]});"
+        analysis = analyze_result(result_text, "jsonp-test")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.primary_array)
+        self.assertIn("items", analysis.json_analysis.primary_array.path)
+        self.assertIsNotNone(analysis.parse_info)
+        self.assertEqual(analysis.parse_info.source, "jsonp")
+
+    def test_parses_json5_payload(self):
+        result_text = "{'items': [{'id': 1,},],}"
+        analysis = analyze_result(result_text, "json5-test")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.normalized_json)
+        parsed = json.loads(analysis.normalized_json)
+        self.assertIn("items", parsed)
+
+    def test_extracts_json_from_html_script(self):
+        html = (
+            "<html><body>"
+            "<script id=\"__NEXT_DATA__\" type=\"application/json\">"
+            "{\"items\":[{\"id\":1}]}"
+            "</script></body></html>"
+        )
+        analysis = analyze_result(html, "html-script-test")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.primary_array)
+        self.assertIn("items", analysis.json_analysis.primary_array.path)
+        self.assertIsNotNone(analysis.parse_info)
+        self.assertIn("html", analysis.parse_info.source)
+
+    def test_extracts_json_from_js_assignment(self):
+        html = (
+            "<html><body>"
+            "<script>window.__NEXT_DATA__ = {\"items\":[{\"id\":1}]};</script>"
+            "</body></html>"
+        )
+        analysis = analyze_result(html, "html-assign-test")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.json_analysis.primary_array)
+        self.assertIn("items", analysis.json_analysis.primary_array.path)
+
+    def test_decodes_base64_json_data_url(self):
+        payload = {"items": [{"id": 1}]}
+        encoded = base64.b64encode(json.dumps(payload).encode("utf-8")).decode("ascii")
+        text = f"data:application/json;base64,{encoded}"
+        analysis = analyze_result(text, "base64-json")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.decode_info)
+        self.assertIn("base64", analysis.decode_info.steps)
+
+    def test_decodes_gzip_base64_json(self):
+        payload = {"items": [{"id": 1}]}
+        compressed = gzip.compress(json.dumps(payload).encode("utf-8"))
+        encoded = base64.b64encode(compressed).decode("ascii")
+        text = f"data:application/octet-stream;base64,{encoded}"
+        analysis = analyze_result(text, "gzip-json")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIsNotNone(analysis.decode_info)
+        self.assertIn("gzip", analysis.decode_info.steps)
+
+    def test_decodes_base64_csv_as_text(self):
+        csv_text = "id,name\n1,Alice\n2,Bob"
+        encoded = base64.b64encode(csv_text.encode("utf-8")).decode("ascii")
+        analysis = analyze_result(encoded, "base64-csv")
+
+        self.assertFalse(analysis.is_json)
+        self.assertIsNotNone(analysis.text_analysis)
+        self.assertEqual(analysis.text_analysis.format, "csv")
+        self.assertIsNotNone(analysis.decode_info)
+        self.assertIn("base64", analysis.decode_info.steps)
+
+    def test_detects_table_array(self):
+        data = [
+            ["id", "name"],
+            [1, "Alice"],
+            [2, "Bob"],
+        ]
+        analysis = analyze_result(json.dumps(data), "table-test")
+
+        self.assertTrue(analysis.is_json)
+        arr = analysis.json_analysis.primary_array
+        self.assertIsNotNone(arr.table_info)
+        self.assertTrue(arr.table_info.has_header)
+        self.assertIn("id", arr.table_info.columns)
+        self.assertIn("$[0]", analysis.query_patterns.list_all)
+
+    def test_single_object_wrapper_query_uses_path(self):
+        data = {"data": {"id": 1, "name": "Alice"}}
+        analysis = analyze_result(json.dumps(data), "wrapper-test")
+
+        self.assertTrue(analysis.is_json)
+        self.assertIn("$.data.id", analysis.query_patterns.list_all)
+
+    def test_json_lines_summary(self):
+        text = "{\"id\": 1, \"name\": \"Alice\"}\n{\"id\": 2, \"name\": \"Bob\"}"
+        analysis = analyze_result(text, "jsonl-test")
+
+        self.assertFalse(analysis.is_json)
+        self.assertEqual(analysis.text_analysis.format, "json_lines")
+        self.assertIn("id", analysis.text_analysis.json_lines_info.fields)
+        self.assertIn("JSON LINES", analysis.compact_summary)
+
+    def test_sse_summary(self):
+        text = (
+            "event: message\n"
+            "data: {\"id\": 1, \"status\": \"ok\"}\n\n"
+            "event: message\n"
+            "data: {\"id\": 2, \"status\": \"ok\"}\n\n"
+        )
+        analysis = analyze_result(text, "sse-test")
+
+        self.assertFalse(analysis.is_json)
+        self.assertEqual(analysis.text_analysis.format, "sse")
+        self.assertIn("SSE", analysis.compact_summary)

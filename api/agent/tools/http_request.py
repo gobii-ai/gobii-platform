@@ -27,6 +27,25 @@ RESPONSE_MAX_BYTES = 5 * 1024 * 1024
 PREVIEW_MAX_BYTES = RESPONSE_MAX_BYTES
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
+_JSON_PREFIXES = (
+    ")]}',",
+    ")]}'",
+    "while(1);",
+    "for(;;);",
+    "/*-secure-*/",
+)
+
+
+def _strip_json_prefixes(text: str) -> str:
+    if not text:
+        return text
+    stripped = text.lstrip("\ufeff")
+    trimmed = stripped.lstrip()
+    for prefix in _JSON_PREFIXES:
+        if trimmed.startswith(prefix):
+            return trimmed[len(prefix):].lstrip()
+    return trimmed
+
 
 class _ResponseBodyResult:
     def __init__(
@@ -496,10 +515,11 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         # Try parsing regardless of content-type since some APIs return JSON with wrong headers.
         # Quick check: only attempt parse if content looks like JSON (starts with { or [).
         # IMPORTANT: Parse BEFORE adding truncation message, otherwise json.loads fails.
-        stripped = content_str.lstrip()
+        normalized = _strip_json_prefixes(content_str)
+        stripped = normalized.lstrip()
         if stripped and stripped[0] in "{[":
             try:
-                content_str = json.loads(content_str)
+                content_str = json.loads(stripped)
             except Exception:
                 pass  # Keep as string if parse fails
         # Add truncation notice for string content only (parsed JSON doesn't need it)

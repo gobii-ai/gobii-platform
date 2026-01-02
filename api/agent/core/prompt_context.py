@@ -562,6 +562,11 @@ Don't include empty strings in query arrays.
 - Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
 - Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
+**UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.
+Wrong: `SELECT 'header' UNION ALL SELECT col1, col2 FROM t` (1 column vs 2 columns - fails!)
+Right: Run separate queries, or pad with empty columns:
+  `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
+
 **Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
 ```
 Table mytable (rows: 150): CREATE TABLE mytable (...)

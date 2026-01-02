@@ -1285,6 +1285,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp-retry" },
+    { name = "beautifulsoup4" },
     { name = "bleach" },
     { name = "boto3" },
     { name = "browser-use" },
@@ -1292,6 +1293,7 @@ dependencies = [
     { name = "celery-redbeat" },
     { name = "channels" },
     { name = "channels-redis" },
+    { name = "charset-normalizer" },
     { name = "cron-descriptor" },
     { name = "cryptography" },
     { name = "daphne" },
@@ -1316,6 +1318,7 @@ dependencies = [
     { name = "imapclient" },
     { name = "inscriptis" },
     { name = "json-schema-to-pydantic" },
+    { name = "json5" },
     { name = "litellm" },
     { name = "mail-parser" },
     { name = "markdown" },
@@ -1392,6 +1395,7 @@ dependencies = [
     { name = "pygments" },
     { name = "pyjwt" },
     { name = "pypandoc-binary" },
+    { name = "python-dateutil" },
     { name = "python-frontmatter" },
     { name = "redis" },
     { name = "requests" },
@@ -1408,6 +1412,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp-retry", specifier = "==2.9.1" },
+    { name = "beautifulsoup4", specifier = ">=4.14.2" },
     { name = "bleach", specifier = "~=6.2.0" },
     { name = "boto3", specifier = "~=1.38.39" },
     { name = "browser-use", specifier = "==0.11.2" },
@@ -1415,6 +1420,7 @@ requires-dist = [
     { name = "celery-redbeat", specifier = "~=2.3.2" },
     { name = "channels", specifier = ">=4.3.1" },
     { name = "channels-redis", specifier = ">=4.3.0" },
+    { name = "charset-normalizer", specifier = ">=3.4.3" },
     { name = "cron-descriptor", specifier = ">=2.0.6" },
     { name = "cryptography", specifier = "~=44.0.3" },
     { name = "daphne", specifier = ">=4.2.1" },
@@ -1440,6 +1446,7 @@ requires-dist = [
     { name = "imapclient", specifier = "~=2.3" },
     { name = "inscriptis", specifier = "==2.6.0" },
     { name = "json-schema-to-pydantic", specifier = "~=0.4.1" },
+    { name = "json5", specifier = ">=0.13.0" },
     { name = "litellm", git = "https://github.com/gobii-ai/litellm.git?rev=1e4f1e10a1a1adbf48b6be8b417844f2dd64162b" },
     { name = "mail-parser", specifier = "==4.1.4" },
     { name = "markdown", specifier = "~=3.8" },
@@ -1516,6 +1523,7 @@ requires-dist = [
     { name = "pygments", specifier = "~=2.19.1" },
     { name = "pyjwt", specifier = "~=2.10.1" },
     { name = "pypandoc-binary", specifier = "==1.15" },
+    { name = "python-dateutil", specifier = ">=2.9.0" },
     { name = "python-frontmatter", specifier = "~=1.1.0" },
     { name = "redis", specifier = "~=6.2.0" },
     { name = "requests", specifier = "~=2.32.4" },
@@ -2106,6 +2114,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/f0/25/c9d8590a698a1cef53859b9a6ff32c79a758f16af4ab37118e4529503b2b/json_schema_to_pydantic-0.4.1.tar.gz", hash = "sha256:218df347563ce91d6214614310723db986e9de38f2bd0f683368a78fd0761a7a", size = 40975, upload-time = "2025-07-14T19:05:30.418Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f9/65/54ac92e3d1346ff21bb7e5b15078046fea552517c2d5d0184e5643074f36/json_schema_to_pydantic-0.4.1-py3-none-any.whl", hash = "sha256:83ecc23c4f44ad013974bd9dfef6475097ea130dc83872d0152f93a953f56564", size = 12969, upload-time = "2025-07-14T19:05:29.289Z" },
+]
+
+[[package]]
+name = "json5"
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/77/e8/a3f261a66e4663f22700bc8a17c08cb83e91fbf086726e7a228398968981/json5-0.13.0.tar.gz", hash = "sha256:b1edf8d487721c0bf64d83c28e91280781f6e21f4a797d3261c7c828d4c165bf", size = 52441, upload-time = "2026-01-01T19:42:14.99Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/9e/038522f50ceb7e74f1f991bf1b699f24b0c2bbe7c390dd36ad69f4582258/json5-0.13.0-py3-none-any.whl", hash = "sha256:9a08e1dd65f6a4d4c6fa82d216cf2477349ec2346a38fd70cc11d2557499fbcc", size = 36163, upload-time = "2026-01-01T19:42:13.962Z" },
 ]
 
 [[package]]

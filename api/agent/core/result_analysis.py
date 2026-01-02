@@ -5,11 +5,21 @@ Analyzes JSON and text data to extract actionable query patterns,
 structure information, and hints that help agents write correct SQL queries.
 """
 
+import base64
+import binascii
+import csv
+import gzip
+import io
 import json
 import re
+import urllib.parse
+import xml.etree.ElementTree as ElementTree
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import json5
+from bs4 import BeautifulSoup
+from charset_normalizer import from_bytes
 
 # Size thresholds for strategy recommendations
 SIZE_SMALL = 4 * 1024        # 4KB - can inline fully
@@ -22,6 +32,47 @@ MAX_ARRAY_SCAN = 1000        # Max items to scan in an array
 MAX_DEPTH = 10               # Max nesting depth to analyze
 MAX_FIELDS = 50              # Max fields to report
 MAX_SAMPLE_BYTES = 300       # Max bytes for sample values
+MAX_EMBEDDED_SCAN_DEPTH = 6
+MAX_EMBEDDED_SCAN_LIST_ITEMS = 25
+MAX_EMBEDDED_CANDIDATES = 50
+MAX_EMBEDDED_STRING_BYTES = 50000
+MAX_JSON_EXTRACT_BYTES = 200000
+MIN_EMBEDDED_CHARS = 20
+MAX_JSON_CANDIDATES = 20
+MAX_BASE64_CHARS = 3000000
+MAX_DECODED_BYTES = 2000000
+MAX_HTML_SCAN_BYTES = 500000
+MAX_JSON_LINES_SCAN = 50
+MAX_SSE_SCAN_LINES = 200
+
+_JSON_PREFIXES = (
+    ")]}',",
+    ")]}'",
+    "while(1);",
+    "for(;;);",
+    "/*-secure-*/",
+)
+
+_PREFERRED_ARRAY_KEYS = {
+    "items",
+    "results",
+    "data",
+    "content",
+    "rows",
+    "records",
+    "entries",
+    "children",
+}
+
+
+@dataclass
+class TableInfo:
+    """Information about JSON arrays of arrays (tabular data)."""
+    has_header: bool = False
+    columns: List[str] = field(default_factory=list)
+    row_count: int = 0
+    column_types: List[str] = field(default_factory=list)
+    sample_rows: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -33,6 +84,7 @@ class ArrayInfo:
     item_sample: Optional[str] = None
     nested_arrays: List[str] = field(default_factory=list)  # paths relative to item
     item_data_key: Optional[str] = None  # e.g., "data" if items are {"kind": ..., "data": {...actual fields...}}
+    table_info: Optional[TableInfo] = None
 
 
 @dataclass
@@ -65,7 +117,6 @@ class CsvInfo:
     sample_rows: List[str] = field(default_factory=list)  # First 2-3 data rows (not header)
     column_types: List[str] = field(default_factory=list)  # Inferred: int, float, text
 
-
 @dataclass
 class DocStructure:
     """Structure information for markdown/HTML documents."""
@@ -76,11 +127,36 @@ class DocStructure:
 
 
 @dataclass
+class XmlInfo:
+    """Structure information for XML documents."""
+    root_tag: Optional[str] = None
+    element_count: int = 0
+    depth: int = 0
+
+
+@dataclass
 class TextHints:
     """Hints for searching/extracting from text."""
     key_positions: Dict[str, int] = field(default_factory=dict)  # keyword -> first position
     line_count: int = 0
     avg_line_length: int = 0
+
+
+@dataclass
+class JsonLinesInfo:
+    """Summary information for newline-delimited JSON."""
+    line_count: int = 0
+    parsed_line_count: int = 0
+    fields: List[str] = field(default_factory=list)
+    sample_objects: List[str] = field(default_factory=list)
+
+
+@dataclass
+class SseInfo:
+    """Summary information for Server-Sent Events."""
+    data_line_count: int = 0
+    event_count_estimate: int = 0
+    json_fields: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -107,9 +183,24 @@ class EmbeddedContent:
     """Structured content embedded in a JSON string field (e.g., CSV in $.content)."""
     path: str  # e.g., "$.content"
     format: str  # csv, json_lines, etc.
+    confidence: float = 0.0
     csv_info: Optional[CsvInfo] = None
+    doc_structure: Optional[DocStructure] = None
+    xml_info: Optional[XmlInfo] = None
+    json_info: Optional["EmbeddedJsonInfo"] = None
     line_count: int = 0
     byte_size: int = 0
+
+
+@dataclass
+class EmbeddedJsonInfo:
+    """Summary information for JSON embedded as a string."""
+    pattern: str
+    wrapper_path: Optional[str] = None
+    primary_array_path: Optional[str] = None
+    primary_array_length: Optional[int] = None
+    primary_array_fields: List[str] = field(default_factory=list)
+    object_fields: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -119,6 +210,22 @@ class QueryPatterns:
     count: Optional[str] = None
     sample: Optional[str] = None
     filter_template: Optional[str] = None
+
+
+@dataclass
+class DecodeInfo:
+    """Information about decoded payloads (base64, gzip, etc.)."""
+    steps: List[str] = field(default_factory=list)
+    bytes_before: int = 0
+    bytes_after: int = 0
+    encoding: Optional[str] = None
+
+
+@dataclass
+class ParseInfo:
+    """Information about how JSON was parsed/extracted."""
+    mode: str = "json"  # json, json5
+    source: str = "raw"  # raw, jsonp, html, data_url, base64, urlencoded, extracted
 
 
 @dataclass
@@ -132,17 +239,21 @@ class JsonAnalysis:
     field_types: List[FieldTypeInfo] = field(default_factory=list)
     pagination: Optional[PaginationInfo] = None
     detected_patterns: Optional[DetectedPatterns] = None
-    embedded_content: Optional[EmbeddedContent] = None  # CSV/structured content in string field
+    embedded_content: Optional[EmbeddedContent] = None  # Backward-compatible first hit
+    embedded_contents: List[EmbeddedContent] = field(default_factory=list)
 
 
 @dataclass
 class TextAnalysis:
     """Complete analysis of text data."""
-    format: str  # csv, markdown, html, log, json_lines, plain
+    format: str  # csv, markdown, html, log, json_lines, sse, xml, plain
     confidence: float = 0.0
     csv_info: Optional[CsvInfo] = None
     doc_structure: Optional[DocStructure] = None
+    xml_info: Optional[XmlInfo] = None
     text_hints: Optional[TextHints] = None
+    json_lines_info: Optional[JsonLinesInfo] = None
+    sse_info: Optional[SseInfo] = None
 
 
 @dataclass
@@ -154,6 +265,356 @@ class ResultAnalysis:
     text_analysis: Optional[TextAnalysis] = None
     query_patterns: Optional[QueryPatterns] = None
     compact_summary: str = ""  # One-line summary for prompt
+    decode_info: Optional[DecodeInfo] = None
+    parse_info: Optional[ParseInfo] = None
+    prepared_text: Optional[str] = None
+    normalized_json: Optional[str] = None
+
+
+@dataclass
+class PreparedResult:
+    """Prepared payload and parse metadata for analysis/storage."""
+    analysis_text: str
+    parsed_json: Optional[Any] = None
+    is_json: bool = False
+    normalized_json: Optional[str] = None
+    decode_info: Optional[DecodeInfo] = None
+    parse_info: Optional[ParseInfo] = None
+
+
+# ---------------------------------------------------------------------------
+# Payload preparation
+# ---------------------------------------------------------------------------
+
+def _is_text_like(text: str) -> bool:
+    if not text:
+        return False
+    sample = text[:1000]
+    if not sample:
+        return False
+    non_printable = sum(
+        1
+        for ch in sample
+        if ord(ch) < 9 or (ord(ch) > 13 and ord(ch) < 32)
+    )
+    return (non_printable / len(sample)) < 0.2
+
+
+def _decode_bytes_to_text(data: bytes) -> Tuple[Optional[str], Optional[str]]:
+    if not data:
+        return None, None
+    match = from_bytes(data).best()
+    if match is not None:
+        text = str(match)
+        if _is_text_like(text):
+            return text, match.encoding
+    try:
+        text = data.decode("utf-8", errors="replace")
+        if _is_text_like(text):
+            return text, "utf-8"
+    except Exception:
+        pass
+    return None, None
+
+
+def _safe_gzip_decompress(data: bytes) -> Optional[bytes]:
+    if not data:
+        return None
+    try:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as gz:
+            out = gz.read(MAX_DECODED_BYTES + 1)
+        if len(out) > MAX_DECODED_BYTES:
+            return None
+        return out
+    except Exception:
+        return None
+
+
+def _extract_data_url(text: str) -> Tuple[Optional[bytes], Optional[str]]:
+    if not text:
+        return None, None
+    if not text.startswith("data:"):
+        return None, None
+    header, sep, payload = text.partition(",")
+    if not sep:
+        return None, None
+    if ";base64" not in header.lower():
+        return None, None
+    if len(payload) > MAX_BASE64_CHARS:
+        return None, None
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+        return decoded, header
+    except (binascii.Error, ValueError):
+        return None, None
+
+
+def _looks_like_base64(text: str) -> bool:
+    if not text:
+        return False
+    candidate = "".join(text.split())
+    if len(candidate) < 16 or len(candidate) > MAX_BASE64_CHARS:
+        return False
+    if len(candidate) % 4 != 0:
+        return False
+    if not re.fullmatch(r"[A-Za-z0-9+/=]+", candidate):
+        return False
+    return True
+
+
+def _decode_base64_text(text: str) -> Tuple[Optional[str], Optional[DecodeInfo]]:
+    if not text:
+        return None, None
+    data_bytes, _ = _extract_data_url(text.strip())
+    steps = []
+    bytes_before = len(text.encode("utf-8"))
+    if data_bytes is not None:
+        steps.append("base64")
+    elif _looks_like_base64(text):
+        candidate = "".join(text.split())
+        try:
+            data_bytes = base64.b64decode(candidate, validate=True)
+            steps.append("base64")
+        except (binascii.Error, ValueError):
+            data_bytes = None
+    if data_bytes is None:
+        return None, None
+
+    if data_bytes.startswith(b"\x1f\x8b"):
+        decompressed = _safe_gzip_decompress(data_bytes)
+        if decompressed:
+            data_bytes = decompressed
+            steps.append("gzip")
+
+    decoded_text, encoding = _decode_bytes_to_text(data_bytes)
+    if not decoded_text:
+        return None, None
+
+    info = DecodeInfo(
+        steps=steps,
+        bytes_before=bytes_before,
+        bytes_after=len(decoded_text.encode("utf-8")),
+        encoding=encoding,
+    )
+    return decoded_text, info
+
+
+def _parse_json_any(text: str) -> Tuple[Optional[Any], Optional[str]]:
+    if not text:
+        return None, None
+    try:
+        return json.loads(text), "json"
+    except Exception:
+        pass
+    try:
+        return json5.loads(text), "json5"
+    except Exception:
+        return None, None
+
+
+def _unwrap_jsonp(text: str) -> Optional[str]:
+    if not text:
+        return None
+    stripped = text.strip()
+    match = re.match(r"^[$\w\.]+\s*\(", stripped)
+    if not match:
+        return None
+    start = match.end() - 1
+    depth = 0
+    in_str = False
+    quote_char = ""
+    escape = False
+    for idx in range(start, len(stripped)):
+        ch = stripped[idx]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote_char:
+                in_str = False
+            continue
+        if ch in ("\"", "'"):
+            in_str = True
+            quote_char = ch
+            continue
+        if ch == "(":
+            depth += 1
+            continue
+        if ch == ")":
+            depth -= 1
+            if depth == 0:
+                payload = stripped[start + 1:idx]
+                return payload.strip()
+    return None
+
+
+def _extract_first_json_block(text: str) -> Optional[str]:
+    if not text:
+        return None
+    start_idx = None
+    for idx, ch in enumerate(text):
+        if ch in "{[":
+            start_idx = idx
+            break
+    if start_idx is None:
+        return None
+    limit = min(len(text), start_idx + MAX_JSON_EXTRACT_BYTES)
+    stack = []
+    in_str = False
+    quote_char = ""
+    escape = False
+    for idx in range(start_idx, limit):
+        ch = text[idx]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == quote_char:
+                in_str = False
+            continue
+        if ch in ("\"", "'"):
+            in_str = True
+            quote_char = ch
+            continue
+        if ch in "{[":
+            stack.append(ch)
+            continue
+        if ch in "}]":
+            if not stack:
+                break
+            opener = stack.pop()
+            if (opener == "{" and ch != "}") or (opener == "[" and ch != "]"):
+                return None
+            if not stack:
+                return text[start_idx:idx + 1]
+    return None
+
+
+def _looks_like_html(text: str) -> bool:
+    if not text:
+        return False
+    sample = text[:2000].lower()
+    return "<html" in sample or "<body" in sample or "<script" in sample
+
+
+def _extract_json_from_html(text: str) -> List[Tuple[str, str]]:
+    if not text or not _looks_like_html(text):
+        return []
+    scan_text = text if len(text) <= MAX_HTML_SCAN_BYTES else text[:MAX_HTML_SCAN_BYTES]
+    soup = BeautifulSoup(scan_text, "html.parser")
+    candidates: List[Tuple[str, str]] = []
+
+    for script in soup.find_all("script"):
+        script_text = script.string or script.get_text()
+        if not script_text:
+            continue
+        script_text = script_text.strip()
+        if not script_text:
+            continue
+        script_type = (script.get("type") or "").lower()
+        script_id = (script.get("id") or "").lower()
+        if "json" in script_type or script_id in {"__next_data__", "__nuxt__"}:
+            candidates.append((script_text, "html_script"))
+            continue
+        if "__next_data__" in script_text or "__nuxt__" in script_text:
+            extracted = _extract_first_json_block(script_text)
+            if extracted:
+                candidates.append((extracted, "html_script"))
+                continue
+        if "=" in script_text and "{" in script_text:
+            extracted = _extract_first_json_block(script_text)
+            if extracted:
+                candidates.append((extracted, "html_script"))
+
+    for pre in soup.find_all("pre"):
+        pre_text = pre.get_text().strip()
+        if pre_text.startswith("{") or pre_text.startswith("["):
+            candidates.append((pre_text, "html_pre"))
+
+    return candidates[:MAX_JSON_CANDIDATES]
+
+
+def _extract_urlencoded_json(text: str) -> Optional[str]:
+    if not text:
+        return None
+    if "%7b" not in text.lower() and "%5b" not in text.lower():
+        return None
+    decoded = urllib.parse.unquote_plus(text)
+    decoded = decoded.strip()
+    if decoded.startswith("{") or decoded.startswith("["):
+        return decoded
+    if "=" not in decoded:
+        return None
+    pairs = urllib.parse.parse_qs(decoded, keep_blank_values=True)
+    for values in pairs.values():
+        for value in values:
+            if not value:
+                continue
+            candidate = value.strip()
+            if candidate.startswith("{") or candidate.startswith("["):
+                return candidate
+    return None
+
+
+def prepare_result_text(result_text: str) -> PreparedResult:
+    raw_text = result_text or ""
+    if _analyze_json_lines(raw_text) or _analyze_sse(raw_text):
+        return PreparedResult(analysis_text=raw_text, parsed_json=None, is_json=False)
+    candidates: List[Tuple[str, str, Optional[DecodeInfo]]] = []
+
+    candidates.append((raw_text, "raw", None))
+
+    jsonp = _unwrap_jsonp(raw_text)
+    if jsonp:
+        candidates.append((jsonp, "jsonp", None))
+
+    urlencoded = _extract_urlencoded_json(raw_text)
+    if urlencoded:
+        candidates.append((urlencoded, "urlencoded", None))
+
+    for candidate, source in _extract_json_from_html(raw_text):
+        candidates.append((candidate, source, None))
+
+    extracted = _extract_first_json_block(raw_text)
+    if extracted and extracted != raw_text:
+        candidates.append((extracted, "extracted", None))
+
+    decoded_text, decode_info = _decode_base64_text(raw_text)
+    if decoded_text:
+        if _analyze_json_lines(decoded_text) or _analyze_sse(decoded_text):
+            return PreparedResult(
+                analysis_text=decoded_text,
+                parsed_json=None,
+                is_json=False,
+                decode_info=decode_info,
+            )
+        candidates.append((decoded_text, "base64", decode_info))
+
+    for text, source, info in candidates[:MAX_JSON_CANDIDATES]:
+        parsed, mode = _parse_json_any(_strip_json_prefixes(text).strip())
+        if parsed is not None:
+            normalized = json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
+            return PreparedResult(
+                analysis_text=normalized,
+                parsed_json=parsed,
+                is_json=True,
+                normalized_json=normalized,
+                decode_info=info,
+                parse_info=ParseInfo(mode=mode or "json", source=source),
+            )
+
+    if decoded_text:
+        return PreparedResult(
+            analysis_text=decoded_text,
+            parsed_json=None,
+            is_json=False,
+            normalized_json=None,
+            decode_info=decode_info,
+        )
+
+    return PreparedResult(analysis_text=raw_text, parsed_json=None, is_json=False)
 
 
 # ---------------------------------------------------------------------------
@@ -213,6 +674,50 @@ def _truncate_sample(value: Any, max_bytes: int = MAX_SAMPLE_BYTES) -> str:
         return text[:max_bytes - 3] + "..."
     except Exception:
         return ""
+
+
+def _strip_json_prefixes(text: str) -> str:
+    """Remove common anti-CSRF prefixes from JSON responses."""
+    if not text:
+        return text
+    stripped = text.lstrip("\ufeff")
+    trimmed = stripped.lstrip()
+    for prefix in _JSON_PREFIXES:
+        if trimmed.startswith(prefix):
+            return trimmed[len(prefix):].lstrip()
+    return trimmed
+
+
+def _try_parse_json_string(text: str) -> Optional[Any]:
+    """Parse JSON from a string if it looks like a standalone JSON payload."""
+    if not text:
+        return None
+    candidate = _strip_json_prefixes(text).strip()
+    if not candidate:
+        return None
+    if candidate[0] not in "{[":
+        return None
+    if candidate[-1] not in "}]":
+        return None
+    if len(candidate) > MAX_JSON_EXTRACT_BYTES:
+        return None
+    parsed, _ = _parse_json_any(candidate)
+    return parsed
+
+
+def normalize_json_text(text: str) -> Optional[str]:
+    """Return a cleaned JSON payload if the text is JSON with known prefixes."""
+    if not text:
+        return None
+    candidate = _strip_json_prefixes(text).strip()
+    if not candidate:
+        return None
+    if candidate[0] not in "{[" or candidate[-1] not in "}]":
+        return None
+    parsed, _ = _parse_json_any(candidate)
+    if parsed is None:
+        return None
+    return json.dumps(parsed, ensure_ascii=False, separators=(",", ":"))
 
 
 def _analyze_array_item_fields(items: List[Any], max_items: int = 5) -> Tuple[List[str], List[FieldTypeInfo], Optional[str], Optional[str]]:
@@ -344,9 +849,76 @@ def _find_nested_arrays(item: Dict, prefix: str = "") -> List[str]:
     return arrays[:5]  # Limit nested array reporting
 
 
+def _detect_table_array(arr: List[Any]) -> Optional[TableInfo]:
+    """Detect array-of-arrays structures that represent tabular data."""
+    if not arr:
+        return None
+    sample_rows = [row for row in arr[:10] if isinstance(row, list)]
+    if len(sample_rows) < 2:
+        return None
+    lengths = [len(row) for row in sample_rows if row]
+    if not lengths:
+        return None
+    length_counts: Dict[int, int] = {}
+    for length in lengths:
+        length_counts[length] = length_counts.get(length, 0) + 1
+    common_len = max(length_counts, key=length_counts.get)
+    if common_len < 2:
+        return None
+    sample_rows = [row for row in sample_rows if len(row) == common_len]
+    if len(sample_rows) < 2:
+        return None
+
+    header_row = sample_rows[0]
+    header_cells = [
+        cell for cell in header_row
+        if isinstance(cell, str) and cell.strip() and len(cell) < 50
+    ]
+    numeric_headers = sum(
+        1
+        for cell in header_row
+        if isinstance(cell, str) and re.match(r'^-?\d+(\.\d+)?$', cell.strip())
+    )
+    has_header = len(header_cells) == common_len and numeric_headers < max(1, common_len // 2)
+
+    if has_header:
+        columns = [cell.strip() for cell in header_row]
+        data_rows = sample_rows[1:4]
+        row_count = max(0, len(arr) - 1)
+    else:
+        columns = [f"col{i + 1}" for i in range(common_len)]
+        data_rows = sample_rows[:3]
+        row_count = len(arr)
+
+    column_types: List[str] = []
+    if data_rows:
+        col_values = [[] for _ in columns]
+        for row in data_rows:
+            for idx, val in enumerate(row[:len(columns)]):
+                col_values[idx].append(str(val) if val is not None else "")
+        column_types = [_infer_column_type(values) for values in col_values]
+
+    sample_rows_text = [json.dumps(row, ensure_ascii=False)[:300] for row in data_rows]
+
+    return TableInfo(
+        has_header=has_header,
+        columns=columns[:20],
+        row_count=row_count,
+        column_types=column_types[:20],
+        sample_rows=sample_rows_text,
+    )
+
+
 def _analyze_array(arr: List, path: str) -> ArrayInfo:
     """Analyze a JSON array."""
     length = len(arr)
+    table_info = _detect_table_array(arr)
+    if table_info:
+        return ArrayInfo(
+            path=path,
+            length=length,
+            table_info=table_info,
+        )
     item_fields, field_types, sample, item_data_key = _analyze_array_item_fields(arr)
 
     # Check for nested arrays in first item
@@ -392,16 +964,42 @@ def _detect_wrapper_path(data: Dict) -> Tuple[Optional[str], Any]:
     return None, data
 
 
+def _find_nested_pagination_dict(data: Any, depth: int = 0) -> Optional[Dict]:
+    if depth > 3:
+        return None
+    if isinstance(data, dict):
+        for key in ("pageInfo", "page_info", "pagination", "paging"):
+            if key in data and isinstance(data[key], dict):
+                return data[key]
+        for value in data.values():
+            found = _find_nested_pagination_dict(value, depth + 1)
+            if found:
+                return found
+    elif isinstance(data, list):
+        for item in data[:5]:
+            found = _find_nested_pagination_dict(item, depth + 1)
+            if found:
+                return found
+    return None
+
+
 def _detect_pagination(data: Dict) -> PaginationInfo:
     """Detect pagination patterns in response."""
     info = PaginationInfo()
 
     pagination_fields = {
-        "next": ["next_cursor", "nextCursor", "next_page_token", "nextPageToken", "next", "cursor", "after"],
-        "total": ["total", "total_count", "totalCount", "count", "total_results", "totalResults"],
-        "has_more": ["has_more", "hasMore", "has_next", "hasNext", "more"],
+        "next": [
+            "next_cursor", "nextCursor", "next_page_token", "nextPageToken",
+            "next", "cursor", "after", "endCursor", "next_page", "nextPage",
+            "next_url", "nextUrl",
+        ],
+        "total": [
+            "total", "total_count", "totalCount", "count", "total_results",
+            "totalResults", "result_count", "resultCount",
+        ],
+        "has_more": ["has_more", "hasMore", "has_next", "hasNext", "more", "hasNextPage"],
         "page": ["page", "current_page", "currentPage", "page_number", "pageNumber"],
-        "limit": ["limit", "per_page", "perPage", "page_size", "pageSize"],
+        "limit": ["limit", "per_page", "perPage", "page_size", "pageSize", "first"],
     }
 
     def find_field(candidates: List[str], obj: Dict) -> Optional[str]:
@@ -411,11 +1009,15 @@ def _detect_pagination(data: Dict) -> PaginationInfo:
         return None
 
     # Flatten nested structures for searching
-    search_obj = data
-    if "meta" in data and isinstance(data["meta"], dict):
-        search_obj = {**data, **data["meta"]}
-    if "pagination" in data and isinstance(data["pagination"], dict):
-        search_obj = {**data, **data["pagination"]}
+    search_obj = dict(data)
+    for key in ("meta", "pagination", "pageInfo", "page_info", "links", "link"):
+        if key in data and isinstance(data[key], dict):
+            search_obj.update(data[key])
+
+    # Look for nested pagination hints if present
+    nested_paging = _find_nested_pagination_dict(data, depth=0)
+    if nested_paging:
+        search_obj.update(nested_paging)
 
     info.next_field = find_field(pagination_fields["next"], search_obj)
     info.total_field = find_field(pagination_fields["total"], search_obj)
@@ -504,55 +1106,168 @@ def _get_scalar_fields(data: Dict, exclude_keys: set) -> List[str]:
     return scalars[:20]
 
 
-def _detect_embedded_content(data: Dict) -> Optional[EmbeddedContent]:
-    """Detect structured content (CSV, etc.) embedded in JSON string fields.
+def _summarize_embedded_json(parsed: Any) -> EmbeddedJsonInfo:
+    analysis = analyze_json(parsed, "embedded-json", detect_embedded_content=False)
+    info = EmbeddedJsonInfo(pattern=analysis.pattern, wrapper_path=analysis.wrapper_path)
+    if analysis.primary_array:
+        info.primary_array_path = analysis.primary_array.path
+        info.primary_array_length = analysis.primary_array.length
+        info.primary_array_fields = analysis.primary_array.item_fields[:10]
+    elif analysis.field_types:
+        info.object_fields = [ft.name for ft in analysis.field_types[:10]]
+    return info
 
-    When http_request fetches a CSV file, the result is:
-    {"url": "...", "status_code": 200, "content": "id,name,email\\n1,Alice,..."}
 
-    This detects when a string field contains parseable structured data.
-    """
-    # Fields that commonly contain fetched content
-    content_fields = ["content", "body", "data", "text", "response", "payload"]
+def _analyze_embedded_text(
+    text: str,
+    full_text: str,
+    path: str,
+) -> Optional[EmbeddedContent]:
+    if len(text) < MIN_EMBEDDED_CHARS:
+        return None
 
-    for field_name in content_fields:
-        if field_name not in data:
-            continue
-        val = data[field_name]
-        if not isinstance(val, str) or len(val) < 20:
-            continue
+    line_count = full_text.count("\n") + (1 if full_text else 0)
+    byte_size = len(full_text.encode("utf-8")) if full_text else 0
 
-        # Check for CSV
-        is_csv, csv_info = _detect_csv(val)
-        if is_csv and csv_info.columns and len(csv_info.columns) >= 2:
-            return EmbeddedContent(
-                path=f"$.{field_name}",
-                format="csv",
-                csv_info=csv_info,
-                line_count=csv_info.row_count_estimate + (1 if csv_info.has_header else 0),
-                byte_size=len(val.encode("utf-8")),
-            )
+    jsonl_info = _analyze_json_lines(text)
+    if jsonl_info:
+        return EmbeddedContent(
+            path=path,
+            format="json_lines",
+            confidence=0.9,
+            line_count=line_count,
+            byte_size=byte_size,
+        )
 
-        # Check for JSON lines (newline-delimited JSON)
-        lines = val.strip().split('\n', 5)
-        if len(lines) >= 2:
-            try:
-                # Try parsing first two lines as JSON
-                json.loads(lines[0])
-                json.loads(lines[1])
-                return EmbeddedContent(
-                    path=f"$.{field_name}",
-                    format="json_lines",
-                    line_count=val.count('\n') + 1,
-                    byte_size=len(val.encode("utf-8")),
-                )
-            except (json.JSONDecodeError, ValueError):
-                pass
+    parsed_json = _try_parse_json_string(text)
+    if parsed_json is not None:
+        return EmbeddedContent(
+            path=path,
+            format="json",
+            confidence=0.95,
+            json_info=_summarize_embedded_json(parsed_json),
+            line_count=line_count,
+            byte_size=byte_size,
+        )
+
+    is_csv, csv_info = _detect_csv(text)
+    if is_csv and csv_info.columns and len(csv_info.columns) >= 2:
+        return EmbeddedContent(
+            path=path,
+            format="csv",
+            confidence=0.9,
+            csv_info=csv_info,
+            line_count=csv_info.row_count_estimate + (1 if csv_info.has_header else 0),
+            byte_size=byte_size,
+        )
+
+    is_xml, xml_info = _detect_xml(text)
+    if is_xml:
+        return EmbeddedContent(
+            path=path,
+            format="xml",
+            confidence=0.85,
+            xml_info=xml_info,
+            line_count=line_count,
+            byte_size=byte_size,
+        )
+
+    is_html, html_structure = _detect_html(text)
+    if is_html:
+        return EmbeddedContent(
+            path=path,
+            format="html",
+            confidence=0.85,
+            doc_structure=html_structure,
+            line_count=line_count,
+            byte_size=byte_size,
+        )
+
+    is_md, md_structure = _detect_markdown(text)
+    if is_md:
+        return EmbeddedContent(
+            path=path,
+            format="markdown",
+            confidence=0.8,
+            doc_structure=md_structure,
+            line_count=line_count,
+            byte_size=byte_size,
+        )
 
     return None
 
 
-def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
+def _iter_string_fields(
+    data: Any,
+    path: str = "$",
+    depth: int = 0,
+) -> List[Tuple[str, str]]:
+    if depth > MAX_EMBEDDED_SCAN_DEPTH:
+        return []
+
+    results: List[Tuple[str, str]] = []
+    if isinstance(data, dict):
+        for key, val in data.items():
+            key_path = f"{path}.{key}"
+            if isinstance(val, str):
+                results.append((key_path, val))
+            elif isinstance(val, (dict, list)):
+                results.extend(_iter_string_fields(val, key_path, depth + 1))
+    elif isinstance(data, list):
+        list_path = f"{path}[*]"
+        for item in data[:MAX_EMBEDDED_SCAN_LIST_ITEMS]:
+            if isinstance(item, str):
+                results.append((list_path, item))
+            elif isinstance(item, (dict, list)):
+                results.extend(_iter_string_fields(item, list_path, depth + 1))
+
+    return results
+
+
+def _embedded_sort_key(entry: EmbeddedContent) -> Tuple[int, float, int]:
+    format_priority = {
+        "json": 4,
+        "json_lines": 3,
+        "csv": 3,
+        "xml": 2,
+        "html": 1,
+        "markdown": 1,
+    }
+    return (
+        format_priority.get(entry.format, 0),
+        entry.confidence,
+        entry.byte_size,
+    )
+
+
+def _detect_embedded_contents(data: Any) -> List[EmbeddedContent]:
+    """Detect structured content embedded in JSON string fields."""
+    if not isinstance(data, (dict, list)):
+        return []
+
+    found: Dict[str, EmbeddedContent] = {}
+    scanned = 0
+    for path, val in _iter_string_fields(data):
+        if scanned >= MAX_EMBEDDED_CANDIDATES:
+            break
+        if not val or len(val) < MIN_EMBEDDED_CHARS:
+            continue
+        scanned += 1
+
+        sample = val if len(val) <= MAX_EMBEDDED_STRING_BYTES else val[:MAX_EMBEDDED_STRING_BYTES]
+        embedded = _analyze_embedded_text(sample, val, path)
+        if not embedded:
+            continue
+        existing = found.get(path)
+        if not existing or embedded.confidence > existing.confidence:
+            found[path] = embedded
+
+    results = list(found.values())
+    results.sort(key=_embedded_sort_key, reverse=True)
+    return results[:5]
+
+
+def analyze_json(data: Any, result_id: str, *, detect_embedded_content: bool = True) -> JsonAnalysis:
     """Perform complete JSON analysis."""
     analysis = JsonAnalysis(pattern="unknown")
 
@@ -561,6 +1276,9 @@ def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
         analysis.pattern = "array"
         analysis.primary_array = _analyze_array(data, "$")
         analysis.detected_patterns = _detect_patterns(data, None)
+        if detect_embedded_content:
+            analysis.embedded_contents = _detect_embedded_contents(data)
+            analysis.embedded_content = analysis.embedded_contents[0] if analysis.embedded_contents else None
 
     elif isinstance(data, dict):
         # Check for wrapper
@@ -571,8 +1289,21 @@ def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
         all_arrays = _find_all_arrays(data)
 
         if all_arrays:
-            # Sort by depth (shallower first) then by size (larger first)
-            all_arrays.sort(key=lambda x: (x[0].count('.'), -len(x[1])))
+            def array_score(entry: Tuple[str, List]) -> Tuple[int, float, int, int]:
+                path, arr = entry
+                depth = path.count(".")
+                length = len(arr)
+                sample_items = arr[:5] if isinstance(arr, list) else []
+                object_count = sum(1 for item in sample_items if isinstance(item, dict))
+                object_ratio = object_count / max(1, len(sample_items))
+                path_bonus = 0
+                tokens = [t for t in re.split(r"[.\[]", path.replace("$", "")) if t]
+                for key in _PREFERRED_ARRAY_KEYS:
+                    if key in tokens:
+                        path_bonus += 1
+                return (path_bonus, object_ratio, length, -depth)
+
+            all_arrays.sort(key=array_score, reverse=True)
 
             # Primary array is the most prominent one
             primary_path, primary_arr = all_arrays[0]
@@ -591,7 +1322,7 @@ def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
             analysis.pattern = "single_object"
             # Get field types for single object
             if wrapper_path and isinstance(unwrapped, dict):
-                fields, type_infos, sample = _analyze_array_item_fields([unwrapped])
+                fields, type_infos, sample, _ = _analyze_array_item_fields([unwrapped])
                 analysis.field_types = type_infos
 
         # Pagination detection
@@ -606,8 +1337,10 @@ def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
         # Pattern detection
         analysis.detected_patterns = _detect_patterns(data, wrapper_path)
 
-        # Check for embedded structured content (CSV in string fields)
-        analysis.embedded_content = _detect_embedded_content(data)
+        # Check for embedded structured content (CSV/JSON/etc in string fields)
+        if detect_embedded_content:
+            analysis.embedded_contents = _detect_embedded_contents(data)
+            analysis.embedded_content = analysis.embedded_contents[0] if analysis.embedded_contents else None
 
     return analysis
 
@@ -655,36 +1388,59 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     column types so agents can parse CSV without seeing full data.
     """
     info = CsvInfo()
-    lines = text.split('\n', 20)  # Check first 20 lines
+    lines = text.split('\n', 50)  # Check first 50 lines
     if len(lines) < 2:
         return False, info
 
-    # Try different delimiters
+    sample_lines = [line for line in lines[:20] if line.strip()]
+    if len(sample_lines) < 2:
+        return False, info
+    sample_text = "\n".join(sample_lines)
+
+    # Try csv.Sniffer first for messy real-world files.
+    sniffer = csv.Sniffer()
+    dialect = None
+    try:
+        dialect = sniffer.sniff(sample_text, delimiters=[",", "\t", ";", "|"])
+    except csv.Error:
+        dialect = None
+
+    # Fallback to simple delimiter consistency if sniffer fails.
     delimiters = [',', '\t', ';', '|']
     best_delimiter = ','
     best_consistency = 0
 
-    for delim in delimiters:
-        counts = [line.count(delim) for line in lines[:10] if line.strip()]
-        if not counts:
-            continue
-        # Check if counts are consistent
-        if max(counts) > 0 and max(counts) == min(counts):
-            if counts[0] > best_consistency:
-                best_consistency = counts[0]
-                best_delimiter = delim
+    if dialect:
+        best_delimiter = dialect.delimiter
+        best_consistency = 1
+    else:
+        for delim in delimiters:
+            counts = [line.count(delim) for line in sample_lines[:10] if line.strip()]
+            if not counts:
+                continue
+            # Check if counts are consistent
+            if max(counts) > 0 and max(counts) == min(counts):
+                if counts[0] > best_consistency:
+                    best_consistency = counts[0]
+                    best_delimiter = delim
 
     if best_consistency < 1:
         return False, info
 
     info.delimiter = best_delimiter
 
-    # Parse header
-    header_line = lines[0]
-    columns = [c.strip().strip('"\'') for c in header_line.split(best_delimiter)]
+    reader = csv.reader(sample_lines, delimiter=best_delimiter)
+    rows = list(reader)
+    if not rows:
+        return False, info
 
-    # Check if first row looks like a header (non-numeric, reasonable names)
-    looks_like_header = all(
+    header_row = rows[0]
+    if header_row:
+        header_row[0] = header_row[0].lstrip("\ufeff")
+    columns = [c.strip().strip('"\'') for c in header_row]
+
+    # Check if first row looks like a header (non-numeric, reasonable names).
+    looks_like_header = sniffer.has_header(sample_text) if dialect else all(
         not re.match(r'^-?\d+\.?\d*$', col) and len(col) < 50
         for col in columns if col
     )
@@ -698,15 +1454,14 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
         info.columns = [f"col{i}" for i in range(len(columns))][:20]
 
     # Extract first 2-3 data rows (after header if present)
-    data_lines = [l for l in lines[data_start_idx:data_start_idx + 3] if l.strip()]
-    info.sample_rows = [line[:300] for line in data_lines]
+    data_rows = [row for row in rows[data_start_idx:data_start_idx + 3] if any(cell.strip() for cell in row)]
+    info.sample_rows = [best_delimiter.join(row)[:300] for row in data_rows]
 
     # Infer column types from sample data
-    if data_lines and info.columns:
+    if data_rows and info.columns:
         # Parse sample rows into column values
         col_values: List[List[str]] = [[] for _ in info.columns]
-        for line in data_lines:
-            row_values = line.split(best_delimiter)
+        for row_values in data_rows:
             for i, val in enumerate(row_values[:len(info.columns)]):
                 col_values[i].append(val)
 
@@ -749,6 +1504,49 @@ def _detect_markdown(text: str) -> Tuple[bool, DocStructure]:
     structure.has_tables = bool(re.search(r'\|.+\|.+\|', text))
 
     return True, structure
+
+
+def _normalize_xml_tag(tag: str) -> str:
+    if not tag:
+        return tag
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _detect_xml(text: str) -> Tuple[bool, XmlInfo]:
+    """Detect if text is XML format."""
+    info = XmlInfo()
+    stripped = text.lstrip()
+    if not stripped or "<" not in stripped or ">" not in stripped:
+        return False, info
+
+    if re.search(r"<!doctype\s+html|<html\b", stripped, re.IGNORECASE):
+        return False, info
+
+    if len(stripped) > MAX_JSON_EXTRACT_BYTES:
+        return False, info
+
+    try:
+        root = ElementTree.fromstring(stripped)
+    except ElementTree.ParseError:
+        return False, info
+
+    info.root_tag = _normalize_xml_tag(root.tag)
+    element_count = 0
+    max_depth = 0
+    stack = [(root, 1)]
+    while stack:
+        node, depth = stack.pop()
+        element_count += 1
+        if depth > max_depth:
+            max_depth = depth
+        for child in list(node):
+            stack.append((child, depth + 1))
+
+    info.element_count = element_count
+    info.depth = max_depth
+    return True, info
 
 
 def _detect_html(text: str) -> Tuple[bool, DocStructure]:
@@ -802,22 +1600,77 @@ def _detect_log_format(text: str) -> bool:
     return matches >= 3
 
 
-def _detect_json_lines(text: str) -> bool:
-    """Detect if text is newline-delimited JSON."""
-    lines = [l.strip() for l in text.split('\n', 10) if l.strip()]
+def _analyze_json_lines(text: str) -> Optional[JsonLinesInfo]:
+    """Analyze newline-delimited JSON."""
+    if not text:
+        return None
+    stripped = text.strip()
+    if stripped.startswith("[") and stripped.endswith("]"):
+        return None
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
     if len(lines) < 2:
-        return False
+        return None
 
-    json_lines = 0
-    for line in lines[:10]:
-        if line.startswith('{') and line.endswith('}'):
-            try:
-                json.loads(line)
-                json_lines += 1
-            except Exception:
-                pass
+    parsed_count = 0
+    field_counts: Dict[str, int] = {}
+    samples: List[str] = []
+    for line in lines[:MAX_JSON_LINES_SCAN]:
+        if not (line.startswith("{") or line.startswith("[")):
+            continue
+        parsed, _ = _parse_json_any(line)
+        if parsed is None:
+            continue
+        parsed_count += 1
+        if isinstance(parsed, dict):
+            for key in parsed.keys():
+                field_counts[key] = field_counts.get(key, 0) + 1
+        if len(samples) < 3:
+            samples.append(line[:300])
 
-    return json_lines >= 3
+    if parsed_count < 2:
+        return None
+
+    fields = sorted(field_counts.keys(), key=lambda k: -field_counts[k])[:15]
+    return JsonLinesInfo(
+        line_count=len(lines),
+        parsed_line_count=parsed_count,
+        fields=fields,
+        sample_objects=samples,
+    )
+
+
+def _analyze_sse(text: str) -> Optional[SseInfo]:
+    """Analyze Server-Sent Events text and extract JSON field hints."""
+    if not text:
+        return None
+    lines = text.splitlines()
+    data_lines: List[str] = []
+    event_count = 0
+    for line in lines[:MAX_SSE_SCAN_LINES]:
+        if line.strip() == "":
+            event_count += 1
+            continue
+        if line.startswith("data:"):
+            payload = line[5:].lstrip()
+            if payload and payload != "[DONE]":
+                data_lines.append(payload)
+
+    if len(data_lines) < 2:
+        return None
+
+    field_counts: Dict[str, int] = {}
+    for payload in data_lines[:MAX_JSON_LINES_SCAN]:
+        parsed, _ = _parse_json_any(payload)
+        if isinstance(parsed, dict):
+            for key in parsed.keys():
+                field_counts[key] = field_counts.get(key, 0) + 1
+
+    fields = sorted(field_counts.keys(), key=lambda k: -field_counts[k])[:15]
+    return SseInfo(
+        data_line_count=len(data_lines),
+        event_count_estimate=max(event_count, 1),
+        json_fields=fields,
+    )
 
 
 def _extract_text_hints(text: str) -> TextHints:
@@ -846,9 +1699,19 @@ def analyze_text(text: str) -> TextAnalysis:
     analysis = TextAnalysis(format="plain")
 
     # Check JSON lines first (before CSV, since JSON has commas)
-    if _detect_json_lines(text):
+    json_lines_info = _analyze_json_lines(text)
+    if json_lines_info:
         analysis.format = "json_lines"
         analysis.confidence = 0.9
+        analysis.json_lines_info = json_lines_info
+        analysis.text_hints = _extract_text_hints(text)
+        return analysis
+
+    sse_info = _analyze_sse(text)
+    if sse_info:
+        analysis.format = "sse"
+        analysis.confidence = 0.8
+        analysis.sse_info = sse_info
         analysis.text_hints = _extract_text_hints(text)
         return analysis
 
@@ -858,6 +1721,14 @@ def analyze_text(text: str) -> TextAnalysis:
         analysis.format = "csv"
         analysis.confidence = 0.9
         analysis.csv_info = csv_info
+        analysis.text_hints = _extract_text_hints(text)
+        return analysis
+
+    is_xml, xml_info = _detect_xml(text)
+    if is_xml:
+        analysis.format = "xml"
+        analysis.confidence = 0.85
+        analysis.xml_info = xml_info
         analysis.text_hints = _extract_text_hints(text)
         return analysis
 
@@ -930,6 +1801,11 @@ def _determine_size_strategy(byte_count: int) -> SizeStrategy:
 # Query Pattern Generation
 # ---------------------------------------------------------------------------
 
+def _safe_sql_identifier(name: str, fallback: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_]", "_", name).strip("_")
+    return cleaned or fallback
+
+
 def _generate_query_patterns(
     result_id: str,
     json_analysis: Optional[JsonAnalysis],
@@ -949,6 +1825,41 @@ def _generate_query_patterns(
                 each_expr = "json_each(result_json)"
             else:
                 each_expr = f"json_each(result_json,'{path}')"
+
+            if arr.table_info:
+                table = arr.table_info
+                col_names = table.columns[:5] if table.columns else []
+                extracts = ", ".join(
+                    f"json_extract(r.value,'$[{idx}]') AS "
+                    f"{_safe_sql_identifier(name, f'col{idx + 1}')}"
+                    for idx, name in enumerate(col_names)
+                )
+                row_filter = ""
+                if table.has_header:
+                    row_filter = " AND CAST(r.key AS INTEGER) > 0"
+                if extracts:
+                    patterns.list_all = (
+                        f"SELECT {extracts} "
+                        f"FROM __tool_results, {each_expr} AS r "
+                        f"WHERE result_id='{result_id}'{row_filter} LIMIT 25"
+                    )
+                patterns.count = (
+                    f"SELECT COUNT(*) "
+                    f"FROM __tool_results, {each_expr} AS r "
+                    f"WHERE result_id='{result_id}'{row_filter}"
+                )
+                patterns.sample = (
+                    f"SELECT r.value "
+                    f"FROM __tool_results, {each_expr} AS r "
+                    f"WHERE result_id='{result_id}'{row_filter} LIMIT 1"
+                )
+                if col_names:
+                    patterns.filter_template = (
+                        f"SELECT ... FROM __tool_results, {each_expr} AS r "
+                        f"WHERE result_id='{result_id}'{row_filter} "
+                        f"AND json_extract(r.value,'$[0]')='value'"
+                    )
+                return patterns
 
             # If items have a data wrapper (e.g., {"kind": ..., "data": {...fields...}}),
             # prefix field paths with the wrapper key
@@ -987,8 +1898,11 @@ def _generate_query_patterns(
         elif json_analysis.pattern == "single_object":
             # Direct extraction for single objects
             if json_analysis.field_types:
+                prefix = "$"
+                if json_analysis.wrapper_path:
+                    prefix = json_analysis.wrapper_path
                 fields = [ft.name for ft in json_analysis.field_types[:5]]
-                extracts = ", ".join(f"json_extract(result_json,'$.{f}')" for f in fields)
+                extracts = ", ".join(f"json_extract(result_json,'{prefix}.{f}')" for f in fields)
                 patterns.list_all = (
                     f"SELECT {extracts} "
                     f"FROM __tool_results WHERE result_id='{result_id}'"
@@ -1032,6 +1946,8 @@ def _generate_compact_summary(
     json_analysis: Optional[JsonAnalysis],
     text_analysis: Optional[TextAnalysis],
     query_patterns: Optional["QueryPatterns"] = None,
+    parse_info: Optional[ParseInfo] = None,
+    decode_info: Optional[DecodeInfo] = None,
 ) -> str:
     """Generate a compact, actionable summary for the prompt.
 
@@ -1041,6 +1957,19 @@ def _generate_compact_summary(
     3. Brief structure info
     """
     parts = []
+
+    def _split_wildcard_path(path: str) -> Tuple[Optional[str], Optional[str]]:
+        if "[*]" not in path:
+            return None, None
+        prefix, suffix = path.split("[*]", 1)
+        parent_path = prefix.rstrip(".") or "$"
+        if suffix.startswith("."):
+            item_path = f"${suffix}"
+        elif suffix:
+            item_path = f"${suffix}"
+        else:
+            item_path = "$"
+        return parent_path, item_path
 
     if is_json and json_analysis:
         if json_analysis.primary_array:
@@ -1056,22 +1985,35 @@ def _generate_compact_summary(
                     each_expr = "json_each(result_json)"
                 else:
                     each_expr = f"json_each(result_json,'{path}')"
-                field_prefix = f".{arr.item_data_key}" if arr.item_data_key else ""
-                fields_to_show = arr.item_fields[:3]
-                if fields_to_show:
-                    extracts = ", ".join(f"json_extract(r.value,'${field_prefix}.{f}')" for f in fields_to_show)
+                if arr.table_info and arr.table_info.columns:
+                    extracts = ", ".join(
+                        f"json_extract(r.value,'$[{idx}]')" for idx, _ in enumerate(arr.table_info.columns[:3])
+                    )
+                    row_filter = ""
+                    if arr.table_info.has_header:
+                        row_filter = " AND CAST(r.key AS INTEGER) > 0"
                     parts.append(
                         f"→ QUERY: SELECT {extracts} "
                         f"FROM __tool_results, {each_expr} AS r "
-                        f"WHERE result_id='{result_id}' LIMIT 25"
+                        f"WHERE result_id='{result_id}'{row_filter} LIMIT 25"
                     )
                 else:
-                    # Primitive array (numbers, strings) - just show value directly
-                    parts.append(
-                        f"→ QUERY: SELECT r.value "
-                        f"FROM __tool_results, {each_expr} AS r "
-                        f"WHERE result_id='{result_id}' LIMIT 25"
-                    )
+                    field_prefix = f".{arr.item_data_key}" if arr.item_data_key else ""
+                    fields_to_show = arr.item_fields[:3]
+                    if fields_to_show:
+                        extracts = ", ".join(f"json_extract(r.value,'${field_prefix}.{f}')" for f in fields_to_show)
+                        parts.append(
+                            f"→ QUERY: SELECT {extracts} "
+                            f"FROM __tool_results, {each_expr} AS r "
+                            f"WHERE result_id='{result_id}' LIMIT 25"
+                        )
+                    else:
+                        # Primitive array (numbers, strings) - just show value directly
+                        parts.append(
+                            f"→ QUERY: SELECT r.value "
+                            f"FROM __tool_results, {each_expr} AS r "
+                            f"WHERE result_id='{result_id}' LIMIT 25"
+                        )
 
             # PATH explicitly labeled - critical for correct queries
             # Include item_data_key if present so agent knows full path
@@ -1080,13 +2022,27 @@ def _generate_compact_summary(
             else:
                 parts.append(f"  PATH: {path} ({arr.length} items)")
 
-            # Fields - brief
-            if arr.item_fields:
-                parts.append(f"  FIELDS: {', '.join(arr.item_fields[:10])}")
+            if arr.table_info:
+                table = arr.table_info
+                col_count = len(table.columns)
+                parts.append(f"  TABLE: ~{table.row_count} rows, {col_count} columns")
+                if table.column_types and len(table.column_types) == len(table.columns):
+                    col_with_types = [
+                        f"{c}:{t}" for c, t in zip(table.columns[:10], table.column_types[:10])
+                    ]
+                    parts.append(f"  COLUMNS: {', '.join(col_with_types)}")
+                elif table.columns:
+                    parts.append(f"  COLUMNS: {', '.join(table.columns[:10])}")
+                if table.sample_rows:
+                    parts.append(f"  SAMPLE: {table.sample_rows[0]}")
+            else:
+                # Fields - brief
+                if arr.item_fields:
+                    parts.append(f"  FIELDS: {', '.join(arr.item_fields[:10])}")
 
-            # Nested arrays if present
-            if arr.nested_arrays:
-                parts.append(f"  NESTED: {', '.join(arr.nested_arrays[:3])}")
+                # Nested arrays if present
+                if arr.nested_arrays:
+                    parts.append(f"  NESTED: {', '.join(arr.nested_arrays[:3])}")
 
         elif json_analysis.pattern == "single_object":
             # Single object - simpler query
@@ -1094,7 +2050,8 @@ def _generate_compact_summary(
                 parts.append(f"→ QUERY: {query_patterns.list_all}")
             elif json_analysis.field_types:
                 fields = [ft.name for ft in json_analysis.field_types[:3]]
-                extracts = ", ".join(f"json_extract(result_json,'$.{f}')" for f in fields)
+                prefix = json_analysis.wrapper_path or "$"
+                extracts = ", ".join(f"json_extract(result_json,'{prefix}.{f}')" for f in fields)
                 parts.append(
                     f"→ QUERY: SELECT {extracts} "
                     f"FROM __tool_results WHERE result_id='{result_id}'"
@@ -1113,48 +2070,119 @@ def _generate_compact_summary(
         if json_analysis.detected_patterns and json_analysis.detected_patterns.empty_result:
             parts.append("  ⚠ Result array is empty")
 
-        # Embedded CSV content - show rich metadata for parsing
-        if json_analysis.embedded_content and json_analysis.embedded_content.format == "csv":
-            emb = json_analysis.embedded_content
-            csv = emb.csv_info
-            if csv and csv.columns:
-                parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
-
-                # Show columns with inferred types and count
-                col_count = len(csv.columns)
-                if csv.column_types and len(csv.column_types) == len(csv.columns):
-                    col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
-                    parts.append(f"  SCHEMA ({col_count} columns): {', '.join(col_with_types)}")
+        # Embedded structured content in JSON strings
+        if json_analysis.embedded_contents:
+            for emb in json_analysis.embedded_contents[:2]:
+                parent_path, item_path = _split_wildcard_path(emb.path)
+                if parent_path:
+                    extract_query = (
+                        f"SELECT json_extract(r.value,'{item_path}') "
+                        f"FROM __tool_results, json_each(result_json,'{parent_path}') AS r "
+                        f"WHERE result_id='{result_id}'"
+                    )
                 else:
-                    parts.append(f"  COLUMNS ({col_count}): {', '.join(csv.columns[:12])}")
+                    extract_query = (
+                        f"SELECT json_extract(result_json,'{emb.path}') "
+                        f"FROM __tool_results WHERE result_id='{result_id}'"
+                    )
 
-                # Show sample data row (first data row, truncated)
-                if csv.sample_rows:
-                    sample = csv.sample_rows[0][:150]
-                    parts.append(f"  SAMPLE: {sample}")
+                if emb.format == "csv" and emb.csv_info and emb.csv_info.columns:
+                    csv = emb.csv_info
+                    parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
 
-                # Ready-to-use query to extract CSV text
-                parts.append(f"  → GET CSV: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
-                parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
-                # Add pattern hint based on column count with concrete structure
-                if col_count > 1:
-                    # Build concrete CTE chain: p1(c1,r)→p2(c2,r2)→...→pN(cN,cN+1)
-                    cte_parts = []
-                    for i in range(1, col_count):
-                        if i < col_count - 1:
-                            cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
+                    col_count = len(csv.columns)
+                    if csv.column_types and len(csv.column_types) == len(csv.columns):
+                        col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
+                        parts.append(f"  SCHEMA ({col_count} columns): {', '.join(col_with_types)}")
+                    else:
+                        parts.append(f"  COLUMNS ({col_count}): {', '.join(csv.columns[:12])}")
+
+                    if csv.sample_rows:
+                        sample = csv.sample_rows[0][:150]
+                        parts.append(f"  SAMPLE: {sample}")
+
+                    parts.append(f"  → GET CSV: {extract_query}")
+                    parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
+                    if col_count > 1:
+                        cte_parts = []
+                        for i in range(1, col_count):
+                            if i < col_count - 1:
+                                cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
+                            else:
+                                cte_parts.append(f"p{i}(c{i},c{i+1})")
+                        cte_chain = "→".join(cte_parts)
+                        cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
+                        parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
+
+                elif emb.format == "json":
+                    parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT")
+                    parts.append(f"  → GET JSON: {extract_query}")
+
+                    if emb.json_info and not parent_path:
+                        base_expr = f"json_extract(result_json,'{emb.path}')"
+                        primary_path = emb.json_info.primary_array_path or "$"
+                        if primary_path == "$":
+                            each_expr = f"json_each({base_expr})"
                         else:
-                            cte_parts.append(f"p{i}(c{i},c{i+1})")
-                    cte_chain = "→".join(cte_parts)
-                    cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
-                    parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
+                            each_expr = f"json_each({base_expr},'{primary_path}')"
+                        fields = emb.json_info.primary_array_fields[:3]
+                        if fields:
+                            extracts = ", ".join(f"json_extract(r.value,'$.{f}')" for f in fields)
+                            parts.append(
+                                f"  → QUERY: SELECT {extracts} "
+                                f"FROM __tool_results, {each_expr} AS r "
+                                f"WHERE result_id='{result_id}' LIMIT 25"
+                            )
+                        elif emb.json_info.object_fields:
+                            fields = emb.json_info.object_fields[:3]
+                            extracts = ", ".join(f"json_extract({base_expr},'$.{f}')" for f in fields)
+                            parts.append(
+                                f"  → QUERY: SELECT {extracts} "
+                                f"FROM __tool_results WHERE result_id='{result_id}'"
+                            )
+
+                elif emb.format == "json_lines":
+                    parts.append(f"\n  🧩 JSON LINES in {emb.path} (~{emb.line_count} lines)")
+                    parts.append(f"  → GET JSONL: {extract_query}")
+
+                elif emb.format == "xml":
+                    root_tag = emb.xml_info.root_tag if emb.xml_info else None
+                    tag_note = f" root={root_tag}" if root_tag else ""
+                    parts.append(f"\n  📄 XML DATA in {emb.path}{tag_note}")
+                    parts.append(f"  → GET XML: {extract_query}")
+
+                elif emb.format in ("html", "markdown"):
+                    parts.append(f"\n  📄 {emb.format.upper()} DATA in {emb.path} (~{emb.line_count} lines)")
+                    parts.append(f"  → GET TEXT: {extract_query}")
 
     else:
         # Text data
         if text_analysis:
             fmt = text_analysis.format
 
-            if fmt == "csv" and text_analysis.csv_info:
+            if fmt == "json_lines" and text_analysis.json_lines_info:
+                info = text_analysis.json_lines_info
+                parts.append(
+                    f"→ QUERY: SELECT substr(result_text, 1, 2000) "
+                    f"FROM __tool_results WHERE result_id='{result_id}'"
+                )
+                parts.append(f"  TYPE: JSON LINES (~{info.line_count} lines)")
+                if info.fields:
+                    parts.append(f"  FIELDS: {', '.join(info.fields[:12])}")
+                parts.append("  → Extract line by line and parse as JSON")
+
+            elif fmt == "sse" and text_analysis.sse_info:
+                info = text_analysis.sse_info
+                parts.append(
+                    f"→ QUERY: SELECT substr(result_text, 1, 2000) "
+                    f"FROM __tool_results WHERE result_id='{result_id}'"
+                )
+                parts.append(f"  TYPE: SSE (~{info.event_count_estimate} events)")
+                if info.json_fields:
+                    parts.append(f"  FIELDS: {', '.join(info.json_fields[:12])}")
+                parts.append("  → Extract data: lines and parse JSON payloads")
+
+            elif fmt == "csv" and text_analysis.csv_info:
                 csv = text_analysis.csv_info
                 col_count = len(csv.columns)
                 parts.append(f"  TYPE: CSV (~{csv.row_count_estimate} rows, {col_count} columns)")
@@ -1197,6 +2225,15 @@ def _generate_compact_summary(
                 )
                 parts.append(f"  TYPE: {fmt.upper()} ({len(doc.sections)} sections)")
 
+            elif fmt == "xml" and text_analysis.xml_info:
+                xml_info = text_analysis.xml_info
+                root_note = f" root={xml_info.root_tag}" if xml_info and xml_info.root_tag else ""
+                parts.append(
+                    f"→ QUERY: SELECT substr(result_text, 1, 2000) "
+                    f"FROM __tool_results WHERE result_id='{result_id}'"
+                )
+                parts.append(f"  TYPE: XML ({xml_info.element_count} elements{root_note})")
+
             elif fmt == "log":
                 parts.append(
                     f"→ QUERY: SELECT substr(result_text, instr(lower(result_text),'error')-50, 300) "
@@ -1215,6 +2252,14 @@ def _generate_compact_summary(
                 parts.append(f"  TYPE: Text (~{hints.line_count if hints else '?'} lines)")
 
     # Size warning at end
+    if parse_info and (parse_info.source != "raw" or parse_info.mode != "json"):
+        parts.append(f"  PARSE: {parse_info.source} ({parse_info.mode})")
+    if decode_info and decode_info.steps:
+        steps = "+".join(decode_info.steps)
+        encoding = f", encoding={decode_info.encoding}" if decode_info.encoding else ""
+        parts.append(
+            f"  DECODED: {steps} ({decode_info.bytes_before}->{decode_info.bytes_after} bytes{encoding})"
+        )
     if size_strategy.warning:
         parts.append(f"  SIZE: {size_strategy.warning}")
 
@@ -1233,25 +2278,34 @@ def analyze_result(result_text: str, result_id: str) -> ResultAnalysis:
     the content is JSON or text, analyzes the structure, and generates
     actionable query patterns and hints.
     """
-    byte_count = len(result_text.encode("utf-8"))
+    prepared = prepare_result_text(result_text)
+    analysis_text = prepared.analysis_text
+    byte_count = len(analysis_text.encode("utf-8"))
     size_strategy = _determine_size_strategy(byte_count)
 
     # Try parsing as JSON
-    is_json = False
-    parsed = None
+    is_json = prepared.is_json
+    parsed = prepared.parsed_json
     json_analysis = None
     text_analysis = None
 
-    try:
-        parsed = json.loads(result_text)
-        is_json = True
-    except Exception:
-        pass
+    if is_json and parsed is None:
+        parsed, _ = _parse_json_any(analysis_text)
+        is_json = parsed is not None
 
     if is_json and parsed is not None:
-        json_analysis = analyze_json(parsed, result_id)
+        if isinstance(parsed, str):
+            json_analysis = JsonAnalysis(pattern="string")
+            embedded = _analyze_embedded_text(parsed, parsed, "$")
+            if embedded:
+                json_analysis.embedded_contents = [embedded]
+                json_analysis.embedded_content = embedded
+        elif isinstance(parsed, (dict, list)):
+            json_analysis = analyze_json(parsed, result_id)
+        else:
+            json_analysis = JsonAnalysis(pattern="scalar")
     else:
-        text_analysis = analyze_text(result_text)
+        text_analysis = analyze_text(analysis_text)
 
     # Generate query patterns
     query_patterns = _generate_query_patterns(
@@ -1260,7 +2314,14 @@ def analyze_result(result_text: str, result_id: str) -> ResultAnalysis:
 
     # Generate compact summary (pass query_patterns for complete example queries)
     compact_summary = _generate_compact_summary(
-        result_id, is_json, size_strategy, json_analysis, text_analysis, query_patterns
+        result_id,
+        is_json,
+        size_strategy,
+        json_analysis,
+        text_analysis,
+        query_patterns,
+        parse_info=prepared.parse_info,
+        decode_info=prepared.decode_info,
     )
 
     return ResultAnalysis(
@@ -1270,6 +2331,10 @@ def analyze_result(result_text: str, result_id: str) -> ResultAnalysis:
         text_analysis=text_analysis,
         query_patterns=query_patterns,
         compact_summary=compact_summary,
+        decode_info=prepared.decode_info,
+        parse_info=prepared.parse_info,
+        prepared_text=analysis_text,
+        normalized_json=prepared.normalized_json,
     )
 
 
@@ -1283,6 +2348,18 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             "recommendation": analysis.size_strategy.recommendation,
         },
     }
+    if analysis.parse_info:
+        result["parse"] = {
+            "mode": analysis.parse_info.mode,
+            "source": analysis.parse_info.source,
+        }
+    if analysis.decode_info and analysis.decode_info.steps:
+        result["decode"] = {
+            "steps": analysis.decode_info.steps,
+            "bytes_before": analysis.decode_info.bytes_before,
+            "bytes_after": analysis.decode_info.bytes_after,
+            "encoding": analysis.decode_info.encoding,
+        }
 
     if analysis.json_analysis:
         ja = analysis.json_analysis
@@ -1296,28 +2373,59 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
                 "length": ja.primary_array.length,
                 "fields": ja.primary_array.item_fields[:15],
             }
+            if ja.primary_array.table_info:
+                table = ja.primary_array.table_info
+                result["json"]["primary_array"]["table"] = {
+                    "has_header": table.has_header,
+                    "columns": table.columns[:15],
+                    "row_count": table.row_count,
+                    "column_types": table.column_types[:15],
+                }
         if ja.pagination and ja.pagination.detected:
             result["json"]["pagination"] = {
                 "type": ja.pagination.pagination_type,
                 "next": ja.pagination.next_field,
                 "total": ja.pagination.total_field,
             }
-        if ja.embedded_content:
-            ec = ja.embedded_content
-            result["json"]["embedded_content"] = {
+
+        def _serialize_embedded(ec: EmbeddedContent) -> Dict[str, Any]:
+            payload: Dict[str, Any] = {
                 "path": ec.path,
                 "format": ec.format,
                 "line_count": ec.line_count,
                 "byte_size": ec.byte_size,
             }
             if ec.csv_info:
-                result["json"]["embedded_content"]["csv"] = {
+                payload["csv"] = {
                     "columns": ec.csv_info.columns[:15],
                     "rows": ec.csv_info.row_count_estimate,
                     "delimiter": ec.csv_info.delimiter,
                     "column_types": ec.csv_info.column_types[:15],
                     "sample_rows": ec.csv_info.sample_rows[:2],
                 }
+            if ec.json_info:
+                payload["json"] = {
+                    "pattern": ec.json_info.pattern,
+                    "wrapper_path": ec.json_info.wrapper_path,
+                    "primary_array_path": ec.json_info.primary_array_path,
+                    "primary_array_length": ec.json_info.primary_array_length,
+                    "primary_array_fields": ec.json_info.primary_array_fields[:15],
+                    "object_fields": ec.json_info.object_fields[:15],
+                }
+            if ec.xml_info:
+                payload["xml"] = {
+                    "root_tag": ec.xml_info.root_tag,
+                    "element_count": ec.xml_info.element_count,
+                    "depth": ec.xml_info.depth,
+                }
+            return payload
+
+        if ja.embedded_contents:
+            serialized = [_serialize_embedded(ec) for ec in ja.embedded_contents[:3]]
+            result["json"]["embedded_contents"] = serialized
+            result["json"]["embedded_content"] = serialized[0]
+        elif ja.embedded_content:
+            result["json"]["embedded_content"] = _serialize_embedded(ja.embedded_content)
 
     if analysis.text_analysis:
         ta = analysis.text_analysis
@@ -1337,6 +2445,25 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
                 {"heading": s["heading"], "pos": s["position"]}
                 for s in ta.doc_structure.sections[:10]
             ]
+        if ta.xml_info:
+            result["text"]["xml"] = {
+                "root_tag": ta.xml_info.root_tag,
+                "element_count": ta.xml_info.element_count,
+                "depth": ta.xml_info.depth,
+            }
+        if ta.json_lines_info:
+            result["text"]["json_lines"] = {
+                "line_count": ta.json_lines_info.line_count,
+                "parsed_lines": ta.json_lines_info.parsed_line_count,
+                "fields": ta.json_lines_info.fields[:15],
+                "samples": ta.json_lines_info.sample_objects[:2],
+            }
+        if ta.sse_info:
+            result["text"]["sse"] = {
+                "data_lines": ta.sse_info.data_line_count,
+                "events": ta.sse_info.event_count_estimate,
+                "fields": ta.sse_info.json_fields[:15],
+            }
 
     if analysis.query_patterns:
         qp = analysis.query_patterns
