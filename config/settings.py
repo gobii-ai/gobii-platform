@@ -1024,8 +1024,8 @@ def _default_pipedream_environment() -> str:
 
 PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_environment())
 
-# Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,greenhouse,trello")
-PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,greenhouse,trello")
+# Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
+PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
 
 # Pipedream Connect GC (batch cleanup)
 PIPEDREAM_GC_ENABLED = env.bool(
