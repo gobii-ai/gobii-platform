@@ -306,8 +306,10 @@ class Analytics:
                 context = {
                     'ip': '0',
                 }
-
-                analytics.track(user_id, event, properties, context)
+                try:
+                    analytics.track(user_id, event, properties, context)
+                except RuntimeError:
+                    logger.exception(f"Failed to track event {event} for user {user_id}")
 
     @staticmethod
     @tracer.start_as_current_span("ANALYTICS Track Event Anonymous")
