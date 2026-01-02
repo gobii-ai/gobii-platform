@@ -117,6 +117,9 @@ def _normalize_write_path(
     path = raw_path.strip()
     if not path:
         return None
+    basename = posixpath.basename(path)
+    if basename in ("", ".", ".."):
+        return None
     if not path.startswith("/"):
         path = f"/{path}"
     normalized = posixpath.normpath(path)
