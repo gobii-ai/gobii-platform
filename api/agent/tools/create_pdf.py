@@ -10,11 +10,11 @@ import pdfkit
 from django.conf import settings
 
 from api.models import PersistentAgent
-from api.agent.files.filespace_service import write_bytes_to_exports
+from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.tools.file_export_helpers import resolve_export_target
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_FILENAME = "export.pdf"
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
@@ -216,16 +216,27 @@ def get_create_pdf_tool() -> Dict[str, Any]:
         "function": {
             "name": "create_pdf",
             "description": (
-                "Create a PDF from provided HTML and store it in the agent filespace under /exports. "
-                "The HTML must be self-contained; external or local asset references are not allowed."
+                "Create a PDF from provided HTML and store it in the agent filespace. "
+                "Recommended path: /exports/your-file.pdf. The HTML must be self-contained; "
+                "external or local asset references are not allowed."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "html": {"type": "string", "description": "HTML string to convert into a PDF."},
-                    "filename": {"type": "string", "description": "Optional output filename (defaults to export.pdf)."},
+                    "file_path": {
+                        "type": "string",
+                        "description": (
+                            "Required filespace path (recommended: /exports/report.pdf). "
+                            "Use overwrite=true to replace an existing file at that path."
+                        ),
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "When true, overwrites the existing file at that path.",
+                    },
                 },
-                "required": ["html"],
+                "required": ["html", "file_path"],
             },
         },
     }
@@ -253,9 +264,9 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             "message": "HTML contains external or local asset references. Only inline data assets are allowed.",
         }
 
-    filename = params.get("filename")
-    if filename is not None and not isinstance(filename, str):
-        return {"status": "error", "message": "filename must be a string when provided"}
+    path, overwrite, error = resolve_export_target(params)
+    if error:
+        return error
 
     try:
         pdf_bytes = pdfkit.from_string(html, False, options=PDFKIT_OPTIONS)
@@ -272,11 +283,11 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not pdf_bytes:
         return {"status": "error", "message": "PDF generation returned empty output."}
 
-    return write_bytes_to_exports(
+    return write_bytes_to_dir(
         agent=agent,
         content_bytes=pdf_bytes,
-        filename=filename,
-        fallback_name=DEFAULT_FILENAME,
         extension=EXTENSION,
         mime_type=MIME_TYPE,
+        path=path,
+        overwrite=overwrite,
     )

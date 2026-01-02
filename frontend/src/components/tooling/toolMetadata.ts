@@ -80,8 +80,9 @@ function deriveFileExport(
   const resultObject = parseResultObject(entry.result)
   const status = coerceString(resultObject?.['status'])
   const message = coerceString(resultObject?.['message'])
-  const filename = coerceString(resultObject?.['filename']) || coerceString(parameters?.['filename'])
-  const path = coerceString(resultObject?.['path'])
+  const paramPath = coerceString(parameters?.['file_path']) || coerceString(parameters?.['path'])
+  const filename = coerceString(resultObject?.['filename']) || paramPath || coerceString(parameters?.['filename'])
+  const path = coerceString(resultObject?.['path']) || paramPath
   const isError = status?.toLowerCase() === 'error'
 
   const caption = message ? truncate(message, 56) : filename ? truncate(filename, 56) : path ? truncate(path, 56) : null

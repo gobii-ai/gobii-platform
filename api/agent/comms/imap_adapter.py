@@ -22,6 +22,7 @@ from .adapters import (
     _is_forward_like,
     _extract_forward_sections,
 )
+from .attachment_filters import is_signature_image_attachment
 from config.settings import EMAIL_STRIP_REPLIES
 from config import settings
 import logging
@@ -135,6 +136,8 @@ def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
                 filename = str(make_header(decode_header(filename)))
             except Exception:
                 pass
+            if is_signature_image_attachment(filename, ctype):
+                continue
 
             cf = ContentFile(raw, name=filename)
             # annotate metadata for downstream saver

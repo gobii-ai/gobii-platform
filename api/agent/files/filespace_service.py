@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import posixpath
 from dataclasses import dataclass
 from typing import Any, List
 
@@ -109,6 +110,89 @@ def _normalize_filename(raw_name: str | None, fallback_name: str, extension: str
     return name
 
 
+def _normalize_write_path(
+    raw_path: str,
+    extension: str,
+) -> tuple[str | None, list[str], str, str] | None:
+    path = raw_path.strip()
+    if not path:
+        return None
+    basename = posixpath.basename(path)
+    if basename in ("", ".", ".."):
+        return None
+    if not path.startswith("/"):
+        path = f"/{path}"
+    normalized = posixpath.normpath(path)
+    if not normalized.startswith("/"):
+        normalized = f"/{normalized}"
+    parts = [part for part in normalized.split("/") if part]
+    if not parts:
+        return None
+    dir_parts: list[str] = []
+    for part in parts[:-1]:
+        safe_part = get_valid_filename(part)
+        if not safe_part:
+            return None
+        dir_parts.append(safe_part)
+    filename = parts[-1]
+    if not filename:
+        return None
+    safe_filename = _normalize_filename(filename, filename, extension)
+    if not safe_filename:
+        return None
+    full_path = "/" + "/".join(dir_parts + [safe_filename])
+    root_dir = dir_parts[0] if dir_parts else None
+    sub_dirs = dir_parts[1:] if dir_parts else []
+    return root_dir, sub_dirs, safe_filename, full_path
+
+
+def _ensure_nested_dirs(
+    filespace: AgentFileSpace,
+    root_dir: AgentFsNode,
+    dir_parts: list[str],
+) -> AgentFsNode | None:
+    current = root_dir
+    for part in dir_parts:
+        existing = AgentFsNode.objects.filter(
+            filespace=filespace,
+            parent=current,
+            name=part,
+            is_deleted=False,
+        ).first()
+        if existing:
+            if existing.node_type != AgentFsNode.NodeType.DIR:
+                return None
+            current = existing
+            continue
+        current = get_or_create_dir(filespace, current, part)
+    return current
+
+
+def _save_node_content(
+    node: AgentFsNode,
+    content_bytes: bytes,
+    dir_name: str,
+    agent_id: str,
+    *,
+    delete_node_on_failure: bool,
+) -> dict[str, Any] | None:
+    try:
+        node.content.save(node.name, ContentFile(content_bytes), save=False)
+        node.save()
+        node.refresh_from_db()
+        return None
+    except Exception:
+        logger.exception("Failed to persist file to %s for agent %s", dir_name, agent_id)
+        try:
+            if node.content and getattr(node.content, "name", None):
+                node.content.delete(save=False)
+        except Exception:
+            logger.exception("Failed to clean up file content for node %s", node.id)
+        if delete_node_on_failure:
+            node.delete()
+        return {"status": "error", "message": "Failed to save the file in the filespace."}
+
+
 def _agent_has_access(agent: "PersistentAgent", filespace_id: "uuid.UUID") -> bool:
     return AgentFileSpaceAccess.objects.filter(agent=agent, filespace_id=filespace_id).exists()
 
@@ -116,11 +200,10 @@ def _agent_has_access(agent: "PersistentAgent", filespace_id: "uuid.UUID") -> bo
 def write_bytes_to_dir(
     agent: "PersistentAgent",
     content_bytes: bytes,
-    filename: str | None,
-    fallback_name: str,
-    extension: str,
+    path: str,
     mime_type: str,
-    dir_name: str,
+    extension: str = "",
+    overwrite: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(content_bytes, (bytes, bytearray)):
         return {"status": "error", "message": "File content must be bytes."}
@@ -142,18 +225,72 @@ def write_bytes_to_dir(
     if not _agent_has_access(agent, filespace.id):
         return {"status": "error", "message": "Agent lacks access to the filespace."}
 
-    try:
-        target_dir = get_or_create_dir(filespace, None, dir_name)
-    except Exception as exc:
-        logger.exception("Failed to resolve %s directory for agent %s: %s", dir_name, agent.id, exc)
-        return {"status": "error", "message": f"Failed to access the {dir_name} directory."}
+    if not isinstance(path, str):
+        return {"status": "error", "message": "path must be a string."}
 
-    base_name = _normalize_filename(filename, fallback_name, extension)
+    extension = (extension or "").strip()
+    if extension and not extension.startswith("."):
+        extension = f".{extension}"
+
+    normalized_path = _normalize_write_path(path, extension)
+    if not normalized_path:
+        return {"status": "error", "message": "path must include a filename."}
+
+    root_dir_name, sub_dirs, safe_filename, full_path = normalized_path
+    if root_dir_name:
+        try:
+            target_dir = get_or_create_dir(filespace, None, root_dir_name)
+        except Exception as exc:
+            logger.exception("Failed to resolve %s directory for agent %s: %s", root_dir_name, agent.id, exc)
+            return {"status": "error", "message": f"Failed to access the {root_dir_name} directory."}
+
+        target_dir = _ensure_nested_dirs(filespace, target_dir, sub_dirs)
+        if target_dir is None:
+            return {"status": "error", "message": "Path conflicts with an existing file."}
+    else:
+        target_dir = None
+
     checksum = hashlib.sha256(content_bytes).hexdigest()
+
+    existing = AgentFsNode.objects.filter(
+        filespace=filespace,
+        path=full_path,
+        is_deleted=False,
+    ).first()
+    if existing:
+        if existing.node_type != AgentFsNode.NodeType.FILE:
+            return {"status": "error", "message": "Path points to a directory, not a file."}
+        if overwrite:
+            old_content_name = getattr(existing.content, "name", None)
+            existing.mime_type = mime_type
+            existing.checksum_sha256 = checksum
+            existing.size_bytes = len(content_bytes)
+            error = _save_node_content(
+                existing,
+                content_bytes,
+                root_dir_name or "filespace root",
+                agent.id,
+                delete_node_on_failure=False,
+            )
+            if error:
+                return error
+            if old_content_name and old_content_name != existing.content.name:
+                try:
+                    existing.content.storage.delete(old_content_name)
+                except Exception:
+                    logger.exception("Failed to delete prior content for node %s", existing.id)
+            node = existing
+            return {
+                "status": "ok",
+                "path": node.path,
+                "node_id": str(node.id),
+                "filename": node.name,
+            }
+
     node = None
     max_attempts = 5
     for attempt in range(max_attempts):
-        name = dedupe_name(filespace, target_dir, base_name)
+        name = dedupe_name(filespace, target_dir, safe_filename)
         node = AgentFsNode(
             filespace=filespace,
             parent=target_dir,
@@ -168,30 +305,17 @@ def write_bytes_to_dir(
                 node.save()
             break
         except IntegrityError:
-            logger.warning(
-                "Filename collision for agent %s on %s (attempt %s)",
-                agent.id,
-                name,
-                attempt + 1,
-            )
             if attempt == max_attempts - 1:
-                return {
-                    "status": "error",
-                    "message": "Failed to allocate a unique filename for this file.",
-                }
-
-    try:
-        node.content.save(name, ContentFile(content_bytes), save=True)
-        node.refresh_from_db()
-    except Exception:
-        logger.exception("Failed to persist file to %s for agent %s", dir_name, agent.id)
-        try:
-            if node.content and getattr(node.content, "name", None):
-                node.content.delete(save=False)
-        except Exception:
-            logger.exception("Failed to clean up file content for node %s", node.id)
-        node.delete()
-        return {"status": "error", "message": "Failed to save the file in the filespace."}
+                return {"status": "error", "message": "Failed to allocate the requested file path."}
+    error = _save_node_content(
+        node,
+        content_bytes,
+        root_dir_name or "filespace root",
+        agent.id,
+        delete_node_on_failure=True,
+    )
+    if error:
+        return error
 
     result = {
         "status": "ok",
@@ -223,25 +347,6 @@ def write_bytes_to_dir(
     except Exception:
         logger.debug("Failed to emit file exported analytics for agent %s", getattr(agent, "id", None), exc_info=True)
     return result
-
-
-def write_bytes_to_exports(
-    agent: "PersistentAgent",
-    content_bytes: bytes,
-    filename: str | None,
-    fallback_name: str,
-    extension: str,
-    mime_type: str,
-) -> dict[str, Any]:
-    return write_bytes_to_dir(
-        agent=agent,
-        content_bytes=content_bytes,
-        filename=filename,
-        fallback_name=fallback_name,
-        extension=extension,
-        mime_type=mime_type,
-        dir_name=EXPORTS_DIR_NAME,
-    )
 
 
 def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNodeInfo]:
