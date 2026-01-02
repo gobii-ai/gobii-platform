@@ -1120,12 +1120,13 @@ def _generate_compact_summary(
             if csv and csv.columns:
                 parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
 
-                # Show columns with inferred types
+                # Show columns with inferred types and count
+                col_count = len(csv.columns)
                 if csv.column_types and len(csv.column_types) == len(csv.columns):
                     col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
-                    parts.append(f"  SCHEMA: {', '.join(col_with_types)}")
+                    parts.append(f"  SCHEMA ({col_count} columns): {', '.join(col_with_types)}")
                 else:
-                    parts.append(f"  COLUMNS: {', '.join(csv.columns[:12])}")
+                    parts.append(f"  COLUMNS ({col_count}): {', '.join(csv.columns[:12])}")
 
                 # Show sample data row (first data row, truncated)
                 if csv.sample_rows:
@@ -1135,6 +1136,9 @@ def _generate_compact_summary(
                 # Ready-to-use query to extract CSV text
                 parts.append(f"  → GET CSV: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
                 parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
+                # Add pattern hint based on column count
+                if col_count > 1:
+                    parts.append(f"  → PATTERN: For {col_count} columns, use {col_count-1} sequential CTEs (p1→p2→...→p{col_count-1}), each extracting one column")
 
     else:
         # Text data
@@ -1143,7 +1147,8 @@ def _generate_compact_summary(
 
             if fmt == "csv" and text_analysis.csv_info:
                 csv = text_analysis.csv_info
-                parts.append(f"  TYPE: CSV (~{csv.row_count_estimate} rows)")
+                col_count = len(csv.columns)
+                parts.append(f"  TYPE: CSV (~{csv.row_count_estimate} rows, {col_count} columns)")
 
                 # Show columns with inferred types
                 if csv.column_types and len(csv.column_types) == len(csv.columns):
@@ -1161,6 +1166,9 @@ def _generate_compact_summary(
                     f"→ QUERY: SELECT result_text FROM __tool_results WHERE result_id='{result_id}'"
                 )
                 parts.append(f"  → Parse CSV line by line. Do NOT use json_each()")
+                # Add pattern hint based on column count
+                if col_count > 1:
+                    parts.append(f"  → PATTERN: For {col_count} columns, use {col_count-1} sequential CTEs (p1→p2→...→p{col_count-1}), each extracting one column")
 
             elif fmt in ("markdown", "html") and text_analysis.doc_structure:
                 doc = text_analysis.doc_structure

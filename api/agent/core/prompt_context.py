@@ -252,66 +252,50 @@ Step 5: Present findings
 
 ---
 
-## Trajectory 2: CSV Data → Parse into Table → Statistical Analysis
+## Trajectory 2: CSV Data → Parse into Table → Analysis
 
 User asks: "Analyze this dataset and find any interesting patterns"
 
 ```
 Step 1: Fetch the CSV
-  http_request(url="https://data.example.org/measurements.csv", will_continue_work=true)
+  http_request(url="https://data.example.org/sensors.csv", will_continue_work=true)
 
   Result meta shows:
-    CSV DATA in $.content (2847 rows)
-    SCHEMA: timestamp:text, sensor_id:int, temperature:float, humidity:float, location:text
-    SAMPLE: 2024-01-15T08:00:00,101,22.5,45.2,Building-A
+    CSV DATA in $.content (500 rows, 4 columns)
+    SCHEMA: sensor_id:int, temp:float, humidity:float, location:text
+    SAMPLE: 101,22.5,45.2,Building-A
     GET CSV: SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='d4e5f6'
 
-Step 2: Create table matching the schema, then parse CSV with a WITH clause
+Step 2: Create table and parse CSV using sequential field extraction
   sqlite_batch(queries="
-    CREATE TABLE IF NOT EXISTS measurements (
-      timestamp TEXT, sensor_id INTEGER, temperature REAL, humidity REAL, location TEXT
-    );
+    CREATE TABLE sensors (sensor_id INT, temp REAL, humidity REAL, location TEXT);
 
-    WITH csv_text AS (
-      SELECT json_extract(result_json,'$.content') as raw FROM __tool_results WHERE result_id='d4e5f6'
-    ),
-    lines AS (
-      SELECT substr(raw, 1, instr(raw, char(10))-1) as line,
-             substr(raw, instr(raw, char(10))+1) as rest, 1 as skip_header
-      FROM csv_text
-      UNION ALL
-      SELECT
-        CASE WHEN instr(rest, char(10)) > 0
-             THEN substr(rest, 1, instr(rest, char(10))-1)
-             ELSE rest END,
-        CASE WHEN instr(rest, char(10)) > 0
-             THEN substr(rest, instr(rest, char(10))+1)
-             ELSE '' END,
-        0
-      FROM lines WHERE length(rest) > 0
-    )
-    INSERT INTO measurements (timestamp, sensor_id, temperature, humidity, location)
-    SELECT
-      substr(line, 1, instr(line,',')-1),
-      CAST(substr(line, instr(line,',')+1, instr(substr(line,instr(line,',')+1),',')-1) AS INTEGER),
-      CAST(substr(line, instr(line,',')+1) AS REAL),
-      -- simplified: in practice parse each comma-separated field
-      'parsed'
-    FROM lines WHERE skip_header = 0 AND length(line) > 0 LIMIT 100", will_continue_work=true)
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='d4e5f6'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL
+        SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
+      p3 AS (SELECT c1,c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
+    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3",
+    will_continue_work=true)
 
-Step 3: If CSV parsing is complex, get a sample first to understand the format
+  Result: Query 1 affected 500 rows
+
+Step 3: Verify and analyze
   sqlite_batch(queries="
-    SELECT substr(json_extract(result_json,'$.content'), 1, 500)
-    FROM __tool_results WHERE result_id='d4e5f6'", will_continue_work=true)
+    SELECT location, COUNT(*) as n, ROUND(AVG(temp),1) as avg_temp, ROUND(AVG(humidity),1) as avg_hum
+    FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
 
-  Then build appropriate INSERT statements based on what you see.
+  Result: Building-A|245|23.1|48.2, Building-B|180|21.8|52.1, ...
 
-Step 4: Run analysis queries on the loaded data
-  sqlite_batch(queries="
-    SELECT location, COUNT(*), ROUND(AVG(temperature),1), ROUND(AVG(humidity),1)
-    FROM measurements GROUP BY location", will_continue_work=true)
-
-Step 5: Present findings with insights
+Step 4: Present findings with insights
 ```
 
 ---
