@@ -190,266 +190,303 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return in-context learning examples for sqlite_batch usage.
 
-    These examples teach the agent when and how to use SQLite effectively,
-    including schema design, batch operations, and schema evolution patterns.
+    These examples teach the agent complete agentic flows for handling
+    large tool results efficiently, including inspection, extraction,
+    and persistence patterns.
     """
     return """
 ## SQLite In-Context Learning
 
-Your database is persistent across runs. Design schemas that grow with your task.
+Your database is persistent across runs. The `__tool_results` table holds tool outputs for THIS CYCLE ONLY — extract what matters into durable tables.
 
-**Important:** The `queries` parameter is a plain SQL string. Use semicolons to separate multiple statements. Never use brackets, quotes around the whole thing, or array syntax.
+**Critical workflow for large results:**
+1. Tool returns large result → 2. Inspect metadata (bytes, is_json, array length) → 3. Sample structure → 4. Extract only needed fields → 5. Persist if needed
 
-**Workflow:** Fetch data before querying. Don't query an empty database — there's nothing there yet!
-- First run: create schema → fetch external data → INSERT → report
-- Later runs: fetch new data → INSERT → query for comparison/aggregation → report
-
----
-
-### When to Use SQLite
-
-**Use sqlite_batch for:**
-- Tracking entities over time (prices, rankings, mentions, events)
-- Deduplicating data across runs (seen URLs, processed items)
-- Complex filtering, sorting, or aggregation
-- Storing structured results for comparison or reporting
-- Any data that needs to survive across cycles
-
-**Skip SQLite for:**
-- One-off calculations → just reason inline
-- Simple lists under ~20 items → keep in working memory
-- Data you'll never reference again → don't persist
+**Syntax:** The `queries` parameter is a plain SQL string. Use semicolons to separate statements.
 
 ---
 
-### Schema Creation
+## Flow 1: Large API Response → Inspect → Extract → Report
 
-**Single table:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS prices (symbol TEXT PRIMARY KEY, price REAL, fetched_at TEXT)")
-```
+When a tool returns a large JSON response, DON'T try to read it all. Inspect, sample, then extract.
 
-**Table with index** — use semicolons to separate statements:
+**Step 1: Fetch data**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS price_history (id INTEGER PRIMARY KEY, symbol TEXT, price REAL, fetched_at TEXT); CREATE INDEX IF NOT EXISTS idx_price_symbol ON price_history(symbol, fetched_at DESC)")
+http_request(url="https://api.example.com/products", will_continue_work=true)
 ```
+→ Returns result_id in metadata, e.g. "call_abc123"
 
-**Multiple related tables:**
+**Step 2: Inspect what came back (ALWAYS DO THIS FIRST)**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, stage TEXT, last_checked TEXT, notes TEXT); CREATE TABLE IF NOT EXISTS funding_rounds (id INTEGER PRIMARY KEY, startup_id INTEGER, amount REAL, date TEXT, source TEXT)")
+sqlite_batch(queries="SELECT result_id, bytes, is_json, json_type, json_array_length(result_json, '$.products') AS item_count FROM __tool_results WHERE result_id='call_abc123'")
 ```
+→ Result: bytes=48201, is_json=1, json_type=object, item_count=342
+→ Now you know: 48KB, JSON object, 342 products. Don't dump it all!
 
-**Deduplication pattern:**
+**Step 3: Sample 2-3 items to understand structure**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS seen_urls (url TEXT PRIMARY KEY, first_seen TEXT, title TEXT)")
+sqlite_batch(queries="SELECT json_extract(value, '$') FROM __tool_results, json_each(result_json, '$.products') WHERE result_id='call_abc123' LIMIT 2")
+```
+→ Shows: {id, name, price, category, stock, description, images...}
+→ Now you know which fields exist. Pick only what you need.
+
+**Step 4: Extract only needed fields into durable table**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT, price REAL, category TEXT); INSERT OR REPLACE INTO products (id, name, price, category) SELECT json_extract(value,'$.id'), json_extract(value,'$.name'), json_extract(value,'$.price'), json_extract(value,'$.category') FROM __tool_results, json_each(result_json,'$.products') WHERE result_id='call_abc123'")
+```
+→ 342 rows, ~8KB stored vs 48KB raw. Now queryable forever.
+
+**Step 5: Answer the user's question from clean data**
+```
+sqlite_batch(queries="SELECT category, COUNT(*) as cnt, ROUND(AVG(price),2) as avg_price FROM products GROUP BY category ORDER BY cnt DESC LIMIT 5")
 ```
 
 ---
 
-### Insert & Query Patterns
+## Flow 2: Search → Store URLs → Scrape → Extract Content
 
-**Insert multiple rows then query:**
-```
-sqlite_batch(queries="INSERT INTO price_history (symbol, price, fetched_at) VALUES ('BTC', 67000.50, '2024-01-15T10:30:00Z'); INSERT INTO price_history (symbol, price, fetched_at) VALUES ('ETH', 3400.25, '2024-01-15T10:30:00Z'); SELECT symbol, price, fetched_at FROM price_history WHERE fetched_at > datetime('now', '-24 hours') ORDER BY fetched_at DESC", will_continue_work=true)
-```
+Multi-step research: search, persist URLs, scrape selectively, extract relevant sections.
 
-**Upsert** — update if exists, insert if new:
+**Step 1: Search**
 ```
-sqlite_batch(queries="INSERT INTO prices (symbol, price, fetched_at) VALUES ('BTC', 67500.00, '2024-01-15T12:00:00Z') ON CONFLICT(symbol) DO UPDATE SET price=excluded.price, fetched_at=excluded.fetched_at")
+web_search(query="kubernetes security best practices 2024", will_continue_work=true)
 ```
+→ Returns result_id="call_search1"
 
-**Bulk insert with dedup:**
+**Step 2: Check result size and structure**
 ```
-sqlite_batch(queries="INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post1', '2024-01-15', 'Great Article'); INSERT OR IGNORE INTO seen_urls (url, first_seen, title) VALUES ('https://example.com/post2', '2024-01-15', 'Another Post'); SELECT COUNT(*) as total_seen FROM seen_urls")
+sqlite_batch(queries="SELECT bytes, json_array_length(result_json,'$.organic') AS n FROM __tool_results WHERE result_id='call_search1'")
 ```
+→ n=15 results
 
----
-
-### Tool Result Analysis (Ephemeral)
-
-Tool outputs are loaded into the built-in __tool_results table for this cycle only. Copy anything important into durable tables.
-
-**Inspect recent tool results:**
+**Step 3: Extract URLs to persistent table for tracking**
 ```
-sqlite_batch(queries="SELECT result_id, tool_name, bytes, line_count, is_json, json_type, top_keys FROM __tool_results ORDER BY created_at DESC LIMIT 5")
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS research_urls (url TEXT PRIMARY KEY, title TEXT, snippet TEXT, scraped INTEGER DEFAULT 0); INSERT OR IGNORE INTO research_urls (url, title, snippet) SELECT json_extract(value,'$.link'), json_extract(value,'$.title'), json_extract(value,'$.snippet') FROM __tool_results, json_each(result_json,'$.organic') WHERE result_id='call_search1'", will_continue_work=true)
 ```
 
-**Extract JSON fields and persist:**
+**Step 4: Get next unscraped URL**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS search_results (url TEXT PRIMARY KEY, title TEXT, source_tool TEXT, fetched_at TEXT); INSERT OR IGNORE INTO search_results (url, title, source_tool, fetched_at) SELECT json_extract(value, '$.url'), json_extract(value, '$.title'), tool_name, created_at FROM __tool_results, json_each(result_json, '$.organic') WHERE result_id = 'RESULT_ID_HERE'", will_continue_work=true)
-```
-
-**Work with non-JSON results:**
-```
-sqlite_batch(queries="SELECT substr(result_text, 1, 2000) AS snippet FROM __tool_results WHERE result_id = 'RESULT_ID_HERE'")
+sqlite_batch(queries="SELECT url, title FROM research_urls WHERE scraped=0 LIMIT 1", will_continue_work=true)
 ```
 
-If is_truncated=1 or result_json is null, re-run the tool with a smaller output or read from result_text.
-
----
-
-### Schema Evolution
-
-Schemas aren't static. Add columns, create new tables, migrate data as your task evolves.
-
-**Add a column:**
+**Step 5: Scrape it**
 ```
-sqlite_batch(queries="ALTER TABLE startups ADD COLUMN sentiment TEXT")
+http_request(url="https://example.com/k8s-security-guide", will_continue_work=true)
 ```
+→ Returns result_id="call_scrape1", large HTML/text
 
-**Create derived table for reporting:**
+**Step 6: Check size, find relevant section position**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS daily_summaries (date TEXT PRIMARY KEY, btc_high REAL, btc_low REAL, eth_high REAL, eth_low REAL); INSERT OR REPLACE INTO daily_summaries (date, btc_high, btc_low, eth_high, eth_low) SELECT date(fetched_at), MAX(CASE WHEN symbol='BTC' THEN price END), MIN(CASE WHEN symbol='BTC' THEN price END), MAX(CASE WHEN symbol='ETH' THEN price END), MIN(CASE WHEN symbol='ETH' THEN price END) FROM price_history GROUP BY date(fetched_at)")
+sqlite_batch(queries="SELECT bytes, instr(lower(result_text),'security') AS first_match, instr(lower(result_text),'best practice') AS bp_match FROM __tool_results WHERE result_id='call_scrape1'")
 ```
+→ bytes=91204, first_match=1523, bp_match=8934
 
-**Restructure a table:**
+**Step 7: Extract just the relevant section (not 91KB!)**
 ```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS startups_v2 (id INTEGER PRIMARY KEY, name TEXT UNIQUE, url TEXT, category TEXT, stage TEXT, score INTEGER, last_checked TEXT); INSERT INTO startups_v2 (name, url, stage, last_checked) SELECT name, url, stage, last_checked FROM startups; DROP TABLE startups; ALTER TABLE startups_v2 RENAME TO startups")
+sqlite_batch(queries="SELECT substr(result_text, 8934, 2000) AS content FROM __tool_results WHERE result_id='call_scrape1'")
+```
+→ 2000 chars of relevant content
+
+**Step 8: Mark scraped, continue to next**
+```
+sqlite_batch(queries="UPDATE research_urls SET scraped=1 WHERE url='https://example.com/k8s-security-guide'", will_continue_work=true)
 ```
 
 ---
 
-### Aggregation & Analysis
+## Flow 3: Nested JSON → Targeted Extraction
 
-**Trend detection:**
+API responses often have deep nesting. Navigate precisely.
+
+**Step 1: Fetch nested data**
 ```
-sqlite_batch(queries="SELECT symbol, AVG(price) as avg_price, MIN(price) as low, MAX(price) as high FROM price_history WHERE fetched_at > datetime('now', '-7 days') GROUP BY symbol")
+http_request(url="https://api.github.com/repos/org/repo/pulls", will_continue_work=true)
 ```
+→ result_id="call_prs1", 120KB nested JSON
 
-**Change detection for alerting:**
+**Step 2: Check structure**
 ```
-sqlite_batch(queries="SELECT symbol, price, LAG(price) OVER (PARTITION BY symbol ORDER BY fetched_at) as prev_price FROM price_history WHERE fetched_at > datetime('now', '-1 hour')")
+sqlite_batch(queries="SELECT bytes, json_array_length(result_json) AS pr_count FROM __tool_results WHERE result_id='call_prs1'")
 ```
+→ 47 PRs, 120KB — each PR has user object, head/base objects, labels array...
 
-**Top-N with ranking:**
+**Step 3: See what top-level keys exist**
 ```
-sqlite_batch(queries="SELECT name, score, RANK() OVER (ORDER BY score DESC) as rank FROM startups WHERE stage = 'seed' LIMIT 10")
+sqlite_batch(queries="SELECT DISTINCT key FROM __tool_results, json_each(result_json) AS arr, json_each(arr.value) WHERE result_id='call_prs1' LIMIT 15")
 ```
+→ id, number, title, user, state, created_at, merged_at, head, base...
 
----
-
-### String Escaping — Critical!
-
-**Escape single quotes by doubling them:**
-
-  ✗ Bad:  VALUES ('McDonald's', ...)
-  ✓ Good: VALUES ('McDonald''s', ...)
-
-  ✗ Bad:  VALUES ('It's raining', ...)
-  ✓ Good: VALUES ('It''s raining', ...)
-
-**Example with escaped quotes:**
+**Step 4: Extract flattened view (reach into nested objects)**
 ```
-sqlite_batch(queries="INSERT INTO notes (title, content) VALUES ('User''s Feedback', 'They said: ''This is great!''')")
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS pull_requests AS SELECT json_extract(value,'$.number') AS pr_num, json_extract(value,'$.title') AS title, json_extract(value,'$.user.login') AS author, json_extract(value,'$.state') AS state, json_extract(value,'$.created_at') AS created, json_extract(value,'$.merged_at') AS merged FROM __tool_results, json_each(result_json) WHERE result_id='call_prs1'")
 ```
+→ 47 rows, ~4KB vs 120KB
 
----
-
-### Column-Value Matching — Critical!
-
-**Every INSERT must have exactly one value per column.** Count columns, count values — they must match.
-
-  ✗ Bad (6 values for 7 columns — missing author):
-  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
-  VALUES ('123', '456', NULL, 'Comment text here', '2024-01-15T10:30:00Z', 1)
-
-  ✓ Good (7 values for 7 columns):
-  INSERT INTO comments (id, story_id, parent_id, author, text, created_at, depth)
-  VALUES ('123', '456', NULL, 'username', 'Comment text here', '2024-01-15T10:30:00Z', 1)
-
-**When bulk inserting, verify each row tuple has the right count before executing.**
-
----
-
-### Table Name Consistency — Critical!
-
-**Use the exact same table name everywhere: CREATE TABLE, CREATE INDEX, INSERT, SELECT, UPDATE, DELETE.** Watch for singular vs plural typos (hn_comments vs hn_comment).
-
-  ✗ Bad (table is hn_comments, but index references hn_comment):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  CREATE INDEX idx_story ON hn_comment(story_id);  -- FAILS: no such table
-
-  ✗ Bad (same typo in INSERT):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  INSERT INTO hn_comment ...  -- FAILS: no such table
-
-  ✓ Good (same name in all statements):
-  CREATE TABLE IF NOT EXISTS hn_comments (...);
-  CREATE INDEX idx_story ON hn_comments(story_id);
-  INSERT INTO hn_comments ...
-  SELECT * FROM hn_comments
-
----
-
-### Avoid Reserved Words as Identifiers
-
-**Don't use SQL reserved words for table or column names.** Common traps: values, table, order, group, index, key, default, check, column, row, user, type, status, data, time, date.
-
-  ✗ Bad:
-  CREATE TABLE values (...)      -- "values" is reserved
-  CREATE TABLE data (order TEXT) -- "order" is reserved
-
-  ✓ Good:
-  CREATE TABLE price_values (...)
-  CREATE TABLE entries (sort_order TEXT)
-
----
-
-### Cleanup & Maintenance
-
-**Prune old data:**
+**Step 5: Query the clean table**
 ```
-sqlite_batch(queries="DELETE FROM price_history WHERE fetched_at < datetime('now', '-30 days')", will_continue_work=false)
-```
-
-**Remove duplicates:**
-```
-sqlite_batch(queries="DELETE FROM price_history WHERE id NOT IN (SELECT MIN(id) FROM price_history GROUP BY symbol, fetched_at)")
+sqlite_batch(queries="SELECT author, COUNT(*) as prs, SUM(CASE WHEN merged IS NOT NULL THEN 1 ELSE 0 END) as merged_count FROM pull_requests GROUP BY author ORDER BY prs DESC LIMIT 10")
 ```
 
 ---
 
-### The Golden Rule: Fetch Before You Query
+## Flow 4: Large Text → Find Positions → Extract Sections
 
-An empty database has nothing to SELECT. On first run:
-1. **Create schema** → 2. **Fetch external data** → 3. **INSERT** → 4. **Query/report**
+For non-JSON results (HTML, logs, docs), use position-based extraction.
 
-On later runs (DB has data):
-1. **Fetch new data** → 2. **INSERT** → 3. **Query to compare/aggregate** → 4. **Report**
-
-**✗ Wrong (querying empty DB):**
+**Step 1: Fetch large text**
 ```
-sqlite_batch(queries="SELECT * FROM items")  -- returns nothing!
+http_request(url="https://logs.example.com/app.log", will_continue_work=true)
 ```
-→ http_request(api)  -- should have done this first
+→ result_id="call_logs1", is_json=0
 
-**✓ Right (fetch first, then store):**
-→ http_request(api, will_continue_work=true)
-[Next cycle: insert the results, then query if needed]
+**Step 2: Check size and characteristics**
+```
+sqlite_batch(queries="SELECT bytes, line_count, is_json, (length(result_text) - length(replace(result_text,'ERROR',''))) / 5 AS error_count FROM __tool_results WHERE result_id='call_logs1'")
+```
+→ bytes=524288 (500KB), line_count=8420, is_json=0, error_count=7
+
+**Step 3: Find first error position**
+```
+sqlite_batch(queries="SELECT instr(result_text,'ERROR') AS first_error_pos FROM __tool_results WHERE result_id='call_logs1'")
+```
+→ first_error_pos=145023
+
+**Step 4: Extract context around error**
+```
+sqlite_batch(queries="SELECT substr(result_text, 145023 - 200, 600) AS error_context FROM __tool_results WHERE result_id='call_logs1'")
+```
+→ 600 chars showing error + context (not 500KB!)
+
+**Step 5: For pattern matching across text**
+```
+sqlite_batch(queries="SELECT result_id FROM __tool_results WHERE result_text LIKE '%Connection refused%' OR result_text LIKE '%timeout%'")
+```
 
 ---
 
-### Agentic Patterns
+## Flow 5: Aggregate First → Extract Only What Matters
 
-**First run — create schema, fetch, store:**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, external_id TEXT UNIQUE, name TEXT, value REAL, fetched_at TEXT)", will_continue_work=true)
-```
-→ http_request(external-api, will_continue_work=true)
-[Next cycle: INSERT results, report to user]
+Don't extract 1000 items when you only need the 5 failures.
 
-**Later runs — fetch new, insert, compare:**
-→ http_request(external-api, will_continue_work=true)
-[Next cycle: INSERT OR IGNORE new items, query for changes, report differences]
-
-**Evolve schema when requirements change:**
+**Step 1: Fetch order data**
 ```
-sqlite_batch(queries="ALTER TABLE items ADD COLUMN category TEXT")
+http_request(url="https://api.store.com/orders?days=30", will_continue_work=true)
+```
+→ result_id="call_orders1", 2847 orders, 340KB
+
+**Step 2: Aggregate by status BEFORE extracting details**
+```
+sqlite_batch(queries="SELECT json_extract(value,'$.status') AS status, COUNT(*) AS cnt FROM __tool_results, json_each(result_json,'$.orders') WHERE result_id='call_orders1' GROUP BY 1")
+```
+→ pending=12, processing=45, shipped=2756, failed=34
+
+**Step 3: Extract ONLY the failed ones**
+```
+sqlite_batch(queries="SELECT json_extract(value,'$.id') AS order_id, json_extract(value,'$.error') AS error, json_extract(value,'$.customer.email') AS email FROM __tool_results, json_each(result_json,'$.orders') WHERE result_id='call_orders1' AND json_extract(value,'$.status')='failed'")
+```
+→ 34 rows with actionable data (not 2847 rows / 340KB)
+
+---
+
+## Flow 6: Cross-Tool Correlation
+
+Join data from multiple tool calls.
+
+**Step 1: Already have search results stored**
+```
+sqlite_batch(queries="SELECT url, title FROM research_urls WHERE scraped=1 LIMIT 5")
 ```
 
-**Data getting large — prune old records:**
+**Step 2: Correlate with scraped content**
+```
+sqlite_batch(queries="SELECT r.url, r.title, substr(t.result_text, 1, 500) AS preview FROM research_urls r JOIN __tool_results t ON t.result_id = r.scrape_result_id WHERE r.scraped=1")
+```
+
+---
+
+## Key Techniques Reference
+
+### Inspect Metadata First
+```
+SELECT result_id, bytes, is_json, json_type, line_count, top_keys FROM __tool_results WHERE result_id='X'
+```
+
+### Count Array Elements
+```
+SELECT json_array_length(result_json, '$.items') FROM __tool_results WHERE result_id='X'
+```
+
+### Sample Without Extracting All
+```
+SELECT json_extract(value,'$') FROM __tool_results, json_each(result_json,'$.items') WHERE result_id='X' LIMIT 3
+```
+
+### Create Table Directly From JSON
+```
+CREATE TABLE items AS SELECT json_extract(value,'$.id') AS id, json_extract(value,'$.name') AS name FROM __tool_results, json_each(result_json,'$.data') WHERE result_id='X'
+```
+
+### Reach Into Nested Objects
+```
+json_extract(value, '$.user.profile.email')
+json_extract(value, '$.items[0].price')
+```
+
+### Text Position Finding
+```
+SELECT instr(result_text, 'keyword') AS pos FROM __tool_results WHERE result_id='X'
+```
+
+### Text Extraction Around Position
+```
+SELECT substr(result_text, pos - 100, 500) FROM ...
+```
+
+### Pattern Matching in Text
+```
+WHERE result_text LIKE '%error%' OR result_text GLOB '*Exception*'
+```
+
+---
+
+## Common Pitfalls
+
+### String Escaping
+```
+✗ VALUES ('McDonald's')
+✓ VALUES ('McDonald''s')
+```
+
+### Column-Value Count Mismatch
+```
+✗ INSERT INTO t (a, b, c) VALUES (1, 2)  -- 3 cols, 2 vals
+✓ INSERT INTO t (a, b, c) VALUES (1, 2, 3)
+```
+
+### Table Name Typos
+```
+✗ CREATE TABLE items (...); INSERT INTO item ...
+✓ CREATE TABLE items (...); INSERT INTO items ...
+```
+
+### Reserved Words
+```
+✗ CREATE TABLE order (...)
+✓ CREATE TABLE orders (...)
+```
+
+### Querying Empty Tables
+Always fetch external data BEFORE querying. First run: create schema → fetch → insert → query.
+
+---
+
+## Cleanup
+
 ```
 sqlite_batch(queries="DELETE FROM items WHERE fetched_at < datetime('now', '-30 days')")
+```
+```
+sqlite_batch(queries="DROP TABLE IF EXISTS temp_analysis")
 ```
 """
 
