@@ -1447,7 +1447,7 @@ requires-dist = [
     { name = "inscriptis", specifier = "==2.6.0" },
     { name = "json-schema-to-pydantic", specifier = "~=0.4.1" },
     { name = "json5", specifier = ">=0.13.0" },
-    { name = "litellm", git = "https://github.com/gobii-ai/litellm.git?rev=966fc7e36954d82bbf8ca48916d8e028c2416154" },
+    { name = "litellm", git = "https://github.com/gobii-ai/litellm.git?rev=38d759e3de5fd843adc5a448ec5ecdf35cc4c39c" },
     { name = "mail-parser", specifier = "==4.1.4" },
     { name = "markdown", specifier = "~=3.8" },
     { name = "markitdown", extras = ["all"], specifier = "==0.1.4" },
@@ -2217,7 +2217,7 @@ wheels = [
 [[package]]
 name = "litellm"
 version = "1.80.11"
-source = { git = "https://github.com/gobii-ai/litellm.git?rev=966fc7e36954d82bbf8ca48916d8e028c2416154#966fc7e36954d82bbf8ca48916d8e028c2416154" }
+source = { git = "https://github.com/gobii-ai/litellm.git?rev=38d759e3de5fd843adc5a448ec5ecdf35cc4c39c#38d759e3de5fd843adc5a448ec5ecdf35cc4c39c" }
 dependencies = [
     { name = "aiohttp" },
     { name = "click" },
