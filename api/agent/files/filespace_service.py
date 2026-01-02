@@ -22,6 +22,7 @@ from ...models import (
 
 logger = get_task_logger(__name__)
 EXPORTS_DIR_NAME = "exports"
+DOWNLOADS_DIR_NAME = "downloads"
 
 
 @dataclass
@@ -112,13 +113,14 @@ def _agent_has_access(agent: "PersistentAgent", filespace_id: "uuid.UUID") -> bo
     return AgentFileSpaceAccess.objects.filter(agent=agent, filespace_id=filespace_id).exists()
 
 
-def write_bytes_to_exports(
+def write_bytes_to_dir(
     agent: "PersistentAgent",
     content_bytes: bytes,
     filename: str | None,
     fallback_name: str,
     extension: str,
     mime_type: str,
+    dir_name: str,
 ) -> dict[str, Any]:
     if not isinstance(content_bytes, (bytes, bytearray)):
         return {"status": "error", "message": "File content must be bytes."}
@@ -141,20 +143,20 @@ def write_bytes_to_exports(
         return {"status": "error", "message": "Agent lacks access to the filespace."}
 
     try:
-        exports_dir = get_or_create_dir(filespace, None, EXPORTS_DIR_NAME)
+        target_dir = get_or_create_dir(filespace, None, dir_name)
     except Exception as exc:
-        logger.exception("Failed to resolve exports directory for agent %s: %s", agent.id, exc)
-        return {"status": "error", "message": "Failed to access the exports directory."}
+        logger.exception("Failed to resolve %s directory for agent %s: %s", dir_name, agent.id, exc)
+        return {"status": "error", "message": f"Failed to access the {dir_name} directory."}
 
     base_name = _normalize_filename(filename, fallback_name, extension)
     checksum = hashlib.sha256(content_bytes).hexdigest()
     node = None
     max_attempts = 5
     for attempt in range(max_attempts):
-        name = dedupe_name(filespace, exports_dir, base_name)
+        name = dedupe_name(filespace, target_dir, base_name)
         node = AgentFsNode(
             filespace=filespace,
-            parent=exports_dir,
+            parent=target_dir,
             node_type=AgentFsNode.NodeType.FILE,
             name=name,
             created_by_agent=agent,
@@ -175,14 +177,14 @@ def write_bytes_to_exports(
             if attempt == max_attempts - 1:
                 return {
                     "status": "error",
-                    "message": "Failed to allocate a unique filename for this export.",
+                    "message": "Failed to allocate a unique filename for this file.",
                 }
 
     try:
         node.content.save(name, ContentFile(content_bytes), save=True)
         node.refresh_from_db()
     except Exception:
-        logger.exception("Failed to persist file to exports for agent %s", agent.id)
+        logger.exception("Failed to persist file to %s for agent %s", dir_name, agent.id)
         try:
             if node.content and getattr(node.content, "name", None):
                 node.content.delete(save=False)
@@ -221,6 +223,25 @@ def write_bytes_to_exports(
     except Exception:
         logger.debug("Failed to emit file exported analytics for agent %s", getattr(agent, "id", None), exc_info=True)
     return result
+
+
+def write_bytes_to_exports(
+    agent: "PersistentAgent",
+    content_bytes: bytes,
+    filename: str | None,
+    fallback_name: str,
+    extension: str,
+    mime_type: str,
+) -> dict[str, Any]:
+    return write_bytes_to_dir(
+        agent=agent,
+        content_bytes=content_bytes,
+        filename=filename,
+        fallback_name=fallback_name,
+        extension=extension,
+        mime_type=mime_type,
+        dir_name=EXPORTS_DIR_NAME,
+    )
 
 
 def import_message_attachments_to_filespace(message_id: str) -> List[ImportedNodeInfo]:

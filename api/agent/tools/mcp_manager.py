@@ -1115,10 +1115,9 @@ class MCPToolManager:
                 "message": f"Tool '{tool_name}' is blacklisted and cannot be executed",
             }
 
-        if runtime.name == "brightdata":
-            pdf_error = self._brightdata_pdf_guard(info.tool_name, params)
-            if pdf_error:
-                return pdf_error
+        param_error = self._param_guards.validate(runtime.name, info.tool_name, params, owner=None)
+        if param_error:
+            return param_error
 
         if not self._ensure_runtime_registered(runtime):
             return {"status": "error", "message": f"MCP server '{runtime.name}' is not available"}

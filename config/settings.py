@@ -1053,8 +1053,8 @@ if PIPEDREAM_GC_ENABLED:
 # Maximum file size (in bytes) for downloads and inbound attachments
 # Default: 10 MB. Override with env var MAX_FILE_SIZE if needed.
 MAX_FILE_SIZE = env.int("MAX_FILE_SIZE", default=10 * 1024 * 1024)
-ALLOW_FILE_DOWNLOAD = env.bool("ALLOW_FILE_DOWNLOAD", default=False)
-ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=False)
+ALLOW_FILE_DOWNLOAD = env.bool("ALLOW_FILE_DOWNLOAD", default=True)
+ALLOW_FILE_UPLOAD = env.bool("ALLOW_FILE_UPLOAD", default=True)
 
 # Manual whitelist limits
 # Maximum number of manual allowlist entries per agent. Configurable via env.

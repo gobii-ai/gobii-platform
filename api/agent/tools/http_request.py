@@ -7,7 +7,10 @@ including tool definition and execution logic.
 
 import json
 import logging
+import mimetypes
+import os
 import re
+import urllib.parse
 from typing import Dict, Any
 
 import requests
@@ -17,8 +20,139 @@ from django.conf import settings
 
 from ...models import PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
+from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
 
 logger = logging.getLogger(__name__)
+PREVIEW_MAX_BYTES = 30 * 1024
+DOWNLOAD_CHUNK_SIZE = 64 * 1024
+
+
+class _ResponseBodyResult:
+    def __init__(
+        self,
+        content_bytes: bytes,
+        preview_bytes: bytes,
+        total_bytes: int,
+        truncated: bool,
+        over_limit: bool,
+    ) -> None:
+        self.content_bytes = content_bytes
+        self.preview_bytes = preview_bytes
+        self.total_bytes = total_bytes
+        self.truncated = truncated
+        self.over_limit = over_limit
+
+
+def _coerce_optional_bool(value: Any) -> bool | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() == "true"
+    return None
+
+
+def _decode_filename_star(value: str) -> str:
+    value = value.strip().strip('"')
+    charset, sep, encoded = value.partition("''")
+    if sep:
+        if not charset:
+            return urllib.parse.unquote(encoded)
+        try:
+            return urllib.parse.unquote(encoded, encoding=charset)
+        except (LookupError, UnicodeDecodeError):
+            return urllib.parse.unquote(encoded)
+    return urllib.parse.unquote(value)
+
+
+def _extract_filename_from_disposition(content_disposition: str | None) -> str | None:
+    if not content_disposition:
+        return None
+    filename = None
+    filename_star = None
+    for part in content_disposition.split(";"):
+        part = part.strip()
+        lower = part.lower()
+        if lower.startswith("filename*="):
+            value = part.split("=", 1)[1].strip().strip('"')
+            filename_star = _decode_filename_star(value)
+        elif lower.startswith("filename="):
+            filename = part.split("=", 1)[1].strip().strip('"')
+    return filename_star or filename
+
+
+def _resolve_download_name(url: str, content_disposition: str | None) -> str | None:
+    filename = _extract_filename_from_disposition(content_disposition)
+    if filename:
+        return filename
+    try:
+        path = urllib.parse.urlparse(url).path
+    except ValueError:
+        return None
+    base = os.path.basename(path)
+    return base or None
+
+
+def _read_response_body(
+    resp: requests.Response,
+    download_requested: bool,
+    max_download_bytes: int | None,
+    content_length: int | None,
+) -> _ResponseBodyResult:
+    total_bytes = 0
+    if download_requested:
+        download_chunks = []
+        preview_chunks = []
+        preview_read = 0
+        for chunk in resp.iter_content(chunk_size=DOWNLOAD_CHUNK_SIZE):
+            if not chunk:
+                break
+            next_total = total_bytes + len(chunk)
+            if max_download_bytes and next_total > max_download_bytes:
+                total_bytes = next_total
+                return _ResponseBodyResult(
+                    content_bytes=b"".join(download_chunks),
+                    preview_bytes=b"".join(preview_chunks),
+                    total_bytes=total_bytes,
+                    truncated=total_bytes > PREVIEW_MAX_BYTES,
+                    over_limit=True,
+                )
+            download_chunks.append(chunk)
+            total_bytes = next_total
+            if preview_read < PREVIEW_MAX_BYTES:
+                take = min(len(chunk), PREVIEW_MAX_BYTES - preview_read)
+                preview_chunks.append(chunk[:take])
+                preview_read += take
+        return _ResponseBodyResult(
+            content_bytes=b"".join(download_chunks),
+            preview_bytes=b"".join(preview_chunks),
+            total_bytes=total_bytes,
+            truncated=total_bytes > PREVIEW_MAX_BYTES,
+            over_limit=False,
+        )
+
+    preview_chunks = []
+    bytes_read = 0
+    for chunk in resp.iter_content(chunk_size=1024):
+        if not chunk:
+            break
+        if bytes_read + len(chunk) > PREVIEW_MAX_BYTES:
+            chunk = chunk[: PREVIEW_MAX_BYTES - bytes_read]
+        preview_chunks.append(chunk)
+        bytes_read += len(chunk)
+        if bytes_read >= PREVIEW_MAX_BYTES:
+            break
+    truncated = bytes_read >= PREVIEW_MAX_BYTES or (
+        content_length is not None and content_length > bytes_read
+    )
+    return _ResponseBodyResult(
+        content_bytes=b"",
+        preview_bytes=b"".join(preview_chunks),
+        total_bytes=bytes_read,
+        truncated=truncated,
+        over_limit=False,
+    )
 
 
 def get_http_request_tool() -> Dict[str, Any]:
@@ -41,6 +175,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "headers": {"type": "object", "description": "Optional HTTP headers to include in the request."},
                     "body": {"type": "string", "description": "Optional request body (for POST/PUT)."},
                     "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
+                    "download": {
+                        "type": "boolean",
+                        "description": "Whether to save the response to the agent filespace (returns path/node_id/filename).",
+                    },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
@@ -75,15 +213,10 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not url:
         return {"status": "error", "message": "Missing required parameter: url"}
 
-    will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is None:
-        will_continue_work = None
-    elif isinstance(will_continue_work_raw, bool):
-        will_continue_work = will_continue_work_raw
-    elif isinstance(will_continue_work_raw, str):
-        will_continue_work = will_continue_work_raw.lower() == "true"
-    else:
-        will_continue_work = None
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
+    download_requested = _coerce_optional_bool(params.get("download")) is True
+    if download_requested and not getattr(settings, "ALLOW_FILE_DOWNLOAD", False):
+        return {"status": "error", "message": "File downloads are disabled."}
 
     # Log original request details (before secret substitution)
     logger.info(
@@ -254,29 +387,54 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     except RequestException as e:
         return {"status": "error", "message": f"HTTP request failed: {e}"}
 
-    # Read up to 30 KB
-    max_bytes = 30 * 1024  # 30 KB
-    content_chunks = []
-    bytes_read = 0
+    if download_requested and (resp.status_code < 200 or resp.status_code >= 300):
+        resp.close()
+        return {
+            "status": "error",
+            "message": f"Download failed with status {resp.status_code}.",
+            "status_code": resp.status_code,
+        }
+
+    content_length = resp.headers.get("Content-Length")
     try:
-        for chunk in resp.iter_content(chunk_size=1024):
-            if not chunk:
-                break
-            if bytes_read + len(chunk) > max_bytes:
-                chunk = chunk[: max_bytes - bytes_read]
-            content_chunks.append(chunk)
-            bytes_read += len(chunk)
-            if bytes_read >= max_bytes:
-                break
+        content_length = int(content_length) if content_length else None
+    except (TypeError, ValueError):
+        content_length = None
+
+    max_download_bytes = getattr(settings, "MAX_FILE_SIZE", None) if download_requested else None
+    if download_requested and max_download_bytes and content_length and content_length > max_download_bytes:
+        resp.close()
+        return {
+            "status": "error",
+            "message": (
+                f"File exceeds maximum allowed size ({content_length} bytes > "
+                f"{max_download_bytes} bytes)."
+            ),
+        }
+
+    try:
+        body_result = _read_response_body(
+            resp,
+            download_requested=download_requested,
+            max_download_bytes=max_download_bytes,
+            content_length=content_length,
+        )
     finally:
         resp.close()
 
-    content_bytes = b"".join(content_chunks)
-    truncated = (
-        bytes_read >= max_bytes or (
-            resp.headers.get("Content-Length") and int(resp.headers["Content-Length"]) > bytes_read
-        )
-    )
+    if download_requested and body_result.over_limit:
+        return {
+            "status": "error",
+            "message": (
+                f"File exceeds maximum allowed size ({body_result.total_bytes} bytes > "
+                f"{max_download_bytes} bytes)."
+            ),
+        }
+
+    content_bytes = body_result.content_bytes
+    preview_bytes = body_result.preview_bytes
+    total_bytes = body_result.total_bytes
+    truncated = body_result.truncated
 
     # Determine if we should treat content as text
     content_type = (resp.headers.get("Content-Type") or "").lower()
@@ -289,14 +447,17 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     if is_textual:
         try:
-            content_str = content_bytes.decode("utf-8", errors="replace")
+            content_str = preview_bytes.decode("utf-8", errors="replace")
         except Exception:
-            content_str = content_bytes.decode(errors="replace")
+            content_str = preview_bytes.decode(errors="replace")
         if truncated:
             content_str += "\n\n[Content truncated to 30KB]"
     else:
-        size_hint = resp.headers.get("Content-Length", f"{bytes_read}+")
-        content_str = f"[Binary content omitted – {content_type or 'unknown type'}, length ≈ {size_hint} bytes]"
+        size_hint = content_length if content_length is not None else total_bytes
+        content_str = (
+            f"[Binary content omitted – {content_type or 'unknown type'}, "
+            f"length ≈ {size_hint} bytes]"
+        )
 
     # Log response details
     response_size = len(content_str) if isinstance(content_str, str) else len(str(content_str))
@@ -313,6 +474,34 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         "content": content_str,
         "proxy_used": str(proxy_server) if proxy_server else None,
     }
+    if download_requested:
+        content_type_header = resp.headers.get("Content-Type") or ""
+        mime_type = content_type_header.split(";", 1)[0].strip().lower() or "application/octet-stream"
+        download_name = _resolve_download_name(url, resp.headers.get("Content-Disposition"))
+        extension = ""
+        if download_name:
+            _, ext = os.path.splitext(download_name)
+            extension = (ext or "").lower()
+        if not extension:
+            extension = (mimetypes.guess_extension(mime_type) or "").lower()
+        download_result = write_bytes_to_dir(
+            agent=agent,
+            content_bytes=content_bytes,
+            filename=download_name,
+            fallback_name="download",
+            extension=extension,
+            mime_type=mime_type,
+            dir_name=DOWNLOADS_DIR_NAME,
+        )
+        if download_result.get("status") != "ok":
+            return download_result
+        response.update(
+            {
+                "path": download_result["path"],
+                "node_id": download_result["node_id"],
+                "filename": download_result["filename"],
+            }
+        )
     if will_continue_work is False:
         response["auto_sleep_ok"] = True
     return response

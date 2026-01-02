@@ -67,7 +67,7 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
                 "Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. "
                 "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
                 "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "
-                "those are handled via MCP tools using connect/auth links. File uploads and downloads are NOT currently supported!!! "
+                "those are handled via MCP tools using connect/auth links. "
                 f"You will be automatically notified when the task completes and can see results in your context. {limit_sentence}"
             ),
             "parameters": {
