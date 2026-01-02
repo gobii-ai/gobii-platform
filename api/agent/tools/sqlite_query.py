@@ -21,6 +21,13 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 
 from ...models import PersistentAgent
+from .sqlite_guardrails import (
+    clear_guarded_connection,
+    get_blocked_statement_reason,
+    open_guarded_sqlite_connection,
+    start_query_timer,
+    stop_query_timer,
+)
 from .sqlite_helpers import is_write_statement
 
 logger = logging.getLogger(__name__)
@@ -41,6 +48,10 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if len(query_preview) > 500:
         query_preview = query_preview[:500] + f"... [TRUNCATED, total {len(query)} chars]"
 
+    block_reason = get_blocked_statement_reason(query)
+    if block_reason:
+        return {"status": "error", "message": f"Query blocked: {block_reason}"}
+
     should_auto_sleep = is_write_statement(query)
 
     logger.info(
@@ -52,9 +63,11 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not db_path:
         return {"status": "error", "message": "SQLite DB path unavailable"}
 
+    conn = None
     try:
-        conn = sqlite3.connect(db_path)
+        conn = open_guarded_sqlite_connection(db_path)
         cursor = conn.cursor()
+        start_query_timer(conn)
         cursor.execute(query)
 
         # Get database size on disk
@@ -112,8 +125,12 @@ def execute_sqlite_query(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     except Exception as e:
         return {"status": "error", "message": f"SQLite query failed: {e}"}
     finally:
+        if conn is not None:
+            stop_query_timer(conn)
         try:
-            conn.close()
+            if conn is not None:
+                clear_guarded_connection(conn)
+                conn.close()
         except Exception:
             pass
 
@@ -159,7 +176,7 @@ we truncate and add a notice at the end."""
         return "SQLite database not initialised – no schema present yet."
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = open_guarded_sqlite_connection(db_path)
         cur = conn.cursor()
         cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
         tables = cur.fetchall()

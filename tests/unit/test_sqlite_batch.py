@@ -157,3 +157,26 @@ class SqliteBatchToolTests(TestCase):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": {"sql": "SELECT 1"}})
             self.assertEqual(out.get("status"), "error")
+
+    def test_attach_database_is_blocked(self):
+        with self._with_temp_db() as (_db_path, _token, tmp):
+            escape_path = os.path.join(tmp.name, "escape.db")
+            out = execute_sqlite_batch(
+                self.agent,
+                {"queries": f"ATTACH DATABASE '{escape_path}' AS other"},
+            )
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("not authorized", out.get("message", "").lower())
+            self.assertFalse(os.path.exists(escape_path))
+
+    def test_vacuum_is_blocked(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": "VACUUM"})
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("vacuum", out.get("message", "").lower())
+
+    def test_database_list_pragma_is_blocked(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": "PRAGMA database_list"})
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("not authorized", out.get("message", "").lower())
