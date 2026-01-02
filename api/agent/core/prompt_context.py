@@ -190,333 +190,632 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return in-context learning examples for sqlite_batch usage.
 
-    These examples teach the agent complete agentic flows for handling
-    large tool results efficiently, including inspection, extraction,
-    and persistence patterns.
+    These examples teach efficient, defensive querying patterns within
+    complete agentic flows—showing how queries fit into larger tasks.
     """
     return """
 ## SQLite In-Context Learning
 
-Your database is persistent across runs. The `__tool_results` table holds tool outputs for THIS CYCLE ONLY — extract what matters into durable tables.
+Your database persists across runs. `__tool_results` holds tool outputs for THIS CYCLE ONLY—extract what matters into durable tables.
 
-**Critical workflow for large results:**
-1. Tool returns large result → 2. Inspect metadata (bytes, is_json, array length, schema size) → 3. Sample structure → 4. Extract only needed fields → 5. Persist if needed
-
-**Syntax:** The `queries` parameter is a plain SQL string. Use semicolons to separate statements.
-
----
-
-## Flow 1: Large API Response → Inspect → Extract → Report
-
-When a tool returns a large JSON response, DON'T try to read it all. Inspect, sample, then extract.
-
-**Step 1: Fetch data**
-```
-http_request(url="https://api.example.com/products", will_continue_work=true)
-```
-→ Returns result_id in metadata, e.g. "call_abc123"
-
-**Step 2: Inspect what came back (ALWAYS DO THIS FIRST)**
-```
-sqlite_batch(queries="SELECT result_id, bytes, is_json, json_type, json_array_length(result_json, '$.content.products') AS item_count FROM __tool_results WHERE result_id='call_abc123'")
-```
-→ Result: bytes=48201, is_json=1, json_type=object, item_count=342
-→ Now you know: 48KB, JSON object, 342 products. Don't dump it all!
-
-**Step 3: Sample 2-3 items to understand structure**
-```
-sqlite_batch(queries="SELECT json_extract(item.value, '$') FROM __tool_results, json_each(result_json, '$.content.products') AS item WHERE result_id='call_abc123' LIMIT 2")
-```
-→ Shows: {id, name, price, category, stock, description, images...}
-→ Now you know which fields exist. Pick only what you need.
-
-**Step 4: Extract only needed fields into durable table**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS products (id TEXT PRIMARY KEY, name TEXT, price REAL, category TEXT); INSERT OR REPLACE INTO products (id, name, price, category) SELECT json_extract(item.value,'$.id'), json_extract(item.value,'$.name'), json_extract(item.value,'$.price'), json_extract(item.value,'$.category') FROM __tool_results, json_each(result_json,'$.content.products') AS item WHERE result_id='call_abc123'")
-```
-→ 342 rows, ~8KB stored vs 48KB raw. Now queryable forever.
-
-**Step 5: Answer the user's question from clean data**
-```
-sqlite_batch(queries="SELECT category, COUNT(*) as cnt, ROUND(AVG(price),2) as avg_price FROM products GROUP BY category ORDER BY cnt DESC LIMIT 5")
-```
+**Core rules:**
+- NEVER select full `result_text` or `result_json`—always extract specific fields with LIMIT
+- Use the embedded meta/schema in the prompt above to know structure before querying
+- Constrain every query: LIMIT rows, substr() strings, extract only needed JSON fields
+- After extracting data, CONTINUE to present/analyze it—don't stop after the query
 
 ---
 
-## Flow 2: Search → Store URLs → Scrape → Extract Content
+## Flow 1: API Data → Extract → Present All Results
 
-Multi-step research: search, persist URLs, scrape selectively, extract relevant sections.
+User asks "what's trending?" You fetch data, extract it, then present everything.
 
-**Step 1: Search**
 ```
-web_search(query="kubernetes security best practices 2024", will_continue_work=true)
-```
-→ Returns result_id="call_search1"
+1. search_tools(query="fetch data from REST APIs", will_continue_work=true)
+   → Enables: http_request
 
-**Step 2: Check result size and structure**
-```
-sqlite_batch(queries="SELECT bytes, json_array_length(result_json,'$.organic') AS n FROM __tool_results WHERE result_id='call_search1'")
-```
-→ n=15 results
+2. http_request(url="https://api.example.com/trending", will_continue_work=true)
+   → result_id="R1", 50KB JSON with 100 items
 
-**Step 3: Extract URLs to persistent table for tracking**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS research_urls (url TEXT PRIMARY KEY, title TEXT, snippet TEXT, scraped INTEGER DEFAULT 0); INSERT OR IGNORE INTO research_urls (url, title, snippet) SELECT json_extract(value,'$.link'), json_extract(value,'$.title'), json_extract(value,'$.snippet') FROM __tool_results, json_each(result_json,'$.organic') WHERE result_id='call_search1'", will_continue_work=true)
-```
+3. sqlite_batch(queries="
+   SELECT json_extract(item.value,'$.title') AS title,
+          json_extract(item.value,'$.score') AS score,
+          json_extract(item.value,'$.url') AS url
+   FROM __tool_results, json_each(result_json,'$.content.items') AS item
+   WHERE result_id='R1'
+   ORDER BY score DESC LIMIT 25", will_continue_work=true)
+   → Returns 25 rows of clean data
 
-**Step 4: Get next unscraped URL**
-```
-sqlite_batch(queries="SELECT url, title FROM research_urls WHERE scraped=0 LIMIT 1", will_continue_work=true)
+4. Format ALL 25 results into a nice table/list and present to user
+   → Don't stop after 5 items! User asked for trending, give them the full picture
 ```
 
-**Step 5: Scrape it**
-```
-http_request(url="https://example.com/k8s-security-guide", will_continue_work=true)
-```
-→ Returns result_id="call_scrape1", large HTML/text
+**Key pattern:** First search for the right tools, then use them. The query extracts data, but your job isn't done—you must present the results. Set `will_continue_work=true` throughout, then format and deliver.
 
-**Step 6: Check size, find relevant section position**
-```
-sqlite_batch(queries="SELECT bytes, instr(lower(result_text),'security') AS first_match, instr(lower(result_text),'best practice') AS bp_match FROM __tool_results WHERE result_id='call_scrape1'")
-```
-→ bytes=91204, first_match=1523, bp_match=8934
+---
 
-**Step 7: Extract just the relevant section (not 91KB!)**
-```
-sqlite_batch(queries="SELECT substr(result_text, 8934, 2000) AS content FROM __tool_results WHERE result_id='call_scrape1'")
-```
-→ 2000 chars of relevant content
+## Flow 2: Large Response → Aggregate → Drill Down → Report
 
-**Step 8: Mark scraped, continue to next**
+User asks about order failures. You need the big picture first, then details.
+
 ```
-sqlite_batch(queries="UPDATE research_urls SET scraped=1 WHERE url='https://example.com/k8s-security-guide'", will_continue_work=true)
+1. http_request(url="https://api.store.com/orders?days=30", will_continue_work=true)
+   → result_id="R2", 340KB with 2847 orders
+
+2. sqlite_batch(queries="
+   SELECT json_extract(o.value,'$.status') AS status, COUNT(*) AS cnt
+   FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+   WHERE result_id='R2'
+   GROUP BY 1 ORDER BY cnt DESC", will_continue_work=true)
+   → pending=12, processing=45, shipped=2756, failed=34
+
+3. sqlite_batch(queries="
+   SELECT json_extract(o.value,'$.id') AS order_id,
+          json_extract(o.value,'$.error') AS error,
+          json_extract(o.value,'$.customer.email') AS email
+   FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+   WHERE result_id='R2'
+     AND json_extract(o.value,'$.status')='failed'
+   LIMIT 50", will_continue_work=true)
+   → All 34 failed orders with details
+
+4. Present summary AND the failed order details to user
+   → "Found 2847 orders: 2756 shipped, 45 processing, 34 failed. Here are the failures..."
 ```
 
 ---
 
-## Flow 3: Nested JSON → Targeted Extraction
+## Flow 3: Nested JSON → Flatten → Store → Query Multiple Times
 
-API responses often have deep nesting. Navigate precisely.
+Complex nested data that you'll need to analyze from multiple angles.
 
-**Step 1: Fetch nested data**
 ```
-http_request(url="https://api.github.com/repos/org/repo/pulls", will_continue_work=true)
-```
-→ result_id="call_prs1", 120KB nested JSON
+1. http_request(url="https://api.github.com/repos/org/repo/pulls", will_continue_work=true)
+   → result_id="R3", 120KB nested JSON
 
-**Step 2: Check structure**
-```
-sqlite_batch(queries="SELECT bytes, json_array_length(result_json, '$.content') AS pr_count FROM __tool_results WHERE result_id='call_prs1'")
-```
-→ 47 PRs, 120KB — each PR has user object, head/base objects, labels array...
+2. sqlite_batch(queries="
+   CREATE TABLE IF NOT EXISTS prs (
+     number INTEGER PRIMARY KEY, title TEXT, author TEXT,
+     state TEXT, created TEXT, merged TEXT
+   );
+   INSERT OR REPLACE INTO prs
+   SELECT json_extract(pr.value,'$.number'),
+          json_extract(pr.value,'$.title'),
+          json_extract(pr.value,'$.user.login'),
+          json_extract(pr.value,'$.state'),
+          json_extract(pr.value,'$.created_at'),
+          json_extract(pr.value,'$.merged_at')
+   FROM __tool_results, json_each(result_json,'$.content') AS pr
+   WHERE result_id='R3'", will_continue_work=true)
+   → 47 PRs stored in durable table
 
-**Step 3: See what top-level keys exist in each PR**
-```
-sqlite_batch(queries="SELECT DISTINCT key FROM __tool_results, json_each(result_json, '$.content') AS pr, json_each(pr.value) WHERE result_id='call_prs1' LIMIT 15")
-```
-→ id, number, title, user, state, created_at, merged_at, head, base...
+3. sqlite_batch(queries="
+   SELECT author, COUNT(*) as total,
+          SUM(CASE WHEN merged IS NOT NULL THEN 1 ELSE 0 END) as merged
+   FROM prs GROUP BY author ORDER BY total DESC LIMIT 10", will_continue_work=true)
+   → Top contributors with merge rates
 
-**Step 4: Extract flattened view (reach into nested objects)**
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS pull_requests AS SELECT json_extract(pr.value,'$.number') AS pr_num, json_extract(pr.value,'$.title') AS title, json_extract(pr.value,'$.user.login') AS author, json_extract(pr.value,'$.state') AS state, json_extract(pr.value,'$.created_at') AS created, json_extract(pr.value,'$.merged_at') AS merged FROM __tool_results, json_each(result_json, '$.content') AS pr WHERE result_id='call_prs1'")
-```
-→ 47 rows, ~4KB vs 120KB
+4. sqlite_batch(queries="
+   SELECT title, author, created FROM prs
+   WHERE state='open' ORDER BY created DESC LIMIT 15", will_continue_work=true)
+   → Recent open PRs
 
-**Step 5: Query the clean table**
+5. Present both analyses to user with insights
 ```
-sqlite_batch(queries="SELECT author, COUNT(*) as prs, SUM(CASE WHEN merged IS NOT NULL THEN 1 ELSE 0 END) as merged_count FROM pull_requests GROUP BY author ORDER BY prs DESC LIMIT 10")
+
+**Key pattern:** Store once, query many times. Durable tables let you slice data different ways.
+
+---
+
+## Flow 4: Search → Store URLs → Scrape Loop → Synthesize
+
+Multi-step research where you track progress and synthesize findings.
+
+```
+1. search_tools(query="web search and scraping tools", will_continue_work=true)
+   → Enables: mcp_bright_data_search_engine, mcp_bright_data_scrape_as_markdown, http_request
+
+2. mcp_bright_data_search_engine(query="kubernetes security best practices 2024", will_continue_work=true)
+   → result_id="R4"
+
+3. sqlite_batch(queries="
+   CREATE TABLE IF NOT EXISTS research (
+     url TEXT PRIMARY KEY, title TEXT, snippet TEXT,
+     scraped INTEGER DEFAULT 0, key_points TEXT
+   );
+   INSERT OR IGNORE INTO research (url, title, snippet)
+   SELECT json_extract(r.value,'$.link'),
+          json_extract(r.value,'$.title'),
+          substr(json_extract(r.value,'$.snippet'), 1, 300)
+   FROM __tool_results, json_each(result_json,'$.organic') AS r
+   WHERE result_id='R4'", will_continue_work=true)
+   → 10 URLs stored for processing
+
+4. sqlite_batch(queries="SELECT url, title FROM research WHERE scraped=0 LIMIT 1", will_continue_work=true)
+   → Get next URL to scrape
+
+5. mcp_bright_data_scrape_as_markdown(url="<the_url>", will_continue_work=true)
+   → result_id="R5", large markdown text
+
+6. sqlite_batch(queries="
+   WITH t AS (SELECT result_text, instr(lower(result_text),'security') AS pos
+              FROM __tool_results WHERE result_id='R5')
+   SELECT substr(result_text, MAX(1, pos-100), 1500) AS content
+   FROM t WHERE pos > 0 LIMIT 1", will_continue_work=true)
+   → Extract relevant section
+
+7. sqlite_batch(queries="
+   UPDATE research SET scraped=1, key_points='..extracted insights..'
+   WHERE url='<the_url>'", will_continue_work=true)
+
+8. Repeat steps 4-7 for more URLs, or...
+
+9. sqlite_batch(queries="SELECT title, key_points FROM research WHERE scraped=1", will_continue_work=true)
+
+10. Synthesize all findings into comprehensive report for user
 ```
 
 ---
 
-## Flow 4: Large Text → Find Positions → Extract Sections
+## Flow 5: Messy HTML/Text → Find Sections → Extract Windows
 
-For non-JSON results (HTML, logs, docs), use position-based extraction.
+Scraping a long document where you need specific sections.
 
-**Step 1: Fetch large text**
 ```
-http_request(url="https://logs.example.com/app.log", will_continue_work=true)
-```
-→ result_id="call_logs1", is_json=0
+1. http_request(url="https://example.com/annual-report.html", will_continue_work=true)
+   → result_id="R6", 200KB HTML
 
-**Step 2: Check size and characteristics**
-```
-sqlite_batch(queries="SELECT bytes, line_count, is_json, (length(result_text) - length(replace(result_text,'ERROR',''))) / 5 AS error_count FROM __tool_results WHERE result_id='call_logs1'")
-```
-→ bytes=524288 (500KB), line_count=8420, is_json=0, error_count=7
+2. sqlite_batch(queries="
+   SELECT instr(lower(result_text),'executive summary') AS exec_pos,
+          instr(lower(result_text),'financial highlights') AS fin_pos,
+          instr(lower(result_text),'outlook') AS outlook_pos,
+          length(result_text) AS total_len
+   FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
+   → exec_pos=4521, fin_pos=28340, outlook_pos=89234, total_len=198234
 
-**Step 3: Find first error position**
-```
-sqlite_batch(queries="SELECT instr(result_text,'ERROR') AS first_error_pos FROM __tool_results WHERE result_id='call_logs1'")
-```
-→ first_error_pos=145023
+3. sqlite_batch(queries="
+   SELECT substr(result_text, 4521, 2000) AS exec_summary
+   FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
 
-**Step 4: Extract context around error**
-```
-sqlite_batch(queries="SELECT substr(result_text, 145023 - 200, 600) AS error_context FROM __tool_results WHERE result_id='call_logs1'")
-```
-→ 600 chars showing error + context (not 500KB!)
+4. sqlite_batch(queries="
+   SELECT substr(result_text, 28340, 2500) AS financials
+   FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
 
-**Step 5: For pattern matching across text**
+5. sqlite_batch(queries="
+   SELECT substr(result_text, 89234, 2000) AS outlook
+   FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
+
+6. Synthesize all three sections into summary for user
+   → Don't just dump raw extracts—provide analysis
 ```
-sqlite_batch(queries="SELECT result_id FROM __tool_results WHERE result_text LIKE '%Connection refused%' OR result_text LIKE '%timeout%'")
+
+**Key pattern:** Find positions first, then extract small windows. Never grab the whole document.
+
+---
+
+## Flow 6: CSV Data → Sample → Target → Count
+
+Working with large CSV exports without parsing everything.
+
+```
+1. http_request(url="https://api.example.com/export.csv", will_continue_work=true)
+   → result_id="R7", 2MB CSV
+
+2. sqlite_batch(queries="
+   SELECT substr(result_text, 1, 1000) AS header_sample
+   FROM __tool_results WHERE result_id='R7'", will_continue_work=true)
+   → See columns: id,status,amount,date,customer_id,...
+
+3. sqlite_batch(queries="
+   SELECT (length(result_text) - length(replace(result_text, char(10), ''))) AS total_rows,
+          (length(result_text) - length(replace(result_text, ',FAILED,', ''))) / 8 AS failed_estimate,
+          (length(result_text) - length(replace(result_text, ',SUCCESS,', ''))) / 9 AS success_estimate
+   FROM __tool_results WHERE result_id='R7'", will_continue_work=true)
+   → total_rows≈45000, failed≈234, success≈44500
+
+4. sqlite_batch(queries="
+   WITH t AS (SELECT result_text, instr(result_text, ',FAILED,') AS pos
+              FROM __tool_results WHERE result_id='R7')
+   SELECT substr(result_text, MAX(1, pos-100), 300) AS failed_sample
+   FROM t WHERE pos > 0 LIMIT 1", will_continue_work=true)
+   → See what a failed row looks like
+
+5. Report findings: "~45,000 orders: 234 failed (0.5%). Here's a sample failure..."
 ```
 
 ---
 
-## Flow 5: Aggregate First → Extract Only What Matters
+## Flow 7: Deeply Nested Arrays → Extract Line Items
 
-Don't extract 1000 items when you only need the 5 failures.
+Orders with line items, documents with sections, etc.
 
-**Step 1: Fetch order data**
 ```
-http_request(url="https://api.store.com/orders?days=30", will_continue_work=true)
-```
-→ result_id="call_orders1", 2847 orders, 340KB
+1. http_request(url="https://api.store.com/orders/recent", will_continue_work=true)
+   → result_id="R8"
 
-**Step 2: Aggregate by status BEFORE extracting details**
-```
-sqlite_batch(queries="SELECT json_extract(o.value,'$.status') AS status, COUNT(*) AS cnt FROM __tool_results, json_each(result_json,'$.content.orders') AS o WHERE result_id='call_orders1' GROUP BY 1")
-```
-→ pending=12, processing=45, shipped=2756, failed=34
+2. sqlite_batch(queries="
+   SELECT json_extract(ord.value,'$.id') AS order_id,
+          json_extract(ord.value,'$.customer.name') AS customer,
+          json_extract(line.value,'$.product_name') AS product,
+          json_extract(line.value,'$.quantity') AS qty,
+          json_extract(line.value,'$.unit_price') AS price
+   FROM __tool_results,
+        json_each(result_json,'$.content.orders') AS ord,
+        json_each(ord.value,'$.line_items') AS line
+   WHERE result_id='R8'
+   LIMIT 50", will_continue_work=true)
 
-**Step 3: Extract ONLY the failed ones**
-```
-sqlite_batch(queries="SELECT json_extract(o.value,'$.id') AS order_id, json_extract(o.value,'$.error') AS error, json_extract(o.value,'$.customer.email') AS email FROM __tool_results, json_each(result_json,'$.content.orders') AS o WHERE result_id='call_orders1' AND json_extract(o.value,'$.status')='failed'")
-```
-→ 34 rows with actionable data (not 2847 rows / 340KB)
+3. sqlite_batch(queries="
+   SELECT json_extract(ord.value,'$.id') AS order_id,
+          json_array_length(ord.value,'$.line_items') AS item_count,
+          json_extract(ord.value,'$.total') AS total
+   FROM __tool_results, json_each(result_json,'$.content.orders') AS ord
+   WHERE result_id='R8'
+   ORDER BY json_extract(ord.value,'$.total') DESC
+   LIMIT 10", will_continue_work=true)
+   → Top 10 orders by value
 
----
-
-## Flow 6: Cross-Tool Correlation
-
-Join data from multiple tool calls.
-
-**Step 1: Already have search results stored**
-```
-sqlite_batch(queries="SELECT url, title FROM research_urls WHERE scraped=1 LIMIT 5")
-```
-
-**Step 2: Correlate with scraped content**
-```
-sqlite_batch(queries="SELECT r.url, r.title, substr(t.result_text, 1, 500) AS preview FROM research_urls r JOIN __tool_results t ON t.result_id = r.scrape_result_id WHERE r.scraped=1")
+4. Present both views to user
 ```
 
 ---
 
-## Key Techniques Reference
+## Flow 8: LinkedIn Recruiting — Messy Nested Profiles → Filter → Shortlist
 
-### http_request Results
-http_request wraps responses: `{"status":"ok", "status_code":200, "content":{...}}`. For JSON APIs, `content` is already parsed:
+Real LinkedIn data is deeply nested with optional fields everywhere. Build a candidate pipeline.
+
 ```
-SELECT json_extract(item.value, '$.name') FROM __tool_results, json_each(result_json, '$.content.items') AS item WHERE result_id='X'
+1. search_tools(query="LinkedIn profile search and data extraction", will_continue_work=true)
+   → Enables: mcp_bright_data_linkedin_people_search, mcp_bright_data_linkedin_person_profile
+
+2. mcp_bright_data_linkedin_people_search(first_name="", last_name="", url="...", will_continue_work=true)
+   → result_id="R9", array of profile summaries
+
+3. sqlite_batch(queries="
+   CREATE TABLE IF NOT EXISTS candidates (
+     linkedin_url TEXT PRIMARY KEY,
+     name TEXT,
+     headline TEXT,
+     location TEXT,
+     profile_fetched INTEGER DEFAULT 0,
+     skills_match INTEGER,
+     experience_years INTEGER,
+     status TEXT DEFAULT 'new',
+     notes TEXT
+   );
+   INSERT OR IGNORE INTO candidates (linkedin_url, name, headline, location)
+   SELECT json_extract(p.value,'$.linkedin_url'),
+          json_extract(p.value,'$.name'),
+          substr(json_extract(p.value,'$.headline'), 1, 200),
+          json_extract(p.value,'$.location')
+   FROM __tool_results, json_each(result_json,'$.content') AS p
+   WHERE result_id='R9'", will_continue_work=true)
+   → 25 candidates stored
+
+4. sqlite_batch(queries="
+   SELECT linkedin_url, name, headline FROM candidates
+   WHERE profile_fetched=0 AND status='new'
+   ORDER BY linkedin_url LIMIT 1", will_continue_work=true)
+   → Get next candidate to fetch full profile
+
+5. mcp_bright_data_linkedin_person_profile(url="<linkedin_url>", will_continue_work=true)
+   → result_id="R10", huge nested profile with experience[], education[], skills[], etc.
+
+6. sqlite_batch(queries="
+   SELECT json_extract(result_json,'$.content.name') AS name,
+          json_extract(result_json,'$.content.headline') AS headline,
+          json_array_length(result_json,'$.content.experience') AS exp_count,
+          json_array_length(result_json,'$.content.skills') AS skill_count
+   FROM __tool_results WHERE result_id='R10'", will_continue_work=true)
+   → Quick overview: 8 experience entries, 23 skills
+
+7. sqlite_batch(queries="
+   SELECT json_extract(exp.value,'$.company') AS company,
+          json_extract(exp.value,'$.title') AS title,
+          json_extract(exp.value,'$.start_date') AS started,
+          json_extract(exp.value,'$.end_date') AS ended,
+          substr(json_extract(exp.value,'$.description'), 1, 300) AS desc_preview
+   FROM __tool_results, json_each(result_json,'$.content.experience') AS exp
+   WHERE result_id='R10'
+   ORDER BY json_extract(exp.value,'$.start_date') DESC LIMIT 5", will_continue_work=true)
+   → Recent 5 roles with trimmed descriptions
+
+8. sqlite_batch(queries="
+   SELECT json_extract(sk.value,'$.name') AS skill
+   FROM __tool_results, json_each(result_json,'$.content.skills') AS sk
+   WHERE result_id='R10'
+     AND (lower(json_extract(sk.value,'$.name')) LIKE '%python%'
+          OR lower(json_extract(sk.value,'$.name')) LIKE '%machine learning%'
+          OR lower(json_extract(sk.value,'$.name')) LIKE '%data%')
+   LIMIT 10", will_continue_work=true)
+   → Matching skills found
+
+9. sqlite_batch(queries="
+   UPDATE candidates SET
+     profile_fetched=1,
+     skills_match=3,
+     experience_years=8,
+     notes='Strong ML background, 8 yrs exp, currently at Google'
+   WHERE linkedin_url='<linkedin_url>'", will_continue_work=true)
+
+10. Repeat steps 4-9 for more candidates, then...
+
+11. sqlite_batch(queries="
+    SELECT name, headline, location, skills_match, experience_years, notes
+    FROM candidates
+    WHERE profile_fetched=1 AND skills_match >= 2
+    ORDER BY skills_match DESC, experience_years DESC
+    LIMIT 20", will_continue_work=true)
+
+12. Present ranked shortlist with your assessment of each candidate
 ```
 
-### Always Alias json_each()
-When using json_each, ALWAYS alias it. When using multiple json_each, each needs a UNIQUE alias:
+**Key patterns:** Track state (profile_fetched), score candidates (skills_match), handle deeply nested arrays (experience[], skills[]), trim long text fields.
+
+---
+
+## Flow 9: Lead Gen — Company Search → Scrape → Extract Contacts
+
+Find companies, scrape their sites, extract decision-maker contacts from messy HTML.
+
 ```
-✗ SELECT value FROM t, json_each(col1), json_each(col2)  -- ambiguous 'value'
-✓ SELECT a.value, b.value FROM t, json_each(col1) AS a, json_each(col2) AS b
+1. search_tools(query="web search and website scraping", will_continue_work=true)
+   → Enables: mcp_bright_data_search_engine, mcp_bright_data_scrape_as_markdown, http_request
+
+2. mcp_bright_data_search_engine(query="B2B SaaS companies series A NYC", will_continue_work=true)
+   → result_id="R11"
+
+3. sqlite_batch(queries="
+   CREATE TABLE IF NOT EXISTS leads (
+     domain TEXT PRIMARY KEY,
+     company_name TEXT,
+     snippet TEXT,
+     scraped INTEGER DEFAULT 0,
+     has_contact INTEGER,
+     contact_page_url TEXT,
+     emails TEXT,
+     decision_makers TEXT,
+     priority INTEGER DEFAULT 0,
+     status TEXT DEFAULT 'new'
+   );
+   INSERT OR IGNORE INTO leads (domain, company_name, snippet)
+   SELECT
+     CASE
+       WHEN instr(json_extract(r.value,'$.link'), '/', 9) > 0
+       THEN substr(json_extract(r.value,'$.link'), 1, instr(json_extract(r.value,'$.link'), '/', 9)-1)
+       ELSE json_extract(r.value,'$.link')
+     END,
+     json_extract(r.value,'$.title'),
+     substr(json_extract(r.value,'$.snippet'), 1, 250)
+   FROM __tool_results, json_each(result_json,'$.organic') AS r
+   WHERE result_id='R11'", will_continue_work=true)
+   → 10 company domains stored
+
+4. sqlite_batch(queries="
+   SELECT domain, company_name FROM leads WHERE scraped=0 LIMIT 1", will_continue_work=true)
+
+5. mcp_bright_data_scrape_as_markdown(url="<domain>/about", will_continue_work=true)
+   → result_id="R12", about page content
+
+6. sqlite_batch(queries="
+   SELECT instr(lower(result_text),'team') AS team_pos,
+          instr(lower(result_text),'leadership') AS leadership_pos,
+          instr(lower(result_text),'contact') AS contact_pos,
+          instr(result_text,'@') AS email_pos,
+          length(result_text) AS len
+   FROM __tool_results WHERE result_id='R12'", will_continue_work=true)
+   → team_pos=4521, leadership_pos=0, contact_pos=8923, email_pos=12340
+
+7. sqlite_batch(queries="
+   SELECT substr(result_text, 4521, 2000) AS team_section
+   FROM __tool_results WHERE result_id='R12'", will_continue_work=true)
+   → Extract team section to find names/titles
+
+8. sqlite_batch(queries="
+   WITH t AS (SELECT result_text, instr(result_text,'@') AS pos
+              FROM __tool_results WHERE result_id='R12')
+   SELECT substr(result_text, MAX(1, pos-30), 80) AS email_context
+   FROM t WHERE pos > 0 LIMIT 1", will_continue_work=true)
+   → Found: "reach us at hello@company.com or sales@company.com"
+
+9. sqlite_batch(queries="
+   UPDATE leads SET
+     scraped=1,
+     has_contact=1,
+     emails='hello@company.com, sales@company.com',
+     decision_makers='John Smith (CEO), Jane Doe (CTO)',
+     priority=3
+   WHERE domain='<domain>'", will_continue_work=true)
+
+10. If team section was empty, try scraping /team or /contact page:
+    mcp_bright_data_scrape_as_markdown(url="<domain>/team", will_continue_work=true)
+    → result_id="R13"
+
+11. sqlite_batch(queries="
+    SELECT CASE WHEN length(result_text) > 500 THEN 'found' ELSE 'empty' END AS page_status,
+           instr(lower(result_text),'ceo') AS ceo_pos,
+           instr(lower(result_text),'founder') AS founder_pos
+    FROM __tool_results WHERE result_id='R13'", will_continue_work=true)
+    → Decide if page is useful
+
+12. Repeat for more companies, then...
+
+13. sqlite_batch(queries="
+    SELECT company_name, domain, emails, decision_makers, priority
+    FROM leads
+    WHERE scraped=1 AND has_contact=1
+    ORDER BY priority DESC
+    LIMIT 15", will_continue_work=true)
+
+14. Present prioritized lead list with contact info and recommended approach
 ```
 
-### Access json_each Columns Correctly
-json_each produces columns: key, value, type, atom, id, parent, fullkey, path
-```
-✓ SELECT item.key, item.value FROM t, json_each(data) AS item
-✗ SELECT item FROM t, json_each(data) AS item  -- 'item' is the alias, not a column
-```
+**Key patterns:** Extract domain from URL, fallback scraping (/about → /team → /contact), find email patterns in text, track scrape state, prioritize leads.
 
-### Inspect Metadata First
-```
-SELECT result_id, bytes, is_json, json_type, top_keys FROM __tool_results WHERE result_id='X'
-```
+---
 
-### Count Array Elements
-```
-SELECT json_array_length(result_json, '$.content.items') FROM __tool_results WHERE result_id='X'
-```
+## Flow 10: Multi-Source Enrichment — Cross-Reference and Dedupe
 
-### Sample Before Bulk Extract
-```
-SELECT json_extract(item.value, '$') FROM __tool_results, json_each(result_json, '$.content.items') AS item WHERE result_id='X' LIMIT 2
-```
+Combine data from multiple sources, handle duplicates, enrich records.
 
-### Create Table Directly From JSON
 ```
-CREATE TABLE items AS SELECT json_extract(item.value,'$.id') AS id, json_extract(item.value,'$.name') AS name FROM __tool_results, json_each(result_json,'$.content.data') AS item WHERE result_id='X'
-```
+1. Already have candidates table from previous work. Search for additional tools:
+   search_tools(query="LinkedIn company data and employee lists", will_continue_work=true)
+   → Enables: mcp_bright_data_linkedin_company_profile
 
-### Text Position + Extraction
-```
-SELECT substr(result_text, instr(result_text, 'ERROR') - 50, 300) AS context FROM __tool_results WHERE result_id='X' AND instr(result_text, 'ERROR') > 0
+2. mcp_bright_data_linkedin_company_profile(url="https://linkedin.com/company/acme", will_continue_work=true)
+   → result_id="R14", company data with employees[]
+
+3. sqlite_batch(queries="
+   SELECT json_extract(result_json,'$.content.name') AS company,
+          json_extract(result_json,'$.content.employee_count') AS size,
+          json_array_length(result_json,'$.content.employees') AS employees_returned
+   FROM __tool_results WHERE result_id='R14'", will_continue_work=true)
+   → Acme Corp, 250 employees, 20 sample employees returned
+
+4. sqlite_batch(queries="
+   INSERT OR IGNORE INTO candidates (linkedin_url, name, headline, location, notes)
+   SELECT json_extract(emp.value,'$.linkedin_url'),
+          json_extract(emp.value,'$.name'),
+          json_extract(emp.value,'$.title'),
+          'Acme Corp',
+          'Found via company page'
+   FROM __tool_results, json_each(result_json,'$.content.employees') AS emp
+   WHERE result_id='R14'
+     AND json_extract(emp.value,'$.title') LIKE '%Engineer%'", will_continue_work=true)
+   → Added 8 new engineers (OR IGNORE handles duplicates)
+
+5. sqlite_batch(queries="
+   SELECT name, headline, location,
+          CASE WHEN profile_fetched=1 THEN 'enriched' ELSE 'pending' END AS status
+   FROM candidates
+   WHERE location LIKE '%Acme%' OR notes LIKE '%Acme%'
+   ORDER BY profile_fetched DESC, name
+   LIMIT 20", will_continue_work=true)
+
+6. For candidates without full profiles, continue enrichment loop...
+
+7. sqlite_batch(queries="
+   SELECT COUNT(*) AS total,
+          SUM(CASE WHEN profile_fetched=1 THEN 1 ELSE 0 END) AS enriched,
+          SUM(CASE WHEN skills_match >= 2 THEN 1 ELSE 0 END) AS qualified
+   FROM candidates", will_continue_work=true)
+   → Progress: 45 total, 28 enriched, 12 qualified
+
+8. Present progress report and top qualified candidates
 ```
 
 ---
 
-## CTE Best Practices
+## Flow 11: Error Recovery — Handle Missing Data Gracefully
 
-CTEs (WITH clauses) help with complex queries but require discipline:
+Real-world data has gaps. Detect and work around them.
 
-**1. Name CTEs distinctly - avoid typos**
 ```
-✗ WITH my_items AS (...) SELECT * FROM my_item  -- typo: my_item vs my_items
-✓ WITH my_items AS (...) SELECT * FROM my_items
+1. Fetch profile that might have incomplete data
+   mcp_bright_data_linkedin_person_profile(url="...", will_continue_work=true)
+   → result_id="R15"
+
+2. sqlite_batch(queries="
+   SELECT
+     COALESCE(json_extract(result_json,'$.content.name'), '[no name]') AS name,
+     COALESCE(json_extract(result_json,'$.content.email'), '') AS email,
+     CASE WHEN json_type(result_json,'$.content.experience')='array'
+          THEN json_array_length(result_json,'$.content.experience')
+          ELSE 0 END AS exp_count,
+     CASE WHEN json_type(result_json,'$.content.skills')='array'
+          THEN json_array_length(result_json,'$.content.skills')
+          ELSE 0 END AS skill_count
+   FROM __tool_results WHERE result_id='R15'", will_continue_work=true)
+   → name="John Doe", email="", exp_count=0, skill_count=5
+   → Note: No experience data available!
+
+3. If experience is empty, check if there's text description to parse:
+   sqlite_batch(queries="
+   SELECT substr(COALESCE(json_extract(result_json,'$.content.summary'), ''), 1, 500) AS summary,
+          substr(COALESCE(json_extract(result_json,'$.content.about'), ''), 1, 500) AS about
+   FROM __tool_results WHERE result_id='R15'", will_continue_work=true)
+   → Maybe experience is mentioned in summary/about text
+
+4. sqlite_batch(queries="
+   SELECT
+     instr(lower(COALESCE(json_extract(result_json,'$.content.summary'),'')), 'years') AS years_mentioned,
+     instr(lower(COALESCE(json_extract(result_json,'$.content.summary'),'')), 'experience') AS exp_mentioned
+   FROM __tool_results WHERE result_id='R15'", will_continue_work=true)
+   → years_mentioned=45, exp_mentioned=67 — can extract from text
+
+5. sqlite_batch(queries="
+   WITH t AS (
+     SELECT COALESCE(json_extract(result_json,'$.content.summary'),'') AS txt
+     FROM __tool_results WHERE result_id='R15'
+   )
+   SELECT substr(txt, MAX(1, instr(lower(txt),'years')-20), 50) AS years_context
+   FROM t WHERE instr(lower(txt),'years') > 0", will_continue_work=true)
+   → "with over 10 years of experience in..."
+
+6. Update candidate with best available data:
+   sqlite_batch(queries="
+   UPDATE candidates SET
+     profile_fetched=1,
+     experience_years=10,
+     notes='Experience extracted from summary (structured data unavailable)'
+   WHERE linkedin_url='...'", will_continue_work=true)
+
+7. Continue with next candidate, log data quality issues for user
 ```
 
-**2. Reference CTE columns correctly**
-```
-WITH parsed AS (SELECT result_json AS data FROM __tool_results WHERE result_id='X')
-✗ SELECT json_extract(data, '$.name') FROM parsed, json_each(data)  -- data is column, need parsed.data
-✓ SELECT json_extract(item.value, '$.name') FROM parsed, json_each(parsed.data, '$.content.items') AS item
-```
+**Key patterns:** COALESCE for missing fields, json_type() to check if arrays exist, fallback to text parsing when structured data is missing, document data quality issues.
 
 ---
 
-## Common Pitfalls
+## Common Patterns Reference
 
-### String Escaping
-```
-✗ VALUES ('McDonald's')
-✓ VALUES ('McDonald''s')
-```
-
-### Column-Value Count Mismatch
-```
-✗ INSERT INTO t (a, b, c) VALUES (1, 2)  -- 3 cols, 2 vals
-✓ INSERT INTO t (a, b, c) VALUES (1, 2, 3)
+**Extract JSON array items with specific fields:**
+```sql
+SELECT json_extract(item.value,'$.id'), json_extract(item.value,'$.name')
+FROM __tool_results, json_each(result_json,'$.content.items') AS item
+WHERE result_id='R' LIMIT 30
 ```
 
-### Table/CTE Name Typos
-```
-✗ WITH items AS (...) SELECT * FROM item  -- typo!
-✓ WITH items AS (...) SELECT * FROM items
-```
-
-### Ambiguous Column References
-```
-✗ SELECT value FROM t, json_each(a), json_each(b)  -- which value?
-✓ SELECT x.value, y.value FROM t, json_each(a) AS x, json_each(b) AS y
+**Handle missing/nullable fields:**
+```sql
+SELECT json_extract(item.value,'$.id'),
+       COALESCE(json_extract(item.value,'$.email'), '[no email]')
+FROM __tool_results, json_each(result_json,'$.content.users') AS item
+WHERE result_id='R' AND json_extract(item.value,'$.active')=1 LIMIT 25
 ```
 
-### Wrong json_each Column Access
-```
-✗ SELECT item FROM json_each(data) AS item  -- item is alias, not column
-✓ SELECT item.value FROM json_each(data) AS item
+**Trim oversized string fields:**
+```sql
+SELECT json_extract(item.value,'$.title'),
+       substr(json_extract(item.value,'$.body'), 1, 400) AS preview
+FROM __tool_results, json_each(result_json,'$.content.posts') AS item
+WHERE result_id='R' LIMIT 15
 ```
 
-### Querying Empty Tables
-Always fetch external data BEFORE querying. First run: create schema → fetch → insert → query.
+**Find and extract text sections:**
+```sql
+WITH t AS (SELECT result_text, instr(lower(result_text),'conclusion') AS pos
+           FROM __tool_results WHERE result_id='R')
+SELECT substr(result_text, MAX(1,pos-50), 1000) FROM t WHERE pos>0 LIMIT 1
+```
 
----
+**Count array items without extracting:**
+```sql
+SELECT json_array_length(result_json,'$.content.items') AS count
+FROM __tool_results WHERE result_id='R'
+```
 
-## Cleanup
+**Multiple json_each requires UNIQUE aliases:**
+```sql
+SELECT a.value AS outer_item, b.value AS inner_item
+FROM t, json_each(col1) AS a, json_each(a.value,'$.nested') AS b
+```
 
-```
-sqlite_batch(queries="DELETE FROM items WHERE fetched_at < datetime('now', '-30 days')")
-```
-```
-sqlite_batch(queries="DROP TABLE IF EXISTS temp_analysis")
-```
+**http_request response structure:** `{"status":"ok", "status_code":200, "content":{...}}`
+— extract from `$.content`, not from root
+
+**Escape single quotes:** `'McDonald''s'` not `'McDonald's'`
 """
 
 
