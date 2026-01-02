@@ -4345,12 +4345,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     update_props['previous_agent_color_hex'] = prev_agent_color_hex
                 if 'whitelist_policy' in changed_fields_for_analytics:
                     update_props['previous_whitelist_policy'] = prev_whitelist_policy
-                Analytics.track_event(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
-                    source=AnalyticsSource.WEB,
-                    properties=update_props.copy(),
-                )
+                try:
+                    Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
+                        source=AnalyticsSource.WEB,
+                        properties=update_props.copy(),
+                    )
+                except Exception as e:
+                    logger.exception(
+                        "Failed to track persistent agent update analytics for agent %s",
+                        agent.id,
+                    )
 
                 if avatar_changed:
                     new_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
