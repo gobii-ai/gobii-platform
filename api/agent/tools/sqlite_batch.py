@@ -14,6 +14,13 @@ from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
 
 from ...models import PersistentAgent
+from .sqlite_guardrails import (
+    clear_guarded_connection,
+    get_blocked_statement_reason,
+    open_guarded_sqlite_connection,
+    start_query_timer,
+    stop_query_timer,
+)
 from .sqlite_helpers import is_write_statement
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
 
@@ -117,7 +124,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     only_write_queries = True
 
     try:
-        conn = sqlite3.connect(db_path)
+        conn = open_guarded_sqlite_connection(db_path)
         cur = conn.cursor()
         try:
             cur.execute("PRAGMA busy_timeout = 2000;")
@@ -132,9 +139,15 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 had_error = True
                 error_message = f"Query {idx} is empty or invalid."
                 break
+            block_reason = get_blocked_statement_reason(query)
+            if block_reason:
+                had_error = True
+                error_message = f"Query {idx} blocked: {block_reason}"
+                break
 
             only_write_queries = only_write_queries and is_write_statement(query)
             try:
+                start_query_timer(conn)
                 cur.execute(query)
                 if cur.description is not None:
                     columns = [col[0] for col in cur.description]
@@ -155,6 +168,8 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 had_error = True
                 error_message = f"Query {idx} failed: {exc}"
                 break
+            finally:
+                stop_query_timer(conn)
 
         db_size_mb = _get_db_size_mb(db_path)
         size_warning = ""
@@ -177,6 +192,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     finally:
         if conn is not None:
             try:
+                clear_guarded_connection(conn)
                 conn.close()
             except Exception:
                 pass

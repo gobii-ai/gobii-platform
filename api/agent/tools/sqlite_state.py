@@ -11,13 +11,14 @@ import contextvars
 import logging
 import os
 import shutil
-import sqlite3
 import tempfile
 from typing import Dict, Any
 
 import zstandard as zstd
 from django.core.files import File
 from django.core.files.storage import default_storage
+
+from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +43,9 @@ def get_sqlite_schema_prompt() -> str:
     if not db_path or not os.path.exists(db_path):
         return "SQLite database not initialised – no schema present yet."
 
+    conn = None
     try:
-        conn = sqlite3.connect(db_path)
+        conn = open_guarded_sqlite_connection(db_path)
         cur = conn.cursor()
         cur.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name;")
         tables = cur.fetchall()
@@ -73,10 +75,12 @@ def get_sqlite_schema_prompt() -> str:
     except Exception as e:  # noqa: BLE001
         return f"Failed to inspect SQLite DB: {e}"
     finally:
-        try:
-            conn.close()
-        except Exception:
-            pass
+        if conn is not None:
+            try:
+                clear_guarded_connection(conn)
+                conn.close()
+            except Exception:
+                pass
 
 
 def set_sqlite_db_path(db_path: str) -> contextvars.Token:
@@ -134,7 +138,7 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
         finally:
             if os.path.exists(db_path):
                 try:
-                    conn = sqlite3.connect(db_path)
+                    conn = open_guarded_sqlite_connection(db_path)
                     try:
                         conn.execute("VACUUM;")
                         try:
@@ -143,7 +147,11 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                             pass
                         conn.commit()
                     finally:
-                        conn.close()
+                        try:
+                            clear_guarded_connection(conn)
+                            conn.close()
+                        except Exception:
+                            pass
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "SQLite maintenance (VACUUM/optimize) failed for agent %s",
@@ -185,4 +193,3 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                             pass
 
             reset_sqlite_db_path(token)
-
