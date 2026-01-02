@@ -299,10 +299,13 @@ Step 2: Create table and parse CSV using sequential field extraction
 
 Step 3: Analyze (skip verification - schema already confirms data)
   sqlite_batch(queries="
-    SELECT location, COUNT(*) as n, ROUND(AVG(temp),1) as avg_temp, ROUND(AVG(humidity),1) as avg_hum
+    SELECT location, COUNT(*) as n,
+      ROUND(AVG(temp),1) as avg_temp,
+      ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
+      ROUND(AVG(humidity),1) as avg_hum
     FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
 
-  Result: Building-A|245|23.1|48.2, Building-B|180|21.8|52.1, ...
+  Result: Building-A|245|23.1|2.31|48.2, Building-B|180|21.8|1.95|52.1, ...
 
 Step 4: Present findings with insights
 ```
