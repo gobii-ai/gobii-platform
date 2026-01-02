@@ -52,7 +52,7 @@ from ...models import (
     PersistentAgentStepSnapshot,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
-    PersistentAgentEnabledTool,
+    PersistentAgentToolCall,
 )
 from ...services.web_sessions import get_active_web_sessions
 
@@ -72,7 +72,6 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
 from ..tools.charter_updater import get_update_charter_tool
-from ..tools.database_enabler import get_enable_database_tool
 from ..tools.email_sender import get_send_email_tool
 from ..tools.peer_dm import get_send_agent_message_tool
 from ..tools.request_contact_permission import get_request_contact_permission_tool
@@ -85,14 +84,15 @@ from ..tools.spawn_web_task import (
     get_spawn_web_task_tool,
 )
 from ..tools.sqlite_state import get_sqlite_schema_prompt
-from ..tools.tool_manager import (
-    SQLITE_TOOL_NAME,
-    ensure_default_tools_enabled,
-    get_enabled_tool_definitions,
-    is_sqlite_enabled_for_agent,
-)
+from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
+from .tool_results import (
+    LAST_N_PREVIEW,
+    ToolCallResultRecord,
+    ToolResultPromptInfo,
+    prepare_tool_results_for_prompt,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -265,6 +265,29 @@ sqlite_batch(queries="INSERT OR IGNORE INTO seen_urls (url, first_seen, title) V
 
 ---
 
+### Tool Result Analysis (Ephemeral)
+
+Tool outputs are loaded into the built-in __tool_results table for this cycle only. Copy anything important into durable tables.
+
+**Inspect recent tool results:**
+```
+sqlite_batch(queries="SELECT result_id, tool_name, bytes, line_count, is_json, json_type, top_keys FROM __tool_results ORDER BY created_at DESC LIMIT 5")
+```
+
+**Extract JSON fields and persist:**
+```
+sqlite_batch(queries="CREATE TABLE IF NOT EXISTS search_results (url TEXT PRIMARY KEY, title TEXT, source_tool TEXT, fetched_at TEXT); INSERT OR IGNORE INTO search_results (url, title, source_tool, fetched_at) SELECT json_extract(value, '$.url'), json_extract(value, '$.title'), tool_name, created_at FROM __tool_results, json_each(result_json, '$.organic') WHERE result_id = 'RESULT_ID_HERE'", will_continue_work=true)
+```
+
+**Work with non-JSON results:**
+```
+sqlite_batch(queries="SELECT substr(result_text, 1, 2000) AS snippet FROM __tool_results WHERE result_id = 'RESULT_ID_HERE'")
+```
+
+If is_truncated=1 or result_json is null, re-run the tool with a smaller output or read from result_text.
+
+---
+
 ### Schema Evolution
 
 Schemas aren't static. Add columns, create new tables, migrate data as your task evolves.
@@ -428,133 +451,6 @@ sqlite_batch(queries="ALTER TABLE items ADD COLUMN category TEXT")
 ```
 sqlite_batch(queries="DELETE FROM items WHERE fetched_at < datetime('now', '-30 days')")
 ```
-"""
-
-
-def _get_enable_database_examples() -> str:
-    """Return in-context learning examples for when to call enable_database.
-
-    These examples help the agent recognize tasks that benefit from SQLite
-    and show the pattern of enabling → schema creation → usage.
-    """
-    return """
-## When to Enable Your Database
-
-You have access to a persistent SQLite database. Call `enable_database` when your task would benefit from structured, durable storage.
-
----
-
-### Tasks That Need a Database
-
-**Tracking over time** — prices, rankings, mentions, metrics:
-User: 'Monitor bitcoin price and alert me on big swings'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE price_history..., fetch price, INSERT, compare to baseline]
-
-**Deduplication across runs** — seen items, processed URLs:
-User: 'Watch HN for AI posts, but don't repeat yourself'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE seen_posts..., fetch HN, INSERT OR IGNORE new ones, report only unseen]
-
-**Building lists or datasets** — restaurants, startups, candidates:
-User: 'Compile a list of AI startups in the YC W24 batch'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE startups..., research and INSERT each one, query for final report]
-
-**Comparison and change detection** — competitor prices, job listings:
-User: 'Track my competitor's pricing page and alert on changes'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE price_snapshots..., scrape current, compare to last, alert if different]
-
-**Aggregation and analysis** — trends, summaries, statistics:
-User: 'Give me weekly summaries of my portfolio performance'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE daily_values..., store daily data, query for weekly aggregates]
-
-**Multi-entity tracking** — multiple stocks, several competitors:
-User: 'Track AAPL, GOOGL, and MSFT for me'
-→ enable_database(will_continue_work=true)
-[Next cycle: CREATE TABLE stock_prices(symbol, price, fetched_at)..., track all three]
-
----
-
-### Tasks That Don't Need a Database
-
-**One-off questions** — no persistence needed:
-User: 'What's the weather in Tokyo?'
-→ http_request(weather-api)
-→ 'It's 72°F and sunny in Tokyo!'
-(No database — just fetch and respond)
-
-**Simple calculations** — reason inline:
-User: 'What's 15% of 847?'
-→ '15% of 847 is **127.05**'
-(No database — mental math)
-
-**Short lists** — keep in working memory:
-User: 'Give me 5 book recommendations on AI'
-→ Search, compile list, respond
-(No database — small enough to hold in context)
-
-**Immediate lookups** — no history needed:
-User: 'What's Apple's current stock price?'
-→ http_request(finance-api)
-→ 'AAPL is at **$198.50** ([Yahoo Finance](url))'
-(No database — unless they want tracking)
-
----
-
-### The Enable → Schema → Use Pattern
-
-**Step 1: Recognize the need**
-User: 'Scout promising open source projects weekly'
-Thinking: "This needs deduplication (don't report same project twice) and tracking (compare stars over time)"
-
-**Step 2: Enable the database**
-```
-enable_database(will_continue_work=true)
-```
-
-**Step 3: Create your schema** (next cycle — use semicolons for multiple statements)
-```
-sqlite_batch(queries="CREATE TABLE IF NOT EXISTS projects (id INTEGER PRIMARY KEY, repo TEXT UNIQUE, name TEXT, stars INTEGER, first_seen TEXT, last_checked TEXT); CREATE INDEX IF NOT EXISTS idx_stars ON projects(stars DESC)")
-```
-
-**Step 4: Use it in your workflow** (ongoing)
-```
-sqlite_batch(queries="INSERT OR IGNORE INTO projects (repo, name, stars, first_seen, last_checked) VALUES ('user/repo', 'Cool Project', 1250, '2024-01-15', '2024-01-15')")
-```
-```
-sqlite_batch(queries="SELECT repo, name, stars FROM projects WHERE first_seen > datetime('now', '-7 days') ORDER BY stars DESC LIMIT 10")
-```
-
----
-
-### Agentic Decision Examples
-
-**Upgrading a simple task to tracked:**
-User: 'Actually, keep tracking those startups over time'
-Thinking: "They want ongoing tracking — I need persistence now"
-```
-enable_database(will_continue_work=true)
-```
-→ update_charter('Track startups over time, maintain database of candidates')
-
-**Recognizing scale:**
-User: 'Find all restaurants in downtown Seattle with ratings'
-Thinking: "This will be hundreds of entries — database for sure"
-```
-enable_database(will_continue_work=true)
-```
-
-**Charter implies persistence:**
-Charter: 'Monitor competitor pricing and alert on changes'
-[Cron fires for first time]
-Thinking: "I need to store baselines to detect changes"
-```
-enable_database(will_continue_work=true)
-```
-[Next: create schema, store first snapshot]
 """
 
 
@@ -1307,24 +1203,14 @@ def build_prompt_context(
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
     
-    # SQLite schema - include only when agent is eligible AND sqlite_batch is enabled
-    sqlite_eligible = is_sqlite_enabled_for_agent(agent)
-    sqlite_db_enabled = PersistentAgentEnabledTool.objects.filter(
-        agent=agent,
-        tool_full_name=SQLITE_TOOL_NAME,
-    ).exists()
-    # Only show sqlite context if agent is eligible (paid + max intelligence)
-    sqlite_active = sqlite_eligible and sqlite_db_enabled
-
-    sqlite_schema_block = ""
-    if sqlite_active:
-        sqlite_schema_block = get_sqlite_schema_prompt()
-        variable_group.section_text(
-            "sqlite_schema",
-            sqlite_schema_block,
-            weight=1,
-            shrinker="hmt"
-        )
+    # SQLite schema - always available
+    sqlite_schema_block = get_sqlite_schema_prompt()
+    variable_group.section_text(
+        "sqlite_schema",
+        sqlite_schema_block,
+        weight=1,
+        shrinker="hmt"
+    )
 
     # Agent filesystem listing - simple list of accessible files
     files_listing_block = get_agent_filesystem_prompt(agent)
@@ -1335,47 +1221,23 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Contextual note - only show sqlite notes if agent is eligible
-    if sqlite_eligible:
-        if sqlite_active and any(line.startswith("Table ") for line in sqlite_schema_block.splitlines()):
-            sqlite_note = (
-                "This is your current SQLite schema. Use sqlite_batch whenever you need durable structured memory, complex analysis, or set-based queries. "
-                "You can execute DDL or other SQL statements at any time to modify and evolve the schema so it best supports your ongoing task or charter."
-            )
-        elif sqlite_active:
-            sqlite_note = (
-                "SQLite is enabled but no user tables exist yet. Use sqlite_batch to create whatever schema best supports your current task or charter."
-            )
-        else:
-            sqlite_note = (
-                "Call enable_database when you need durable structured memory, complex analysis, or set-based queries. "
-                "For quick math, short lists, or one-off comparisons, just reason inline. "
-                "Once enabled, you can create and evolve a SQLite schema to support your objectives."
-            )
-        variable_group.section_text(
-            "sqlite_note",
-            sqlite_note,
-            weight=1,
-            non_shrinkable=True
-        )
-        # Add in-context learning examples based on SQLite state
-        if sqlite_active:
-            # Database is enabled — show usage examples
-            variable_group.section_text(
-                "sqlite_examples",
-                _get_sqlite_examples(),
-                weight=2,  # Higher weight = shrinks before critical content
-                shrinker="hmt"  # Can be truncated if token budget is tight
-            )
-        else:
-            # Database is available but not enabled — show when/how to enable
-            variable_group.section_text(
-                "enable_database_examples",
-                _get_enable_database_examples(),
-                weight=2,
-                shrinker="hmt"
-            )
-    # For ineligible agents, no sqlite_note is added - they don't have access to the feature
+    sqlite_note = (
+        "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
+        "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
+        "to keep durable data across cycles."
+    )
+    variable_group.section_text(
+        "sqlite_note",
+        sqlite_note,
+        weight=1,
+        non_shrinkable=True
+    )
+    variable_group.section_text(
+        "sqlite_examples",
+        _get_sqlite_examples(),
+        weight=2,
+        shrinker="hmt"
+    )
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
@@ -3115,6 +2977,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             agent=agent, created_at__gt=step_cutoff
         )
         .select_related("tool_call", "system_step")
+        .defer("tool_call__result")
         .order_by("-created_at")[:limit_tool_history]
     )
     messages = list(
@@ -3154,6 +3017,42 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     else:
         completed_tasks = []
 
+    tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
+    tool_call_records: List[ToolCallResultRecord] = []
+    recent_preview_ids: set[str] = set()
+    if steps:
+        step_lookup = {str(step.id): step for step in steps}
+        tool_call_results = (
+            PersistentAgentToolCall.objects
+            .filter(step_id__in=list(step_lookup.keys()))
+            .values("step_id", "result", "tool_name")
+        )
+        for row in tool_call_results:
+            step_id = str(row["step_id"])
+            step = step_lookup.get(step_id)
+            if step is None:
+                continue
+            result_text = row.get("result") or ""
+            if not result_text:
+                continue
+            tool_call_records.append(
+                ToolCallResultRecord(
+                    step_id=step_id,
+                    tool_name=row.get("tool_name") or "",
+                    created_at=step.created_at,
+                    result_text=result_text,
+                )
+            )
+        if tool_call_records:
+            ordered_records = sorted(tool_call_records, key=lambda r: r.created_at)
+            recent_preview_ids = {
+                record.step_id for record in ordered_records[-LAST_N_PREVIEW:]
+            }
+    tool_result_prompt_info = prepare_tool_results_for_prompt(
+        tool_call_records,
+        recent_preview_ids=recent_preview_ids,
+    )
+
     # format steps (group meta/params/result components together)
     for s in steps:
         try:
@@ -3168,8 +3067,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             }
             if getattr(s, "credits_cost", None) is not None:
                 components["cost"] = f"{s.credits_cost} credits"
-            if tc.result:
-                components["result"] = str(tc.result)
+            result_info = tool_result_prompt_info.get(str(s.id))
+            if result_info:
+                components["result_meta"] = result_info.meta
+                if result_info.preview_text:
+                    key = "result" if result_info.is_inline else "result_preview"
+                    components[key] = result_info.preview_text
 
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
@@ -3344,6 +3247,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             "cost": 2,        # Helpful for budgeting; small and should remain visible
             "params": 1,      # Low priority - can be shrunk aggressively
             "result": 1,      # Low priority - can be shrunk aggressively
+            "result_meta": 2, # Medium priority - supports tool result lookup
+            "result_preview": 1, # Low priority - preview only
             "content": 2,     # Medium priority for message content (SMS, etc.)
             "attachments": 2, # Medium priority for message attachment paths
             "description": 2, # Medium priority for step descriptions
@@ -3370,7 +3275,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if (
-                    component_name in ("params", "result", "body") or
+                    component_name in ("params", "result", "result_preview", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"
@@ -3412,20 +3317,6 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_search_tools_tool(),
         get_request_contact_permission_tool(),
     ]
-
-    include_enable_db_tool = True
-    if agent:
-        # Only show enable_database if:
-        # 1. Agent is eligible for sqlite (paid + max intelligence)
-        # 2. sqlite_batch is not already enabled
-        sqlite_eligible = is_sqlite_enabled_for_agent(agent)
-        already_enabled = PersistentAgentEnabledTool.objects.filter(
-            agent=agent, tool_full_name=SQLITE_TOOL_NAME
-        ).exists()
-        include_enable_db_tool = sqlite_eligible and not already_enabled
-
-    if include_enable_db_tool:
-        static_tools.append(get_enable_database_tool())
 
     if agent and agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

@@ -25,8 +25,6 @@ from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
-from constants.plans import PlanNames
-from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
@@ -72,47 +70,16 @@ HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME}
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME}
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
     Check if the sqlite tool should be available for this agent.
 
-    SQLite is available for:
-    - VIP users (overrides plan/tier checks)
-    - Paid accounts with max intelligence.
-    Free accounts never have access unless the user is VIP.
+    SQLite is a core capability and is enabled for all agents.
     """
-    if agent is None:
-        return False
-
-    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-        return True
-
-    user = getattr(agent, "user", None)
-    if getattr(user, "is_vip", False):
-        return True
-
-    owner = getattr(agent, "organization", None) or user
-    if owner is None:
-        return False
-
-    try:
-        plan = get_owner_plan(owner)
-    except Exception:
-        logger.exception("Failed to get owner plan for agent %s", agent.id)
-        return False
-
-    is_free = plan.get("id") == PlanNames.FREE
-
-    if is_free:
-        # Free accounts: never allowed
-        return False
-
-    # Paid accounts: only allowed on max intelligence
-    preferred_tier = getattr(agent, "preferred_llm_tier", None)
-    return preferred_tier == AgentLLMTier.MAX.value
+    return agent is not None
 
 
 BUILTIN_TOOL_REGISTRY = {

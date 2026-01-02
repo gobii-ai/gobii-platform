@@ -12,7 +12,7 @@ import logging
 import os
 import shutil
 import tempfile
-from typing import Dict, Any
+from typing import Optional
 
 import zstandard as zstd
 from django.core.files import File
@@ -24,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 # Context variable to expose the SQLite DB path to tool execution helpers
 _sqlite_db_path_var: contextvars.ContextVar[str] = contextvars.ContextVar("sqlite_db_path", default=None)
+
+TOOL_RESULTS_TABLE = "__tool_results"
+EPHEMERAL_TABLES = {TOOL_RESULTS_TABLE}
+BUILTIN_TABLE_NOTES = {
+    TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
+}
 
 
 def get_sqlite_schema_prompt() -> str:
@@ -62,7 +68,13 @@ def get_sqlite_schema_prompt() -> str:
             except Exception:
                 count = "?"
             create_stmt_single_line = " ".join((create_stmt or "").split())
-            lines.append(f"Table {name} (rows: {count}): {create_stmt_single_line}")
+            note = BUILTIN_TABLE_NOTES.get(name)
+            if note:
+                lines.append(
+                    f"Table {name} (rows: {count}, {note}): {create_stmt_single_line}"
+                )
+            else:
+                lines.append(f"Table {name} (rows: {count}): {create_stmt_single_line}")
 
         block = "\n".join(lines)
         encoded = block.encode("utf-8")
@@ -86,6 +98,11 @@ def get_sqlite_schema_prompt() -> str:
 def set_sqlite_db_path(db_path: str) -> contextvars.Token:
     """Set the SQLite DB path in the context variable."""
     return _sqlite_db_path_var.set(db_path)
+
+
+def get_sqlite_db_path() -> Optional[str]:
+    """Return the current SQLite DB path from context, if available."""
+    return _sqlite_db_path_var.get(None)
 
 
 def reset_sqlite_db_path(token: contextvars.Token) -> None:
@@ -140,6 +157,7 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                 try:
                     conn = open_guarded_sqlite_connection(db_path)
                     try:
+                        _drop_ephemeral_tables(conn)
                         conn.execute("VACUUM;")
                         try:
                             conn.execute("PRAGMA optimize;")
@@ -193,3 +211,11 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                             pass
 
             reset_sqlite_db_path(token)
+
+
+def _drop_ephemeral_tables(conn) -> None:
+    for table_name in EPHEMERAL_TABLES:
+        try:
+            conn.execute(f'DROP TABLE IF EXISTS "{table_name}";')
+        except Exception:
+            logger.debug("Failed to drop ephemeral table %s", table_name, exc_info=True)
