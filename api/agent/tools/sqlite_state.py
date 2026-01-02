@@ -36,9 +36,11 @@ def get_sqlite_schema_prompt() -> str:
     """Return a human-readable SQLite schema summary capped to ~30 KB.
 
     The summary includes the CREATE TABLE statement of each user table
-    followed by its row count, e.g.::
+    followed by its row count and sample data, e.g.::
 
         Table users (rows: 42): CREATE TABLE users(id INTEGER PRIMARY KEY, ...)
+          sample: (1, 'alice', 25), (2, 'bob', 30)
+          stats: id[1-42], name[42 distinct], age[18-65]
 
     Returns plain text; callers can wrap/label it as desired. If no user
     tables exist yet, we state that explicitly. Truncates aggressively
@@ -76,6 +78,12 @@ def get_sqlite_schema_prompt() -> str:
             else:
                 lines.append(f"Table {name} (rows: {count}): {create_stmt_single_line}")
 
+            # Add sample rows and stats for non-ephemeral tables with data
+            if name not in EPHEMERAL_TABLES and isinstance(count, int) and count > 0:
+                sample_stats = _get_table_sample_and_stats(cur, name, count)
+                if sample_stats:
+                    lines.append(sample_stats)
+
         block = "\n".join(lines)
         encoded = block.encode("utf-8")
         max_bytes = 30000
@@ -93,6 +101,94 @@ def get_sqlite_schema_prompt() -> str:
                 conn.close()
             except Exception:
                 pass
+
+
+def _get_table_sample_and_stats(cur, table_name: str, row_count: int) -> str:
+    """Get sample rows and column stats for a table.
+
+    Returns a formatted string with sample data and basic statistics,
+    or empty string if unable to fetch.
+    """
+    try:
+        # Get column info
+        cur.execute(f"PRAGMA table_info(\"{table_name}\");")
+        columns = [(row[1], row[2].upper()) for row in cur.fetchall()]  # (name, type)
+        if not columns:
+            return ""
+
+        parts = []
+
+        # Get 2 sample rows (first and a middle one for variety)
+        sample_rows = []
+        try:
+            cur.execute(f"SELECT * FROM \"{table_name}\" LIMIT 1;")
+            first_row = cur.fetchone()
+            if first_row:
+                sample_rows.append(first_row)
+
+            if row_count > 2:
+                # Get a row from the middle
+                mid_offset = row_count // 2
+                cur.execute(f"SELECT * FROM \"{table_name}\" LIMIT 1 OFFSET {mid_offset};")
+                mid_row = cur.fetchone()
+                if mid_row and mid_row != first_row:
+                    sample_rows.append(mid_row)
+        except Exception:
+            pass
+
+        if sample_rows:
+            formatted_rows = []
+            for row in sample_rows:
+                formatted_vals = []
+                for val in row:
+                    if val is None:
+                        formatted_vals.append("NULL")
+                    elif isinstance(val, str):
+                        # Truncate long strings
+                        display = val[:30] + "..." if len(val) > 30 else val
+                        formatted_vals.append(f"'{display}'")
+                    else:
+                        formatted_vals.append(str(val))
+                formatted_rows.append(f"({', '.join(formatted_vals)})")
+            parts.append(f"  sample: {', '.join(formatted_rows)}")
+
+        # Get basic stats per column (only for tables < 5000 rows to avoid slow queries)
+        if row_count < 5000:
+            stats = []
+            for col_name, col_type in columns:
+                try:
+                    if col_type in ("INTEGER", "INT", "REAL", "FLOAT", "NUMERIC", "DOUBLE"):
+                        # Numeric: show range
+                        cur.execute(f"SELECT MIN(\"{col_name}\"), MAX(\"{col_name}\") FROM \"{table_name}\";")
+                        min_val, max_val = cur.fetchone()
+                        if min_val is not None and max_val is not None:
+                            if isinstance(min_val, float):
+                                stats.append(f"{col_name}[{min_val:.2f}-{max_val:.2f}]")
+                            else:
+                                stats.append(f"{col_name}[{min_val}-{max_val}]")
+                    elif col_type in ("TEXT", "VARCHAR", "CHAR"):
+                        # Text: show distinct count and sample values
+                        cur.execute(f"SELECT COUNT(DISTINCT \"{col_name}\") FROM \"{table_name}\";")
+                        (distinct_count,) = cur.fetchone()
+                        if distinct_count and distinct_count <= 10:
+                            # Show actual values if few distinct
+                            cur.execute(f"SELECT DISTINCT \"{col_name}\" FROM \"{table_name}\" LIMIT 5;")
+                            distinct_vals = [row[0] for row in cur.fetchall() if row[0]]
+                            if distinct_vals:
+                                # Truncate long values
+                                display_vals = [v[:20] if len(v) <= 20 else v[:17] + "..." for v in distinct_vals[:5]]
+                                stats.append(f"{col_name}[{', '.join(display_vals)}]")
+                        elif distinct_count:
+                            stats.append(f"{col_name}[{distinct_count} distinct]")
+                except Exception:
+                    pass
+
+            if stats:
+                parts.append(f"  stats: {', '.join(stats)}")
+
+        return "\n".join(parts)
+    except Exception:
+        return ""
 
 
 def set_sqlite_db_path(db_path: str) -> contextvars.Token:

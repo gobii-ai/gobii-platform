@@ -287,9 +287,17 @@ Step 2: Create table and parse CSV using sequential field extraction
     INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3",
     will_continue_work=true)
 
-  Result: Query 1 affected 500 rows
+  Result: Query 0 affected 0 rows. Query 1 affected 0 rows.
+  (Note: CTE-based INSERTs often report 0 rows - this is normal, data IS inserted)
 
-Step 3: Verify and analyze
+  sqlite_schema now shows:
+    Table sensors (rows: 500): CREATE TABLE sensors (...)
+      sample: (101, 22.5, 45.2, 'Building-A'), (298, 21.3, 51.8, 'Building-B')
+      stats: sensor_id[101-600], temp[18.20-28.90], humidity[35.10-62.40], location[Building-A, Building-B, Building-C]
+
+  Schema confirms 500 rows with correct data - no verification query needed.
+
+Step 3: Analyze (skip verification - schema already confirms data)
   sqlite_batch(queries="
     SELECT location, COUNT(*) as n, ROUND(AVG(temp),1) as avg_temp, ROUND(AVG(humidity),1) as avg_hum
     FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
@@ -533,6 +541,24 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 http_request wraps responses in $.content, so paths are $.content.items not $.items.
 
 When analyzing data multiple ways, store in a table first, then run multiple queries.
+
+## Common Pitfalls
+
+**CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
+The data IS inserted - verify by checking sqlite_schema which shows sample rows and row counts.
+Don't run extra verification queries; trust the schema.
+
+**Query formatting**: Pass SQL as a plain string or array of strings to sqlite_batch.
+Wrong: `queries='["SELECT * FROM t"]'` (JSON-stringified array)
+Right: `queries='SELECT * FROM t'` or `queries=['SELECT * FROM t', 'SELECT * FROM t2']`
+
+**Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
+```
+Table mytable (rows: 150): CREATE TABLE mytable (...)
+  sample: (5.1, 3.5, 1.4, 0.2, 'setosa'), (6.3, 2.5, 5.0, 1.9, 'virginica')
+  stats: col1[4.30-7.90], col2[setosa, versicolor, virginica]
+```
+This confirms data loaded correctly - no need for SELECT COUNT(*) verification.
 """
 
 
