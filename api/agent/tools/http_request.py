@@ -539,7 +539,6 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             path=download_path,
             extension=extension,
             mime_type=mime_type,
-            allow_unique=True,
         )
         if download_result.get("status") != "ok":
             return download_result

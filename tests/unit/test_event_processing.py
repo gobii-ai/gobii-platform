@@ -1306,7 +1306,6 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self.assertEqual(mock_write.call_args.kwargs["path"], "/downloads/report.pdf")
         self.assertEqual(mock_write.call_args.kwargs["extension"], ".pdf")
         self.assertEqual(mock_write.call_args.kwargs["mime_type"], "application/pdf")
-        self.assertTrue(mock_write.call_args.kwargs["allow_unique"])
 
     @override_settings(ALLOW_FILE_DOWNLOAD=False)
     @patch('requests.request')

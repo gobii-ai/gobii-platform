@@ -58,7 +58,7 @@ class FileExportToolTests(TestCase):
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), b"col1,col2\n3,4\n")
 
-    def test_create_csv_path_requires_overwrite_to_replace(self):
+    def test_create_csv_path_dedupes_when_overwrite_false(self):
         first = execute_create_csv(
             self.agent,
             {"csv_text": "col1,col2\n1,2\n", "file_path": "/exports/report.csv"},
@@ -69,8 +69,9 @@ class FileExportToolTests(TestCase):
         )
 
         self.assertEqual(first["status"], "ok")
-        self.assertEqual(second["status"], "error")
-        self.assertIn("already exists", second["message"].lower())
+        self.assertEqual(second["status"], "ok")
+        self.assertNotEqual(first["node_id"], second["node_id"])
+        self.assertEqual(second["path"], "/exports/report (2).csv")
 
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(
@@ -163,6 +164,22 @@ class FileExportToolTests(TestCase):
         self.assertEqual(node.mime_type, "application/pdf")
         with node.content.open("rb") as handle:
             self.assertTrue(handle.read().startswith(b"%PDF-1.4"))
+
+    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
+    def test_create_pdf_path_dedupes_when_overwrite_false(self, mock_pdf):
+        first = execute_create_pdf(
+            self.agent,
+            {"html": "<html><body>Hello</body></html>", "file_path": "/exports/report.pdf"},
+        )
+        second = execute_create_pdf(
+            self.agent,
+            {"html": "<html><body>Updated</body></html>", "file_path": "/exports/report.pdf"},
+        )
+
+        self.assertEqual(first["status"], "ok")
+        self.assertEqual(second["status"], "ok")
+        self.assertNotEqual(first["node_id"], second["node_id"])
+        self.assertEqual(second["path"], "/exports/report (2).pdf")
 
     @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
     def test_create_pdf_overwrites_exports_path(self, mock_pdf):

@@ -204,7 +204,6 @@ def write_bytes_to_dir(
     mime_type: str,
     extension: str = "",
     overwrite: bool = False,
-    allow_unique: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(content_bytes, (bytes, bytearray)):
         return {"status": "error", "message": "File content must be bytes."}
@@ -287,13 +286,11 @@ def write_bytes_to_dir(
                 "node_id": str(node.id),
                 "filename": node.name,
             }
-        if not allow_unique:
-            return {"status": "error", "message": "File already exists at the requested path."}
 
     node = None
-    max_attempts = 5 if allow_unique else 1
+    max_attempts = 5
     for attempt in range(max_attempts):
-        name = dedupe_name(filespace, target_dir, safe_filename) if allow_unique else safe_filename
+        name = dedupe_name(filespace, target_dir, safe_filename)
         node = AgentFsNode(
             filespace=filespace,
             parent=target_dir,
@@ -308,7 +305,7 @@ def write_bytes_to_dir(
                 node.save()
             break
         except IntegrityError:
-            if not allow_unique or attempt == max_attempts - 1:
+            if attempt == max_attempts - 1:
                 return {"status": "error", "message": "Failed to allocate the requested file path."}
     error = _save_node_content(
         node,

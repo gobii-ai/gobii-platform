@@ -290,5 +290,4 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         mime_type=MIME_TYPE,
         path=path,
         overwrite=overwrite,
-        allow_unique=False,
     )
