@@ -190,259 +190,222 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return focused examples for sqlite_batch usage.
 
-    Emphasizes: use query from meta, decision flows, continue after query.
+    Emphasizes: copy query from meta, keep working until done, handle errors.
     """
     return """
-## SQLite Query Patterns
+## How to Extract Data from Tool Results
 
-**CRITICAL: Always copy the QUERY from meta above.** The preview is a structure hint only.
-- Use `→ QUERY:` line from result meta - it has the correct PATH
-- Preview shows truncated data - never parse it directly
-- After query returns data, CONTINUE to analyze/present it
+**Rule 1: Copy the QUERY from meta** - it has the correct path
+**Rule 2: Keep working** - don't stop after one query, complete the task
+**Rule 3: Handle problems** - empty results, errors, unexpected data
 
 ---
 
-## Core Pattern: Query → Analyze → Decide → Continue
+## Basic Pattern
 
 ```
-1. http_request(url="...", will_continue_work=true)
-   → result_id="R1" with meta showing:
-     → QUERY: SELECT json_extract(r.value,'$.id')... FROM __tool_results, json_each(result_json,'$.content.items') AS r WHERE result_id='R1' LIMIT 25
-       PATH: $.content.items (50 items)
-
-2. sqlite_batch(queries="<copy QUERY from meta above>", will_continue_work=true)
-   → Returns extracted data
-
-3. DECISION POINT - based on what query returned:
-   - Empty? → Report "no results found" or try different source
-   - Has errors? → Report errors to user
-   - Has data? → Continue to next step
-
-4. Present/analyze the query results to user
-   → Format nicely, don't just dump raw output
+1. Fetch data → get result_id with meta showing QUERY
+2. Run the QUERY from meta → get actual data
+3. Check result → empty? error? success?
+4. Continue working → analyze, present, or fetch more
 ```
 
 ---
 
-## Flow: Large Data → Aggregate First → Drill Down
+## Example: Fetch JSON Array → Extract → Present
 
 ```
-1. http_request(url="/orders?days=30", will_continue_work=true)
-   → result_id="R2", 340KB
+STEP 1: Fetch
+  http_request(url="/api/users", will_continue_work=true)
+  → result_id="R1"
+  → Meta shows: QUERY: SELECT json_extract(r.value,'$.name'), json_extract(r.value,'$.email')
+                       FROM __tool_results, json_each(result_json,'$.content.users') AS r
+                       WHERE result_id='R1' LIMIT 25
 
-2. First: aggregate to understand scope
-   sqlite_batch(queries="
-   SELECT json_extract(o.value,'$.status') AS status, COUNT(*) AS cnt
-   FROM __tool_results, json_each(result_json,'$.content.orders') AS o
-   WHERE result_id='R2' GROUP BY 1", will_continue_work=true)
-   → shipped=2756, failed=34, pending=57
+STEP 2: Extract (copy the QUERY from meta)
+  sqlite_batch(queries="SELECT json_extract(r.value,'$.name'), json_extract(r.value,'$.email')
+    FROM __tool_results, json_each(result_json,'$.content.users') AS r
+    WHERE result_id='R1' LIMIT 25", will_continue_work=true)
+  → Returns: Alice|alice@example.com, Bob|bob@example.com, ...
 
-3. DECISION: failures need attention
-   sqlite_batch(queries="
-   SELECT json_extract(o.value,'$.id'), json_extract(o.value,'$.error')
-   FROM __tool_results, json_each(result_json,'$.content.orders') AS o
-   WHERE result_id='R2' AND json_extract(o.value,'$.status')='failed'
-   LIMIT 50", will_continue_work=true)
+STEP 3: Check result
+  - Got data? → Continue to present it
+  - Empty? → Tell user "no users found"
+  - Error? → Report the error
 
-4. Present: "2847 orders total. 34 failed - here are the errors..."
-```
-
----
-
-## Flow: Store → Query Multiple Times
-
-```
-1. http_request(url="/pulls", will_continue_work=true)
-   → result_id="R3"
-
-2. Store in durable table (persists across cycles):
-   sqlite_batch(queries="
-   CREATE TABLE IF NOT EXISTS prs (id INTEGER PRIMARY KEY, title TEXT, author TEXT, state TEXT);
-   INSERT OR REPLACE INTO prs SELECT json_extract(pr.value,'$.number'), json_extract(pr.value,'$.title'),
-          json_extract(pr.value,'$.user.login'), json_extract(pr.value,'$.state')
-   FROM __tool_results, json_each(result_json,'$.content') AS pr WHERE result_id='R3'", will_continue_work=true)
-
-3. Now query YOUR table (not __tool_results):
-   sqlite_batch(queries="SELECT author, COUNT(*) FROM prs GROUP BY author ORDER BY 2 DESC LIMIT 10", will_continue_work=true)
-   sqlite_batch(queries="SELECT title FROM prs WHERE state='open' LIMIT 15", will_continue_work=true)
-
-4. Present both analyses
+STEP 4: Present results to user
+  → "Found 25 users. Here are the first few: Alice (alice@example.com)..."
 ```
 
 ---
 
-## Flow: Research Loop with Progress Tracking
+## Example: Large Data → Count First → Then Details
 
 ```
-1. mcp_bright_data_search_engine(query="...", will_continue_work=true)
-   → result_id="R4"
+STEP 1: Fetch large dataset
+  http_request(url="/api/orders?days=30", will_continue_work=true)
+  → result_id="R2" (large response)
 
-2. Store URLs with progress tracking:
-   sqlite_batch(queries="
-   CREATE TABLE IF NOT EXISTS research (url TEXT PRIMARY KEY, scraped INTEGER DEFAULT 0, findings TEXT);
-   INSERT OR IGNORE INTO research (url) SELECT json_extract(r.value,'$.link')
-   FROM __tool_results, json_each(result_json,'$.organic') AS r WHERE result_id='R4'", will_continue_work=true)
+STEP 2: Count and group first (don't try to load everything)
+  sqlite_batch(queries="SELECT json_extract(o.value,'$.status') AS status, COUNT(*) AS cnt
+    FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+    WHERE result_id='R2' GROUP BY 1", will_continue_work=true)
+  → shipped=2756, failed=34, pending=57
 
-3. Loop: get next unprocessed item
-   sqlite_batch(queries="SELECT url FROM research WHERE scraped=0 LIMIT 1", will_continue_work=true)
+STEP 3: Decide what to drill into
+  → 34 failures need attention
 
-4. DECISION: if no unprocessed items, synthesize and present
-   sqlite_batch(queries="SELECT url, findings FROM research WHERE scraped=1", will_continue_work=true)
-   → Present compiled findings
+STEP 4: Get details on failures only
+  sqlite_batch(queries="SELECT json_extract(o.value,'$.id'), json_extract(o.value,'$.error')
+    FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+    WHERE result_id='R2' AND json_extract(o.value,'$.status')='failed'", will_continue_work=true)
 
-5. Otherwise: process the URL
-   mcp_bright_data_scrape_as_markdown(url="<url>", will_continue_work=true)
-   → result_id="R5"
-
-6. Extract relevant content (use QUERY from meta):
-   sqlite_batch(queries="SELECT substr(result_text, 1, 2000) FROM __tool_results WHERE result_id='R5'", will_continue_work=true)
-
-7. Update progress:
-   sqlite_batch(queries="UPDATE research SET scraped=1, findings='...' WHERE url='<url>'", will_continue_work=true)
-
-8. Loop back to step 3
+STEP 5: Present findings
+  → "2847 orders in last 30 days. 34 failed with these errors: ..."
 ```
 
 ---
 
-## Flow: Decision Branching
+## Example: Store Data → Query Multiple Ways
+
+When you need to analyze the same data multiple ways, store it in a table first.
 
 ```
-1. Fetch data
-   http_request(url="/status", will_continue_work=true)
-   → result_id="R6"
+STEP 1: Fetch
+  http_request(url="/api/products", will_continue_work=true)
+  → result_id="R3"
 
-2. Query for decision info:
-   sqlite_batch(queries="
-   SELECT json_extract(result_json,'$.content.status') AS status,
-          json_extract(result_json,'$.content.error') AS error
-   FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
+STEP 2: Create table and load data
+  sqlite_batch(queries="
+    CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL);
+    INSERT OR REPLACE INTO products
+      SELECT json_extract(p.value,'$.id'), json_extract(p.value,'$.name'),
+             json_extract(p.value,'$.category'), json_extract(p.value,'$.price')
+      FROM __tool_results, json_each(result_json,'$.content.products') AS p
+      WHERE result_id='R3'", will_continue_work=true)
 
-3. BRANCH based on result:
-   IF status='error':
-     → Report error to user, ask what to do
-   ELIF status='pending':
-     → Wait or check again later
-   ELIF status='complete':
-     → Extract full results and present
-   ELSE:
-     → Handle unexpected status
+STEP 3: Now run multiple queries on YOUR table
+  sqlite_batch(queries="SELECT category, COUNT(*), AVG(price) FROM products GROUP BY category", will_continue_work=true)
+  sqlite_batch(queries="SELECT name, price FROM products ORDER BY price DESC LIMIT 10", will_continue_work=true)
+
+STEP 4: Present all findings
 ```
 
 ---
 
-## Flow: CSV Data → Create Table → Query
+## Example: Loop Until Done
 
-When http_request fetches a CSV file, meta shows `📄 CSV DATA in $.content`.
-The CSV is a string inside JSON - extract it, parse lines, load into table.
+For tasks that require processing multiple items:
 
 ```
-1. Fetch CSV data
-   http_request(url="https://example.com/data.csv", will_continue_work=true)
-   → result_id="R7"
-   → Meta shows: 📄 CSV DATA in $.content (500 rows)
-     COLUMNS: id, name, email, status
-     → SCHEMA: CREATE TABLE IF NOT EXISTS csv_data (id TEXT, name TEXT, email TEXT, status TEXT)
+STEP 1: Get list of URLs to process
+  mcp_bright_data_search_engine(query="...", will_continue_work=true)
+  → result_id="R4"
 
-2. DECISION: Check if CSV (look for 📄 CSV DATA in meta)
-   IF no CSV indicator:
-     → It's JSON - use json_each patterns above
-   IF CSV detected:
-     → Continue with CSV extraction below
+STEP 2: Store with progress tracking
+  sqlite_batch(queries="
+    CREATE TABLE IF NOT EXISTS todo (url TEXT PRIMARY KEY, done INTEGER DEFAULT 0, notes TEXT);
+    INSERT OR IGNORE INTO todo (url)
+      SELECT json_extract(r.value,'$.link')
+      FROM __tool_results, json_each(result_json,'$.organic') AS r
+      WHERE result_id='R4'", will_continue_work=true)
 
-3. Create table with schema from meta:
-   sqlite_batch(queries="
-   CREATE TABLE IF NOT EXISTS csv_data (id TEXT, name TEXT, email TEXT, status TEXT)", will_continue_work=true)
+STEP 3: Get next item
+  sqlite_batch(queries="SELECT url FROM todo WHERE done=0 LIMIT 1", will_continue_work=true)
 
-4. Get CSV content and count lines to verify:
-   sqlite_batch(queries="
-   SELECT length(json_extract(result_json,'$.content')) AS bytes,
-          (length(json_extract(result_json,'$.content')) - length(replace(json_extract(result_json,'$.content'),char(10),''))) AS line_count
-   FROM __tool_results WHERE result_id='R7'", will_continue_work=true)
-   → bytes=24500, line_count=501 (500 data + 1 header)
+STEP 4: Check if done
+  - No rows? → All done, go to STEP 7
+  - Got URL? → Continue to STEP 5
 
-5. Parse CSV using recursive CTE (handles any number of rows):
-   sqlite_batch(queries="
-   WITH RECURSIVE
-     csv_raw AS (SELECT json_extract(result_json,'$.content') AS txt FROM __tool_results WHERE result_id='R7'),
-     lines(line_num, line, rest) AS (
-       SELECT 1,
-              substr(txt, 1, instr(txt, char(10))-1),
-              substr(txt, instr(txt, char(10))+1)
-       FROM csv_raw WHERE instr(txt, char(10)) > 0
-       UNION ALL
-       SELECT line_num + 1,
-              CASE WHEN instr(rest, char(10)) > 0
-                   THEN substr(rest, 1, instr(rest, char(10))-1)
-                   ELSE rest END,
-              CASE WHEN instr(rest, char(10)) > 0
-                   THEN substr(rest, instr(rest, char(10))+1)
-                   ELSE '' END
-       FROM lines WHERE rest != '' AND line_num < 1000
-     ),
-     parsed AS (
-       SELECT line_num,
-         trim(substr(line, 1, instr(line||',',',')-1)) AS c1,
-         trim(substr(line, instr(line,',')+1, instr(substr(line,instr(line,',')+1)||',',',')-1)) AS c2,
-         trim(substr(line, instr(line,',',1,2)+1, instr(substr(line,instr(line,',',1,2)+1)||',',',')-1)) AS c3,
-         trim(substr(line, instr(line,',',1,3)+1)) AS c4
-       FROM lines WHERE line_num > 1
-     )
-   INSERT INTO csv_data SELECT c1, c2, c3, c4 FROM parsed", will_continue_work=true)
+STEP 5: Process the URL
+  mcp_bright_data_scrape_as_markdown(url="<the url>", will_continue_work=true)
+  → result_id="R5"
+  sqlite_batch(queries="SELECT substr(result_text,1,2000) FROM __tool_results WHERE result_id='R5'", will_continue_work=true)
+  → Extract relevant info
 
-6. Verify and query your table:
-   sqlite_batch(queries="SELECT COUNT(*) FROM csv_data", will_continue_work=true)
-   → 500 rows loaded
+STEP 6: Mark done and loop back
+  sqlite_batch(queries="UPDATE todo SET done=1, notes='...' WHERE url='<the url>'", will_continue_work=true)
+  → Go back to STEP 3
 
-7. Now query your table freely:
-   sqlite_batch(queries="SELECT status, COUNT(*) FROM csv_data GROUP BY status", will_continue_work=true)
-   sqlite_batch(queries="SELECT * FROM csv_data WHERE email LIKE '%@example.com' LIMIT 20", will_continue_work=true)
+STEP 7: Summarize all findings
+  sqlite_batch(queries="SELECT url, notes FROM todo WHERE done=1", will_continue_work=true)
+  → Present compiled results to user
 ```
-
-**CSV Parsing Notes:**
-- `char(10)` = newline for line splitting
-- `instr(line||',',',')` safely finds delimiter even for last column
-- Skip `line_num > 1` to exclude header row
-- For tab-delimited: replace `,` with `char(9)` in parsing
-- Recursive CTE has LIMIT to prevent infinite loops
-- Large files (>5000 rows): may need multiple batches
 
 ---
 
-## Common SQL Patterns
+## Example: CSV Data
 
-**Use QUERY from meta - it has correct path:**
+**IMPORTANT: CSV is a raw text string, NOT JSON. You cannot use json_each() on it.**
+
+When http_request fetches CSV, meta shows `📄 CSV DATA in $.content`.
+
+```
+STEP 1: Fetch CSV
+  http_request(url="https://example.com/data.csv", will_continue_work=true)
+  → result_id="R6"
+  → Meta shows: 📄 CSV DATA in $.content (100 rows)
+                COLUMNS: id, name, email, status
+
+STEP 2: Get the raw CSV text (it's just a string!)
+  sqlite_batch(queries="SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='R6'", will_continue_work=true)
+  → Returns: "id,name,email,status\n1,Alice,alice@example.com,active\n2,Bob,..."
+
+STEP 3: Read the CSV text and present it
+  - The query above returns the ENTIRE CSV as a text string
+  - Read it, understand it, summarize/present to user
+  - For small CSVs (<100 rows): just present the data directly
+  - Do NOT try to parse with json_each - CSV is not JSON!
+
+WRONG - DO NOT DO THIS:
+  json_each(result_json,'$.content')     -- FAILS: content is a string, not array
+  json_extract(r.value,'$.col0')         -- FAILS: CSV has no $.col0
+```
+
+---
+
+## Common Mistakes to Avoid
+
+```
+WRONG: json_extract(r.value)
+RIGHT: json_extract(r.value,'$.fieldname')  -- always include the path!
+
+WRONG: json_each(result_json,'$.content') on CSV data
+RIGHT: json_extract(result_json,'$.content') to get CSV as text string
+
+WRONG: json_each(result_json,'$.items')
+RIGHT: json_each(result_json,'$.content.items')  -- http_request wraps in $.content
+
+WRONG: guessing the path
+RIGHT: copy the QUERY from meta - it has the correct path
+```
+
+---
+
+## Quick Reference
+
+**Always include path in json_extract:**
 ```sql
--- Meta shows: → QUERY: SELECT ... json_each(result_json,'$.content.hits') ...
--- COPY THAT QUERY - don't guess the path!
+json_extract(r.value,'$.name')   -- Correct
+json_extract(r.value)            -- Wrong: missing path!
+r.value                          -- Also works: gets the whole item as JSON string
+```
+
+**http_request wraps data in $.content:**
+```sql
+json_each(result_json,'$.content.items')  -- Correct
+json_each(result_json,'$.items')          -- Wrong: missing $.content
 ```
 
 **Handle missing fields:**
 ```sql
-SELECT COALESCE(json_extract(r.value,'$.email'), '[none]') FROM ...
+COALESCE(json_extract(r.value,'$.email'), 'none')
 ```
 
-**Check array exists before iterating:**
+**Escape quotes in strings:**
 ```sql
-SELECT CASE WHEN json_type(result_json,'$.content.items')='array'
-       THEN json_array_length(result_json,'$.content.items') ELSE 0 END
+'McDonald''s'  -- Correct (double the quote)
 ```
-
-**Nested arrays need unique aliases:**
-```sql
-SELECT ... FROM __tool_results,
-  json_each(result_json,'$.content.orders') AS ord,
-  json_each(ord.value,'$.line_items') AS line
-WHERE result_id='R'
-```
-
-**http_request envelope:** Data is in `$.content`, not root:
-```sql
--- Correct: json_each(result_json,'$.content.items')
--- Wrong:   json_each(result_json,'$.items')
-```
-
-**Escape quotes:** `'McDonald''s'` not `'McDonald's'`
 """
 
 

@@ -1013,6 +1013,13 @@ def _generate_compact_summary(
                         f"FROM __tool_results, {each_expr} AS r "
                         f"WHERE result_id='{result_id}' LIMIT 25"
                     )
+                else:
+                    # Primitive array (numbers, strings) - just show value directly
+                    parts.append(
+                        f"→ QUERY: SELECT r.value "
+                        f"FROM __tool_results, {each_expr} AS r "
+                        f"WHERE result_id='{result_id}' LIMIT 25"
+                    )
 
             # PATH explicitly labeled - critical for correct queries
             # Include item_data_key if present so agent knows full path
@@ -1054,20 +1061,15 @@ def _generate_compact_summary(
         if json_analysis.detected_patterns and json_analysis.detected_patterns.empty_result:
             parts.append("  ⚠ Result array is empty")
 
-        # Embedded CSV content - show extraction pattern
+        # Embedded CSV content - show simple extraction hint
         if json_analysis.embedded_content and json_analysis.embedded_content.format == "csv":
             emb = json_analysis.embedded_content
             csv = emb.csv_info
             if csv and csv.columns:
-                # Generate CREATE TABLE with proper columns
-                col_defs = ", ".join(f"{c} TEXT" for c in csv.columns[:15])
-                col_names = ", ".join(csv.columns[:15])
-
-                parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows)")
+                parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
                 parts.append(f"  COLUMNS: {', '.join(csv.columns[:10])}")
-                parts.append(f"  → TO EXTRACT: Create table, split lines, parse with instr/substr")
-                parts.append(f"  → SCHEMA: CREATE TABLE IF NOT EXISTS csv_data ({col_defs})")
-                parts.append(f"  → See examples for multi-step CSV extraction flow")
+                parts.append(f"  → QUERY: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
+                parts.append(f"  → Returns raw CSV text. Read it directly - do NOT use json_each()")
 
     else:
         # Text data

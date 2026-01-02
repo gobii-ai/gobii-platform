@@ -582,6 +582,7 @@ class EdgeCaseTests(SimpleTestCase):
         self.assertIn("CSV DATA", analysis.compact_summary)
         self.assertIn("$.content", analysis.compact_summary)
         self.assertIn("COLUMNS", analysis.compact_summary)
+        self.assertIn("QUERY", analysis.compact_summary)
 
     def test_csv_in_json_serialization(self):
         """Verify embedded CSV info is serialized correctly."""
