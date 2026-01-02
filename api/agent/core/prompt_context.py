@@ -280,6 +280,7 @@ Step 2: Create table and parse CSV using sequential field extraction
           CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
         FROM lines WHERE length(rest)>0
       ),
+      -- 4 columns need 3 CTEs: p1 extracts c1, p2 extracts c2, p3 extracts c3 AND c4 (remainder)
       p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0),
       p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
       p3 AS (SELECT c1,c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
@@ -347,6 +348,167 @@ Step 7: Compile and present research
   sqlite_batch(queries="SELECT title, summary FROM research WHERE scraped=1", will_continue_work=false)
 
   Synthesize findings into a coherent summary for the user.
+```
+
+---
+
+## Trajectory 4: JSON API + CSV Enrichment → Decision Making
+
+User asks: "Check our orders against the product catalog and flag any issues"
+
+```
+Step 1: Fetch orders from API (JSON)
+  http_request(url="https://api.example.com/orders?status=pending", will_continue_work=true)
+
+  Result meta shows:
+    QUERY: json_each(result_json,'$.content.orders')
+    PATH: $.content.orders (47 items)
+    FIELDS: order_id:int, product_code:str, quantity:int, customer_id:int
+
+Step 2: Store orders in table
+  sqlite_batch(queries="
+    CREATE TABLE orders (order_id INT PRIMARY KEY, product_code TEXT, quantity INT, customer_id INT);
+    INSERT INTO orders SELECT
+      json_extract(o.value,'$.order_id'), json_extract(o.value,'$.product_code'),
+      json_extract(o.value,'$.quantity'), json_extract(o.value,'$.customer_id')
+    FROM __tool_results, json_each(result_json,'$.content.orders') AS o
+    WHERE result_id='ord123'", will_continue_work=true)
+
+  Result: Query 1 affected 47 rows
+
+Step 3: Fetch product catalog (CSV)
+  http_request(url="https://data.example.com/catalog.csv", will_continue_work=true)
+
+  Result meta shows:
+    CSV DATA in $.content (1200 rows)
+    SCHEMA (4 columns): code:text, name:text, price:float, stock:int
+    SAMPLE: SKU-001,Widget Pro,29.99,150
+    PATTERN: 4 cols need 3 CTEs: p1→...→p3, where p3 extracts c3 AND c4
+
+Step 4: Parse CSV into products table
+  sqlite_batch(queries="
+    CREATE TABLE products (code TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='cat456'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      -- 4 columns need 3 CTEs: p1 extracts c1, p2 extracts c2, p3 extracts c3 AND c4
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0 AND line NOT LIKE 'code%'),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
+      p3 AS (SELECT c1, c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
+    INSERT OR IGNORE INTO products SELECT c1, c2, CAST(c3 AS REAL), CAST(c4 AS INT) FROM p3", will_continue_work=true)
+
+  Result: Query 1 affected 1200 rows
+
+Step 5: Join and identify issues - orders for products with insufficient stock
+  sqlite_batch(queries="
+    SELECT o.order_id, o.product_code, o.quantity, p.stock, p.name,
+           CASE WHEN p.code IS NULL THEN 'UNKNOWN_PRODUCT'
+                WHEN o.quantity > p.stock THEN 'INSUFFICIENT_STOCK'
+                ELSE 'OK' END as status
+    FROM orders o LEFT JOIN products p ON o.product_code = p.code
+    WHERE p.code IS NULL OR o.quantity > p.stock
+    ORDER BY status, o.order_id", will_continue_work=true)
+
+  Result: 101|SKU-999|5|NULL|NULL|UNKNOWN_PRODUCT, 102|SKU-042|200|45|Gadget X|INSUFFICIENT_STOCK, ...
+
+Step 6: Decision - report findings and recommend actions
+  Found 3 orders referencing unknown products (need catalog update or order correction).
+  Found 8 orders exceeding available stock (need restock or customer notification).
+  Present actionable summary to user.
+```
+
+---
+
+## Trajectory 5: Compare Multiple Sources → Detect Discrepancies → Act
+
+User asks: "Compare our inventory system with warehouse counts and find mismatches"
+
+```
+Step 1: Fetch system inventory (JSON API)
+  http_request(url="https://api.internal/inventory", will_continue_work=true)
+
+  Result meta shows:
+    QUERY: json_each(result_json,'$.content.items')
+    PATH: $.content.items (500 items)
+    FIELDS: sku:str, system_count:int, location:str
+
+Step 2: Fetch warehouse physical counts (CSV export)
+  http_request(url="https://warehouse.internal/counts.csv", will_continue_work=true)
+
+  Result meta shows:
+    CSV DATA in $.content (520 rows)
+    SCHEMA (3 columns): sku:text, physical_count:int, counted_at:text
+    PATTERN: 3 cols need 2 CTEs: p1→...→p2, where p2 extracts c2 AND c3
+
+Step 3: Load both into tables for comparison
+  sqlite_batch(queries="
+    -- Table 1: System inventory from JSON
+    CREATE TABLE system_inv (sku TEXT PRIMARY KEY, system_count INT, location TEXT);
+    INSERT INTO system_inv SELECT
+      json_extract(i.value,'$.sku'), json_extract(i.value,'$.system_count'), json_extract(i.value,'$.location')
+    FROM __tool_results, json_each(result_json,'$.content.items') AS i
+    WHERE result_id='inv789';
+
+    -- Table 2: Warehouse counts from CSV
+    CREATE TABLE warehouse_counts (sku TEXT PRIMARY KEY, physical_count INT, counted_at TEXT);
+    WITH RECURSIVE
+      csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='wh012'),
+      lines AS (
+        SELECT substr(txt,1,instr(txt,char(10))-1) as line, substr(txt,instr(txt,char(10))+1) as rest FROM csv
+        UNION ALL SELECT
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,1,instr(rest,char(10))-1) ELSE rest END,
+          CASE WHEN instr(rest,char(10))>0 THEN substr(rest,instr(rest,char(10))+1) ELSE '' END
+        FROM lines WHERE length(rest)>0
+      ),
+      -- 3 columns need 2 CTEs: p1 extracts c1, p2 extracts c2 AND c3
+      p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0 AND line NOT LIKE 'sku%'),
+      p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as c3 FROM p1)
+    INSERT OR IGNORE INTO warehouse_counts SELECT c1, CAST(c2 AS INT), c3 FROM p2", will_continue_work=true)
+
+  Result: Query 0 affected 500 rows. Query 1 affected 520 rows.
+
+Step 4: Find discrepancies - items where counts don't match
+  sqlite_batch(queries="
+    SELECT COALESCE(s.sku, w.sku) as sku,
+           s.system_count, w.physical_count,
+           (COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance,
+           s.location,
+           CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
+                WHEN w.sku IS NULL THEN 'IN_SYSTEM_NOT_WAREHOUSE'
+                WHEN s.system_count != w.physical_count THEN 'COUNT_MISMATCH'
+           END as issue_type
+    FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
+    WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
+    ORDER BY ABS(variance) DESC LIMIT 25", will_continue_work=true)
+
+  Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
+
+Step 5: Summarize by issue type for decision making
+  sqlite_batch(queries="
+    SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
+    FROM (
+      SELECT CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
+                  WHEN w.sku IS NULL THEN 'IN_SYSTEM_NOT_WAREHOUSE'
+                  ELSE 'COUNT_MISMATCH' END as issue_type,
+             ABS(COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance
+      FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
+      WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
+    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=false)
+
+  Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
+
+Step 6: Present findings with prioritized recommendations
+  "Found 67 inventory discrepancies across 3 categories:
+   - 42 count mismatches (1,847 units total variance) - priority for recount
+   - 20 items in warehouse not in system - need to add to inventory
+   - 5 items in system not found in warehouse - investigate possible shrinkage
+   Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
 ```
 
 ---

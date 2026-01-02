@@ -1136,9 +1136,18 @@ def _generate_compact_summary(
                 # Ready-to-use query to extract CSV text
                 parts.append(f"  → GET CSV: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
                 parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
-                # Add pattern hint based on column count
+                # Add pattern hint based on column count with concrete structure
                 if col_count > 1:
-                    parts.append(f"  → PATTERN: For {col_count} columns, use {col_count-1} sequential CTEs (p1→p2→...→p{col_count-1}), each extracting one column")
+                    # Build concrete CTE chain: p1(c1,r)→p2(c2,r2)→...→pN(cN,cN+1)
+                    cte_parts = []
+                    for i in range(1, col_count):
+                        if i < col_count - 1:
+                            cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
+                        else:
+                            cte_parts.append(f"p{i}(c{i},c{i+1})")
+                    cte_chain = "→".join(cte_parts)
+                    cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
+                    parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
 
     else:
         # Text data
@@ -1166,9 +1175,18 @@ def _generate_compact_summary(
                     f"→ QUERY: SELECT result_text FROM __tool_results WHERE result_id='{result_id}'"
                 )
                 parts.append(f"  → Parse CSV line by line. Do NOT use json_each()")
-                # Add pattern hint based on column count
+                # Add pattern hint based on column count with concrete structure
                 if col_count > 1:
-                    parts.append(f"  → PATTERN: For {col_count} columns, use {col_count-1} sequential CTEs (p1→p2→...→p{col_count-1}), each extracting one column")
+                    # Build concrete CTE chain: p1(c1,r)→p2(c2,r2)→...→pN(cN,cN+1)
+                    cte_parts = []
+                    for i in range(1, col_count):
+                        if i < col_count - 1:
+                            cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
+                        else:
+                            cte_parts.append(f"p{i}(c{i},c{i+1})")
+                    cte_chain = "→".join(cte_parts)
+                    cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
+                    parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
 
             elif fmt in ("markdown", "html") and text_analysis.doc_structure:
                 doc = text_analysis.doc_structure
