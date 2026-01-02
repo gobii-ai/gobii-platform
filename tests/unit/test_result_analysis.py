@@ -193,6 +193,29 @@ class TextAnalysisTests(SimpleTestCase):
         self.assertIsNotNone(analysis.csv_info)
         self.assertEqual(analysis.csv_info.delimiter, "\t")
 
+    def test_csv_extracts_sample_rows_and_types(self):
+        """CSV analysis should extract sample rows and infer column types."""
+        text = """id,name,price,active
+1,Widget,19.99,true
+2,Gadget,29.50,false
+3,Device,99.00,true"""
+
+        analysis = analyze_text(text)
+
+        self.assertEqual(analysis.format, "csv")
+        self.assertIsNotNone(analysis.csv_info)
+
+        # Should have sample rows (first 2-3 data rows)
+        self.assertGreater(len(analysis.csv_info.sample_rows), 0)
+        self.assertIn("Widget", analysis.csv_info.sample_rows[0])
+
+        # Should have column types inferred
+        self.assertEqual(len(analysis.csv_info.column_types), 4)
+        self.assertEqual(analysis.csv_info.column_types[0], "int")  # id
+        self.assertEqual(analysis.csv_info.column_types[1], "text")  # name
+        self.assertEqual(analysis.csv_info.column_types[2], "float")  # price
+        self.assertEqual(analysis.csv_info.column_types[3], "text")  # active (bool as text)
+
     def test_detects_markdown_format(self):
         text = """# Main Heading
 
@@ -390,7 +413,11 @@ class FullAnalysisTests(SimpleTestCase):
         analysis = analyze_result(text, "test-id")
 
         self.assertIn("CSV", analysis.compact_summary)
-        self.assertIn("columns", analysis.compact_summary.lower())
+        # When types are inferred, we use SCHEMA; otherwise COLUMNS
+        self.assertTrue(
+            "schema" in analysis.compact_summary.lower() or
+            "columns" in analysis.compact_summary.lower()
+        )
 
 
 @tag("batch_result_analysis")
@@ -581,8 +608,12 @@ class EdgeCaseTests(SimpleTestCase):
         # Compact summary should include CSV hints
         self.assertIn("CSV DATA", analysis.compact_summary)
         self.assertIn("$.content", analysis.compact_summary)
-        self.assertIn("COLUMNS", analysis.compact_summary)
-        self.assertIn("QUERY", analysis.compact_summary)
+        # When types are inferred, we use SCHEMA; otherwise COLUMNS
+        self.assertTrue(
+            "SCHEMA" in analysis.compact_summary or
+            "COLUMNS" in analysis.compact_summary
+        )
+        self.assertIn("GET CSV", analysis.compact_summary)
 
     def test_csv_in_json_serialization(self):
         """Verify embedded CSV info is serialized correctly."""

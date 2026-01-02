@@ -23,8 +23,8 @@ from ...proxy_selection import select_proxy_for_persistent_agent
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
 
 logger = logging.getLogger(__name__)
-PREVIEW_MAX_BYTES = 30 * 1024
 RESPONSE_MAX_BYTES = 5 * 1024 * 1024
+PREVIEW_MAX_BYTES = RESPONSE_MAX_BYTES
 DOWNLOAD_CHUNK_SIZE = 64 * 1024
 
 
@@ -175,7 +175,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                 "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
                 "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
-                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB and binary bodies are omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
+                "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),
             "parameters": {
                 "type": "object",
@@ -448,19 +448,50 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
     # Determine if we should treat content as text
     content_type = (resp.headers.get("Content-Type") or "").lower()
-    is_textual = (
+    is_explicitly_textual = (
         content_type.startswith("text/")
         or "json" in content_type
         or "javascript" in content_type
         or "xml" in content_type
+        or "csv" in content_type
     )
 
-    if is_textual:
-        decode_bytes = preview_bytes if download_requested else content_bytes
+    decode_bytes = preview_bytes if download_requested else content_bytes
+
+    # For explicitly textual types or unknown types, try to decode as UTF-8.
+    # Many servers return application/octet-stream for plain text/CSV files.
+    # We attempt decoding and only treat as binary if it fails badly.
+    is_binary = False
+    if is_explicitly_textual:
+        # Trust the content type and decode with replacement for any bad chars
         try:
             content_str = decode_bytes.decode("utf-8", errors="replace")
         except Exception:
             content_str = decode_bytes.decode(errors="replace")
+    else:
+        # Unknown content type - try to decode and check if it looks like valid text
+        try:
+            # First try strict decoding to see if it's clean UTF-8
+            content_str = decode_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            # Not clean UTF-8, try with replacement and check the error ratio
+            content_str = decode_bytes.decode("utf-8", errors="replace")
+            # Count replacement chars (U+FFFD) - if too many, probably binary
+            replacement_count = content_str.count("\ufffd")
+            # More than 5% replacement chars suggests actual binary data
+            if len(content_str) > 0 and replacement_count / len(content_str) > 0.05:
+                is_binary = True
+        except Exception:
+            # Fallback for any other errors
+            content_str = decode_bytes.decode(errors="replace")
+
+    if is_binary:
+        size_hint = content_length if content_length is not None else total_bytes
+        content_str = (
+            f"[Binary content omitted – {content_type or 'unknown type'}, "
+            f"length ≈ {size_hint} bytes]"
+        )
+    else:
         # Parse JSON content so agents can query it directly without double extraction.
         # Try parsing regardless of content-type since some APIs return JSON with wrong headers.
         # Quick check: only attempt parse if content looks like JSON (starts with { or [).
@@ -473,14 +504,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 pass  # Keep as string if parse fails
         # Add truncation notice for string content only (parsed JSON doesn't need it)
         if truncated and isinstance(content_str, str):
-            truncation_label = "30KB" if download_requested else "5MB"
-            content_str += f"\n\n[Content truncated to {truncation_label}]"
-    else:
-        size_hint = content_length if content_length is not None else total_bytes
-        content_str = (
-            f"[Binary content omitted – {content_type or 'unknown type'}, "
-            f"length ≈ {size_hint} bytes]"
-        )
+            content_str += "\n\n[Content truncated to 5MB]"
 
     # Log response details
     response_size = len(content_str) if isinstance(content_str, str) else len(str(content_str))

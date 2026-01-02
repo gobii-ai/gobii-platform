@@ -62,7 +62,8 @@ class CsvInfo:
     has_header: bool = True
     columns: List[str] = field(default_factory=list)
     row_count_estimate: int = 0
-    sample_row: Optional[str] = None
+    sample_rows: List[str] = field(default_factory=list)  # First 2-3 data rows (not header)
+    column_types: List[str] = field(default_factory=list)  # Inferred: int, float, text
 
 
 @dataclass
@@ -615,8 +616,44 @@ def analyze_json(data: Any, result_id: str) -> JsonAnalysis:
 # Text Analysis
 # ---------------------------------------------------------------------------
 
+def _infer_column_type(values: List[str]) -> str:
+    """Infer column type from sample values."""
+    if not values:
+        return "text"
+
+    int_count = 0
+    float_count = 0
+    empty_count = 0
+
+    for val in values:
+        val = val.strip().strip('"\'')
+        if not val:
+            empty_count += 1
+            continue
+        # Try int
+        if re.match(r'^-?\d+$', val):
+            int_count += 1
+        # Try float
+        elif re.match(r'^-?\d+\.\d+$', val):
+            float_count += 1
+
+    non_empty = len(values) - empty_count
+    if non_empty == 0:
+        return "text"
+
+    if int_count == non_empty:
+        return "int"
+    if float_count == non_empty or (int_count + float_count) == non_empty:
+        return "float"
+    return "text"
+
+
 def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
-    """Detect if text is CSV format."""
+    """Detect if text is CSV format and extract rich metadata.
+
+    Extracts columns, sample rows (first 2-3 data rows), and inferred
+    column types so agents can parse CSV without seeing full data.
+    """
     info = CsvInfo()
     lines = text.split('\n', 20)  # Check first 20 lines
     if len(lines) < 2:
@@ -653,13 +690,28 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     )
 
     info.has_header = looks_like_header
+    data_start_idx = 1 if looks_like_header else 0
+
     if looks_like_header:
         info.columns = columns[:20]
-        if len(lines) > 1:
-            info.sample_row = lines[1][:200]
     else:
         info.columns = [f"col{i}" for i in range(len(columns))][:20]
-        info.sample_row = lines[0][:200]
+
+    # Extract first 2-3 data rows (after header if present)
+    data_lines = [l for l in lines[data_start_idx:data_start_idx + 3] if l.strip()]
+    info.sample_rows = [line[:300] for line in data_lines]
+
+    # Infer column types from sample data
+    if data_lines and info.columns:
+        # Parse sample rows into column values
+        col_values: List[List[str]] = [[] for _ in info.columns]
+        for line in data_lines:
+            row_values = line.split(best_delimiter)
+            for i, val in enumerate(row_values[:len(info.columns)]):
+                col_values[i].append(val)
+
+        # Infer type for each column
+        info.column_types = [_infer_column_type(vals) for vals in col_values]
 
     # Estimate row count
     total_lines = text.count('\n') + 1
@@ -1061,15 +1113,28 @@ def _generate_compact_summary(
         if json_analysis.detected_patterns and json_analysis.detected_patterns.empty_result:
             parts.append("  ⚠ Result array is empty")
 
-        # Embedded CSV content - show simple extraction hint
+        # Embedded CSV content - show rich metadata for parsing
         if json_analysis.embedded_content and json_analysis.embedded_content.format == "csv":
             emb = json_analysis.embedded_content
             csv = emb.csv_info
             if csv and csv.columns:
                 parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
-                parts.append(f"  COLUMNS: {', '.join(csv.columns[:10])}")
-                parts.append(f"  → QUERY: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
-                parts.append(f"  → Returns raw CSV text. Read it directly - do NOT use json_each()")
+
+                # Show columns with inferred types
+                if csv.column_types and len(csv.column_types) == len(csv.columns):
+                    col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
+                    parts.append(f"  SCHEMA: {', '.join(col_with_types)}")
+                else:
+                    parts.append(f"  COLUMNS: {', '.join(csv.columns[:12])}")
+
+                # Show sample data row (first data row, truncated)
+                if csv.sample_rows:
+                    sample = csv.sample_rows[0][:150]
+                    parts.append(f"  SAMPLE: {sample}")
+
+                # Ready-to-use query to extract CSV text
+                parts.append(f"  → GET CSV: SELECT json_extract(result_json,'{emb.path}') FROM __tool_results WHERE result_id='{result_id}'")
+                parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
 
     else:
         # Text data
@@ -1078,13 +1143,24 @@ def _generate_compact_summary(
 
             if fmt == "csv" and text_analysis.csv_info:
                 csv = text_analysis.csv_info
-                parts.append(
-                    f"→ QUERY: SELECT substr(result_text, 1, 500) "
-                    f"FROM __tool_results WHERE result_id='{result_id}'"
-                )
                 parts.append(f"  TYPE: CSV (~{csv.row_count_estimate} rows)")
-                if csv.columns:
-                    parts.append(f"  COLUMNS: {', '.join(csv.columns[:10])}")
+
+                # Show columns with inferred types
+                if csv.column_types and len(csv.column_types) == len(csv.columns):
+                    col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
+                    parts.append(f"  SCHEMA: {', '.join(col_with_types)}")
+                elif csv.columns:
+                    parts.append(f"  COLUMNS: {', '.join(csv.columns[:12])}")
+
+                # Show sample data row
+                if csv.sample_rows:
+                    sample = csv.sample_rows[0][:150]
+                    parts.append(f"  SAMPLE: {sample}")
+
+                parts.append(
+                    f"→ QUERY: SELECT result_text FROM __tool_results WHERE result_id='{result_id}'"
+                )
+                parts.append(f"  → Parse CSV line by line. Do NOT use json_each()")
 
             elif fmt in ("markdown", "html") and text_analysis.doc_structure:
                 doc = text_analysis.doc_structure
@@ -1213,6 +1289,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
                     "columns": ec.csv_info.columns[:15],
                     "rows": ec.csv_info.row_count_estimate,
                     "delimiter": ec.csv_info.delimiter,
+                    "column_types": ec.csv_info.column_types[:15],
+                    "sample_rows": ec.csv_info.sample_rows[:2],
                 }
 
     if analysis.text_analysis:
@@ -1225,6 +1303,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             result["text"]["csv"] = {
                 "columns": ta.csv_info.columns[:15],
                 "rows": ta.csv_info.row_count_estimate,
+                "column_types": ta.csv_info.column_types[:15],
+                "sample_rows": ta.csv_info.sample_rows[:2],
             }
         if ta.doc_structure:
             result["text"]["sections"] = [

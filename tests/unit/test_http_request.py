@@ -210,3 +210,85 @@ class HttpRequestJsonParsingTests(TestCase):
         # Large JSON should be parsed as dict
         self.assertIsInstance(result["content"], dict)
         self.assertEqual(len(result["content"]["items"]), 100)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_octet_stream_csv_is_returned_as_text(self, mock_request, mock_proxy):
+        """CSV data served as application/octet-stream should be returned as text."""
+        mock_proxy.return_value = None
+
+        # Simulating iris.data style CSV (no header, comma-separated)
+        csv_content = b"5.1,3.5,1.4,0.2,Iris-setosa\n4.9,3.0,1.4,0.2,Iris-setosa\n"
+
+        mock_request.return_value = _make_mock_response(
+            content=csv_content,
+            content_type="application/octet-stream",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data"})
+
+        self.assertEqual(result["status"], "ok")
+        # Should NOT be "[Binary content omitted...]"
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Iris-setosa", result["content"])
+        self.assertNotIn("Binary content omitted", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_actual_binary_is_omitted(self, mock_request, mock_proxy):
+        """Actual binary content (images, etc) should still be omitted."""
+        mock_proxy.return_value = None
+
+        # PNG header + random binary garbage
+        binary_content = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 10
+
+        mock_request.return_value = _make_mock_response(
+            content=binary_content,
+            content_type="application/octet-stream",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/image.png"})
+
+        self.assertEqual(result["status"], "ok")
+        # Should be omitted since it's actual binary
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Binary content omitted", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_csv_content_type_is_handled(self, mock_request, mock_proxy):
+        """CSV content-type should be treated as textual."""
+        mock_proxy.return_value = None
+
+        csv_content = b"name,age,city\nAlice,30,NYC\nBob,25,LA\n"
+
+        mock_request.return_value = _make_mock_response(
+            content=csv_content,
+            content_type="text/csv",
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/data.csv"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("Alice", result["content"])
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_no_content_type_with_text_is_returned(self, mock_request, mock_proxy):
+        """Missing content-type with valid text should still be returned."""
+        mock_proxy.return_value = None
+
+        text_content = b"This is plain text without a content-type header."
+
+        mock_request.return_value = _make_mock_response(
+            content=text_content,
+            content_type="",  # No content type
+        )
+
+        result = execute_http_request(self.agent, {"method": "GET", "url": "https://example.com/file.txt"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIsInstance(result["content"], str)
+        self.assertIn("plain text", result["content"])
+        self.assertNotIn("Binary content omitted", result["content"])
