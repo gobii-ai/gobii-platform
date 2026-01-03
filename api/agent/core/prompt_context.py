@@ -207,6 +207,15 @@ FROM __tool_results, json_each(result_json,'$.items') AS i
 WHERE result_id='...' LIMIT 25
 ```
 
+```sql
+-- persist tool outputs into a durable table
+CREATE TABLE IF NOT EXISTS items AS
+SELECT json_extract(i.value,'$.title') AS title,
+       json_extract(i.value,'$.url') AS url
+FROM __tool_results, json_each(result_json,'$.items') AS i
+WHERE result_id='...';
+```
+
 ---
 
 ## Trajectory 1: API Data → Storage → Multi-faceted Analysis
@@ -224,22 +233,27 @@ Step 1: Fetch the data
     PATH: $.content.products (847 items)
     FIELDS: id, name, category, price, stock, created_at
 
-Step 2: Since we need multiple analyses, store in a table first
-  sqlite_batch(queries="
-    CREATE TABLE IF NOT EXISTS products (
+Step 2: Since we need multiple analyses, persist raw tool output and a clean table
+  sqlite_batch(sql="
+    CREATE TABLE IF NOT EXISTS products_raw (
       id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
     );
-    INSERT OR REPLACE INTO products (id, name, category, price, stock)
+    INSERT OR REPLACE INTO products_raw
       SELECT json_extract(p.value,'$.id'), json_extract(p.value,'$.name'),
              json_extract(p.value,'$.category'), json_extract(p.value,'$.price'),
              json_extract(p.value,'$.stock')
       FROM __tool_results, json_each(result_json,'$.content.products') AS p
-      WHERE result_id='a1b2c3'", will_continue_work=true)
+      WHERE result_id='a1b2c3';
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
+    );
+    INSERT OR REPLACE INTO products (id, name, category, price, stock)
+      SELECT id, name, category, price, stock FROM products_raw", will_continue_work=true)
 
-  Result: Query 1 affected 847 rows
+  Result: products_raw and products populated (847 rows)
 
 Step 3: Category breakdown
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT category, COUNT(*) as count,
            ROUND(AVG(price),2) as avg_price,
            ROUND(MIN(price),2) as min_price,
@@ -249,7 +263,7 @@ Step 3: Category breakdown
   Result: Electronics|312|149.99|9.99|899.99, Clothing|245|45.50|12.00|299.00, ...
 
 Step 4: Find outliers - products priced unusually high or low for their category
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT p.name, p.category, p.price, cat.avg_price
     FROM products p
     JOIN (SELECT category, AVG(price) as avg_price FROM products GROUP BY category) cat
@@ -279,7 +293,7 @@ Step 1: Fetch the CSV
     GET CSV: SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='d4e5f6'
 
 Step 2: Create table and parse CSV using sequential field extraction
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE sensors (sensor_id INT, temp REAL, humidity REAL, location TEXT);
 
     WITH RECURSIVE
@@ -296,10 +310,16 @@ Step 2: Create table and parse CSV using sequential field extraction
       p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0),
       p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
       p3 AS (SELECT c1,c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
-    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3",
+    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3;
+    CREATE TABLE IF NOT EXISTS sensors_summary AS
+      SELECT location, COUNT(*) as n,
+        ROUND(AVG(temp),1) as avg_temp,
+        ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
+        ROUND(AVG(humidity),1) as avg_hum
+      FROM sensors GROUP BY location",
     will_continue_work=true)
 
-  Result: Query 0 affected 0 rows. Query 1 affected 0 rows.
+  Result: sensors loaded and sensors_summary prepared.
   (Note: CTE-based INSERTs often report 0 rows - this is normal, data IS inserted)
 
   sqlite_schema now shows:
@@ -310,12 +330,9 @@ Step 2: Create table and parse CSV using sequential field extraction
   Schema confirms 500 rows with correct data - no verification query needed.
 
 Step 3: Analyze (skip verification - schema already confirms data)
-  sqlite_batch(queries="
-    SELECT location, COUNT(*) as n,
-      ROUND(AVG(temp),1) as avg_temp,
-      ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
-      ROUND(AVG(humidity),1) as avg_hum
-    FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
+  sqlite_batch(sql="
+    SELECT location, n, avg_temp, stdev_temp, avg_hum
+    FROM sensors_summary ORDER BY n DESC", will_continue_work=true)
 
   Result: Building-A|245|23.1|2.31|48.2, Building-B|180|21.8|1.95|52.1, ...
 
@@ -324,102 +341,178 @@ Step 4: Present findings with insights
 
 ---
 
-## Trajectory 3: Search → Read Results → Scrape Key Sources
+## Trajectory 3: Research to Action
 
-User asks: "Research recent developments in quantum computing"
-
-```
-Step 1: Search
-  mcp_bright_data_search_engine(query="quantum computing breakthroughs 2024", will_continue_work=true)
-
-  Result meta shows:
-    📄 MARKDOWN in $.result (~400 lines)
-    → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='g7h8i9'
-
-Step 2: Read the search results (use the QUERY hint exactly)
-  sqlite_batch(queries="
-    SELECT substr(json_extract(result_json,'$.result'),1,2000)
-    FROM __tool_results WHERE result_id='g7h8i9'", will_continue_work=true)
-
-  Result shows markdown table (t=title, u=url, p=preview):
-    "## Items
-     | t | u | p |
-     |---|---|---|
-     | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
-     | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
-     ..."
-
-  → Found URLs! Pick the best one and scrape it (don't search again).
-
-Step 3: Scrape the most relevant URL
-  mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
-
-  Result meta shows:
-    📄 MARKDOWN in $.result (~200 lines)
-
-Step 4: Search the scraped content for what you need
-  sqlite_batch(queries=[
-    "SELECT grep_context_all(json_extract(result_json,'$.result'), 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
-  ], will_continue_work=true)
-
-  → Scraped pages are JSON with markdown in $.result - extract with json_extract first
-  → grep_context finds relevant sections with surrounding context
-
-Step 5: Present findings (no more tools needed)
-  "## Quantum Computing Update
-
-   **IBM's 1000-qubit processor** marks a major milestone...
-
-   | Researcher | Role | Contribution |
-   |------------|------|--------------|
-   | Dr. Smith | Lead | Error correction |
-   | Dr. Jones | Architect | Qubit design |
-
-   Key developments:
-   - Error correction improved 10x
-   - Commercial availability expected 2025"
-```
-
-**Key patterns**:
-- Use `grep_context` or `regexp_find_all` to search large content—don't blindly extract first N chars
-- One focused search → scrape → grep → deliver (not: search, search, search, extract, extract)
-- Work silently, deliver beautifully—don't narrate every step ("Let me...", "I'm going to...")
-
-**Shortcuts**:
-- Know the company? Try their domain directly: `scrape_as_markdown(url="https://acme.io/team")`
-- Need LinkedIn/Instagram/etc data? `search_tools('brightdata linkedin')` unlocks specialized extractors
-- The answer is often one good scrape away—don't overthink it
-
----
-
-## Trajectory 3b: Scrape → grep for specific data
-
-When scraping pages for specific info (contacts, pricing, specs), use grep functions instead of blind substr extraction.
+The pattern for recruiting, lead gen, market research, pricing—any research task—is the same:
+discover tools → gather structured data → scrape what's missing → normalize in SQL → deliver.
 
 ```
-Step 1: Scrape the target page
-  mcp_bright_data_scrape_as_markdown(url="https://acme.io/about", will_continue_work=true)
+User asks: "Research Acme Corp—I'm considering a partnership"
 
-  Result meta shows:
-    📄 MARKDOWN (~800 lines)
+Step 0: What do I know? What tools do I need?
+  → This is about a specific company, Acme Corp
+  → Structured data sources exist: LinkedIn, Crunchbase, their website
+  → I should check what extractors I have available
+  → The user wants enough context to make a decision—not just names
 
-Step 2: Search for what you need (don't blindly extract first 2000 chars)
-  sqlite_batch(queries=[
-    "SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') FROM __tool_results WHERE result_id='...'",
-    "SELECT grep_context(result_text, 'CEO|Founder|CTO', 80) FROM __tool_results WHERE result_id='...'"
-  ], will_continue_work=false)
+Step 1: Discover available extractors
+  search_tools(query="linkedin company crunchbase", will_continue_work=true)
 
-  Result 1: "john@acme.io|careers@acme.io|press@acme.io"
-  Result 2: "...Founded by John Smith (CEO) and Jane Doe (CTO) in 2019..."
+  → Found: web_data_linkedin_company_profile, web_data_linkedin_person_profile,
+           web_data_crunchbase_company, web_data_linkedin_job_listings
 
-Step 3: Present findings
-  "## Acme Inc Contact Info
+Step 2: Gather structured company data (parallel calls)
+  mcp_bright_data_web_data_linkedin_company_profile(url="https://linkedin.com/company/acme-corp")
+  mcp_bright_data_web_data_crunchbase_company(url="https://crunchbase.com/organization/acme-corp")
 
-   **Leadership**: John Smith (CEO), Jane Doe (CTO)
-   **Emails**: john@acme.io, careers@acme.io, press@acme.io"
+  → LinkedIn shows: 847 employees, SF headquarters, founded 2018
+  → Crunchbase shows: Series C, $120M raised, last round Dec 2024
+
+Step 3: Store company data for cross-referencing
+  sqlite_batch(sql="
+    CREATE TABLE companies (
+      name TEXT PRIMARY KEY, linkedin_url TEXT, crunchbase_url TEXT, website TEXT,
+      employees INT, hq TEXT, founded INT, funding_stage TEXT, total_raised REAL
+    );
+    INSERT INTO companies VALUES (
+      'Acme Corp', 'linkedin.com/company/acme-corp', 'crunchbase.com/organization/acme-corp',
+      'acme.io', 847, 'San Francisco', 2018, 'Series C', 120000000
+    )", will_continue_work=true)
+
+Step 4: Check what else might be useful—pricing? job openings?
+  search_tools(query="pricing jobs careers", will_continue_work=true)
+
+  → Found: web_data_linkedin_job_listings (structured jobs)
+  → For pricing: need to scrape acme.io/pricing directly
+
+Step 5: Scrape their pricing page + get job listings (parallel)
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing", will_continue_work=true)
+  mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
+
+Step 6: Extract pricing tiers from messy webpage content
+  sqlite_batch(sql="
+    SELECT grep_context_all(json_extract(result_json,'$.result'), '\\$[\\d,]+', 50, 10)
+    FROM __tool_results WHERE result_id='pricing123'", will_continue_work=true)
+
+  → "...Starter: $49/mo for up to 5 users..."
+  → "...Professional: $199/mo, unlimited users..."
+  → "...Enterprise: Contact sales for custom..."
+
+Step 7: Store pricing in structured form
+  sqlite_batch(sql="
+    CREATE TABLE pricing (tier TEXT, price_monthly REAL, notes TEXT);
+    INSERT INTO pricing VALUES
+      ('Starter', 49, 'up to 5 users'),
+      ('Professional', 199, 'unlimited users'),
+      ('Enterprise', NULL, 'custom, contact sales')", will_continue_work=true)
+
+Step 8: Get key people—LinkedIn showed executives, now get details
+  → The company profile revealed key people URLs, fetch them
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/janesmith-ceo")
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/johndoe-cto")
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/sarahchen-vpsales")
+
+Step 9: Normalize people data into a table (handle messy/missing fields)
+  sqlite_batch(sql="
+    CREATE TABLE people (
+      name TEXT, title TEXT, linkedin_url TEXT, company TEXT,
+      prev_companies TEXT, education TEXT, years_in_role INT
+    );
+    -- Insert from structured extractor results, handling NULLs gracefully
+    INSERT INTO people
+    SELECT
+      COALESCE(json_extract(result_json,'$.full_name'), json_extract(result_json,'$.name')),
+      COALESCE(json_extract(result_json,'$.title'), json_extract(result_json,'$.headline'), 'Unknown'),
+      json_extract(result_json,'$.url'),
+      'Acme Corp',
+      (SELECT GROUP_CONCAT(json_extract(e.value,'$.company_name'), ', ')
+       FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3),
+      json_extract(result_json,'$.education[0].school_name'),
+      NULL
+    FROM __tool_results
+    WHERE result_id IN ('person1','person2','person3')", will_continue_work=true)
+
+Step 10: Quick analysis—what's the talent profile?
+  sqlite_batch(sql="
+    SELECT prev_companies FROM people;
+    SELECT tier, price_monthly FROM pricing ORDER BY price_monthly", will_continue_work=true)
+
+  → Team has ex-Stripe, ex-Google backgrounds
+  → Pricing: $49 → $199 → enterprise (mid-market focus)
+
+Step 11: Deliver something genuinely useful
+
+  "## Acme Corp — Partnership Brief
+
+   **Company Profile**
+   | Metric | Value |
+   |--------|-------|
+   | Employees | 847 |
+   | HQ | San Francisco |
+   | Stage | Series C ($120M raised) |
+   | Founded | 2018 |
+
+   **Pricing**
+   | Tier | Monthly | Notes |
+   |------|---------|-------|
+   | Starter | $49 | Up to 5 users |
+   | Professional | $199 | Unlimited users |
+   | Enterprise | Custom | Contact sales |
+
+   **Leadership**
+   | Name | Role | Background |
+   |------|------|------------|
+   | [Jane Smith](linkedin.com/in/janesmith-ceo) | CEO | Ex-Stripe, Stanford MBA |
+   | [John Doe](linkedin.com/in/johndoe-cto) | CTO | Ex-Google, MIT CS PhD |
+   | [Sarah Chen](linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-Salesforce, 8yr enterprise |
+
+   **Assessment**
+   Well-funded Series C with strong enterprise pedigree. Pricing suggests mid-market
+   focus ($199 sweet spot). Leadership team has scaled similar companies before.
+
+   **For Partnership**: They're hiring aggressively (23 open roles) which signals
+   growth mode—good time to approach. VP Sales is the obvious first contact.
+
+   ---
+   Want me to find Sarah's email, research their competitors, or draft outreach?"
 ```
 
-**Key insight**: Use `regexp_find_all` to find patterns, then `grep_context` to understand what you found. Context prevents misinterpretation.
+**Why this works across use cases**:
+- **Recruiting**: Same pattern—focus on the people table, find candidates to poach
+- **Lead gen**: People + pricing = prospect enrichment ready for outreach
+- **Market research**: Add competitor scraping, compare pricing tables
+- **Pricing research**: Expand step 5-7 across multiple competitor sites
+- **CRM**: Everything lands in tables → easy export or further analysis
+
+**The rhythm**:
+1. `search_tools` → discover what extractors exist for this kind of data
+2. Structured extractors → clean data from known platforms (LinkedIn, Crunchbase)
+3. Scrape → fill gaps from the company's own site (pricing, team pages)
+4. SQLite → normalize messy data, handle NULLs, cross-reference sources
+5. Deliver → tables, links, assessment, clear next steps
+
+**Handling messy real-world data**:
+```sql
+-- Names might be in different fields
+COALESCE(json_extract(r,'$.full_name'), json_extract(r,'$.name'), 'Unknown')
+
+-- Collect previous companies from nested experience array
+(SELECT GROUP_CONCAT(json_extract(e.value,'$.company_name'), ', ')
+ FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3)
+
+-- Extract emails from scraped page content
+SELECT regexp_find_all(json_extract(result_json,'$.result'),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+
+-- Find prices with surrounding context to understand what they're for
+SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
+```
+
+**Tool selection logic**:
+- Know the company/person? → `search_tools` to find structured extractors
+- Have a URL or can guess one? → scrape directly
+- Need to discover what's out there? → one `search_engine` query, then act on results
+- Have scraped content? → `grep_context_all` to extract with context, not just `substr`
 
 ---
 
@@ -437,7 +530,7 @@ Step 1: Fetch orders from API (JSON)
     FIELDS: order_id:int, product_code:str, quantity:int, customer_id:int
 
 Step 2: Store orders in table
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE orders (order_id INT PRIMARY KEY, product_code TEXT, quantity INT, customer_id INT);
     INSERT INTO orders SELECT
       json_extract(o.value,'$.order_id'), json_extract(o.value,'$.product_code'),
@@ -457,7 +550,7 @@ Step 3: Fetch product catalog (CSV)
     PATTERN: 4 cols need 3 CTEs: p1→...→p3, where p3 extracts c3 AND c4
 
 Step 4: Parse CSV into products table
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE products (code TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
     WITH RECURSIVE
       csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='cat456'),
@@ -477,7 +570,7 @@ Step 4: Parse CSV into products table
   Result: Query 1 affected 1200 rows
 
 Step 5: Join and identify issues - orders for products with insufficient stock
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT o.order_id, o.product_code, o.quantity, p.stock, p.name,
            CASE WHEN p.code IS NULL THEN 'UNKNOWN_PRODUCT'
                 WHEN o.quantity > p.stock THEN 'INSUFFICIENT_STOCK'
@@ -518,7 +611,7 @@ Step 2: Fetch warehouse physical counts (CSV export)
     PATTERN: 3 cols need 2 CTEs: p1→...→p2, where p2 extracts c2 AND c3
 
 Step 3: Load both into tables for comparison
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     -- Table 1: System inventory from JSON
     CREATE TABLE system_inv (sku TEXT PRIMARY KEY, system_count INT, location TEXT);
     INSERT INTO system_inv SELECT
@@ -545,7 +638,7 @@ Step 3: Load both into tables for comparison
   Result: Query 0 affected 500 rows. Query 1 affected 520 rows.
 
 Step 4: Find discrepancies - items where counts don't match
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT COALESCE(s.sku, w.sku) as sku,
            s.system_count, w.physical_count,
            (COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance,
@@ -561,7 +654,7 @@ Step 4: Find discrepancies - items where counts don't match
   Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
 
 Step 5: Summarize by issue type for decision making
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
     FROM (
       SELECT CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
@@ -581,6 +674,26 @@ Step 6: Present findings with prioritized recommendations
    - 5 items in system not found in warehouse - investigate possible shrinkage
    Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
 ```
+
+---
+
+## The Reasoning Mindset
+
+Before every action, pause and ask: "What do I know, and what tool does that imply?"
+
+**The decision tree**:
+```
+Do I need external data?
+├─ Yes → search_tools FIRST (discover what extractors exist before searching the web)
+│        ├─ Found relevant extractors → use them
+│        └─ Nothing relevant → THEN search_engine as fallback
+└─ No → Do I have a URL already?
+         ├─ Yes → scrape it directly
+         └─ No → http_request if you know the API, otherwise search_tools
+```
+
+search_tools discovers capabilities you didn't know existed. search_engine searches the web.
+Always discover first, search second.
 
 ---
 
@@ -604,27 +717,36 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 http_request wraps responses in $.content, so paths are $.content.items not $.items.
 
-When analyzing data multiple ways, store in a table first, then run multiple queries.
+When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
-## Common Pitfalls
+## Smooth Patterns
 
-**result_text vs result_json**: Web/API results are stored as JSON, so `result_text` is often NULL.
-Use the `→ QUERY:` hint which shows the correct extraction path.
-For markdown/HTML content embedded in JSON, the hint gives a ready-to-use query with substr.
+**result_json first**: Web/API results live in `result_json`. Use the `→ QUERY:` hint for the exact path.
+For markdown/HTML content embedded in JSON, the hint provides a ready-to-run `substr` query.
 
-**CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
-The data is inserted—the sqlite_schema will show sample rows and row counts to confirm. No need for verification queries.
+**CTE-based INSERT**: WITH RECURSIVE...INSERT queries can report 0 affected rows; rely on sqlite_schema for row counts and samples.
 
-**Query formatting**: Pass SQL as a plain string or array of strings to sqlite_batch.
-- `queries='SELECT * FROM t'` ✓
-- `queries=['SELECT * FROM t', 'SELECT * FROM t2']` ✓
-- `queries='["SELECT * FROM t"]'` ✗ (don't JSON-stringify the array)
+**Query formatting**: Pass SQL as a single, clean string. Use semicolons to separate statements.
+- `sql='SELECT * FROM t'`
+- `sql='CREATE TABLE t(a INT); INSERT INTO t VALUES (1); SELECT * FROM t'`
 
-**SQLite quirks**:
-- No STDEV/STDDEV - use: `sqrt(avg(x*x) - avg(x)*avg(x))`
-- No MEDIAN - use: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
-- Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
-- Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
+**Long filters**: Keep each predicate complete on its line, then close the WHERE block before ORDER BY/LIMIT.
+```sql
+SELECT col1, col2
+FROM my_table
+WHERE status = 'active'
+  AND category NOT LIKE '%test%'
+  AND region IN ('us-east', 'eu-west')
+  AND created_at >= '2023-01-01'
+ORDER BY created_at DESC
+LIMIT 50
+```
+
+**SQLite formulas**:
+- Standard deviation: `sqrt(avg(x*x) - avg(x)*avg(x))`
+- Median: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
+- Reuse computed values by wrapping the SELECT in a subquery.
+- Built-in aggregates: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
 **Text analysis functions** (grep-like search for large text):
 - `regexp_find_all(col, 'pattern')` - find ALL matches → "match1|match2|..."
@@ -652,20 +774,15 @@ SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 5)
 SELECT regexp_find_all(result_text, 'https?://[^\\s<>\"]+')
 ```
 
-**Always get context** - a match alone can mislead:
+**Always get context**: Use context-aware matches so each price has meaning.
 ```sql
--- BAD: Just finding "$99" doesn't tell you what it's for
-SELECT regexp_find_all(result_text, '\\$\\d+')  -- "$99|$199|$49"... which is the product?
-
--- GOOD: Context shows what each price refers to
 SELECT grep_context_all(result_text, '\\$\\d+', 40, 5)
 -- → "...Basic plan: $99/month, Pro plan: $199/month..."
 -- → "...shipping fee: $49 for orders under..."
 ```
 
-**UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.
-`SELECT 'header' UNION ALL SELECT col1, col2 FROM t` fails (1 vs 2 columns).
-Either run separate queries, or pad: `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
+**UNION/UNION ALL alignment**: Keep column counts consistent; pad when needed.
+`SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
 
 **Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
 ```
@@ -1447,7 +1564,7 @@ def build_prompt_context(
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
         "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
-        "to keep durable data across cycles."
+        "to keep durable data across cycles. CREATE TABLE AS SELECT is a fast way to persist tool results."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -2627,7 +2744,24 @@ def _get_system_instruction(
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
         "For SMS, keep it brief and plain text. For emails, use rich, expressive HTML—headers, tables, styled elements, visual hierarchy. Make emails beautiful and scannable. Use <a> for links (never raw URLs). The system handles outer wrappers."
         "Emojis are fine when appropriate. Bulleted lists when they help. "
-        "Be efficient but complete. "
+        "Be efficient but complete. Be thorough but not tedious. "
+
+        "Take initiative. "
+        "Don't just answer the question—anticipate what the user *actually* needs. "
+        "If they ask about a company's team, they probably also want to know if the company is legit. "
+        "If they ask about a person, their recent work and background matter too. "
+        "If you found pricing, add a comparison. If you found a product, note alternatives. "
+        "The best interactions feel like you read the user's mind—because you anticipated what they'd want next. "
+        "Go beyond the minimum. Surprise them with thoroughness. Make them say 'wow, that's exactly what I needed'. "
+
+        "Use the right tools. "
+        "Before searching the web, discover what extractors exist via search_tools. "
+        "Structured data beats raw scraping. One extractor call beats 10 minutes of manual work. "
+        "Know your tools—they're your superpower. "
+
+        "Follow every lead. "
+        "If your search reveals a LinkedIn URL, scrape it. If you find a team page, get everyone on it—not just the first person. "
+        "Shallow research is unsatisfying. Go deep. The user is counting on you to be thorough. "
         "Clarifying questions: prefer to decide-and-proceed with reasonable defaults. Only ask if a choice is irreversible, likely wrong without input, or truly blocking. One concise question with a proposed default beats a checklist. "
         "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
         "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
@@ -2793,9 +2927,18 @@ def _get_system_instruction(
         f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "not"} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "Choosing the right tool matters. A few principles: "
+        "Choosing the right tool matters. Think before you act: "
 
-        "Start with `search_tools` when you need external data—it enables the right capabilities for this cycle. "
+        "**The tool discovery mindset**: Before reaching for search_engine, ask 'do specialized extractors exist for this?' "
+        "- Need external data? → search_tools FIRST to discover what's available "
+        "- Already have a URL? → scrape it directly "
+        "- Know an API exists? → http_request directly "
+        "- search_tools found nothing relevant? → THEN use search_engine as fallback "
+
+        "**search_tools vs search_engine—they're different**: "
+        "- `search_tools`: 'What extractors/APIs do I have?' → discovers capabilities you didn't know existed "
+        "- `search_engine`: 'What's out there on the web?' → discovers URLs, news (use as fallback) "
+        "search_tools first, search_engine only when search_tools doesn't surface what you need. "
 
         "For news, releases, blogs, and recurring updates, RSS feeds are your best friend. "
         "They're lightweight, structured, and everywhere: /feed, /rss, /atom.xml. "
@@ -2839,14 +2982,16 @@ def _get_system_instruction(
         "  3. http_request(url='https://reddit.com/r/python/search.json?q=web+framework&sort=top&t=month', headers={'User-Agent': 'bot'}) "
         "  4. Synthesize results, report top frameworks with links to discussions "
 
-        "Complex flow with unknown domain: "
+        "Complex flow (when search_engine IS appropriate): "
         "  User: 'what are the latest AI paper releases this week?' "
-        "  1. search_tools('arxiv api papers') → discovers http_request works, finds arxiv API docs "
-        "  2. search_engine('arxiv api documentation') → learns api.arxiv.org/list/cs.AI/recent exists "
+        "  Reasoning: I know arXiv exists but don't know their exact API format "
+        "  1. search_tools('arxiv api papers') → discovers http_request is available "
+        "  2. search_engine('arxiv api documentation') → I genuinely need to learn the API format "
+        "     → This is appropriate because I'm discovering *how* to use a known service "
         "  3. http_request(url='https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=20') "
-        "  4. Parse Atom/XML response, extract titles, authors, abstracts, arxiv links "
-        "  5. Also check: http_request(url='https://huggingface.co/api/daily_papers') for HF daily papers"
-        "  6. Report synthesized list with [title](arxiv_url) links and brief summaries "
+        "  4. Parse response, extract titles, authors, links "
+        "  5. http_request(url='https://huggingface.co/api/daily_papers') for HF daily papers "
+        "  6. Report synthesized list—one search_engine call, then pure action "
 
         "Flow with fallback to browser: "
         "  User: 'what did @elonmusk post today?' "
@@ -2863,8 +3008,15 @@ def _get_system_instruction(
         "  - X/Twitter timelines (via nitter.net) "
 
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
-        "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it—don't keep searching. "
+        "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it and move forward. "
         "Scraping a page gives you 10x more info than another search query. See a company URL? Scrape it. See a team page? Scrape it. Your brain + scraped content beats endless searching. "
+
+        "**Preferred flow**: "
+        "✓ One focused search_tools or search_engine → read results → scrape/extract → deliver "
+        "✓ Know the platform? → search_tools to enable extractors → use them directly "
+        "✓ Have a URL in your results? → stop searching, start scraping "
+
+        "The best agents think: 'What do I know? What tool does that imply?' then act. "
 
         "`http_request` fetches data (proxy handled for you). "
         "`secure_credentials_request` is for API keys you'll use with http_request, or login credentials for spawn_web_task. "

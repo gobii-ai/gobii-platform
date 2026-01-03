@@ -89,7 +89,7 @@ class SqliteBatchToolTests(TestCase):
 
     def test_single_query_field_is_normalized(self):
         with self._with_temp_db():
-            out = execute_sqlite_batch(self.agent, {"queries": "SELECT 42 AS answer"})
+            out = execute_sqlite_batch(self.agent, {"sql": "SELECT 42 AS answer"})
             self.assertEqual(out.get("status"), "ok")
             result = out["results"][0]
             self.assertEqual(result["result"][0]["answer"], 42)
@@ -151,11 +151,11 @@ class SqliteBatchToolTests(TestCase):
         with self._with_temp_db():
             out = execute_sqlite_batch(self.agent, {"queries": ["  "]})
             self.assertEqual(out.get("status"), "error")
-            self.assertIn("queries", out.get("message", ""))
+            self.assertIn("sql", out.get("message", ""))
 
     def test_string_or_array_only(self):
         with self._with_temp_db():
-            out = execute_sqlite_batch(self.agent, {"queries": {"sql": "SELECT 1"}})
+            out = execute_sqlite_batch(self.agent, {"sql": 123})
             self.assertEqual(out.get("status"), "error")
 
     def test_attach_database_is_blocked(self):
