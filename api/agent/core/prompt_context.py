@@ -713,6 +713,18 @@ For markdown/HTML content embedded in JSON, the hint provides a ready-to-run `su
 - `sql='SELECT * FROM t'`
 - `sql='CREATE TABLE t(a INT); INSERT INTO t VALUES (1); SELECT * FROM t'`
 
+**Long filters**: Keep each predicate complete on its line, then close the WHERE block before ORDER BY/LIMIT.
+```sql
+SELECT col1, col2
+FROM my_table
+WHERE status = 'active'
+  AND category NOT LIKE '%test%'
+  AND region IN ('us-east', 'eu-west')
+  AND created_at >= '2023-01-01'
+ORDER BY created_at DESC
+LIMIT 50
+```
+
 **SQLite formulas**:
 - Standard deviation: `sqrt(avg(x*x) - avg(x)*avg(x))`
 - Median: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
