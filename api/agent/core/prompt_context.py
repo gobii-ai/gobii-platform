@@ -545,7 +545,9 @@ Step 6: Present findings with prioritized recommendations
 
 ## Key Patterns
 
-Copy the QUERY from result metadata - it has the correct json paths.
+**CRITICAL: USE THE EXACT QUERY FROM RESULT METADATA** - don't guess paths!
+Each result shows `→ QUERY: ...` with the correct paths for THAT result.
+Different tools return different structures. The hint knows; you don't. Copy it.
 
 For JSON arrays, load into tables with INSERT...SELECT:
 ```sql
