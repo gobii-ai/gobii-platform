@@ -96,6 +96,10 @@ from ..tools.spawn_web_task import execute_spawn_web_task
 from ..tools.schedule_updater import execute_update_schedule
 from ..tools.charter_updater import execute_update_charter
 from ..tools.database_enabler import execute_enable_database
+from ..tools.sqlite_agent_config import (
+    apply_sqlite_agent_config_updates,
+    seed_sqlite_agent_config,
+)
 from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -2114,6 +2118,7 @@ def _run_agent_loop(
                         logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                     return cumulative_token_usage
 
+            config_snapshot = seed_sqlite_agent_config(agent)
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
@@ -2263,6 +2268,27 @@ def _run_agent_loop(
                 step = PersistentAgentStep.objects.create(**step_kwargs)
                 _attach_prompt_archive(step)
 
+            def _apply_agent_config_updates() -> bool:
+                config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
+                if not config_apply.errors:
+                    return False
+                for error in config_apply.errors:
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Agent config update failed: {error}",
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist config update error step for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                return True
+
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
 
@@ -2319,6 +2345,10 @@ def _run_agent_loop(
             _persist_reasoning_step(reasoning_source)
 
             if not tool_calls:
+                config_errors = _apply_agent_config_updates()
+                if config_errors:
+                    reasoning_only_streak = 0
+                    continue
                 if not message_text:
                     # Empty response (no text, no tools) = agent is done, auto-sleep
                     logger.info(
@@ -2664,6 +2694,9 @@ def _run_agent_loop(
                         followup_required = True
 
                     executed_calls += 1
+
+            if _apply_agent_config_updates():
+                followup_required = True
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)

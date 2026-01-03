@@ -851,7 +851,7 @@ PAID_AGENT_DAILY_CREDIT_TARGET = env.int("PAID_AGENT_DAILY_CREDIT_TARGET", defau
 TOOL_CREDIT_COSTS = {
     "update_charter": Decimal("0.04"),
     "update_schedule": Decimal("0.04"),
-    "sqlite_batch": Decimal("0.8"),
+    "sqlite_batch": Decimal("0.2"),
 }
 
 # Analytics

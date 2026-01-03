@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 _sqlite_db_path_var: contextvars.ContextVar[str] = contextvars.ContextVar("sqlite_db_path", default=None)
 
 TOOL_RESULTS_TABLE = "__tool_results"
-EPHEMERAL_TABLES = {TOOL_RESULTS_TABLE}
+AGENT_CONFIG_TABLE = "__agent_config"
+EPHEMERAL_TABLES = {TOOL_RESULTS_TABLE, AGENT_CONFIG_TABLE}
 BUILTIN_TABLE_NOTES = {
     TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
+    AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule updates)",
 }
 
 MAX_PROMPT_BYTES = 30000
