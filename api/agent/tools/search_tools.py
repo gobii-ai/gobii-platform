@@ -26,6 +26,7 @@ from .tool_manager import (
     HTTP_REQUEST_TOOL_NAME,
     get_enabled_tool_limit,
 )
+from .autotool_heuristics import find_matching_tools
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -78,17 +79,33 @@ def _fallback_builtin_selection(
     available_names: set[str],
 ) -> list[str]:
     """
-    Heuristically select built-in tools when the LLM response does not call enable_tools.
+    Heuristically select tools when the LLM response does not call enable_tools.
 
-    This keeps core tools like http_request available even if the LLM fails to emit a
-    function call, which otherwise causes the agent to loop on search_tools/mcp_brightdata_search_engine.
+    Uses keyword matching from autotool_heuristics for MCP tools (LinkedIn, Crunchbase, etc.)
+    and basic keyword matching for builtins like http_request.
     """
     text = f"{query} {content_text}".lower()
     candidates: list[str] = []
 
+    # Use autotool heuristics to find matching MCP tools (linkedin, crunchbase, etc.)
+    heuristic_matches = find_matching_tools(text)
+    for tool_name in heuristic_matches:
+        if tool_name in available_names and tool_name not in candidates:
+            candidates.append(tool_name)
+
+    # Also check for API/http keywords for http_request
     wants_api = any(keyword in text for keyword in ["api", "http", "https", "request", "fetch", "endpoint", "json"])
     if wants_api and HTTP_REQUEST_TOOL_NAME in available_names:
-        candidates.append(HTTP_REQUEST_TOOL_NAME)
+        if HTTP_REQUEST_TOOL_NAME not in candidates:
+            candidates.append(HTTP_REQUEST_TOOL_NAME)
+
+    if candidates:
+        logger.info(
+            "search_tools: heuristic fallback matched %d tools from query '%s': %s",
+            len(candidates),
+            query[:80],
+            ", ".join(candidates[:5]) + ("..." if len(candidates) > 5 else ""),
+        )
 
     return candidates
 
@@ -144,16 +161,20 @@ def _search_with_llm(
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
     system_prompt = (
-        "You are a concise tool discovery assistant. Given a user query and a list of available tools "
-        "(names, brief descriptions, and summarized parameters), you MUST select ALL relevant tools and then "
-        "call the function enable_tools exactly once with the full tool names you selected. "
-        "If no tools are relevant, do not call the function and reply briefly explaining that none are relevant."
+        "You are a tool selection assistant. Your ONLY job is to call enable_tools with relevant tool names.\n\n"
+        "IMPORTANT: You MUST call the enable_tools function. Do not respond with text - just call the function.\n\n"
+        "How to match tools:\n"
+        "- 'linkedin' in query → select tools containing 'linkedin' (e.g., web_data_linkedin_company_profile)\n"
+        "- 'crunchbase' in query → select tools containing 'crunchbase'\n"
+        "- 'instagram' in query → select tools containing 'instagram'\n"
+        "- etc.\n\n"
+        "Match keywords in the query to tool names. When in doubt, include the tool."
     )
     user_prompt = (
         f"Query: {query}\n\n"
-        "Available tools (names and brief details):\n"
+        "Available tools:\n"
         + "\n".join(tool_lines)
-        + "\n\nSelect the relevant tools and call enable_tools once with their exact full names."
+        + "\n\nCall enable_tools with the matching tool names. Do not reply with text."
     )
 
     try:
@@ -216,6 +237,7 @@ def _search_with_llm(
                     ],
                     params=params,
                     tools=[enable_tools_def],
+                    tool_choice={"type": "function", "function": {"name": "enable_tools"}},
                     drop_params=True,
                     **run_kwargs,
                 )
@@ -258,6 +280,15 @@ def _search_with_llm(
                         enabled_result = enable_callback(agent, requested)
                     except Exception as err:  # pragma: no cover - defensive enabling
                         logger.error("search_tools.%s: enable_tools failed: %s", provider_name, err)
+                else:
+                    # Inner LLM didn't call enable_tools - log for debugging
+                    logger.info(
+                        "search_tools.%s: inner LLM did not call enable_tools for query '%s'; "
+                        "LLM response: %s",
+                        provider_name,
+                        query[:80] if query else "",
+                        (content_text[:200] + "...") if content_text and len(content_text) > 200 else content_text,
+                    )
 
                 message_lines: List[str] = []
                 if content_text:
@@ -300,6 +331,19 @@ def _search_with_llm(
                                     message_lines.append("; ".join(summary))
                         except Exception as err:  # pragma: no cover - defensive enabling
                             logger.error("search_tools.%s: fallback enable_tools failed: %s", provider_name, err)
+
+                # Build explicit message about what happened
+                tools_were_enabled = enabled_result and enabled_result.get("status") == "success" and (
+                    enabled_result.get("enabled") or enabled_result.get("already_enabled")
+                )
+
+                if not message_lines and not tools_were_enabled:
+                    # Make it explicit when no tools were enabled
+                    message_lines.append(
+                        "No matching tools found for your query. "
+                        "Try a more specific query like 'linkedin profile' or 'crunchbase company', "
+                        "or use search_engine/scrape_as_markdown for general web research."
+                    )
 
                 response_payload: ToolSearchResult = {
                     "status": "success",
