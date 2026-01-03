@@ -180,3 +180,40 @@ class SqliteBatchToolTests(TestCase):
             out = execute_sqlite_batch(self.agent, {"queries": "PRAGMA database_list"})
             self.assertEqual(out.get("status"), "error")
             self.assertIn("not authorized", out.get("message", "").lower())
+
+    def test_large_result_is_truncated(self):
+        """Results exceeding MAX_RESULT_ROWS are truncated with warning."""
+        with self._with_temp_db():
+            # Create table with 200 rows
+            create_sql = "CREATE TABLE big (id INTEGER PRIMARY KEY, val TEXT)"
+            insert_sql = "INSERT INTO big (val) VALUES " + ",".join(["('x')"] * 200)
+            execute_sqlite_batch(self.agent, {"queries": [create_sql, insert_sql]})
+
+            # Query without LIMIT
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT * FROM big"})
+            self.assertEqual(out.get("status"), "ok")
+
+            results = out.get("results", [])
+            self.assertEqual(len(results), 1)
+            rows = results[0].get("result", [])
+
+            # Should be truncated to MAX_RESULT_ROWS (100)
+            self.assertLessEqual(len(rows), 100)
+            self.assertIn("TRUNCATED", results[0].get("message", ""))
+
+    def test_result_with_limit_not_warned(self):
+        """Queries with explicit LIMIT don't trigger warnings."""
+        with self._with_temp_db():
+            create_sql = "CREATE TABLE small (id INTEGER PRIMARY KEY)"
+            insert_sql = "INSERT INTO small (id) VALUES " + ",".join([f"({i})" for i in range(30)])
+            execute_sqlite_batch(self.agent, {"queries": [create_sql, insert_sql]})
+
+            # Query WITH explicit LIMIT
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT * FROM small LIMIT 10"})
+            self.assertEqual(out.get("status"), "ok")
+
+            results = out.get("results", [])
+            message = results[0].get("message", "")
+            # Should not have warning since we used LIMIT
+            self.assertNotIn("TRUNCATED", message)
+            self.assertNotIn("⚠️", message)

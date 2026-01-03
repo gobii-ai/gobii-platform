@@ -4,12 +4,19 @@ SQLite batch tool for persistent agents.
 Simplified multi-query executor aligned with sqlite_query.
 """
 
+import json
 import logging
 import os
+import re
 import sqlite3
 from typing import Any, Dict, List, Optional
 
 import sqlparse
+
+# Context protection limits
+MAX_RESULT_ROWS = 100  # Hard cap on rows returned
+MAX_RESULT_BYTES = 8000  # ~2K tokens worth of result data
+WARN_RESULT_ROWS = 50  # Warn if exceeding this
 from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
 
@@ -50,6 +57,41 @@ def _get_error_hint(error_msg: str) -> str:
     if "unique constraint" in error_lower:
         return " FIX: Use INSERT OR REPLACE or INSERT OR IGNORE to handle duplicate keys."
     return ""
+
+
+def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List[Dict[str, Any]], str]:
+    """Enforce context protection limits on query results.
+
+    Returns (limited_rows, warning_message).
+    """
+    warning = ""
+    total_rows = len(rows)
+
+    # Check if query already has LIMIT
+    query_upper = query.upper()
+    has_limit = bool(re.search(r'\bLIMIT\s+\d+', query_upper))
+
+    # Hard cap on rows
+    if total_rows > MAX_RESULT_ROWS:
+        rows = rows[:MAX_RESULT_ROWS]
+        warning = f" ⚠️ TRUNCATED: {total_rows} rows → {MAX_RESULT_ROWS}. Add LIMIT to your query."
+
+    # Check byte size
+    try:
+        result_bytes = len(json.dumps(rows, default=str).encode('utf-8'))
+        if result_bytes > MAX_RESULT_BYTES:
+            # Progressively reduce until under limit
+            while len(rows) > 10 and len(json.dumps(rows, default=str).encode('utf-8')) > MAX_RESULT_BYTES:
+                rows = rows[:len(rows) // 2]
+            warning = f" ⚠️ TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
+    except Exception:
+        pass
+
+    # Warn about missing LIMIT even if not truncated
+    if not warning and total_rows > WARN_RESULT_ROWS and not has_limit:
+        warning = f" ⚠️ Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
+
+    return rows, warning
 
 
 def _clean_statement(statement: str) -> Optional[str]:
@@ -168,9 +210,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 if cur.description is not None:
                     columns = [col[0] for col in cur.description]
                     rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+                    original_count = len(rows)
+                    rows, limit_warning = _enforce_result_limits(rows, query)
                     results.append({
                         "result": rows,
-                        "message": f"Query {idx} returned {len(rows)} rows.",
+                        "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
                     })
                     only_write_queries = False
                 else:
