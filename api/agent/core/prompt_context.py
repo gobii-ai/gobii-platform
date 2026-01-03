@@ -2399,18 +2399,22 @@ def _get_formatting_guidance(
     if primary_medium == "WEB":
         return (
             "Web chat formatting (rich markdown):\n"
-            "Make your output beautiful and scannable:\n"
-            "• **Bold** for emphasis, ## headers for sections\n"
-            "• Bullet/numbered lists for multiple items\n"
-            "• Tables for comparative data (use | col1 | col2 | format)\n"
-            "• Short paragraphs (2-3 sentences max)\n"
-            "Example with table:\n"
-            '  "## Current Prices\n\n'
-            "  | Asset | Price | 24h |\n"
-            "  |-------|-------|-----|\n"
-            "  | BTC | $67k | +2.3% |\n"
-            "  | ETH | $3.4k | +1.8% |\n\n"
-            '  Looking bullish! Want alerts?"'
+            "Make your output visually satisfying—not just informative:\n"
+            "• ## Headers to frame sections—give structure to your response\n"
+            "• **Tables for any structured data**—3+ items with attributes? Use a table.\n"
+            "• **Bold** key metrics, names, and takeaways\n"
+            "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
+            "• Short insight after data (1-2 sentences)\n"
+            "• End with a forward prompt\n\n"
+            "Pattern: Header → Table → Insight → Offer\n"
+            "Example:\n"
+            '  "## 📊 Current Prices\n\n'
+            "  | Asset | Price | 24h | Signal |\n"
+            "  |-------|-------|-----|--------|\n"
+            "  | BTC | **$67k** | +2.3% 📈 | Bullish |\n"
+            "  | ETH | **$3.4k** | +1.8% 📈 | Neutral |\n\n"
+            "  Strong day—BTC broke $66k resistance. ETH following.\n\n"
+            '  Want alerts on specific levels?"'
         )
     elif primary_medium == "SMS":
         return (
@@ -2841,10 +2845,15 @@ def _get_system_instruction(
         "    |-------|-----|-----|\\n"
         "    | [Article Title](url) | 847 | [234](comments_url) |' "
 
-        "Tables vs lists—choose based on the data: "
-        "  • Tables: when comparing across multiple attributes (price + rating + stock, points + comments + time) "
-        "  • Bulleted lists: when each item needs a sentence of context or the attributes vary "
-        "  • Numbered lists: when rank or sequence matters "
+        "Tables are your superpower. When in doubt, use a table. "
+        "Tables create instant visual structure—scannable, professional, satisfying. Bullets feel like notes; tables feel like deliverables. "
+        "  • Got 3+ items with 2+ attributes each? → Table. "
+        "  • Comparing things? → Table. "
+        "  • Showing a list of people, companies, products, articles? → Table. "
+        "  • Status update with multiple metrics? → Table. "
+        "  • Research findings? → Table with sources as links. "
+        "Bullets are for: varied-length commentary, single-attribute lists, or when items need a full sentence each. "
+        "Numbered lists are for: ranked results or sequential steps. "
 
         "Make every element functional: "
         "  • Titles should BE links, not have separate 'read more' links "
@@ -2858,6 +2867,13 @@ def _get_system_instruction(
         "  • Group related items with headers: '## 🔥 Hot' / '## 📈 Rising' "
         "  • Emoji as visual anchors: 🔺 points, 💬 comments, ⏰ time, 💰 price "
 
+        "Structure transforms information into insight. A beautiful response has: "
+        "  1. A clear header that frames what's coming "
+        "  2. Visual data (table, key metrics, status indicators) "
+        "  3. Brief interpretation or insight (1-2 sentences) "
+        "  4. A forward-looking prompt or offer "
+        "This pattern works for everything: research summaries, status updates, recommendations, competitive analysis. "
+
         "Example—a feed with personality: "
         "'## What's hot on the front page\\n\\n"
         "| | Story | 🔺 | 💬 |\\n"
@@ -2867,7 +2883,33 @@ def _get_system_instruction(
         "| 🧠 | [The math behind transformers](url) | 445 | [89](url) |\\n\\n"
         "Heavy on career and AI today. Want me to watch for anything specific?' "
 
+        "Example—research turned beautiful: "
+        "'## 🔬 Competitor Pricing Analysis\\n\\n"
+        "| Company | Starter | Pro | Enterprise | Free Tier |\\n"
+        "|---------|---------|-----|------------|-----------|\\n"
+        "| [Acme](url) | $29/mo | $99/mo | Custom | ✓ 14 days |\\n"
+        "| [Rival](url) | $39/mo | $149/mo | $499/mo | ✗ |\\n"
+        "| [NewCo](url) | Free | $79/mo | Custom | ✓ Always |\\n\\n"
+        "**Insight**: NewCo is disrupting with a freemium model. Acme's mid-tier is 30% cheaper than Rival.\\n\\n"
+        "Want me to dig into feature comparisons or customer reviews?' "
+
+        "Example—status update with structure: "
+        "'## 📊 Weekly Portfolio Summary\\n\\n"
+        "| Asset | Value | Change | Allocation |\\n"
+        "|-------|-------|--------|------------|\\n"
+        "| BTC | $12,400 | +8.2% 📈 | 45% |\\n"
+        "| ETH | $6,200 | +3.1% 📈 | 28% |\\n"
+        "| SOL | $2,100 | -2.4% 📉 | 12% |\\n"
+        "| Cash | $3,300 | — | 15% |\\n\\n"
+        "**Total**: $24,000 (+5.7% this week)\\n\\n"
+        "Strong week! BTC leading the charge. Want me to set alerts for any positions?' "
+
         "The goal: a user should be able to scan your output and immediately see what matters, click what interests them, and understand the landscape—all in seconds. "
+
+        "Elevate the ordinary. Even simple information deserves presentation: "
+        "  Plain: 'Here are some options: Option A, Option B, Option C' "
+        "  Elevated: '## Your Options\\n| Option | Best For | Price |\\n|--------|----------|-------|\\n| A | Speed | $10 |\\n| B | Quality | $25 |\\n| C | Balance | $15 |\\n\\nI'd lean toward B for your use case.' "
+        "The second version takes the same information and makes it *satisfying* to receive. That's the standard. "
 
         "For long-running tasks (first time or in response to a message), let the user know you're on it before diving in. Skip this for scheduled/cron triggers. "
         "Email uses HTML, not markdown. SMS is plain text. Save the **bold** and [links](url) for web chat. "
