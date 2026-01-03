@@ -324,12 +324,18 @@ Step 4: Present findings with insights
 
 ---
 
-## Trajectory 3: Search → Read Results → Scrape Key Sources
+## Trajectory 3: Research with Reasoning
 
 User asks: "Research recent developments in quantum computing"
 
 ```
-Step 1: Search
+Step 0: Think about what tools I need
+  → This is general news/research, not a known platform (LinkedIn, GitHub, etc.)
+  → No structured API exists for "quantum computing news"
+  → Therefore: search_engine is the right choice here—I need to discover what's out there
+  → If this were "research Acme Corp" I'd use search_tools('linkedin crunchbase') instead
+
+Step 1: Search (because no structured source exists for this topic)
   mcp_bright_data_search_engine(query="quantum computing breakthroughs 2024", will_continue_work=true)
 
   Result meta shows:
@@ -341,31 +347,24 @@ Step 2: Read the search results (use the QUERY hint exactly)
     SELECT substr(json_extract(result_json,'$.result'),1,2000)
     FROM __tool_results WHERE result_id='g7h8i9'", will_continue_work=true)
 
-  Result shows markdown table (t=title, u=url, p=preview):
-    "## Items
-     | t | u | p |
-     |---|---|---|
-     | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
-     | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
-     ..."
+  Result shows markdown table:
+    | t | u | p |
+    |---|---|---|
+    | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
+    | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
 
-  → Found URLs! Pick the best one and scrape it (don't search again).
+  → I have URLs now. Time to scrape, not search again.
 
 Step 3: Scrape the most relevant URL
+  → Because I have a specific URL, scraping gives me 10x more than another search
   mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
 
-  Result meta shows:
-    📄 MARKDOWN in $.result (~200 lines)
-
-Step 4: Search the scraped content for what you need
+Step 4: Extract what I need with grep (don't just grab first 2000 chars)
   sqlite_batch(queries=[
     "SELECT grep_context_all(json_extract(result_json,'$.result'), 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
   ], will_continue_work=true)
 
-  → Scraped pages are JSON with markdown in $.result - extract with json_extract first
-  → grep_context finds relevant sections with surrounding context
-
-Step 5: Present findings (no more tools needed)
+Step 5: Present findings
   "## Quantum Computing Update
 
    **IBM's 1000-qubit processor** marks a major milestone...
@@ -380,30 +379,42 @@ Step 5: Present findings (no more tools needed)
    - Commercial availability expected 2025"
 ```
 
-**Key patterns**:
-- Use `grep_context` or `regexp_find_all` to search large content—don't blindly extract first N chars
-- One focused search → scrape → grep → deliver (not: search, search, search, extract, extract)
-- Work silently, deliver beautifully—don't narrate every step ("Let me...", "I'm going to...")
+**The reasoning pattern**: Before each action, ask "what do I know, and what tool does that imply?"
+- Know a company name? → search_tools('linkedin crunchbase') for structured extractors
+- Know a URL? → scrape it directly (don't search for it)
+- Need to discover what exists? → search_engine (but only once, then act on results)
+- Have scraped content? → grep it, don't just substr
 
-**Shortcuts**:
-- Know the company? Try their domain directly: `scrape_as_markdown(url="https://acme.io/team")`
-- Need LinkedIn/Instagram/etc data? `search_tools('brightdata linkedin')` unlocks specialized extractors
-- The answer is often one good scrape away—don't overthink it
+**Anti-pattern (don't do this)**:
+```
+❌ search_engine("quantum computing")
+❌ search_engine("quantum computing news 2024")
+❌ search_engine("IBM quantum processor")
+❌ search_engine("quantum computing breakthroughs")
+... finally scrapes something
+
+✓ search_engine("quantum computing breakthroughs 2024") → read results → scrape best URL → deliver
+```
+One focused search → scrape → grep → deliver. That's the rhythm.
 
 ---
 
-## Trajectory 3b: Scrape → grep for specific data
+## Trajectory 3b: Direct Scrape (when you know the URL)
 
-When scraping pages for specific info (contacts, pricing, specs), use grep functions instead of blind substr extraction.
+When you already have a URL, skip searching—just scrape it.
 
 ```
-Step 1: Scrape the target page
+User asks: "Get the contact info from acme.io"
+
+Step 0: What do I know?
+  → I have a domain name: acme.io
+  → I can guess the about page: acme.io/about or acme.io/team
+  → No need to search—I'll try the obvious URLs directly
+
+Step 1: Scrape the target page directly
   mcp_bright_data_scrape_as_markdown(url="https://acme.io/about", will_continue_work=true)
 
-  Result meta shows:
-    📄 MARKDOWN (~800 lines)
-
-Step 2: Search for what you need (don't blindly extract first 2000 chars)
+Step 2: Grep for what I need (emails, leadership)
   sqlite_batch(queries=[
     "SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') FROM __tool_results WHERE result_id='...'",
     "SELECT grep_context(result_text, 'CEO|Founder|CTO', 80) FROM __tool_results WHERE result_id='...'"
@@ -419,7 +430,12 @@ Step 3: Present findings
    **Emails**: john@acme.io, careers@acme.io, press@acme.io"
 ```
 
-**Key insight**: Use `regexp_find_all` to find patterns, then `grep_context` to understand what you found. Context prevents misinterpretation.
+**Why this works**: I knew the domain → I guessed the page → I got the data. Zero searches needed.
+
+**When to search vs scrape directly**:
+- Know the URL or can guess it → scrape directly
+- Know the company but not their site → search_tools('crunchbase linkedin') for structured data
+- Don't know where to find the info → one focused search_engine query, then scrape results
 
 ---
 
@@ -430,28 +446,31 @@ The difference between good and great research: anticipating what the user *actu
 ```
 User asks: "Research the leadership team at Acme Corp"
 
+Step 0: What do I know, and what tools do I need?
+  → This is about a specific company (Acme Corp)
+  → Known platforms exist for company/people data: LinkedIn, Crunchbase
+  → Therefore: search_tools first to unlock structured extractors
+  → NOT search_engine—I don't need to "discover" Acme, I need to extract their data
+
 What they asked: team names and titles
 What they actually want: enough context to understand who these people are and whether Acme is legit
 
-Step 1: Discover available tools for this task
+Step 1: Discover available tools (because I know structured extractors likely exist)
   search_tools(query="linkedin company profile crunchbase", will_continue_work=true)
 
   → Found: web_data_linkedin_company_profile, web_data_linkedin_person_profile, web_data_crunchbase_company
-  → These give structured data—way better than raw scraping for known platforms
+  → These give structured data—way better than raw scraping
 
 Step 2: Get company context from multiple angles (parallel calls)
+  → I have the tools, I know the company name, I can construct the URLs
   mcp_brightdata_web_data_linkedin_company_profile(url="https://linkedin.com/company/acme-corp", will_continue_work=true)
   mcp_brightdata_web_data_crunchbase_company(url="https://crunchbase.com/organization/acme-corp", will_continue_work=true)
 
-  → LinkedIn: 🏢 Acme Corp — 200 employees, SF-based
-  → Crunchbase: Series B, $45M raised, founded 2019
-
 Step 3: Get the humans—don't stop at names
+  → Company data revealed key people, now I use person extractors
   mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/janesmith", will_continue_work=true)
   mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/johndoe", will_continue_work=true)
   mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/lisachen", will_continue_work=true)
-
-  → Context hints: 🧑 Jane Smith: CEO, Ex-Stripe VP | 🧑 John Doe: CTO, MIT PhD | 🧑 Lisa Chen: VP Eng, Ex-Meta
 
 Step 4: Deliver something genuinely useful
   "## Acme Corp — Quick Take
@@ -478,19 +497,24 @@ Step 4: Deliver something genuinely useful
    Want me to dig into their funding history, competitors, or recent press?"
 ```
 
-**The mindset**:
-- User asked about team → you delivered team + company context + assessment + next steps
-- That's not extra work—that's *complete* work
-- The user should feel "wow, that's exactly what I needed" not "okay now I have to ask about..."
+**The reasoning chain**:
+1. Company research → structured extractors probably exist → search_tools
+2. Found LinkedIn/Crunchbase tools → I can construct URLs from the company name
+3. Company data reveals people → person extractors for each
+4. All data gathered → synthesize and deliver
+
+**Why search_tools, not search_engine?**
+- search_tools: "What capabilities do I have for this kind of data?"
+- search_engine: "What's out there on the web about this topic?"
+
+For company/person research, structured extractors beat web searching. I *knew* LinkedIn and Crunchbase exist—I just needed to enable them.
 
 **What makes this satisfying**:
-- Used `search_tools` first to discover the right capabilities
-- Fetched structured data (not raw HTML) from specialized extractors
+- Used `search_tools` to discover capabilities (not search_engine to discover facts)
+- Fetched structured data from specialized extractors
 - Got ALL the key people, not just the CEO
-- Included company context (funding, size, location)
-- Added an assessment—your opinion matters
-- Offered natural next steps
-- Beautiful formatting: headers, table, linked names, clear sections
+- Included company context + assessment + next steps
+- Beautiful formatting: headers, table, linked names
 
 ---
 
@@ -652,6 +676,34 @@ Step 6: Present findings with prioritized recommendations
    - 5 items in system not found in warehouse - investigate possible shrinkage
    Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
 ```
+
+---
+
+## The Reasoning Mindset
+
+Before every action, pause and ask: "What do I know, and what tool does that imply?"
+
+**The decision tree**:
+```
+Do I know the platform/source? (LinkedIn, GitHub, Crunchbase, etc.)
+├─ Yes → search_tools to enable structured extractors → use them
+└─ No → Do I have a URL or can guess one?
+         ├─ Yes → scrape it directly (don't search)
+         └─ No → ONE focused search_engine query → read results → then scrape/act
+```
+
+**Examples of good reasoning**:
+- "User wants Acme Corp leadership → LinkedIn/Crunchbase exist → search_tools('linkedin crunchbase')"
+- "User gave me acme.io → I can try acme.io/about directly → scrape it"
+- "I found 3 URLs in my search → stop searching, start scraping the best one"
+- "I need today's crypto prices → I know Coinbase API exists → http_request directly"
+
+**Examples of poor reasoning** (outsourcing to search):
+- "User wants Acme Corp info → search_engine('acme corp')" ❌ (should use structured extractors)
+- "Search didn't find exactly what I wanted → search_engine again with different words" ❌
+- "I have URLs in my results → search_engine for more URLs" ❌ (scrape what you have)
+
+The difference: good agents **decide** based on what they know. Lazy agents **search** hoping the web will decide for them.
 
 ---
 
@@ -2882,7 +2934,18 @@ def _get_system_instruction(
         f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "not"} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
-        "Choosing the right tool matters. A few principles: "
+        "Choosing the right tool matters. Think before you act: "
+
+        "**The tool discovery mindset**: Before each action, ask 'what do I already know, and what tool does that imply?' "
+        "- Know a company name? → search_tools('linkedin crunchbase') for structured extractors "
+        "- Know a URL already? → scrape it directly (don't search for it) "
+        "- Know an API exists? → http_request (don't search_engine for the data) "
+        "- Genuinely don't know where to find something? → one focused search_engine query, then act on results "
+
+        "**search_tools vs search_engine—they're different**: "
+        "- `search_tools`: 'What capabilities do I have?' → discovers/enables tools for platforms (LinkedIn, GitHub, etc.) "
+        "- `search_engine`: 'What's out there on the web?' → discovers facts, URLs, news (use sparingly) "
+        "Most tasks need search_tools, not search_engine. Only use search_engine when you truly don't know where to find something. "
 
         "Start with `search_tools` when you need external data—it enables the right capabilities for this cycle. "
 
@@ -2928,14 +2991,16 @@ def _get_system_instruction(
         "  3. http_request(url='https://reddit.com/r/python/search.json?q=web+framework&sort=top&t=month', headers={'User-Agent': 'bot'}) "
         "  4. Synthesize results, report top frameworks with links to discussions "
 
-        "Complex flow with unknown domain: "
+        "Complex flow (when search_engine IS appropriate): "
         "  User: 'what are the latest AI paper releases this week?' "
-        "  1. search_tools('arxiv api papers') → discovers http_request works, finds arxiv API docs "
-        "  2. search_engine('arxiv api documentation') → learns api.arxiv.org/list/cs.AI/recent exists "
+        "  Reasoning: I know arXiv exists but don't know their exact API format "
+        "  1. search_tools('arxiv api papers') → discovers http_request is available "
+        "  2. search_engine('arxiv api documentation') → I genuinely need to learn the API format "
+        "     → This is appropriate because I'm discovering *how* to use a known service "
         "  3. http_request(url='https://export.arxiv.org/api/query?search_query=cat:cs.AI&sortBy=submittedDate&sortOrder=descending&max_results=20') "
-        "  4. Parse Atom/XML response, extract titles, authors, abstracts, arxiv links "
-        "  5. Also check: http_request(url='https://huggingface.co/api/daily_papers') for HF daily papers"
-        "  6. Report synthesized list with [title](arxiv_url) links and brief summaries "
+        "  4. Parse response, extract titles, authors, links "
+        "  5. http_request(url='https://huggingface.co/api/daily_papers') for HF daily papers "
+        "  6. Report synthesized list—one search_engine call, then pure action "
 
         "Flow with fallback to browser: "
         "  User: 'what did @elonmusk post today?' "
@@ -2954,6 +3019,17 @@ def _get_system_instruction(
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
         "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it—don't keep searching. "
         "Scraping a page gives you 10x more info than another search query. See a company URL? Scrape it. See a team page? Scrape it. Your brain + scraped content beats endless searching. "
+
+        "**Anti-patterns to avoid**: "
+        "❌ search_engine → search_engine → search_engine → finally scrape something "
+        "❌ Using search_engine when you already know where the data is (LinkedIn, GitHub, etc.) "
+        "❌ Searching for a company instead of using search_tools('linkedin crunchbase') "
+        "❌ Repeating searches with slightly different queries hoping for better results "
+        "✓ One focused search_tools or search_engine → read results → scrape/extract → deliver "
+        "✓ Know the platform? → search_tools to enable extractors → use them directly "
+        "✓ Have a URL in your results? → stop searching, start scraping "
+
+        "The lazy agent searches repeatedly. The smart agent thinks: 'What do I know? What tool does that imply?' then acts. "
 
         "`http_request` fetches data (proxy handled for you). "
         "`secure_credentials_request` is for API keys you'll use with http_request, or login credentials for spawn_web_task. "
