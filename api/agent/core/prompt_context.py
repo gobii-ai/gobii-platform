@@ -386,6 +386,11 @@ Step 5: Present findings (no more tools needed)
 - Extract enough content to cover all sections (batch multiple substr ranges if needed)
 - One focused search → read → scrape → deliver (not: search, search, search, then read)
 
+**Shortcuts**:
+- Know the company? Try their domain directly: `scrape_as_markdown(url="https://acme.io/team")`
+- Need LinkedIn/Instagram/etc data? `search_tools('brightdata linkedin')` unlocks specialized extractors
+- The answer is often one good scrape away—don't overthink it
+
 ---
 
 ## Trajectory 4: JSON API + CSV Enrichment → Decision Making
