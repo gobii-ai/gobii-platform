@@ -353,27 +353,36 @@ Step 3: Scrape the most relevant URL
   mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
 
   Result meta shows:
+    📄 MARKDOWN in $.result (~200 lines)
     → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='j1k2l3'
 
-Step 4: Extract key content
-  sqlite_batch(queries="
-    SELECT substr(json_extract(result_json,'$.result'),1,3000)
-    FROM __tool_results WHERE result_id='j1k2l3'", will_continue_work=true)
+Step 4: Extract content (get enough to cover the page)
+  sqlite_batch(queries=[
+    "SELECT substr(json_extract(result_json,'$.result'),1,4000) FROM __tool_results WHERE result_id='j1k2l3'",
+    "SELECT substr(json_extract(result_json,'$.result'),4001,4000) FROM __tool_results WHERE result_id='j1k2l3'"
+  ], will_continue_work=true)
 
-  Read content, extract key findings.
+  If page has multiple sections/people/items, extract enough to cover them all.
 
 Step 5: Present findings (no more tools needed)
   "## Quantum Computing Update
 
-   **IBM's 1000-qubit processor** marks a major milestone in quantum computing...
+   **IBM's 1000-qubit processor** marks a major milestone...
+
+   | Researcher | Role | Contribution |
+   |------------|------|--------------|
+   | Dr. Smith | Lead | Error correction |
+   | Dr. Jones | Architect | Qubit design |
 
    Key developments:
    - Error correction improved 10x
-   - Commercial availability expected 2025
-   ..."
+   - Commercial availability expected 2025"
 ```
 
-**Key pattern**: Use the `→ QUERY:` hint from result metadata. Don't guess paths.
+**Key patterns**:
+- Use the `→ QUERY:` hint exactly—don't guess paths
+- Extract enough content to cover all sections (batch multiple substr ranges if needed)
+- One focused search → read → scrape → deliver (not: search, search, search, then read)
 
 ---
 
@@ -2796,7 +2805,7 @@ def _get_system_instruction(
         "  - X/Twitter timelines (via nitter.net) "
 
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
-        "One focused search beats three scattered ones. Once you have a URL, use it—don't keep searching. "
+        "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it—don't keep searching. "
 
         "`http_request` fetches data (proxy handled for you). "
         "`secure_credentials_request` is for API keys you'll use with http_request, or login credentials for spawn_web_task. "
