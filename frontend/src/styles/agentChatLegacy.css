@@ -545,6 +545,15 @@
 .composer-input-surface:focus-within {
   border-color: rgba(99, 102, 241, 0.5);
 }
+
+.composer-shortcut-hint {
+  margin-top: 0.35rem;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(100, 116, 139, 0.9);
+  text-align: right;
+}
 .agent-chat-drop-overlay {
   position: fixed;
   inset: 0;
