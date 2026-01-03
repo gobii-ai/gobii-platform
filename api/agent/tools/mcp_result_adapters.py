@@ -7,6 +7,11 @@ from typing import Any, List, Optional, Tuple
 
 from django.db import DatabaseError
 
+from api.agent.tools.content_skeleton import (
+    extract_serp_skeleton,
+    extract_skeleton,
+    ContentSkeleton,
+)
 from api.services.tool_settings import get_tool_settings_for_owner
 
 logger = logging.getLogger(__name__)
@@ -89,8 +94,30 @@ class BrightDataAdapterBase(MCPToolResultAdapter):
         return first_block, payload
 
 
+_SERP_INDICATORS = ("google search", "search results", "skip to main content")
+
+
+def _parse_markdown_serp(markdown: str, query: str = "") -> List[dict]:
+    """Extract search results from markdown SERP using ContentSkeleton.
+
+    Uses the unified skeleton extractor for smarter title handling
+    (URL fallback when title is "Read more" etc.).
+    """
+    skeleton = extract_serp_skeleton(markdown, query)
+
+    # Convert skeleton format (t/u/p) to adapter format (title/link/position)
+    return [
+        {
+            "title": item["t"],
+            "link": item["u"],
+            "position": item["p"],
+        }
+        for item in skeleton.items
+    ]
+
+
 class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
-    """Strip heavy fields from Bright Data search responses."""
+    """Parse Bright Data search engine results (structured JSON or markdown SERP)."""
 
     server_name = "brightdata"
     tool_name = "search_engine"
@@ -101,11 +128,32 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
             return result
 
         first_block, payload = parsed
+
+        # Case 1: Already structured JSON with organic array
         organic_results = payload.get("organic")
-        if isinstance(organic_results, list):
+        if isinstance(organic_results, list) and organic_results:
             for item in organic_results:
                 if isinstance(item, dict):
                     _strip_image_fields(item)
+            first_block.text = json.dumps(payload, ensure_ascii=False)
+            return result
+
+        # Case 2: Markdown SERP in $.result - parse it to structured data
+        markdown_content = payload.get("result")
+        if isinstance(markdown_content, str) and len(markdown_content) > 500:
+            # Check if it looks like a SERP
+            lower_content = markdown_content[:2000].lower()
+            if any(ind in lower_content for ind in _SERP_INDICATORS):
+                parsed_results = _parse_markdown_serp(markdown_content)
+                if parsed_results:
+                    # Reorder: put organic FIRST so preview shows useful data
+                    truncated_raw = markdown_content[:2000] + "...[truncated]" if len(markdown_content) > 5000 else markdown_content
+                    payload = {
+                        "organic": parsed_results,
+                        "_parsed_from": "markdown_serp",
+                        "status": payload.get("status"),
+                        "result": truncated_raw,
+                    }
 
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
@@ -223,21 +271,134 @@ class BrightDataSearchEngineBatchAdapter(BrightDataAdapterBase):
         return result
 
 
+def _extract_page_title(markdown: str) -> str:
+    """Extract title from markdown - first h1 or first line."""
+    for line in markdown.split('\n')[:20]:
+        stripped = line.strip()
+        if stripped.startswith('# '):
+            return stripped[2:].strip()[:100]
+    return ""
+
+
+def _skeleton_to_compact_output(skeleton: ContentSkeleton, original_bytes: int) -> dict:
+    """Convert skeleton to compact output format for agent consumption.
+
+    Output format optimized for querying:
+        - sections: [{h: heading, c: content_preview}] for articles
+        - items: [{t: title, u: url}] for lists/serp
+        - excerpt: raw text fallback
+        - _meta: compression stats
+    """
+    output = {
+        "kind": skeleton.kind,
+        "title": skeleton.title,
+    }
+
+    if skeleton.items:
+        output["items"] = skeleton.items
+
+    if skeleton.excerpt:
+        output["excerpt"] = skeleton.excerpt
+
+    # Add compression stats
+    skeleton_bytes = skeleton.byte_size()
+    if original_bytes > 1000:
+        output["_meta"] = {
+            "original_bytes": original_bytes,
+            "compressed_bytes": skeleton_bytes,
+            "ratio": f"{100 * (1 - skeleton_bytes / original_bytes):.0f}%",
+        }
+
+    return output
+
+
+# Noise patterns to strip before extraction
+_NOISE_PATTERNS = [
+    # Navigation/UI
+    (r'^(Skip to|Jump to|Go to).*$', re.MULTILINE),
+    (r'^\s*(Menu|Navigation|Search|Sign [Ii]n|Log [Ii]n|Subscribe)[\s|]*$', re.MULTILINE),
+    (r'^\s*\[?(Home|About|Contact|Blog|Products|Services)\]?\s*$', re.MULTILINE),
+    # Cookie/consent banners
+    (r'(?i)cookie.*?(accept|preferences|consent).*?\n', 0),
+    (r'(?i)we use cookies.*?\n', 0),
+    # Social/share buttons
+    (r'^\s*(Share|Tweet|Pin|Follow us).*$', re.MULTILINE),
+    (r'^\s*\d+\s*(shares?|likes?|comments?)\s*$', re.MULTILINE | re.IGNORECASE),
+    # Footer noise
+    (r'(?i)^\s*(copyright|©|all rights reserved).*$', re.MULTILINE),
+    (r'(?i)^\s*privacy policy.*$', re.MULTILINE),
+    (r'(?i)^\s*terms (of|and) (service|use).*$', re.MULTILINE),
+    # Repeated separators
+    (r'[-─=]{10,}', 0),
+    (r'\n{4,}', 0),
+    # Empty brackets/parens (broken links)
+    (r'\[\s*\]\(\s*\)', 0),
+    (r'\(\s*\)', 0),
+]
+
+
+def _strip_noise(markdown: str) -> str:
+    """Strip common noise patterns from markdown."""
+    result = markdown
+    for pattern, flags in _NOISE_PATTERNS:
+        result = re.sub(pattern, '', result, flags=flags)
+    # Collapse excessive whitespace
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result.strip()
+
+
 class BrightDataScrapeAsMarkdownAdapter(BrightDataAdapterBase):
-    """Strip embedded data images from markdown snapshots."""
+    """Transform messy scraped markdown into clean, structured skeleton.
+
+    The insight: we don't need raw messy markdown.
+    We need structured content the agent can query.
+
+    Input:  17KB of nasty random web garbage
+    Output: 800 bytes of clean {kind, title, items[], excerpt}
+    """
 
     server_name = "brightdata"
     tool_name = "scrape_as_markdown"
 
     def adapt(self, result: Any) -> Any:
-        try:
-            first_block = result.content[0]
-            raw_text = first_block.text
-        except (AttributeError, IndexError, TypeError):
+        parsed = self._extract_json_payload(result)
+        if not parsed:
+            # Fallback: just scrub images from raw text
+            try:
+                first_block = result.content[0]
+                if isinstance(first_block.text, str):
+                    first_block.text = scrub_markdown_data_images(first_block.text)
+            except (AttributeError, IndexError, TypeError):
+                pass
             return result
 
-        if isinstance(raw_text, str):
-            first_block.text = scrub_markdown_data_images(raw_text)
+        first_block, payload = parsed
+        markdown_content = payload.get("result")
+
+        if not isinstance(markdown_content, str) or len(markdown_content) < 100:
+            first_block.text = json.dumps(payload, ensure_ascii=False)
+            return result
+
+        original_bytes = len(markdown_content.encode('utf-8'))
+
+        # Step 1: Scrub data images (huge base64 blobs)
+        cleaned = scrub_markdown_data_images(markdown_content)
+
+        # Step 2: Strip noise patterns (nav, cookies, footers)
+        cleaned = _strip_noise(cleaned)
+
+        # Step 3: Extract title
+        title = _extract_page_title(cleaned) or payload.get("url", "")[:80]
+
+        # Step 4: Extract skeleton structure
+        skeleton = extract_skeleton(cleaned, title=title)
+
+        # Step 5: Build compact output
+        compact_output = _skeleton_to_compact_output(skeleton, original_bytes)
+        compact_output["status"] = payload.get("status")
+        compact_output["url"] = payload.get("url")
+
+        first_block.text = json.dumps(compact_output, ensure_ascii=False)
         return result
 
 
