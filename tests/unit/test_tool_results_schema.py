@@ -349,3 +349,81 @@ class MetaTextFormattingTests(SimpleTestCase):
         self.assertIn("decoded_encoding=utf-8", result)
         self.assertIn("parsed_from=jsonp", result)
         self.assertIn("parsed_with=json5", result)
+
+
+@tag("batch_tool_results")
+class PreviewByteLimitTests(SimpleTestCase):
+    """Tests for preview byte limits with large external results."""
+
+    def test_large_result_preview_capped(self):
+        """Results >= 5KB should have preview capped to 200 bytes."""
+        from api.agent.core.tool_results import (
+            _build_prompt_preview,
+            LARGE_RESULT_THRESHOLD,
+            LARGE_RESULT_PREVIEW_CAP,
+        )
+
+        large_text = "x" * 6000  # 6KB
+        preview, is_inline = _build_prompt_preview(
+            large_text,
+            len(large_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+        )
+
+        self.assertFalse(is_inline)
+        # Preview should be capped around LARGE_RESULT_PREVIEW_CAP
+        # (plus some truncation message)
+        self.assertLess(len(preview), LARGE_RESULT_PREVIEW_CAP + 100)
+
+    def test_huge_result_preview_minimal(self):
+        """Results >= 15KB should have minimal preview (100 bytes)."""
+        from api.agent.core.tool_results import (
+            _build_prompt_preview,
+            HUGE_RESULT_THRESHOLD,
+            HUGE_RESULT_PREVIEW_CAP,
+        )
+
+        huge_text = "y" * 20000  # 20KB
+        preview, is_inline = _build_prompt_preview(
+            huge_text,
+            len(huge_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_search_engine",
+        )
+
+        self.assertFalse(is_inline)
+        # Should include KB size in truncation message
+        self.assertIn("KB", preview)
+        self.assertIn("substr", preview)
+
+    def test_sqlite_results_not_capped(self):
+        """SQLite results should not have aggressive preview caps."""
+        from api.agent.core.tool_results import _build_prompt_preview
+
+        large_text = "z" * 20000  # 20KB
+        preview, is_inline = _build_prompt_preview(
+            large_text,
+            len(large_text),
+            recency_position=0,
+            tool_name="sqlite_batch",
+        )
+
+        self.assertFalse(is_inline)
+        # SQLite gets much more generous preview (16KB tier)
+        self.assertGreater(len(preview), 10000)
+
+    def test_small_result_shown_inline(self):
+        """Small results should be shown fully inline."""
+        from api.agent.core.tool_results import _build_prompt_preview
+
+        small_text = "small content"
+        preview, is_inline = _build_prompt_preview(
+            small_text,
+            len(small_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+        )
+
+        self.assertTrue(is_inline)
+        self.assertEqual(preview, small_text)

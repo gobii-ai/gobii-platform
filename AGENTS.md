@@ -33,3 +33,5 @@ Code quality:
 
 Debugging:
 - Never guess what the issue is. Aim to *prove it* via running unit tests, adding new tests when needed (if it's something that should be covered by unit tests), running one off code with uv run django shell, etc.
+
+Agent trajectories are sometimes in ./mediafiles/ 😉

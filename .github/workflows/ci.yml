@@ -184,6 +184,8 @@ jobs:
             tag: batch_tool_results
           - batch: result_analysis
             tag: batch_result_analysis
+          - batch: content_skeleton
+            tag: content_skeleton
           - batch: sqlite_analysis
             tag: sqlite_analysis
           - batch: http_request

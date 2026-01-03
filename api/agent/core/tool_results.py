@@ -24,9 +24,13 @@ PREVIEW_TIERS_EXTERNAL = [
     # Position 3+: None (meta only - use query)
 ]
 
-# For large external results, reduce preview even further to force query usage
-LARGE_RESULT_THRESHOLD = 10_000  # 10KB
-LARGE_RESULT_PREVIEW_CAP = 256   # Max 256 bytes for large external results
+# For large external results, reduce preview to force query usage
+LARGE_RESULT_THRESHOLD = 5_000   # 5KB - start capping early
+LARGE_RESULT_PREVIEW_CAP = 200   # Max 200 bytes for large external results
+
+# For very large results, be aggressive - minimal structure hint only
+HUGE_RESULT_THRESHOLD = 15_000   # 15KB - this is already a lot of text
+HUGE_RESULT_PREVIEW_CAP = 100    # Minimal preview - rely on analysis hints
 
 # SQLite results get MUCH more generous previews - this IS the extracted data
 # the agent needs to work with. Show full results up to reasonable limits.
@@ -351,8 +355,12 @@ def _build_prompt_preview(
 
     # For large EXTERNAL results, cap preview to force query usage
     # (Don't cap sqlite results - agent needs to see query output)
-    if not is_sqlite and full_bytes >= LARGE_RESULT_THRESHOLD:
-        max_bytes = min(max_bytes, LARGE_RESULT_PREVIEW_CAP)
+    if not is_sqlite:
+        if full_bytes >= HUGE_RESULT_THRESHOLD:
+            # Very large result - minimal preview, rely on analysis hints
+            max_bytes = min(max_bytes, HUGE_RESULT_PREVIEW_CAP)
+        elif full_bytes >= LARGE_RESULT_THRESHOLD:
+            max_bytes = min(max_bytes, LARGE_RESULT_PREVIEW_CAP)
 
     # If result fits within tier limit, show full (inline)
     if full_bytes <= max_bytes:
@@ -364,6 +372,13 @@ def _build_prompt_preview(
         if is_sqlite:
             # SQLite result - just note truncation, no "use query" since this IS the query result
             preview_text = f"{preview_text}\n... [{truncated_bytes} more bytes truncated]"
+        elif full_bytes >= HUGE_RESULT_THRESHOLD:
+            # Huge external data - strong guidance to use chunked extraction
+            kb_size = full_bytes // 1024
+            preview_text = (
+                f"{preview_text}\n"
+                f"... [{kb_size}KB total - USE substr(col,1,2000) to extract chunks]"
+            )
         else:
             # External data - remind to use query
             preview_text = (
