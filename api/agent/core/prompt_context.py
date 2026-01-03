@@ -356,15 +356,14 @@ Step 3: Scrape the most relevant URL
 
   Result meta shows:
     📄 MARKDOWN in $.result (~200 lines)
-    → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='j1k2l3'
 
-Step 4: Extract content (get enough to cover the page)
+Step 4: Search the scraped content for what you need
   sqlite_batch(queries=[
-    "SELECT substr(json_extract(result_json,'$.result'),1,4000) FROM __tool_results WHERE result_id='j1k2l3'",
-    "SELECT substr(json_extract(result_json,'$.result'),4001,4000) FROM __tool_results WHERE result_id='j1k2l3'"
+    "SELECT grep_context_all(result_text, 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
   ], will_continue_work=true)
 
-  If page has multiple sections/people/items, extract enough to cover them all.
+  → grep_context finds relevant sections with surrounding context
+  → Don't blindly extract first N chars—search for what you need
 
 Step 5: Present findings (no more tools needed)
   "## Quantum Computing Update
@@ -382,14 +381,45 @@ Step 5: Present findings (no more tools needed)
 ```
 
 **Key patterns**:
-- Use the `→ QUERY:` hint exactly—don't guess paths
-- Extract enough content to cover all sections (batch multiple substr ranges if needed)
-- One focused search → read → scrape → deliver (not: search, search, search, then read)
+- Use `grep_context` or `regexp_find_all` to search large content—don't blindly extract first N chars
+- One focused search → scrape → grep → deliver (not: search, search, search, extract, extract)
+- Work silently, deliver beautifully—don't narrate every step ("Let me...", "I'm going to...")
 
 **Shortcuts**:
 - Know the company? Try their domain directly: `scrape_as_markdown(url="https://acme.io/team")`
 - Need LinkedIn/Instagram/etc data? `search_tools('brightdata linkedin')` unlocks specialized extractors
 - The answer is often one good scrape away—don't overthink it
+
+---
+
+## Trajectory 3b: Scrape → grep for specific data
+
+When scraping pages for specific info (contacts, pricing, specs), use grep functions instead of blind substr extraction.
+
+```
+Step 1: Scrape the target page
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/about", will_continue_work=true)
+
+  Result meta shows:
+    📄 MARKDOWN (~800 lines)
+
+Step 2: Search for what you need (don't blindly extract first 2000 chars)
+  sqlite_batch(queries=[
+    "SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') FROM __tool_results WHERE result_id='...'",
+    "SELECT grep_context(result_text, 'CEO|Founder|CTO', 80) FROM __tool_results WHERE result_id='...'"
+  ], will_continue_work=false)
+
+  Result 1: "john@acme.io|careers@acme.io|press@acme.io"
+  Result 2: "...Founded by John Smith (CEO) and Jane Doe (CTO) in 2019..."
+
+Step 3: Present findings
+  "## Acme Inc Contact Info
+
+   **Leadership**: John Smith (CEO), Jane Doe (CTO)
+   **Emails**: john@acme.io, careers@acme.io, press@acme.io"
+```
+
+**Key insight**: Use `regexp_find_all` to find patterns, then `grep_context` to understand what you found. Context prevents misinterpretation.
 
 ---
 
@@ -596,17 +626,41 @@ The data is inserted—the sqlite_schema will show sample rows and row counts to
 - Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
 - Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
-**Text analysis functions** (available for deeper analysis):
-- `column REGEXP 'pattern'` - regex match (returns 1/0)
-- `regexp_extract(column, 'pattern')` - extract first match
-- `regexp_extract(column, '(group)', 1)` - extract capture group
-- `word_count(column)` - count words
-- `char_count(column)` - count characters
+**Text analysis functions** (grep-like search for large text):
+- `regexp_find_all(col, 'pattern')` - find ALL matches → "match1|match2|..."
+- `grep_context(col, 'pattern', 60)` - first match + 60 chars of surrounding context
+- `grep_context_all(col, 'pattern', 40, 5)` - up to 5 matches, each with context
+- `regexp_extract(col, 'pattern')` - extract first match only
+- `col REGEXP 'pattern'` - boolean match (1/0)
 
-Example: Find emails in text
+**Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
-SELECT regexp_extract(content, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') as email
-FROM documents WHERE content REGEXP '@.*\\.com'
+-- Find emails on a page
+SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+-- → "john@acme.com|sales@acme.com|support@acme.com"
+
+-- Find phone numbers
+SELECT regexp_find_all(result_text, '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
+-- → "555-123-4567|555.987.6543|(555) 111-2222"
+
+-- Find prices with context (to understand what each price is for)
+SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 5)
+-- → "...Product A: $299.99 - Free shipping..."
+-- → "...Was $499, now $349 (30% off)..."
+
+-- Find all URLs
+SELECT regexp_find_all(result_text, 'https?://[^\\s<>\"]+')
+```
+
+**Always get context** - a match alone can mislead:
+```sql
+-- BAD: Just finding "$99" doesn't tell you what it's for
+SELECT regexp_find_all(result_text, '\\$\\d+')  -- "$99|$199|$49"... which is the product?
+
+-- GOOD: Context shows what each price refers to
+SELECT grep_context_all(result_text, '\\$\\d+', 40, 5)
+-- → "...Basic plan: $99/month, Pro plan: $199/month..."
+-- → "...shipping fee: $49 for orders under..."
 ```
 
 **UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.

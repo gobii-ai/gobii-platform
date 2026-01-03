@@ -49,6 +49,79 @@ def _char_count(string: Optional[str]) -> int:
     """Count characters in a string."""
     return len(string) if string else 0
 
+
+def _regexp_find_all(string: Optional[str], pattern: str, separator: str = "|") -> Optional[str]:
+    """Find all regex matches, return as separator-delimited string.
+
+    Usage: regexp_find_all(column, '\$[\d,]+', '|')
+    Returns: "$8,941|$9,199|$10,500" or NULL if no matches
+    """
+    if string is None or pattern is None:
+        return None
+    try:
+        matches = re.findall(pattern, string)
+        if not matches:
+            return None
+        # Dedupe while preserving order, limit to 20 matches
+        seen = set()
+        unique = []
+        for m in matches:
+            if m not in seen:
+                seen.add(m)
+                unique.append(m)
+                if len(unique) >= 20:
+                    break
+        return separator.join(unique)
+    except re.error:
+        return None
+
+
+def _grep_context(string: Optional[str], pattern: str, context_chars: int = 100) -> Optional[str]:
+    """Find pattern and return match with surrounding context.
+
+    Usage: grep_context(column, 'Price', 50)
+    Returns: "...t price is $8,941.04 for the RTX..." or NULL if not found
+    """
+    if string is None or pattern is None:
+        return None
+    try:
+        match = re.search(pattern, string, re.IGNORECASE)
+        if not match:
+            return None
+        start = max(0, match.start() - context_chars)
+        end = min(len(string), match.end() + context_chars)
+        snippet = string[start:end]
+        # Add ellipsis indicators
+        prefix = "..." if start > 0 else ""
+        suffix = "..." if end < len(string) else ""
+        return f"{prefix}{snippet}{suffix}"
+    except re.error:
+        return None
+
+
+def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 5) -> Optional[str]:
+    """Find all pattern matches with surrounding context, newline-separated.
+
+    Usage: grep_context_all(column, '\$[\d,]+', 30, 5)
+    Returns multiple context snippets, one per line
+    """
+    if string is None or pattern is None:
+        return None
+    try:
+        results = []
+        for i, match in enumerate(re.finditer(pattern, string)):
+            if i >= max_matches:
+                break
+            start = max(0, match.start() - context_chars)
+            end = min(len(string), match.end() + context_chars)
+            snippet = string[start:end].replace('\n', ' ')
+            prefix = "..." if start > 0 else ""
+            suffix = "..." if end < len(string) else ""
+            results.append(f"{prefix}{snippet}{suffix}")
+        return "\n".join(results) if results else None
+    except re.error:
+        return None
+
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
     sqlite3.SQLITE_DETACH,
@@ -198,6 +271,13 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("REGEXP", 2, _regexp)
     conn.create_function("regexp_extract", 2, _regexp_extract)
     conn.create_function("regexp_extract", 3, _regexp_extract)  # With group arg
+    conn.create_function("regexp_find_all", 2, _regexp_find_all)
+    conn.create_function("regexp_find_all", 3, _regexp_find_all)  # With separator
+    conn.create_function("grep_context", 2, _grep_context)
+    conn.create_function("grep_context", 3, _grep_context)  # With context_chars
+    conn.create_function("grep_context_all", 2, _grep_context_all)
+    conn.create_function("grep_context_all", 3, _grep_context_all)
+    conn.create_function("grep_context_all", 4, _grep_context_all)  # With max_matches
     conn.create_function("word_count", 1, _word_count)
     conn.create_function("char_count", 1, _char_count)
 
