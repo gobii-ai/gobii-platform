@@ -324,197 +324,178 @@ Step 4: Present findings with insights
 
 ---
 
-## Trajectory 3: Research with Reasoning
+## Trajectory 3: Research to Action
 
-User asks: "Research recent developments in quantum computing"
+The pattern for recruiting, lead gen, market research, pricing—any research task—is the same:
+discover tools → gather structured data → scrape what's missing → normalize in SQL → deliver.
 
 ```
-Step 0: Think about what tools I need
-  → This is general news/research, not a known platform (LinkedIn, GitHub, etc.)
-  → No structured API exists for "quantum computing news"
-  → Therefore: search_engine is the right choice here—I need to discover what's out there
-  → If this were "research Acme Corp" I'd use search_tools('linkedin crunchbase') instead
+User asks: "Research Acme Corp—I'm considering a partnership"
 
-Step 1: Search (because no structured source exists for this topic)
-  mcp_bright_data_search_engine(query="quantum computing breakthroughs 2024", will_continue_work=true)
+Step 0: What do I know? What tools do I need?
+  → This is about a specific company, Acme Corp
+  → Structured data sources exist: LinkedIn, Crunchbase, their website
+  → I should check what extractors I have available
+  → The user wants enough context to make a decision—not just names
 
-  Result meta shows:
-    📄 MARKDOWN in $.result (~400 lines)
-    → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='g7h8i9'
+Step 1: Discover available extractors
+  search_tools(query="linkedin company crunchbase", will_continue_work=true)
 
-Step 2: Read the search results (use the QUERY hint exactly)
+  → Found: web_data_linkedin_company_profile, web_data_linkedin_person_profile,
+           web_data_crunchbase_company, web_data_linkedin_job_listings
+
+Step 2: Gather structured company data (parallel calls)
+  mcp_bright_data_web_data_linkedin_company_profile(url="https://linkedin.com/company/acme-corp")
+  mcp_bright_data_web_data_crunchbase_company(url="https://crunchbase.com/organization/acme-corp")
+
+  → LinkedIn shows: 847 employees, SF headquarters, founded 2018
+  → Crunchbase shows: Series C, $120M raised, last round Dec 2024
+
+Step 3: Store company data for cross-referencing
   sqlite_batch(queries="
-    SELECT substr(json_extract(result_json,'$.result'),1,2000)
-    FROM __tool_results WHERE result_id='g7h8i9'", will_continue_work=true)
+    CREATE TABLE companies (
+      name TEXT PRIMARY KEY, linkedin_url TEXT, crunchbase_url TEXT, website TEXT,
+      employees INT, hq TEXT, founded INT, funding_stage TEXT, total_raised REAL
+    );
+    INSERT INTO companies VALUES (
+      'Acme Corp', 'linkedin.com/company/acme-corp', 'crunchbase.com/organization/acme-corp',
+      'acme.io', 847, 'San Francisco', 2018, 'Series C', 120000000
+    )", will_continue_work=true)
 
-  Result shows markdown table:
-    | t | u | p |
-    |---|---|---|
-    | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
-    | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
+Step 4: Check what else might be useful—pricing? job openings?
+  search_tools(query="pricing jobs careers", will_continue_work=true)
 
-  → I have URLs now. Time to scrape, not search again.
+  → Found: web_data_linkedin_job_listings (structured jobs)
+  → For pricing: need to scrape acme.io/pricing directly
 
-Step 3: Scrape the most relevant URL
-  → Because I have a specific URL, scraping gives me 10x more than another search
-  mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
+Step 5: Scrape their pricing page + get job listings (parallel)
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing", will_continue_work=true)
+  mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
 
-Step 4: Extract what I need with grep (don't just grab first 2000 chars)
-  sqlite_batch(queries=[
-    "SELECT grep_context_all(json_extract(result_json,'$.result'), 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
-  ], will_continue_work=true)
+Step 6: Extract pricing tiers from messy webpage content
+  sqlite_batch(queries="
+    SELECT grep_context_all(json_extract(result_json,'$.result'), '\\$[\\d,]+', 50, 10)
+    FROM __tool_results WHERE result_id='pricing123'", will_continue_work=true)
 
-Step 5: Present findings
-  "## Quantum Computing Update
+  → "...Starter: $49/mo for up to 5 users..."
+  → "...Professional: $199/mo, unlimited users..."
+  → "...Enterprise: Contact sales for custom..."
 
-   **IBM's 1000-qubit processor** marks a major milestone...
+Step 7: Store pricing in structured form
+  sqlite_batch(queries="
+    CREATE TABLE pricing (tier TEXT, price_monthly REAL, notes TEXT);
+    INSERT INTO pricing VALUES
+      ('Starter', 49, 'up to 5 users'),
+      ('Professional', 199, 'unlimited users'),
+      ('Enterprise', NULL, 'custom, contact sales')", will_continue_work=true)
 
-   | Researcher | Role | Contribution |
-   |------------|------|--------------|
-   | Dr. Smith | Lead | Error correction |
-   | Dr. Jones | Architect | Qubit design |
+Step 8: Get key people—LinkedIn showed executives, now get details
+  → The company profile revealed key people URLs, fetch them
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/janesmith-ceo")
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/johndoe-cto")
+  mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/sarahchen-vpsales")
 
-   Key developments:
-   - Error correction improved 10x
-   - Commercial availability expected 2025"
-```
+Step 9: Normalize people data into a table (handle messy/missing fields)
+  sqlite_batch(queries="
+    CREATE TABLE people (
+      name TEXT, title TEXT, linkedin_url TEXT, company TEXT,
+      prev_companies TEXT, education TEXT, years_in_role INT
+    );
+    -- Insert from structured extractor results, handling NULLs gracefully
+    INSERT INTO people
+    SELECT
+      COALESCE(json_extract(result_json,'$.full_name'), json_extract(result_json,'$.name')),
+      COALESCE(json_extract(result_json,'$.title'), json_extract(result_json,'$.headline'), 'Unknown'),
+      json_extract(result_json,'$.url'),
+      'Acme Corp',
+      (SELECT GROUP_CONCAT(json_extract(e.value,'$.company_name'), ', ')
+       FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3),
+      json_extract(result_json,'$.education[0].school_name'),
+      NULL
+    FROM __tool_results
+    WHERE result_id IN ('person1','person2','person3')", will_continue_work=true)
 
-**The reasoning pattern**: Before each action, ask "what do I know, and what tool does that imply?"
-- Know a company name? → search_tools('linkedin crunchbase') for structured extractors
-- Know a URL? → scrape it directly (don't search for it)
-- Need to discover what exists? → search_engine (but only once, then act on results)
-- Have scraped content? → grep it, don't just substr
+Step 10: Quick analysis—what's the talent profile?
+  sqlite_batch(queries="
+    SELECT prev_companies FROM people;
+    SELECT tier, price_monthly FROM pricing ORDER BY price_monthly", will_continue_work=true)
 
-**Anti-pattern (don't do this)**:
-```
-❌ search_engine("quantum computing")
-❌ search_engine("quantum computing news 2024")
-❌ search_engine("IBM quantum processor")
-❌ search_engine("quantum computing breakthroughs")
-... finally scrapes something
+  → Team has ex-Stripe, ex-Google backgrounds
+  → Pricing: $49 → $199 → enterprise (mid-market focus)
 
-✓ search_engine("quantum computing breakthroughs 2024") → read results → scrape best URL → deliver
-```
-One focused search → scrape → grep → deliver. That's the rhythm.
+Step 11: Deliver something genuinely useful
 
----
+  "## Acme Corp — Partnership Brief
 
-## Trajectory 3b: Direct Scrape (when you know the URL)
+   **Company Profile**
+   | Metric | Value |
+   |--------|-------|
+   | Employees | 847 |
+   | HQ | San Francisco |
+   | Stage | Series C ($120M raised) |
+   | Founded | 2018 |
 
-When you already have a URL, skip searching—just scrape it.
+   **Pricing**
+   | Tier | Monthly | Notes |
+   |------|---------|-------|
+   | Starter | $49 | Up to 5 users |
+   | Professional | $199 | Unlimited users |
+   | Enterprise | Custom | Contact sales |
 
-```
-User asks: "Get the contact info from acme.io"
+   **Leadership**
+   | Name | Role | Background |
+   |------|------|------------|
+   | [Jane Smith](linkedin.com/in/janesmith-ceo) | CEO | Ex-Stripe, Stanford MBA |
+   | [John Doe](linkedin.com/in/johndoe-cto) | CTO | Ex-Google, MIT CS PhD |
+   | [Sarah Chen](linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-Salesforce, 8yr enterprise |
 
-Step 0: What do I know?
-  → I have a domain name: acme.io
-  → I can guess the about page: acme.io/about or acme.io/team
-  → No need to search—I'll try the obvious URLs directly
+   **Assessment**
+   Well-funded Series C with strong enterprise pedigree. Pricing suggests mid-market
+   focus ($199 sweet spot). Leadership team has scaled similar companies before.
 
-Step 1: Scrape the target page directly
-  mcp_bright_data_scrape_as_markdown(url="https://acme.io/about", will_continue_work=true)
-
-Step 2: Grep for what I need (emails, leadership)
-  sqlite_batch(queries=[
-    "SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') FROM __tool_results WHERE result_id='...'",
-    "SELECT grep_context(result_text, 'CEO|Founder|CTO', 80) FROM __tool_results WHERE result_id='...'"
-  ], will_continue_work=false)
-
-  Result 1: "john@acme.io|careers@acme.io|press@acme.io"
-  Result 2: "...Founded by John Smith (CEO) and Jane Doe (CTO) in 2019..."
-
-Step 3: Present findings
-  "## Acme Inc Contact Info
-
-   **Leadership**: John Smith (CEO), Jane Doe (CTO)
-   **Emails**: john@acme.io, careers@acme.io, press@acme.io"
-```
-
-**Why this works**: I knew the domain → I guessed the page → I got the data. Zero searches needed.
-
-**When to search vs scrape directly**:
-- Know the URL or can guess it → scrape directly
-- Know the company but not their site → search_tools('crunchbase linkedin') for structured data
-- Don't know where to find the info → one focused search_engine query, then scrape results
-
----
-
-## Trajectory 3c: Thorough Research (the satisfying kind)
-
-The difference between good and great research: anticipating what the user *actually* wants, not just what they asked for.
-
-```
-User asks: "Research the leadership team at Acme Corp"
-
-Step 0: What do I know, and what tools do I need?
-  → This is about a specific company (Acme Corp)
-  → Known platforms exist for company/people data: LinkedIn, Crunchbase
-  → Therefore: search_tools first to unlock structured extractors
-  → NOT search_engine—I don't need to "discover" Acme, I need to extract their data
-
-What they asked: team names and titles
-What they actually want: enough context to understand who these people are and whether Acme is legit
-
-Step 1: Discover available tools (because I know structured extractors likely exist)
-  search_tools(query="linkedin company profile crunchbase", will_continue_work=true)
-
-  → Found: web_data_linkedin_company_profile, web_data_linkedin_person_profile, web_data_crunchbase_company
-  → These give structured data—way better than raw scraping
-
-Step 2: Get company context from multiple angles (parallel calls)
-  → I have the tools, I know the company name, I can construct the URLs
-  mcp_brightdata_web_data_linkedin_company_profile(url="https://linkedin.com/company/acme-corp", will_continue_work=true)
-  mcp_brightdata_web_data_crunchbase_company(url="https://crunchbase.com/organization/acme-corp", will_continue_work=true)
-
-Step 3: Get the humans—don't stop at names
-  → Company data revealed key people, now I use person extractors
-  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/janesmith", will_continue_work=true)
-  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/johndoe", will_continue_work=true)
-  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/lisachen", will_continue_work=true)
-
-Step 4: Deliver something genuinely useful
-  "## Acme Corp — Quick Take
-
-   **Series B startup** ($45M raised), 200 people, SF-based. Founded 2019.
-
-   ### Leadership
-
-   | Role | Name | Background | Why they matter |
-   |------|------|------------|-----------------|
-   | CEO | [Jane Smith](linkedin.com/in/janesmith) | Ex-Stripe VP, Stanford MBA | Payments + scale experience |
-   | CTO | [John Doe](linkedin.com/in/johndoe) | MIT PhD, ex-Google Brain | Deep ML/AI credibility |
-   | VP Eng | [Lisa Chen](linkedin.com/in/lisachen) | Ex-Meta infra, 10yr distributed | Can actually build it |
-
-   ### Assessment
-
-   Strong enterprise pedigree. Technical depth matches their AI claims.
-   CEO has scaled payments before; CTO brings research credibility.
-
-   **Red flags**: None obvious. Team looks legitimate.
+   **For Partnership**: They're hiring aggressively (23 open roles) which signals
+   growth mode—good time to approach. VP Sales is the obvious first contact.
 
    ---
-
-   Want me to dig into their funding history, competitors, or recent press?"
+   Want me to find Sarah's email, research their competitors, or draft outreach?"
 ```
 
-**The reasoning chain**:
-1. Company research → structured extractors probably exist → search_tools
-2. Found LinkedIn/Crunchbase tools → I can construct URLs from the company name
-3. Company data reveals people → person extractors for each
-4. All data gathered → synthesize and deliver
+**Why this works across use cases**:
+- **Recruiting**: Same pattern—focus on the people table, find candidates to poach
+- **Lead gen**: People + pricing = prospect enrichment ready for outreach
+- **Market research**: Add competitor scraping, compare pricing tables
+- **Pricing research**: Expand step 5-7 across multiple competitor sites
+- **CRM**: Everything lands in tables → easy export or further analysis
 
-**Why search_tools, not search_engine?**
-- search_tools: "What capabilities do I have for this kind of data?"
-- search_engine: "What's out there on the web about this topic?"
+**The rhythm**:
+1. `search_tools` → discover what extractors exist for this kind of data
+2. Structured extractors → clean data from known platforms (LinkedIn, Crunchbase)
+3. Scrape → fill gaps from the company's own site (pricing, team pages)
+4. SQLite → normalize messy data, handle NULLs, cross-reference sources
+5. Deliver → tables, links, assessment, clear next steps
 
-For company/person research, structured extractors beat web searching. I *knew* LinkedIn and Crunchbase exist—I just needed to enable them.
+**Handling messy real-world data**:
+```sql
+-- Names might be in different fields
+COALESCE(json_extract(r,'$.full_name'), json_extract(r,'$.name'), 'Unknown')
 
-**What makes this satisfying**:
-- Used `search_tools` to discover capabilities (not search_engine to discover facts)
-- Fetched structured data from specialized extractors
-- Got ALL the key people, not just the CEO
-- Included company context + assessment + next steps
-- Beautiful formatting: headers, table, linked names
+-- Collect previous companies from nested experience array
+(SELECT GROUP_CONCAT(json_extract(e.value,'$.company_name'), ', ')
+ FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3)
+
+-- Extract emails from scraped page content
+SELECT regexp_find_all(json_extract(result_json,'$.result'),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+
+-- Find prices with surrounding context to understand what they're for
+SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
+```
+
+**Tool selection logic**:
+- Know the company/person? → `search_tools` to find structured extractors
+- Have a URL or can guess one? → scrape directly
+- Need to discover what's out there? → one `search_engine` query, then act on results
+- Have scraped content? → `grep_context_all` to extract with context, not just `substr`
 
 ---
 
