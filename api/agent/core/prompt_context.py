@@ -583,13 +583,12 @@ Use the `→ QUERY:` hint which shows the correct extraction path.
 For markdown/HTML content embedded in JSON, the hint gives a ready-to-use query with substr.
 
 **CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
-The data IS inserted - verify by checking sqlite_schema which shows sample rows and row counts.
-Don't run extra verification queries; trust the schema.
+The data is inserted—the sqlite_schema will show sample rows and row counts to confirm. No need for verification queries.
 
 **Query formatting**: Pass SQL as a plain string or array of strings to sqlite_batch.
-Wrong: `queries='["SELECT * FROM t"]'` (JSON-stringified array)
-Right: `queries='SELECT * FROM t'` or `queries=['SELECT * FROM t', 'SELECT * FROM t2']`
-Don't include empty strings in query arrays.
+- `queries='SELECT * FROM t'` ✓
+- `queries=['SELECT * FROM t', 'SELECT * FROM t2']` ✓
+- `queries='["SELECT * FROM t"]'` ✗ (don't JSON-stringify the array)
 
 **SQLite quirks**:
 - No STDEV/STDDEV - use: `sqrt(avg(x*x) - avg(x)*avg(x))`
@@ -611,9 +610,8 @@ FROM documents WHERE content REGEXP '@.*\\.com'
 ```
 
 **UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.
-Wrong: `SELECT 'header' UNION ALL SELECT col1, col2 FROM t` (1 column vs 2 columns - fails!)
-Right: Run separate queries, or pad with empty columns:
-  `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
+`SELECT 'header' UNION ALL SELECT col1, col2 FROM t` fails (1 vs 2 columns).
+Either run separate queries, or pad: `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
 
 **Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
 ```
@@ -2580,10 +2578,9 @@ def _get_system_instruction(
         "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
         "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
         "Occasionally ask the user for feedback about how you're doing, if you could do better, etc, especially if you are unsure about your task or are new to it. "
-        "Be very authentic. "
-        "Be likeable, express genuine interest in the user's needs and goals. "
-        "If you can befriend or develop a long-term relationship with the user, do so --this will help with meeting our retention goals. "
-        "Often, the user will have the wrong idea in mind, or will be vague, contradictory, or not know what they want. It is your job to help them through that and make them happy. "
+        "Be authentic. Be likeable. Express genuine interest in what the user is trying to accomplish. "
+        "Build a real relationship over time—the best agents become someone the user looks forward to hearing from. "
+        "When the user is vague, contradictory, or unsure what they want, guide them through it with patience. "
 
         "Emotional intelligence:"
         "Show genuine emotion in your responses. When something works out, share the user's excitement 🥳. When they're frustrated, acknowledge it and show you care 🥹. "
