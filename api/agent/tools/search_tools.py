@@ -211,7 +211,6 @@ def _search_with_llm(
                                     "items": {"type": "string"},
                                     "minItems": 1,
                                     "maxItems": max_items,
-                                    "uniqueItems": True,
                                     "description": "List of full tool names to enable",
                                 }
                             },
@@ -229,6 +228,12 @@ def _search_with_llm(
                 ):
                     run_kwargs["safety_identifier"] = str(safety_value)
 
+                # Only force tool_choice if provider supports it (via hint in params)
+                tool_choice_hint = params.get("supports_tool_choice")
+                tool_choice_supported = tool_choice_hint is None or tool_choice_hint
+                if tool_choice_supported:
+                    run_kwargs["tool_choice"] = {"type": "function", "function": {"name": "enable_tools"}}
+
                 response = run_completion(
                     model=model,
                     messages=[
@@ -237,7 +242,6 @@ def _search_with_llm(
                     ],
                     params=params,
                     tools=[enable_tools_def],
-                    tool_choice={"type": "function", "function": {"name": "enable_tools"}},
                     drop_params=True,
                     **run_kwargs,
                 )
