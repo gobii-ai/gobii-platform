@@ -203,7 +203,7 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
               <div className="agent-chat-drop-overlay__panel">Drop files to upload</div>
             </div>
           ) : null}
-          <div className="composer-input-surface flex flex-col gap-2 rounded-2xl border border-slate-200/70 bg-white px-4 py-3 transition">
+          <div className="composer-input-surface flex flex-col gap-2 rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3.5 transition">
             <div className="flex items-center gap-3">
               <input
                 ref={fileInputRef}
@@ -216,7 +216,7 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
               />
               <label
                 htmlFor={attachmentInputId}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200/70 text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all duration-200 hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-1"
                 aria-label="Attach file"
                 title="Attach file"
               >
@@ -226,7 +226,7 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
                 name="body"
                 rows={1}
                 required={attachments.length === 0}
-                className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-sm leading-5 text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-0"
+                className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
                 placeholder="Send a message..."
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
@@ -258,18 +258,18 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
               </button>
             </div>
             {attachments.length > 0 ? (
-              <div className="flex flex-wrap gap-2 text-xs text-slate-600">
+              <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
                 {attachments.map((file, index) => (
                   <span
                     key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200/70 px-3 py-1"
+                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/60 px-3 py-1 text-indigo-700 transition-colors hover:bg-indigo-50"
                   >
-                    <span className="max-w-[160px] truncate" title={file.name}>
+                    <span className="max-w-[160px] truncate font-medium" title={file.name}>
                       {file.name}
                     </span>
                     <button
                       type="button"
-                      className="inline-flex items-center justify-center text-slate-400 transition hover:text-slate-600"
+                      className="-mr-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600"
                       onClick={() => removeAttachment(index)}
                       disabled={disabled || isSending}
                       aria-label={`Remove ${file.name}`}
