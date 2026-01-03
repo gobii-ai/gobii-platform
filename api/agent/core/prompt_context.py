@@ -207,6 +207,15 @@ FROM __tool_results, json_each(result_json,'$.items') AS i
 WHERE result_id='...' LIMIT 25
 ```
 
+```sql
+-- persist tool outputs into a durable table
+CREATE TABLE IF NOT EXISTS items AS
+SELECT json_extract(i.value,'$.title') AS title,
+       json_extract(i.value,'$.url') AS url
+FROM __tool_results, json_each(result_json,'$.items') AS i
+WHERE result_id='...';
+```
+
 ---
 
 ## Trajectory 1: API Data → Storage → Multi-faceted Analysis
@@ -224,19 +233,24 @@ Step 1: Fetch the data
     PATH: $.content.products (847 items)
     FIELDS: id, name, category, price, stock, created_at
 
-Step 2: Since we need multiple analyses, store in a table first
+Step 2: Since we need multiple analyses, persist raw tool output and a clean table
   sqlite_batch(sql="
-    CREATE TABLE IF NOT EXISTS products (
+    CREATE TABLE IF NOT EXISTS products_raw (
       id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
     );
-    INSERT OR REPLACE INTO products (id, name, category, price, stock)
+    INSERT OR REPLACE INTO products_raw
       SELECT json_extract(p.value,'$.id'), json_extract(p.value,'$.name'),
              json_extract(p.value,'$.category'), json_extract(p.value,'$.price'),
              json_extract(p.value,'$.stock')
       FROM __tool_results, json_each(result_json,'$.content.products') AS p
-      WHERE result_id='a1b2c3'", will_continue_work=true)
+      WHERE result_id='a1b2c3';
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
+    );
+    INSERT OR REPLACE INTO products (id, name, category, price, stock)
+      SELECT id, name, category, price, stock FROM products_raw", will_continue_work=true)
 
-  Result: Query 1 affected 847 rows
+  Result: products_raw and products populated (847 rows)
 
 Step 3: Category breakdown
   sqlite_batch(sql="
@@ -296,10 +310,16 @@ Step 2: Create table and parse CSV using sequential field extraction
       p1 AS (SELECT substr(line,1,instr(line,',')-1) as c1, substr(line,instr(line,',')+1) as r FROM lines WHERE length(line)>0),
       p2 AS (SELECT c1, substr(r,1,instr(r,',')-1) as c2, substr(r,instr(r,',')+1) as r2 FROM p1),
       p3 AS (SELECT c1,c2, substr(r2,1,instr(r2,',')-1) as c3, substr(r2,instr(r2,',')+1) as c4 FROM p2)
-    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3",
+    INSERT INTO sensors SELECT CAST(c1 AS INT), CAST(c2 AS REAL), CAST(c3 AS REAL), c4 FROM p3;
+    CREATE TABLE IF NOT EXISTS sensors_summary AS
+      SELECT location, COUNT(*) as n,
+        ROUND(AVG(temp),1) as avg_temp,
+        ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
+        ROUND(AVG(humidity),1) as avg_hum
+      FROM sensors GROUP BY location",
     will_continue_work=true)
 
-  Result: Query 0 affected 0 rows. Query 1 affected 0 rows.
+  Result: sensors loaded and sensors_summary prepared.
   (Note: CTE-based INSERTs often report 0 rows - this is normal, data IS inserted)
 
   sqlite_schema now shows:
@@ -311,11 +331,8 @@ Step 2: Create table and parse CSV using sequential field extraction
 
 Step 3: Analyze (skip verification - schema already confirms data)
   sqlite_batch(sql="
-    SELECT location, COUNT(*) as n,
-      ROUND(AVG(temp),1) as avg_temp,
-      ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
-      ROUND(AVG(humidity),1) as avg_hum
-    FROM sensors GROUP BY location ORDER BY n DESC", will_continue_work=true)
+    SELECT location, n, avg_temp, stdev_temp, avg_hum
+    FROM sensors_summary ORDER BY n DESC", will_continue_work=true)
 
   Result: Building-A|245|23.1|2.31|48.2, Building-B|180|21.8|1.95|52.1, ...
 
@@ -700,7 +717,7 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 http_request wraps responses in $.content, so paths are $.content.items not $.items.
 
-When analyzing data multiple ways, store in a table first, then run multiple queries.
+When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
 ## Smooth Patterns
 
@@ -1547,7 +1564,7 @@ def build_prompt_context(
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
         "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
-        "to keep durable data across cycles."
+        "to keep durable data across cycles. CREATE TABLE AS SELECT is a fast way to persist tool results."
     )
     variable_group.section_text(
         "sqlite_note",
