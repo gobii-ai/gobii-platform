@@ -51,12 +51,12 @@ class ContentSkeleton:
 
 # Multiple patterns to catch various markdown link styles
 _SERP_LINK_PATTERNS = [
-    # Standard markdown: [title](url) - title must be 2+ chars
-    re.compile(r"\[([^\]]{2,80})\]\((https?://[^)]+)\)"),
+    # Standard markdown: [title](url) - title must be 2+ chars, no upper limit
+    re.compile(r"\[([^\]]{2,})\]\((https?://[^)]+)\)"),
     # Empty bracket or short title links: [](url) or [x](url)
     re.compile(r"\[([^\]]{0,1})\]\((https?://[^)]+)\)"),
     # Reference-style: [title]: url
-    re.compile(r"^\[([^\]]{2,80})\]:\s*(https?://\S+)", re.MULTILINE),
+    re.compile(r"^\[([^\]]{2,})\]:\s*(https?://\S+)", re.MULTILINE),
 ]
 # Bare URL pattern as last resort
 _BARE_URL_RE = re.compile(r"(?<![(\[])(https?://[^\s\)\]\"'<>]{15,200})(?![)\]])")
@@ -87,8 +87,8 @@ def _is_useful_url(url: str) -> bool:
     # Skip internal Google URLs
     if any(domain in url for domain in _GOOGLE_INTERNAL):
         return False
-    # Skip very short URLs
-    if len(url) < 20:
+    # Skip very short URLs (https://x.co = 12 chars minimum)
+    if len(url) < 12:
         return False
     return True
 

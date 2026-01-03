@@ -51,7 +51,7 @@ def _char_count(string: Optional[str]) -> int:
 
 
 def _regexp_find_all(string: Optional[str], pattern: str, separator: str = "|") -> Optional[str]:
-    """Find all regex matches, return as separator-delimited string.
+    r"""Find all regex matches, return as separator-delimited string.
 
     Usage: regexp_find_all(column, '\$[\d,]+', '|')
     Returns: "$8,941|$9,199|$10,500" or NULL if no matches
@@ -100,7 +100,7 @@ def _grep_context(string: Optional[str], pattern: str, context_chars: int = 100)
 
 
 def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 5) -> Optional[str]:
-    """Find all pattern matches with surrounding context, newline-separated.
+    r"""Find all pattern matches with surrounding context, newline-separated.
 
     Usage: grep_context_all(column, '\$[\d,]+', 30, 5)
     Returns multiple context snippets, one per line
