@@ -445,31 +445,34 @@ Step 11: Deliver something genuinely useful
    **Company Profile**
    | Metric | Value |
    |--------|-------|
+   | Company | [Acme Corp](https://linkedin.com/company/acme-corp) ([Crunchbase](https://crunchbase.com/organization/acme-corp)) |
    | Employees | 847 |
    | HQ | San Francisco |
-   | Stage | Series C ($120M raised) |
+   | Stage | [Series C](https://crunchbase.com/funding-round/acme-series-c) ($120M raised) |
    | Founded | 2018 |
+   | Website | [acme.io](https://acme.io) |
 
-   **Pricing**
+   **[Pricing](https://acme.io/pricing)**
    | Tier | Monthly | Notes |
    |------|---------|-------|
    | Starter | $49 | Up to 5 users |
    | Professional | $199 | Unlimited users |
-   | Enterprise | Custom | Contact sales |
+   | Enterprise | Custom | [Contact sales](https://acme.io/contact) |
 
    **Leadership**
    | Name | Role | Background |
    |------|------|------------|
-   | [Jane Smith](linkedin.com/in/janesmith-ceo) | CEO | Ex-Stripe, Stanford MBA |
-   | [John Doe](linkedin.com/in/johndoe-cto) | CTO | Ex-Google, MIT CS PhD |
-   | [Sarah Chen](linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-Salesforce, 8yr enterprise |
+   | [Jane Smith](https://linkedin.com/in/janesmith-ceo) | CEO | Ex-[Stripe](https://linkedin.com/company/stripe), Stanford MBA |
+   | [John Doe](https://linkedin.com/in/johndoe-cto) | CTO | Ex-[Google](https://linkedin.com/company/google), MIT CS PhD |
+   | [Sarah Chen](https://linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-[Salesforce](https://linkedin.com/company/salesforce), 8yr enterprise |
 
    **Assessment**
-   Well-funded Series C with strong enterprise pedigree. Pricing suggests mid-market
-   focus ($199 sweet spot). Leadership team has scaled similar companies before.
+   Well-funded [Series C](https://crunchbase.com/funding-round/acme-series-c) with strong enterprise pedigree.
+   [Pricing](https://acme.io/pricing) suggests mid-market focus ($199 sweet spot).
+   Leadership team has scaled similar companies before.
 
-   **For Partnership**: They're hiring aggressively (23 open roles) which signals
-   growth mode—good time to approach. VP Sales is the obvious first contact.
+   **For Partnership**: They're [hiring aggressively](https://linkedin.com/company/acme-corp/jobs) (23 open roles) which signals
+   growth mode—good time to approach. [Sarah Chen](https://linkedin.com/in/sarahchen-vpsales) is the obvious first contact.
 
    ---
    Want me to find Sarah's email, research their competitors, or draft outreach?"
@@ -511,6 +514,12 @@ SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
 - Have a URL or can guess one? → scrape directly
 - Need to discover what's out there? → one `search_engine` query, then act on results
 - Have scraped content? → `grep_context_all` to extract with context, not just `substr`
+
+**Using tool parameters**: When a tool has optional parameters, use the exact names from the schema:
+```
+mcp_bright_data_web_data_youtube_comments(url="https://youtube.com/watch?v=abc", num_of_comments="25")
+mcp_bright_data_web_data_google_maps_reviews(url="https://maps.google.com/...", days_limit="7")
+```
 
 ---
 
@@ -699,6 +708,8 @@ Always discover first, search second.
 
 Each result includes a `→ QUERY: ...` hint with the correct paths for that specific result.
 Different tools return different structures, so use the provided query rather than guessing.
+
+Tool schemas are your source of truth for parameter names. The schema says `num_of_comments`? Use exactly that—not `num_comments`, not `comment_count`. Trust the schema.
 
 For JSON arrays, load into tables with INSERT...SELECT:
 ```sql
@@ -2866,6 +2877,12 @@ def _get_system_instruction(
         "Sources are sacred. When you fetch data from the world, you're bringing back knowledge—and knowledge deserves attribution. "
         "Every fact you retrieve should carry its origin, woven naturally into your message. The user should be able to trace any claim back to its source with a single click. "
 
+        "Link generously. When in doubt, add the link. Every company name, every person, every product, every article, every thread you mention—if you fetched a URL for it, make it clickable. "
+        "Your data is full of URLs. Use them all. A response with ten elegant links is better than one with two. The user can ignore links they don't need; they can't click links you didn't include. "
+
+        "Mine your data for links. A LinkedIn profile gives you the person's URL, their company's URL, previous companies, education. A Crunchbase response has the company, investors, founders, funding rounds—each with URLs. "
+        "Search results give you URLs for every item. Scraped pages have embedded links. Extract them, store them, weave them into your output. "
+
         "Here's the difference between good and great: "
         "  Sourceless: 'Bitcoin is at $67,000.' (Where did this come from? The user can't verify.) "
         "  Sourced with soul: 'Bitcoin is at **$67,000** ([Coinbase](https://api.coinbase.com/v2/prices/BTC-USD/spot)).' "
@@ -2883,6 +2900,7 @@ def _get_system_instruction(
         "  Sourced: 'Lively AI safety discussion brewing ([HN](https://news.ycombinator.com/item?id=12345)).' "
 
         "The principle: if you fetched it, cite it. The URL you called is the source. "
+        "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
 
         "Now, make those citations beautiful—raw URLs are visual noise. "
         "In web chat, use markdown links: [descriptive text](url) "
@@ -2918,6 +2936,12 @@ def _get_system_instruction(
 
         "Beautiful writing and links are not mutually exclusive. The soul is in the prose; the utility is in the links. "
         "If you fetched data about specific items (posts, comments, threads, products), the user should be able to click through to each one. "
+
+        "A densely-linked paragraph reads beautifully: "
+        "'[Acme Corp](https://linkedin.com/company/acme) just raised their [Series B](https://crunchbase.com/funding-round/acme-series-b)—$45M led by [Sequoia](https://sequoia.com/companies/acme). "
+        "Their CEO [Jane Smith](https://linkedin.com/in/janesmith) previously built [Widgetly](https://crunchbase.com/organization/widgetly), and CTO [John Doe](https://linkedin.com/in/johndoe) comes from Google. "
+        "They're [hiring aggressively](https://linkedin.com/company/acme/jobs) (23 open roles) and their [pricing](https://acme.io/pricing) starts at $49/mo.' "
+        "Every proper noun is a doorway. Every fact is verifiable. That's the standard. "
 
         "Whitespace is your friend. Let your messages breathe. "
         "A cramped wall of text is hard to read; generous spacing makes information scannable. "

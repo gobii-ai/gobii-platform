@@ -1531,6 +1531,98 @@
   padding: 0.15rem 0.4rem;
 }
 
+/* Schedule Hero Card - beautiful, human-friendly schedule display */
+.schedule-hero {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  padding: 1rem 1.125rem;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(139, 92, 246, 0.06) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+  border-radius: 0.875rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.schedule-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, transparent 60%, rgba(139, 92, 246, 0.05) 100%);
+  pointer-events: none;
+}
+
+.schedule-hero--disabled {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.06) 0%, rgba(148, 163, 184, 0.04) 100%);
+  border-color: rgba(100, 116, 139, 0.12);
+}
+
+.schedule-hero-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  background: linear-gradient(145deg, #fff 0%, rgba(248, 250, 252, 0.95) 100%);
+  border-radius: 0.75rem;
+  box-shadow:
+    0 1px 3px rgba(99, 102, 241, 0.08),
+    0 2px 8px rgba(99, 102, 241, 0.06);
+  flex-shrink: 0;
+}
+
+.schedule-hero--disabled .schedule-hero-icon {
+  box-shadow:
+    0 1px 3px rgba(100, 116, 139, 0.08),
+    0 2px 8px rgba(100, 116, 139, 0.06);
+}
+
+.schedule-hero-emoji {
+  font-size: 1.375rem;
+  line-height: 1;
+}
+
+.schedule-hero-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.schedule-hero-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6366f1;
+  margin: 0 0 0.125rem 0;
+}
+
+.schedule-hero--disabled .schedule-hero-label {
+  color: #64748b;
+}
+
+.schedule-hero-value {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: #312e81;
+  margin: 0;
+  line-height: 1.3;
+}
+
+.schedule-hero--disabled .schedule-hero-value {
+  color: #475569;
+}
+
+.schedule-hero-badge {
+  width: 1.125rem;
+  height: 1.125rem;
+  color: rgba(99, 102, 241, 0.35);
+  flex-shrink: 0;
+}
+
+.schedule-hero--disabled .schedule-hero-badge {
+  color: rgba(100, 116, 139, 0.3);
+}
+
 .chat-bubble--user {
   --user-bubble-bg: linear-gradient(145deg, #5b52f0 0%, #7c3aed 55%, #8b5cf6 100%);
   --user-bubble-border: rgba(99, 102, 241, 0.25);

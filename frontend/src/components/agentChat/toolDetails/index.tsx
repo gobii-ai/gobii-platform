@@ -1,5 +1,6 @@
-import { Fragment } from 'react'
+import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
+import { ChevronDown, ChevronUp, CalendarClock, Clock, Repeat } from 'lucide-react'
 
 import { MarkdownViewer } from '../../common/MarkdownViewer'
 import { StructuredDataTable } from '../../common/StructuredDataTable'
@@ -9,6 +10,7 @@ import type { ScheduleDescription } from '../../../util/schedule'
 import type { ToolDetailComponent, ToolDetailProps } from '../tooling/types'
 import { parseToolSearchResult } from '../tooling/searchUtils'
 import { isRecord, parseResultObject } from '../../../util/objectUtils'
+import { parseAgentConfigUpdates } from '../../tooling/agentConfigSql'
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -92,6 +94,45 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     <div className="space-y-1.5">
       <p className="tool-chip-panel-title">{title}</p>
       <div className="tool-chip-panel-body">{children}</div>
+    </div>
+  )
+}
+
+function TruncatedMarkdown({ content, maxLines = 3 }: { content: string; maxLines?: number }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const lines = content.split('\n')
+  const needsTruncation = lines.length > maxLines || content.length > 200
+
+  if (!needsTruncation) {
+    return <MarkdownViewer content={content} className="prose prose-sm max-w-none" />
+  }
+
+  const truncatedContent = isExpanded
+    ? content
+    : lines.slice(0, maxLines).join('\n').slice(0, 180) + (content.length > 180 ? '…' : '')
+
+  return (
+    <div className="space-y-2">
+      <div className={isExpanded ? '' : 'line-clamp-3'}>
+        <MarkdownViewer content={truncatedContent} className="prose prose-sm max-w-none" />
+      </div>
+      <button
+        type="button"
+        onClick={() => setIsExpanded(!isExpanded)}
+        className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700 transition-colors"
+      >
+        {isExpanded ? (
+          <>
+            <ChevronUp className="h-3.5 w-3.5" />
+            Show less
+          </>
+        ) : (
+          <>
+            <ChevronDown className="h-3.5 w-3.5" />
+            Read full assignment
+          </>
+        )}
+      </button>
     </div>
   )
 }
@@ -1084,6 +1125,38 @@ export function UpdateScheduleDetail({ entry }: ToolDetailProps) {
   )
 }
 
+export function AgentConfigUpdateDetail({ entry }: ToolDetailProps) {
+  const statements = entry.sqlStatements ?? []
+  const parsedUpdate = parseAgentConfigUpdates(statements)
+  const charterText = parsedUpdate?.charterValue ?? entry.charterText ?? null
+  const updatesCharter = parsedUpdate?.updatesCharter ?? Boolean(charterText)
+  const updatesSchedule = parsedUpdate?.updatesSchedule ?? false
+  const scheduleCleared = parsedUpdate?.scheduleCleared ?? false
+  const scheduleRaw = parsedUpdate?.scheduleValue ?? null
+  const scheduleKnown = scheduleCleared || scheduleRaw !== null
+  const scheduleValue = scheduleCleared ? null : scheduleRaw
+  const scheduleDetails = scheduleKnown ? describeSchedule(scheduleValue) : null
+
+  return (
+    <div className="space-y-4">
+      {/* Schedule - shown first as the hero element when present */}
+      {updatesSchedule && scheduleDetails ? (
+        renderScheduleCard(scheduleDetails)
+      ) : null}
+
+      {/* Assignment - truncated with expand */}
+      {updatesCharter && charterText ? (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Assignment</p>
+          <div className="rounded-xl bg-slate-50/80 p-3.5 shadow-sm border border-slate-100">
+            <TruncatedMarkdown content={charterText} maxLines={3} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   default: GenericToolDetail,
   updateCharter: UpdateCharterDetail,
@@ -1110,6 +1183,65 @@ export function resolveDetailComponent(kind: string | null | undefined): ToolDet
 
 function formatSummaryText(summary: string): string {
   return /[.!?]\s*$/.test(summary) ? summary : `${summary}.`
+}
+
+function getScheduleIcon(schedule: ScheduleDescription) {
+  if (schedule.kind === 'disabled') return Clock
+  if (schedule.kind === 'interval' || (schedule.kind === 'cron' && schedule.summary?.toLowerCase().includes('every'))) {
+    return Repeat
+  }
+  return CalendarClock
+}
+
+function getScheduleEmoji(schedule: ScheduleDescription): string {
+  if (schedule.kind === 'disabled') return '⏸️'
+  const summary = schedule.kind === 'cron' ? schedule.summary : schedule.kind === 'interval' || schedule.kind === 'preset' ? schedule.summary : null
+  if (!summary) return '📅'
+  const lower = summary.toLowerCase()
+  if (lower.includes('hour')) return '⏰'
+  if (lower.includes('day') || lower.includes('daily')) return '🌅'
+  if (lower.includes('week')) return '📆'
+  if (lower.includes('month')) return '🗓️'
+  return '🔄'
+}
+
+function renderScheduleCard(schedule: ScheduleDescription): ReactNode {
+  const Icon = getScheduleIcon(schedule)
+  const emoji = getScheduleEmoji(schedule)
+
+  // Get the human-readable summary
+  const getSummaryText = (): string => {
+    switch (schedule.kind) {
+      case 'disabled':
+        return 'Paused'
+      case 'preset':
+        return schedule.summary
+      case 'interval':
+        return schedule.summary
+      case 'cron':
+        return schedule.summary ?? 'Custom schedule'
+      case 'unknown':
+        return 'Custom schedule'
+      default:
+        return 'Scheduled'
+    }
+  }
+
+  const summaryText = getSummaryText()
+  const isDisabled = schedule.kind === 'disabled'
+
+  return (
+    <div className={`schedule-hero ${isDisabled ? 'schedule-hero--disabled' : ''}`}>
+      <div className="schedule-hero-icon">
+        <span className="schedule-hero-emoji" aria-hidden="true">{emoji}</span>
+      </div>
+      <div className="schedule-hero-content">
+        <p className="schedule-hero-label">{isDisabled ? 'Schedule paused' : 'Runs automatically'}</p>
+        <p className="schedule-hero-value">{summaryText}</p>
+      </div>
+      <Icon className="schedule-hero-badge" aria-hidden="true" />
+    </div>
+  )
 }
 
 function renderScheduleDetails(schedule: ScheduleDescription): ReactNode {
@@ -1152,7 +1284,7 @@ function renderScheduleDetails(schedule: ScheduleDescription): ReactNode {
       )
     case 'cron':
       return (
-        <Section title="Cron Fields">
+        <Section title="Schedule details">
           {schedule.summary ? <p className="schedule-note">{formatSummaryText(schedule.summary)}</p> : null}
           <dl className="schedule-cron-grid">
             {schedule.fields.map((field) => (
@@ -1165,7 +1297,7 @@ function renderScheduleDetails(schedule: ScheduleDescription): ReactNode {
             ))}
           </dl>
           {!schedule.summary ? (
-            <p className="schedule-note">Standard cron expression with {schedule.fields.length} field(s).</p>
+            <p className="schedule-note">Custom schedule details with {schedule.fields.length} field(s).</p>
           ) : null}
         </Section>
       )

@@ -173,47 +173,281 @@ function buildCronSummary(fields: string[]): string | null {
   if (fields.length < 5) return null
   const [minuteRaw, hourRaw, domRaw, monthRaw, dowRaw, yearRaw] = [...fields, undefined]
 
-  if (!isSimpleCronValue(minuteRaw) || !isSimpleCronValue(hourRaw)) {
+  const timeSummary = buildCronTimeSummary(minuteRaw, hourRaw)
+  if (!timeSummary) {
     return null
   }
 
-  const minute = parseCronNumber(minuteRaw)
-  const hour = parseCronNumber(hourRaw)
-  if (minute === null || hour === null) {
+  const daySummary = buildCronDaySummary(domRaw, monthRaw, dowRaw)
+  if (!daySummary) {
     return null
   }
 
-  const time = formatTime(hour, minute)
-  const dom = !isWildcard(domRaw) && isSimpleCronValue(domRaw) ? parseCronNumber(domRaw) : null
-  const month = !isWildcard(monthRaw) && isSimpleCronValue(monthRaw) ? resolveMonthName(monthRaw) : null
-  const dow = !isWildcard(dowRaw) && isSimpleCronValue(dowRaw) ? resolveWeekdayName(dowRaw) : null
   const year = yearRaw && !isWildcard(yearRaw) && isSimpleCronValue(yearRaw) ? parseCronNumber(yearRaw) : null
 
-  if (dom !== null && dow) {
-    return null
-  }
-
-  let summary: string | null = null
-
-  if (dom === null && !dow && !month) {
-    summary = `Every day at ${time}`
-  } else if (dow && !month) {
-    summary = `Every ${dow} at ${time}`
-  } else if (dow && month) {
-    summary = `Every ${dow} in ${month} at ${time}`
-  } else if (dom !== null && !month) {
-    summary = `On the ${formatOrdinal(dom)} day of each month at ${time}`
-  } else if (dom !== null && month) {
-    summary = `On ${month} ${formatOrdinal(dom)} at ${time}`
-  } else if (!dow && !dom && month) {
-    summary = `Every day in ${month} at ${time}`
-  }
+  let summary = combineCronSummary(daySummary, timeSummary)
 
   if (summary && year !== null) {
     summary = `${summary} in ${year}`
   }
 
   return summary
+}
+
+type CronTimeSummary = {
+  text: string
+  kind: 'at' | 'every'
+}
+
+function buildCronTimeSummary(minuteRaw: string | undefined, hourRaw: string | undefined): CronTimeSummary | null {
+  const minute = parseCronNumber(minuteRaw)
+  const hour = parseCronNumber(hourRaw)
+
+  if (minute !== null && hour !== null) {
+    return { text: `at ${formatTime(hour, minute)}`, kind: 'at' }
+  }
+
+  if (minute !== null && isWildcard(hourRaw)) {
+    const text = minute === 0 ? 'every hour' : `every hour at ${minute} minutes past`
+    return { text, kind: 'every' }
+  }
+
+  const minuteStep = parseCronStep(minuteRaw)
+  if (minuteStep && isWildcard(hourRaw)) {
+    return { text: `every ${minuteStep.step} minutes`, kind: 'every' }
+  }
+
+  if (minute !== null) {
+    const hourList = parseCronNumberList(hourRaw)
+    if (hourList?.length) {
+      const times = hourList.map((value) => formatTime(value, minute))
+      return { text: `at ${formatList(times)}`, kind: 'at' }
+    }
+
+    const hourRange = parseCronNumberRange(hourRaw)
+    if (hourRange) {
+      const startTime = formatTime(hourRange[0], minute)
+      const endTime = formatTime(hourRange[1], minute)
+      return { text: `every hour between ${startTime} and ${endTime}`, kind: 'every' }
+    }
+
+    const hourStep = parseCronStep(hourRaw)
+    if (hourStep) {
+      const baseTime =
+        hourStep.start !== null ? formatTime(hourStep.start, minute) : null
+      if (minute === 0 && !baseTime) {
+        return { text: `every ${hourStep.step} hours`, kind: 'every' }
+      }
+      if (baseTime) {
+        return { text: `every ${hourStep.step} hours starting at ${baseTime}`, kind: 'every' }
+      }
+      return { text: `every ${hourStep.step} hours at ${minute} minutes past`, kind: 'every' }
+    }
+  }
+
+  if (hour !== null) {
+    const minuteList = parseCronNumberList(minuteRaw)
+    if (minuteList?.length) {
+      const times = minuteList.map((value) => formatTime(hour, value))
+      return { text: `at ${formatList(times)}`, kind: 'at' }
+    }
+  }
+
+  return null
+}
+
+function buildCronDaySummary(
+  domRaw: string | undefined,
+  monthRaw: string | undefined,
+  dowRaw: string | undefined,
+): string | null {
+  const monthSummary = formatMonthSummary(monthRaw)
+  const dowSummary = formatWeekdaySummary(dowRaw)
+  const domSummary = formatDayOfMonthSummary(domRaw)
+
+  if (dowSummary && domSummary) {
+    return null
+  }
+
+  if (dowSummary) {
+    return monthSummary ? `Every ${dowSummary} in ${monthSummary}` : `Every ${dowSummary}`
+  }
+
+  if (domSummary) {
+    if (monthSummary) {
+      return `On ${monthSummary} ${domSummary}`
+    }
+    return `On the ${domSummary} day of each month`
+  }
+
+  if (monthSummary) {
+    return `Every day in ${monthSummary}`
+  }
+
+  return 'Every day'
+}
+
+function combineCronSummary(daySummary: string, timeSummary: CronTimeSummary): string {
+  if (timeSummary.kind === 'at') {
+    return `${daySummary} ${timeSummary.text}`
+  }
+
+  const normalizedTime = capitalizeFirst(timeSummary.text)
+  if (daySummary === 'Every day') {
+    return normalizedTime
+  }
+  if (daySummary.startsWith('Every day in ')) {
+    const monthPart = daySummary.slice('Every day in '.length)
+    return `${normalizedTime} in ${monthPart}`
+  }
+
+  const daySuffix = daySummary.startsWith('Every ')
+    ? daySummary.slice('Every '.length)
+    : daySummary.startsWith('On ')
+      ? daySummary.slice('On '.length)
+      : daySummary.toLowerCase()
+
+  return `${normalizedTime} on ${daySuffix}`
+}
+
+function formatMonthSummary(value: string | undefined): string | null {
+  if (isWildcard(value)) return null
+  if (!value) return null
+  const list = parseCronNamedList(value, resolveMonthName)
+  if (list?.length) {
+    return formatList(list)
+  }
+  const range = parseCronNamedRange(value, resolveMonthName)
+  if (range) {
+    return `${range[0]}–${range[1]}`
+  }
+  const single = resolveMonthName(value)
+  return single ?? null
+}
+
+function formatWeekdaySummary(value: string | undefined): string | null {
+  if (isWildcard(value)) return null
+  if (!value) return null
+  const list = parseCronNamedList(value, resolveWeekdayName)
+  if (list?.length) {
+    return formatList(list)
+  }
+  const range = parseCronNamedRange(value, resolveWeekdayName)
+  if (range) {
+    return `${range[0]}–${range[1]}`
+  }
+  const single = resolveWeekdayName(value)
+  return single ?? null
+}
+
+function formatDayOfMonthSummary(value: string | undefined): string | null {
+  if (isWildcard(value)) return null
+  if (!value) return null
+  const single = parseCronNumber(value)
+  if (single !== null) {
+    return formatOrdinal(single)
+  }
+  const list = parseCronNumberList(value)
+  if (list?.length) {
+    return formatList(list.map((part) => formatOrdinal(part)))
+  }
+  const range = parseCronNumberRange(value)
+  if (range) {
+    return `${formatOrdinal(range[0])}–${formatOrdinal(range[1])}`
+  }
+  return null
+}
+
+function formatList(values: string[]): string {
+  if (values.length <= 1) return values[0] ?? ''
+  if (values.length === 2) return `${values[0]} and ${values[1]}`
+  return `${values.slice(0, -1).join(', ')}, and ${values[values.length - 1]}`
+}
+
+function parseCronNumberList(value: string | undefined): number[] | null {
+  if (!value || !value.includes(',')) return null
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean)
+  if (!parts.length) return null
+  const numbers: number[] = []
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return null
+    }
+    const parsed = Number.parseInt(part, 10)
+    if (!Number.isFinite(parsed)) {
+      return null
+    }
+    numbers.push(parsed)
+  }
+  return numbers
+}
+
+function parseCronNumberRange(value: string | undefined): [number, number] | null {
+  if (!value || !value.includes('-')) return null
+  const match = value.match(/^(\d+)\s*-\s*(\d+)$/)
+  if (!match) return null
+  const start = Number.parseInt(match[1] ?? '', 10)
+  const end = Number.parseInt(match[2] ?? '', 10)
+  if (!Number.isFinite(start) || !Number.isFinite(end)) {
+    return null
+  }
+  return [start, end]
+}
+
+function parseCronStep(value: string | undefined): { start: number | null; step: number } | null {
+  if (!value || !value.includes('/')) return null
+  const match = value.match(/^(\*|\d+)\s*\/\s*(\d+)$/)
+  if (!match) return null
+  const step = Number.parseInt(match[2] ?? '', 10)
+  if (!Number.isFinite(step) || step <= 0) {
+    return null
+  }
+  const startToken = match[1]
+  if (!startToken || startToken === '*') {
+    return { start: null, step }
+  }
+  const start = Number.parseInt(startToken, 10)
+  if (!Number.isFinite(start)) {
+    return null
+  }
+  return { start, step }
+}
+
+function parseCronNamedList(
+  value: string | undefined,
+  resolver: (token: string) => string | null,
+): string[] | null {
+  if (!value || !value.includes(',')) return null
+  const parts = value.split(',').map((part) => part.trim()).filter(Boolean)
+  if (!parts.length) return null
+  const resolved: string[] = []
+  for (const part of parts) {
+    if (part.includes('-') || part.includes('/') || part.includes('*') || part.includes('?')) {
+      return null
+    }
+    const name = resolver(part)
+    if (!name) return null
+    resolved.push(name)
+  }
+  return resolved
+}
+
+function parseCronNamedRange(
+  value: string | undefined,
+  resolver: (token: string) => string | null,
+): [string, string] | null {
+  if (!value || !value.includes('-')) return null
+  const match = value.match(/^([A-Za-z0-9]+)\s*-\s*([A-Za-z0-9]+)$/)
+  if (!match) return null
+  const start = resolver(match[1] ?? '')
+  const end = resolver(match[2] ?? '')
+  if (!start || !end) return null
+  return [start, end]
+}
+
+function capitalizeFirst(value: string): string {
+  if (!value) return value
+  return value.charAt(0).toUpperCase() + value.slice(1)
 }
 
 function isWildcard(value: string | undefined): boolean {

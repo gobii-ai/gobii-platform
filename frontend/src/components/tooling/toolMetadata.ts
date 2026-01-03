@@ -28,6 +28,8 @@ import { parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
+import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
+import { parseAgentConfigUpdates } from './agentConfigSql'
 
 const COMMUNICATION_TOOL_NAMES = [
   'send_email',
@@ -71,6 +73,7 @@ export function coerceString(value: unknown): string | null {
   }
   return null
 }
+
 
 function deriveFileExport(
   entry: ToolCallEntry,
@@ -139,25 +142,98 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
-    derive(_, parameters) {
+    derive(entry, parameters) {
       const sqlParam = parameters?.sql
       const queryParam = parameters?.query
       const queriesParam = parameters?.queries
-      let rawQueries: unknown[] = [];
+      let rawQueries: unknown[] = []
       if (sqlParam !== undefined && sqlParam !== null) {
-        rawQueries = Array.isArray(sqlParam) ? sqlParam : [sqlParam];
+        rawQueries = Array.isArray(sqlParam) ? sqlParam : [sqlParam]
       } else if (queryParam !== undefined && queryParam !== null) {
-        rawQueries = Array.isArray(queryParam) ? queryParam : [queryParam];
+        rawQueries = Array.isArray(queryParam) ? queryParam : [queryParam]
       } else if (queriesParam !== undefined && queriesParam !== null) {
-        rawQueries = Array.isArray(queriesParam) ? queriesParam : [queriesParam];
+        rawQueries = Array.isArray(queriesParam) ? queriesParam : [queriesParam]
       } else if (Array.isArray(parameters?.operations)) {
         // Fallback for backward compatibility with older tool calls
-        rawQueries = parameters.operations;
+        rawQueries = parameters.operations
+      }
+
+      const statements = rawQueries.map(String)
+      const agentConfigUpdate = parseAgentConfigUpdates(statements)
+      if (agentConfigUpdate) {
+        const {
+          updatesCharter,
+          updatesSchedule,
+          charterValue,
+          scheduleValue,
+          scheduleCleared,
+        } = agentConfigUpdate
+        const scheduleKnown = scheduleCleared || scheduleValue !== null
+        const normalizedSchedule = scheduleCleared ? null : scheduleValue
+        const scheduleSummary = scheduleKnown ? summarizeSchedule(normalizedSchedule) : null
+        const scheduleCaption = scheduleCleared
+          ? 'Disabled'
+          : scheduleSummary ?? 'Schedule updated'
+        const scheduleSummaryText = scheduleCleared
+          ? 'Schedule disabled.'
+          : scheduleSummary
+            ? `Schedule set to ${scheduleSummary}.`
+            : 'Schedule updated.'
+        const baseTransform = {
+          detailComponent: AgentConfigUpdateDetail,
+          charterText: charterValue ?? undefined,
+          sqlStatements: statements,
+        }
+
+        if (updatesCharter && updatesSchedule) {
+          const combinedScheduleCaption = scheduleCleared
+            ? 'Schedule disabled'
+            : scheduleSummary ?? 'Schedule updated'
+          const combinedSummary = scheduleCleared
+            ? 'Assignment updated. Schedule disabled.'
+            : scheduleSummary
+              ? `Assignment updated. Schedule set to ${scheduleSummary}.`
+              : 'Assignment and schedule updated.'
+          return {
+            label: 'Assignment and schedule updated',
+            caption: `Assignment updated • ${combinedScheduleCaption}`,
+            icon: Workflow,
+            iconBgClass: 'bg-indigo-100',
+            iconColorClass: 'text-indigo-600',
+            summary: combinedSummary,
+            ...baseTransform,
+          }
+        }
+
+        if (updatesCharter) {
+          const charterCaption = charterValue ? truncate(charterValue, 48) : null
+          return {
+            label: 'Assignment updated',
+            caption: charterCaption ?? entry.caption ?? 'Assignment updated',
+            icon: FileCheck2,
+            iconBgClass: 'bg-indigo-100',
+            iconColorClass: 'text-indigo-600',
+            summary: 'Assignment updated.',
+            ...baseTransform,
+          }
+        }
+
+        if (updatesSchedule) {
+          return {
+            label: 'Schedule updated',
+            caption: scheduleCaption,
+            icon: CalendarClock,
+            iconBgClass: 'bg-sky-100',
+            iconColorClass: 'text-sky-600',
+            summary: scheduleSummaryText,
+            ...baseTransform,
+          }
+        }
       }
 
       return {
         caption: rawQueries.length ? `${rawQueries.length} statement${rawQueries.length === 1 ? '' : 's'}` : 'SQL batch',
-        sqlStatements: rawQueries.map(String),
+        sqlStatements: statements,
       }
     },
   },
