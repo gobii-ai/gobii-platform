@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
+from ..tools.context_hints import extract_context_hint
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
@@ -95,11 +96,22 @@ def prepare_tool_results_for_prompt(
         # Only show rich analysis for tools that fetch external data with unknown structure
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
 
+        # Extract context hint for lightning-fast agent decisions
+        # This is optimistic - if extraction fails, we just skip it
+        context_hint = None
+        if is_analysis_eligible and stored_json:
+            try:
+                payload = json.loads(stored_json)
+                context_hint = extract_context_hint(record.tool_name, payload)
+            except Exception:
+                pass  # Optimistic - no hint is fine
+
         meta_text = _format_meta_text(
             record.step_id,
             meta,
             analysis=analysis if is_analysis_eligible else None,
             stored_in_db=stored_in_db,
+            context_hint=context_hint,
         )
         recency_position = recency_positions.get(record.step_id)
         preview_source = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
@@ -394,6 +406,7 @@ def _format_meta_text(
     *,
     analysis: Optional[ResultAnalysis],
     stored_in_db: bool,
+    context_hint: Optional[str] = None,
 ) -> str:
     """Format metadata and analysis into actionable text for the prompt.
 
@@ -449,6 +462,11 @@ def _format_meta_text(
                 f"\n-> instr(result_text,'keyword') to find, substr() to extract"
                 f"\n-> FROM __tool_results WHERE result_id='{result_id}'"
             )
+
+    # Append context hint if available (optimistic - only when extraction succeeded)
+    # This gives the agent immediate actionable info without extra extraction steps
+    if context_hint:
+        meta_line += f"\n{context_hint}"
 
     return meta_line
 
