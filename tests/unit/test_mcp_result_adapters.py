@@ -37,11 +37,12 @@ class DummyResult:
 
 @tag("batch_mcp_tools")
 class BrightDataSearchEngineAdapterTests(SimpleTestCase):
-    def test_strips_image_fields_from_organic_results(self):
+    def test_transforms_organic_to_skeleton_format(self):
+        """Organic results are transformed to skeleton format (images implicitly stripped)."""
         payload = {
             "organic": [
-                {"title": "Example", "image": "http://example.com/a.png", "image_base64": "abc"},
-                {"title": "Example 2", "image": "http://example.com/b.png"},
+                {"title": "Example", "link": "https://example.com", "image": "http://example.com/a.png"},
+                {"title": "Example 2", "link": "https://example2.com", "image": "http://example.com/b.png"},
             ]
         }
         adapter = BrightDataSearchEngineAdapter()
@@ -50,24 +51,21 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         adapted = adapter.adapt(result)
         cleaned = json.loads(adapted.content[0].text)
 
-        self.assertNotIn("image", cleaned["organic"][0])
-        self.assertNotIn("image_base64", cleaned["organic"][0])
-        self.assertNotIn("image", cleaned["organic"][1])
-        self.assertEqual(cleaned["organic"][0]["title"], "Example")
+        # Output is skeleton format
+        self.assertEqual(cleaned["kind"], "serp")
+        self.assertIn("items", cleaned)
+        # Items have t/u/p fields, no images
+        self.assertEqual(cleaned["items"][0]["t"], "Example")
+        self.assertEqual(cleaned["items"][0]["u"], "https://example.com")
+        self.assertEqual(cleaned["items"][0]["p"], 1)
+        self.assertNotIn("image", cleaned["items"][0])
 
-    def test_strips_nested_images_from_organic_results(self):
+    def test_skeleton_includes_position(self):
+        """Skeleton items include position from source or auto-generated."""
         payload = {
             "organic": [
-                {
-                    "title": "Example",
-                    "images": [
-                        {
-                            "image": "http://example.com/nested.png",
-                            "image_base64": "abc",
-                            "caption": "keep",
-                        }
-                    ],
-                }
+                {"title": "First", "link": "https://first.com", "position": 1},
+                {"title": "Second", "link": "https://second.com"},  # No position, auto-generated
             ]
         }
         adapter = BrightDataSearchEngineAdapter()
@@ -76,10 +74,8 @@ class BrightDataSearchEngineAdapterTests(SimpleTestCase):
         adapted = adapter.adapt(result)
         cleaned = json.loads(adapted.content[0].text)
 
-        nested = cleaned["organic"][0]["images"][0]
-        self.assertNotIn("image", nested)
-        self.assertNotIn("image_base64", nested)
-        self.assertEqual(nested["caption"], "keep")
+        self.assertEqual(cleaned["items"][0]["p"], 1)
+        self.assertEqual(cleaned["items"][1]["p"], 2)  # Auto-generated
 
     def test_batch_adapter_strips_nested_images(self):
         payload = [
@@ -289,7 +285,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
-        payload = {"organic": [{"title": "Example", "image": "http://example.com/a.png", "image_base64": "abc"}]}
+        payload = {"organic": [{"title": "Example", "link": "https://example.com", "image": "http://example.com/a.png"}]}
         dummy_result = DummyResult(json.dumps(payload))
         loop = MagicMock()
         loop.run_until_complete.side_effect = lambda _: dummy_result
@@ -305,9 +301,10 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
 
         self.assertEqual(response.get("status"), "success")
         cleaned = json.loads(response.get("result"))
-        self.assertNotIn("image", cleaned["organic"][0])
-        self.assertNotIn("image_base64", cleaned["organic"][0])
-        self.assertEqual(cleaned["organic"][0]["title"], "Example")
+        # Output is skeleton format
+        self.assertEqual(cleaned["kind"], "serp")
+        self.assertEqual(cleaned["items"][0]["t"], "Example")
+        self.assertNotIn("image", cleaned["items"][0])
 
     def test_execute_mcp_tool_strips_linkedin_text_html(self):
         tool_info = self.company_tool_info
