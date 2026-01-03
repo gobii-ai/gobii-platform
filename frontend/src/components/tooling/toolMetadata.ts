@@ -140,9 +140,15 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconColorClass: 'text-emerald-600',
     detailKind: 'sqliteBatch',
     derive(_, parameters) {
+      const sqlParam = parameters?.sql
+      const queryParam = parameters?.query
       const queriesParam = parameters?.queries
       let rawQueries: unknown[] = [];
-      if (queriesParam) {
+      if (sqlParam !== undefined && sqlParam !== null) {
+        rawQueries = Array.isArray(sqlParam) ? sqlParam : [sqlParam];
+      } else if (queryParam !== undefined && queryParam !== null) {
+        rawQueries = Array.isArray(queryParam) ? queryParam : [queryParam];
+      } else if (queriesParam !== undefined && queriesParam !== null) {
         rawQueries = Array.isArray(queriesParam) ? queriesParam : [queriesParam];
       } else if (Array.isArray(parameters?.operations)) {
         // Fallback for backward compatibility with older tool calls

@@ -50,7 +50,7 @@ class TestParallelToolCallsExecution(TestCase):
         tc1 = MagicMock()
         tc1.function = MagicMock()
         tc1.function.name = 'sqlite_batch'
-        tc1.function.arguments = '{"queries": ["select 1"]}'
+        tc1.function.arguments = '{"sql": "select 1"}'
 
         tc2 = MagicMock()
         tc2.function = MagicMock()

@@ -128,14 +128,35 @@ def _split_sqlite_statements(sql: str) -> List[str]:
     return statements
 
 
+def _extract_sql_param(params: Dict[str, Any]) -> Any:
+    for key in ("sql", "query", "queries"):
+        if key in params:
+            return params.get(key)
+    return None
+
+
+def _unwrap_wrapped_sql(statement: str) -> str:
+    trimmed = statement.strip()
+    if len(trimmed) >= 2 and trimmed[0] == trimmed[-1] and trimmed[0] in ("'", '"'):
+        inner = trimmed[1:-1].strip()
+        if inner:
+            return inner
+    return trimmed
+
+
 def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
-    """Return a list of SQL strings from the single 'queries' parameter."""
-    if "queries" not in params:
+    """Return a list of SQL strings from sql/query/queries inputs."""
+    raw = _extract_sql_param(params)
+    if raw is None:
         return None
 
-    raw = params.get("queries")
+    if isinstance(raw, dict):
+        raw = _extract_sql_param(raw)
+        if raw is None:
+            return None
+
     if isinstance(raw, str):
-        items = [raw]
+        items: List[str] = [_unwrap_wrapped_sql(raw)]
     elif isinstance(raw, list):
         items = raw
     else:
@@ -145,7 +166,23 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     for item in items:
         if not isinstance(item, str):
             return None
-        split_items = _split_sqlite_statements(item)
+        normalized = _unwrap_wrapped_sql(item)
+        if not normalized:
+            continue
+        trimmed = normalized.strip()
+        if trimmed.startswith("[") and trimmed.endswith("]"):
+            try:
+                parsed = json.loads(trimmed)
+            except json.JSONDecodeError:
+                return None
+            if not isinstance(parsed, list) or not all(isinstance(entry, str) for entry in parsed):
+                return None
+            for entry in parsed:
+                split_items = _split_sqlite_statements(_unwrap_wrapped_sql(entry))
+                if split_items:
+                    queries.extend(split_items)
+            continue
+        split_items = _split_sqlite_statements(normalized)
         if split_items:
             queries.extend(split_items)
 
@@ -158,7 +195,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     if not queries:
         return {
             "status": "error",
-            "message": "Provide 'queries' as a SQL string or an array of SQL strings.",
+            "message": "Provide `sql` as a SQL string (semicolon-separated for multiple statements).",
         }
 
     will_continue_work_raw = params.get("will_continue_work", None)
@@ -272,29 +309,22 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
-                "Provide 'queries' as a SQL string or an array of SQL strings to run sequentially; "
-                "multiple statements in one string are split using sqlparse. "
+                "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
                 "REMEMBER TO PROPERLY ESCAPE STRINGS IN SQL STATEMENTS. "
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "queries": {
-                        "anyOf": [
-                            {"type": "string"},
-                            {
-                                "type": "array",
-                                "items": {"type": "string"},
-                            },
-                        ],
-                        "description": "SQL to execute (string for one statement, or array for multiple). You are responsible for managing schema and selective retrieval.",
+                    "sql": {
+                        "type": "string",
+                        "description": "SQL to execute as a single string. Use semicolons to separate statements.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
                     },
                 },
-                "required": ["queries"],
+                "required": ["sql"],
             },
         },
     }

@@ -354,7 +354,43 @@ export function McpToolDetail({ entry }: ToolDetailProps) {
 }
 
 export function SqliteBatchDetail({ entry }: ToolDetailProps) {
-  const statements = entry.sqlStatements || (Array.isArray(entry.parameters?.operations) ? (entry.parameters?.operations as string[]) : null)
+  const statements = (() => {
+    if (entry.sqlStatements?.length) {
+      return entry.sqlStatements
+    }
+    const params =
+      entry.parameters && typeof entry.parameters === 'object'
+        ? (entry.parameters as Record<string, unknown>)
+        : null
+    if (!params) {
+      return null
+    }
+    const sqlParam = params['sql']
+    if (typeof sqlParam === 'string') {
+      return [sqlParam]
+    }
+    if (Array.isArray(sqlParam)) {
+      return sqlParam.map(String)
+    }
+    const queryParam = params['query']
+    if (typeof queryParam === 'string') {
+      return [queryParam]
+    }
+    if (Array.isArray(queryParam)) {
+      return queryParam.map(String)
+    }
+    const queriesParam = params['queries']
+    if (typeof queriesParam === 'string') {
+      return [queriesParam]
+    }
+    if (Array.isArray(queriesParam)) {
+      return queriesParam.map(String)
+    }
+    if (Array.isArray(params['operations'])) {
+      return params['operations'].map(String)
+    }
+    return null
+  })()
   const result = entry.result
   return (
     <div className="space-y-3 text-sm text-slate-600">

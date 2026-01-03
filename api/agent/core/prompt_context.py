@@ -225,7 +225,7 @@ Step 1: Fetch the data
     FIELDS: id, name, category, price, stock, created_at
 
 Step 2: Since we need multiple analyses, store in a table first
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE IF NOT EXISTS products (
       id INTEGER PRIMARY KEY, name TEXT, category TEXT, price REAL, stock INTEGER
     );
@@ -239,7 +239,7 @@ Step 2: Since we need multiple analyses, store in a table first
   Result: Query 1 affected 847 rows
 
 Step 3: Category breakdown
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT category, COUNT(*) as count,
            ROUND(AVG(price),2) as avg_price,
            ROUND(MIN(price),2) as min_price,
@@ -249,7 +249,7 @@ Step 3: Category breakdown
   Result: Electronics|312|149.99|9.99|899.99, Clothing|245|45.50|12.00|299.00, ...
 
 Step 4: Find outliers - products priced unusually high or low for their category
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT p.name, p.category, p.price, cat.avg_price
     FROM products p
     JOIN (SELECT category, AVG(price) as avg_price FROM products GROUP BY category) cat
@@ -279,7 +279,7 @@ Step 1: Fetch the CSV
     GET CSV: SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='d4e5f6'
 
 Step 2: Create table and parse CSV using sequential field extraction
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE sensors (sensor_id INT, temp REAL, humidity REAL, location TEXT);
 
     WITH RECURSIVE
@@ -310,7 +310,7 @@ Step 2: Create table and parse CSV using sequential field extraction
   Schema confirms 500 rows with correct data - no verification query needed.
 
 Step 3: Analyze (skip verification - schema already confirms data)
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT location, COUNT(*) as n,
       ROUND(AVG(temp),1) as avg_temp,
       ROUND(sqrt(avg(temp*temp) - avg(temp)*avg(temp)),2) as stdev_temp,
@@ -352,7 +352,7 @@ Step 2: Gather structured company data (parallel calls)
   → Crunchbase shows: Series C, $120M raised, last round Dec 2024
 
 Step 3: Store company data for cross-referencing
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE companies (
       name TEXT PRIMARY KEY, linkedin_url TEXT, crunchbase_url TEXT, website TEXT,
       employees INT, hq TEXT, founded INT, funding_stage TEXT, total_raised REAL
@@ -373,7 +373,7 @@ Step 5: Scrape their pricing page + get job listings (parallel)
   mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
 
 Step 6: Extract pricing tiers from messy webpage content
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT grep_context_all(json_extract(result_json,'$.result'), '\\$[\\d,]+', 50, 10)
     FROM __tool_results WHERE result_id='pricing123'", will_continue_work=true)
 
@@ -382,7 +382,7 @@ Step 6: Extract pricing tiers from messy webpage content
   → "...Enterprise: Contact sales for custom..."
 
 Step 7: Store pricing in structured form
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE pricing (tier TEXT, price_monthly REAL, notes TEXT);
     INSERT INTO pricing VALUES
       ('Starter', 49, 'up to 5 users'),
@@ -396,7 +396,7 @@ Step 8: Get key people—LinkedIn showed executives, now get details
   mcp_bright_data_web_data_linkedin_person_profile(url="linkedin.com/in/sarahchen-vpsales")
 
 Step 9: Normalize people data into a table (handle messy/missing fields)
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE people (
       name TEXT, title TEXT, linkedin_url TEXT, company TEXT,
       prev_companies TEXT, education TEXT, years_in_role INT
@@ -416,7 +416,7 @@ Step 9: Normalize people data into a table (handle messy/missing fields)
     WHERE result_id IN ('person1','person2','person3')", will_continue_work=true)
 
 Step 10: Quick analysis—what's the talent profile?
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT prev_companies FROM people;
     SELECT tier, price_monthly FROM pricing ORDER BY price_monthly", will_continue_work=true)
 
@@ -513,7 +513,7 @@ Step 1: Fetch orders from API (JSON)
     FIELDS: order_id:int, product_code:str, quantity:int, customer_id:int
 
 Step 2: Store orders in table
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE orders (order_id INT PRIMARY KEY, product_code TEXT, quantity INT, customer_id INT);
     INSERT INTO orders SELECT
       json_extract(o.value,'$.order_id'), json_extract(o.value,'$.product_code'),
@@ -533,7 +533,7 @@ Step 3: Fetch product catalog (CSV)
     PATTERN: 4 cols need 3 CTEs: p1→...→p3, where p3 extracts c3 AND c4
 
 Step 4: Parse CSV into products table
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     CREATE TABLE products (code TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
     WITH RECURSIVE
       csv AS (SELECT json_extract(result_json,'$.content') as txt FROM __tool_results WHERE result_id='cat456'),
@@ -553,7 +553,7 @@ Step 4: Parse CSV into products table
   Result: Query 1 affected 1200 rows
 
 Step 5: Join and identify issues - orders for products with insufficient stock
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT o.order_id, o.product_code, o.quantity, p.stock, p.name,
            CASE WHEN p.code IS NULL THEN 'UNKNOWN_PRODUCT'
                 WHEN o.quantity > p.stock THEN 'INSUFFICIENT_STOCK'
@@ -594,7 +594,7 @@ Step 2: Fetch warehouse physical counts (CSV export)
     PATTERN: 3 cols need 2 CTEs: p1→...→p2, where p2 extracts c2 AND c3
 
 Step 3: Load both into tables for comparison
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     -- Table 1: System inventory from JSON
     CREATE TABLE system_inv (sku TEXT PRIMARY KEY, system_count INT, location TEXT);
     INSERT INTO system_inv SELECT
@@ -621,7 +621,7 @@ Step 3: Load both into tables for comparison
   Result: Query 0 affected 500 rows. Query 1 affected 520 rows.
 
 Step 4: Find discrepancies - items where counts don't match
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT COALESCE(s.sku, w.sku) as sku,
            s.system_count, w.physical_count,
            (COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance,
@@ -637,7 +637,7 @@ Step 4: Find discrepancies - items where counts don't match
   Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
 
 Step 5: Summarize by issue type for decision making
-  sqlite_batch(queries="
+  sqlite_batch(sql="
     SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
     FROM (
       SELECT CASE WHEN s.sku IS NULL THEN 'IN_WAREHOUSE_NOT_SYSTEM'
@@ -702,25 +702,22 @@ http_request wraps responses in $.content, so paths are $.content.items not $.it
 
 When analyzing data multiple ways, store in a table first, then run multiple queries.
 
-## Common Pitfalls
+## Smooth Patterns
 
-**result_text vs result_json**: Web/API results are stored as JSON, so `result_text` is often NULL.
-Use the `→ QUERY:` hint which shows the correct extraction path.
-For markdown/HTML content embedded in JSON, the hint gives a ready-to-use query with substr.
+**result_json first**: Web/API results live in `result_json`. Use the `→ QUERY:` hint for the exact path.
+For markdown/HTML content embedded in JSON, the hint provides a ready-to-run `substr` query.
 
-**CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
-The data is inserted—the sqlite_schema will show sample rows and row counts to confirm. No need for verification queries.
+**CTE-based INSERT**: WITH RECURSIVE...INSERT queries can report 0 affected rows; rely on sqlite_schema for row counts and samples.
 
-**Query formatting**: Pass SQL as a plain string or array of strings to sqlite_batch.
-- `queries='SELECT * FROM t'` ✓
-- `queries=['SELECT * FROM t', 'SELECT * FROM t2']` ✓
-- `queries='["SELECT * FROM t"]'` ✗ (don't JSON-stringify the array)
+**Query formatting**: Pass SQL as a single, clean string. Use semicolons to separate statements.
+- `sql='SELECT * FROM t'`
+- `sql='CREATE TABLE t(a INT); INSERT INTO t VALUES (1); SELECT * FROM t'`
 
-**SQLite quirks**:
-- No STDEV/STDDEV - use: `sqrt(avg(x*x) - avg(x)*avg(x))`
-- No MEDIAN - use: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
-- Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
-- Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
+**SQLite formulas**:
+- Standard deviation: `sqrt(avg(x*x) - avg(x)*avg(x))`
+- Median: `SELECT x FROM t ORDER BY x LIMIT 1 OFFSET (SELECT COUNT(*)/2 FROM t)`
+- Reuse computed values by wrapping the SELECT in a subquery.
+- Built-in aggregates: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
 **Text analysis functions** (grep-like search for large text):
 - `regexp_find_all(col, 'pattern')` - find ALL matches → "match1|match2|..."
@@ -748,20 +745,15 @@ SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 5)
 SELECT regexp_find_all(result_text, 'https?://[^\\s<>\"]+')
 ```
 
-**Always get context** - a match alone can mislead:
+**Always get context**: Use context-aware matches so each price has meaning.
 ```sql
--- BAD: Just finding "$99" doesn't tell you what it's for
-SELECT regexp_find_all(result_text, '\\$\\d+')  -- "$99|$199|$49"... which is the product?
-
--- GOOD: Context shows what each price refers to
 SELECT grep_context_all(result_text, '\\$\\d+', 40, 5)
 -- → "...Basic plan: $99/month, Pro plan: $199/month..."
 -- → "...shipping fee: $49 for orders under..."
 ```
 
-**UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.
-`SELECT 'header' UNION ALL SELECT col1, col2 FROM t` fails (1 vs 2 columns).
-Either run separate queries, or pad: `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
+**UNION/UNION ALL alignment**: Keep column counts consistent; pad when needed.
+`SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
 
 **Verify via schema, not queries**: After INSERT, the sqlite_schema shows:
 ```
@@ -2987,19 +2979,15 @@ def _get_system_instruction(
         "  - X/Twitter timelines (via nitter.net) "
 
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
-        "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it—don't keep searching. "
+        "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it and move forward. "
         "Scraping a page gives you 10x more info than another search query. See a company URL? Scrape it. See a team page? Scrape it. Your brain + scraped content beats endless searching. "
 
-        "**Anti-patterns to avoid**: "
-        "❌ search_engine → search_engine → search_engine → finally scrape something "
-        "❌ Using search_engine when you already know where the data is (LinkedIn, GitHub, etc.) "
-        "❌ Searching for a company instead of using search_tools('linkedin crunchbase') "
-        "❌ Repeating searches with slightly different queries hoping for better results "
+        "**Preferred flow**: "
         "✓ One focused search_tools or search_engine → read results → scrape/extract → deliver "
         "✓ Know the platform? → search_tools to enable extractors → use them directly "
         "✓ Have a URL in your results? → stop searching, start scraping "
 
-        "The lazy agent searches repeatedly. The smart agent thinks: 'What do I know? What tool does that imply?' then acts. "
+        "The best agents think: 'What do I know? What tool does that imply?' then act. "
 
         "`http_request` fetches data (proxy handled for you). "
         "`secure_credentials_request` is for API keys you'll use with http_request, or login credentials for spawn_web_task. "
