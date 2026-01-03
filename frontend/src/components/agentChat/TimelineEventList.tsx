@@ -33,15 +33,15 @@ export const TimelineEventList = memo(function TimelineEventList({
 
   if (initialLoading) {
     return (
-      <div className="timeline-loading-state flex items-center justify-center gap-3 rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-purple-50/60 px-6 py-8 shadow-sm">
+      <div className="timeline-loading-state flex items-center justify-center gap-3.5 rounded-[1.25rem] border border-indigo-100/80 bg-gradient-to-br from-white via-indigo-50/60 to-purple-50/40 px-7 py-9 shadow-sm">
         <span className="loading-pip" aria-hidden="true" />
-        <span className="text-sm font-semibold text-indigo-900/80">Loading conversation…</span>
+        <span className="text-sm font-medium tracking-tight text-indigo-800/75">Loading conversation…</span>
       </div>
     )
   }
 
   if (!events.length) {
-    return <div className="timeline-empty text-center text-sm text-slate-400">No activity yet.</div>
+    return <div className="timeline-empty text-center text-sm font-medium tracking-tight text-slate-400/80">No activity yet.</div>
   }
 
   return (
