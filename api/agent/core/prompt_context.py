@@ -341,13 +341,15 @@ Step 2: Read the search results (use the QUERY hint exactly)
     SELECT substr(json_extract(result_json,'$.result'),1,2000)
     FROM __tool_results WHERE result_id='g7h8i9'", will_continue_work=true)
 
-  Result shows markdown with search results:
+  Result shows markdown table (t=title, u=url, p=preview):
     "## Items
      | t | u | p |
      |---|---|---|
      | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
      | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
      ..."
+
+  → Found URLs! Pick the best one and scrape it (don't search again).
 
 Step 3: Scrape the most relevant URL
   mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
@@ -2806,6 +2808,7 @@ def _get_system_instruction(
 
         "When searching for data, be precise: if you need a price or metric, search for 'bitcoin price API json endpoint' rather than just 'bitcoin price'. "
         "One focused search beats three scattered ones. Read results before searching again. Once you have a URL, scrape it—don't keep searching. "
+        "Scraping a page gives you 10x more info than another search query. See a company URL? Scrape it. See a team page? Scrape it. Your brain + scraped content beats endless searching. "
 
         "`http_request` fetches data (proxy handled for you). "
         "`secure_credentials_request` is for API keys you'll use with http_request, or login credentials for spawn_web_task. "
