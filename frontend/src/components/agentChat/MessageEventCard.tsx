@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -25,7 +26,7 @@ type MessageEventCardProps = {
   agentColorHex?: string
 }
 
-export function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex }: MessageEventCardProps) {
+export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
   const channel = (message.channel || 'web').toLowerCase()
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
@@ -64,6 +65,10 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
   }
 
   const relativeLabel = message.relativeTimestamp || formatRelativeTimestamp(message.timestamp) || ''
+  const status = message.status
+  const statusLabel = status === 'sending' ? 'Sending...' : status === 'failed' ? 'Failed to send' : null
+  const metaLabel = statusLabel || relativeLabel || message.timestamp || ''
+  const metaTitle = message.error || message.timestamp || undefined
   const palette = !isPeer && !isAgent ? buildUserChatPalette(agentColorHex) : null
 
   const contentTone = isPeer ? 'text-slate-800' : isAgent ? 'text-slate-800' : ''
@@ -80,7 +85,11 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
   const bubbleStyle = palette?.cssVars
 
   return (
-    <article className={`timeline-event chat-event ${alignmentClass} ${isPeer ? 'is-peer' : ''}`} data-cursor={eventCursor}>
+    <article
+      className={`timeline-event chat-event ${alignmentClass} ${isPeer ? 'is-peer' : ''}`}
+      data-cursor={eventCursor}
+      data-status={status || undefined}
+    >
       <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>
         <div className={`chat-author ${authorTheme}`}>
           {authorLabel}
@@ -99,8 +108,8 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
           <div className="chat-attachments">
             {message.attachments.map((attachment) => {
               const href = attachment.downloadUrl || attachment.url
-              return (
-                <a key={attachment.id} href={href} target="_blank" rel="noopener noreferrer">
+              const content = (
+                <>
                   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.415-6.414a4 4 0 10-5.657-5.657l-6.415 6.414" />
                   </svg>
@@ -110,15 +119,29 @@ export function MessageEventCard({ eventCursor, message, agentFirstName, agentCo
                   {attachment.fileSizeLabel ? (
                     <span className={isAgent ? 'text-slate-500' : ''}>{attachment.fileSizeLabel}</span>
                   ) : null}
-                </a>
+                </>
+              )
+
+              if (href) {
+                return (
+                  <a key={attachment.id} href={href} target="_blank" rel="noopener noreferrer">
+                    {content}
+                  </a>
+                )
+              }
+
+              return (
+                <span key={attachment.id} className="chat-attachment-pending" title={attachment.filename}>
+                  {content}
+                </span>
               )
             })}
           </div>
         ) : null}
       </div>
-      <div className={metaTheme} title={message.timestamp || undefined}>
-        {relativeLabel || message.timestamp}
+      <div className={metaTheme} title={metaTitle}>
+        {metaLabel}
       </div>
     </article>
   )
-}
+})

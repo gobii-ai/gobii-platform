@@ -76,20 +76,28 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
       return
     }
+    const attachmentsSnapshot = attachments.slice()
     if (onSubmit) {
       try {
         setIsSending(true)
-        await onSubmit(trimmed, attachments)
+        setBody('')
+        setAttachments([])
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
+        requestAnimationFrame(() => adjustTextareaHeight(true))
+        await onSubmit(trimmed, attachmentsSnapshot)
       } finally {
         setIsSending(false)
       }
+    } else {
+      setBody('')
+      setAttachments([])
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      requestAnimationFrame(() => adjustTextareaHeight(true))
     }
-    setBody('')
-    setAttachments([])
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-    requestAnimationFrame(() => adjustTextareaHeight(true))
   }, [adjustTextareaHeight, attachments, body, disabled, isSending, onSubmit])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {

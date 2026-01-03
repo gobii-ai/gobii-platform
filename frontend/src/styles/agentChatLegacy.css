@@ -795,6 +795,22 @@
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.12);
 }
 
+.chat-event[data-status='sending'] .chat-bubble {
+  opacity: 0.88;
+}
+
+.chat-event[data-status='sending'] .chat-meta {
+  color: rgba(129, 140, 248, 0.9);
+}
+
+.chat-event[data-status='failed'] .chat-bubble {
+  border-color: rgba(244, 63, 94, 0.45);
+}
+
+.chat-event[data-status='failed'] .chat-meta {
+  color: rgba(244, 63, 94, 0.85);
+}
+
 .chat-content {
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -1519,6 +1535,18 @@
   font-size: 0.75rem;
   text-decoration: none;
   transition: background 0.18s ease;
+}
+
+.chat-attachment-pending {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  border: 1px dashed rgba(99, 102, 241, 0.35);
+  color: rgba(79, 70, 229, 0.8);
+  background: rgba(99, 102, 241, 0.08);
 }
 
 .chat-bubble--peer-out .chat-attachments a,

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { memo, useCallback } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { ToolDetailProvider } from './tooling/ToolDetailContext'
@@ -14,7 +14,7 @@ type TimelineEventListProps = {
   onToggleThinking?: (cursor: string) => void
 }
 
-export function TimelineEventList({
+export const TimelineEventList = memo(function TimelineEventList({
   agentFirstName,
   events,
   initialLoading = false,
@@ -74,4 +74,4 @@ export function TimelineEventList({
       })}
     </ToolDetailProvider>
   )
-}
+})

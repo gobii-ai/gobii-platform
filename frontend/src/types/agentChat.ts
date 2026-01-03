@@ -23,6 +23,9 @@ export type AgentMessage = {
   attachments?: Attachment[]
   timestamp?: string | null
   relativeTimestamp?: string | null
+  clientId?: string
+  status?: 'sending' | 'failed'
+  error?: string | null
   isPeer?: boolean
   peerAgent?: PeerAgentRef | null
   peerLinkId?: string | null

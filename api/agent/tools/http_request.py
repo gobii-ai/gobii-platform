@@ -73,6 +73,50 @@ def _coerce_optional_bool(value: Any) -> bool | None:
     return None
 
 
+def _normalize_headers(raw_headers: Any) -> dict[str, str]:
+    if raw_headers is None:
+        return {}
+    if isinstance(raw_headers, dict):
+        return {str(k): str(v) for k, v in raw_headers.items()}
+    if isinstance(raw_headers, str):
+        text = raw_headers.strip()
+        if not text:
+            return {}
+        parsed = None
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, dict):
+            return {str(k): str(v) for k, v in parsed.items()}
+        header_map: dict[str, str] = {}
+        for line in text.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if not key:
+                continue
+            header_map[key] = value.strip()
+        if header_map:
+            return {str(k): str(v) for k, v in header_map.items()}
+        logger.warning("HTTP request headers provided as string could not be parsed.")
+        return {}
+    if isinstance(raw_headers, (list, tuple)):
+        header_map: dict[str, str] = {}
+        for item in raw_headers:
+            if isinstance(item, (list, tuple)) and len(item) == 2:
+                key, value = item
+                header_map[str(key)] = str(value)
+            elif isinstance(item, dict):
+                for key, value in item.items():
+                    header_map[str(key)] = str(value)
+        if header_map:
+            return header_map
+    logger.warning("HTTP request headers should be a mapping; got %s.", type(raw_headers).__name__)
+    return {}
+
+
 def _decode_filename_star(value: str) -> str:
     value = value.strip().strip('"')
     charset, sep, encoded = value.partition("''")
@@ -286,9 +330,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             agent.id,
         )
 
-    headers = params.get("headers") or {}
-    # Normalise header keys to str in case they come in as other types
-    headers = {str(k): str(v) for k, v in headers.items()}
+    headers = _normalize_headers(params.get("headers"))
 
     rng = params.get("range")
     if rng:
