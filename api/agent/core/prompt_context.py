@@ -359,11 +359,11 @@ Step 3: Scrape the most relevant URL
 
 Step 4: Search the scraped content for what you need
   sqlite_batch(queries=[
-    "SELECT grep_context_all(result_text, 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
+    "SELECT grep_context_all(json_extract(result_json,'$.result'), 'qubit|processor|breakthrough', 60, 5) FROM __tool_results WHERE result_id='j1k2l3'"
   ], will_continue_work=true)
 
+  → Scraped pages are JSON with markdown in $.result - extract with json_extract first
   → grep_context finds relevant sections with surrounding context
-  → Don't blindly extract first N chars—search for what you need
 
 Step 5: Present findings (no more tools needed)
   "## Quantum Computing Update

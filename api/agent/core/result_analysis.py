@@ -2154,15 +2154,16 @@ def _generate_compact_summary(
                 elif emb.format in ("html", "markdown"):
                     # Suggest grep_context for large content (>10KB), substr for small
                     parts.append(f"\n  📄 {emb.format.upper()} in {emb.path} (~{emb.line_count} lines)")
+                    extract_expr = f"json_extract(result_json,'{emb.path}')"
                     if emb.byte_size > 10000:
                         # Large content - suggest grep
                         parts.append(
-                            f"  → SEARCH: SELECT grep_context_all(result_text, 'keyword', 50, 5) "
+                            f"  → SEARCH: SELECT grep_context_all({extract_expr}, 'keyword', 50, 5) "
                             f"FROM __tool_results WHERE result_id='{result_id}'"
                         )
                     else:
                         parts.append(
-                            f"  → QUERY: SELECT substr(json_extract(result_json,'{emb.path}'),1,2000) "
+                            f"  → QUERY: SELECT substr({extract_expr},1,2000) "
                             f"FROM __tool_results WHERE result_id='{result_id}'"
                         )
 
