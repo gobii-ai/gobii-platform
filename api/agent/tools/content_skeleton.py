@@ -223,15 +223,15 @@ def extract_skeleton(content: str, content_type: str = "", title: str = "") -> C
 
 QUERY_PATTERNS = {
     'serp': {
-        'list': "SELECT json_extract(value,'$.t') as title, json_extract(value,'$.u') as url FROM json_each(result_json,'$.items')",
-        'find': "SELECT json_extract(value,'$.u') FROM json_each(result_json,'$.items') WHERE json_extract(value,'$.t') LIKE '%{keyword}%'",
+        'list': "SELECT json_extract(value,'$.t') as title, json_extract(value,'$.u') as url FROM json_each(result_json,'$.items') LIMIT 12",
+        'find': "SELECT json_extract(value,'$.u') FROM json_each(result_json,'$.items') WHERE json_extract(value,'$.t') LIKE '%{keyword}%' LIMIT 5",
     },
     'article': {
-        'list': "SELECT json_extract(value,'$.h') as heading, json_extract(value,'$.c') as content FROM json_each(result_json,'$.items')",
-        'find': "SELECT json_extract(value,'$.c') FROM json_each(result_json,'$.items') WHERE json_extract(value,'$.h') LIKE '%{keyword}%'",
+        'list': "SELECT json_extract(value,'$.h') as heading, json_extract(value,'$.c') as content FROM json_each(result_json,'$.items') LIMIT 10",
+        'find': "SELECT json_extract(value,'$.c') FROM json_each(result_json,'$.items') WHERE json_extract(value,'$.h') LIKE '%{keyword}%' LIMIT 3",
     },
     'raw': {
-        'get': "SELECT excerpt FROM (SELECT json_extract(result_json,'$.excerpt') as excerpt FROM __tool_results WHERE result_id='{id}')",
+        'get': "SELECT json_extract(result_json,'$.excerpt') FROM __tool_results WHERE result_id='{id}'",
     }
 }
 

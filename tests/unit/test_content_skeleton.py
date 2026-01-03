@@ -297,6 +297,7 @@ class QueryHintTests(SimpleTestCase):
         self.assertIn("SERP: 1 results", hint)
         self.assertIn("json_each", hint)
         self.assertIn("$.items", hint)
+        self.assertIn("LIMIT", hint)  # Defensive querying
 
     def test_article_hint(self):
         skeleton = ContentSkeleton(
@@ -308,6 +309,7 @@ class QueryHintTests(SimpleTestCase):
 
         self.assertIn("ARTICLE: 1 sections", hint)
         self.assertIn("json_each", hint)
+        self.assertIn("LIMIT", hint)  # Defensive querying
 
     def test_raw_hint(self):
         skeleton = ContentSkeleton(

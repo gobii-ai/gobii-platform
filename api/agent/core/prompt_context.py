@@ -195,6 +195,25 @@ def _get_sqlite_examples() -> str:
 When you fetch data from APIs or web sources, results are stored in `__tool_results`.
 Use the QUERY shown in the result metadata - it has the correct paths.
 
+**CRITICAL: Defensive Querying** - Context space is precious. ALWAYS:
+- Use `LIMIT N` on every query (default 25 for exploration, increase only if needed)
+- Use `substr(text, 1, 2000)` for raw text fields, never unbounded
+- Query specific fields with json_extract, NOT entire result_json
+- For large datasets: sample first (`LIMIT 5`), then query what you need
+
+BAD (context bomb):
+```sql
+SELECT json_extract(result_json,'$.result') FROM __tool_results WHERE result_id='...'
+SELECT * FROM __tool_results
+```
+
+GOOD (defensive):
+```sql
+SELECT json_extract(i.value,'$.title'), json_extract(i.value,'$.url')
+FROM __tool_results, json_each(result_json,'$.items') AS i
+WHERE result_id='...' LIMIT 25
+```
+
 ---
 
 ## Trajectory 1: API Data → Storage → Multi-faceted Analysis
