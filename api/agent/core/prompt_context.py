@@ -324,54 +324,56 @@ Step 4: Present findings with insights
 
 ---
 
-## Trajectory 3: Search → Scrape Multiple Sources → Synthesize
+## Trajectory 3: Search → Read Results → Scrape Key Sources
 
 User asks: "Research recent developments in quantum computing"
 
 ```
-Step 1: Search for relevant sources
+Step 1: Search
   mcp_bright_data_search_engine(query="quantum computing breakthroughs 2024", will_continue_work=true)
 
-  Result meta shows QUERY for extracting search results
+  Result meta shows:
+    📄 MARKDOWN in $.result (~400 lines)
+    → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='g7h8i9'
 
-Step 2: Store URLs with progress tracking
+Step 2: Read the search results (use the QUERY hint exactly)
   sqlite_batch(queries="
-    CREATE TABLE IF NOT EXISTS research (
-      url TEXT PRIMARY KEY, title TEXT, scraped INTEGER DEFAULT 0, summary TEXT
-    );
-    INSERT OR IGNORE INTO research (url, title)
-      SELECT json_extract(r.value,'$.link'), json_extract(r.value,'$.title')
-      FROM __tool_results, json_each(result_json,'$.organic') AS r
-      WHERE result_id='g7h8i9' LIMIT 5", will_continue_work=true)
+    SELECT substr(json_extract(result_json,'$.result'),1,2000)
+    FROM __tool_results WHERE result_id='g7h8i9'", will_continue_work=true)
 
-Step 3: Get first unscraped URL
-  sqlite_batch(queries="SELECT url, title FROM research WHERE scraped=0 LIMIT 1", will_continue_work=true)
+  Result shows markdown with search results:
+    "## Items
+     | t | u | p |
+     |---|---|---|
+     | IBM unveils 1000-qubit processor | https://tech.example.com/ibm-quantum | Major breakthrough... |
+     | Google achieves quantum supremacy | https://news.example.com/google | New milestone... |
+     ..."
 
-  Result: https://example.com/quantum-news|"Major Quantum Breakthrough Announced"
+Step 3: Scrape the most relevant URL
+  mcp_bright_data_scrape_as_markdown(url="https://tech.example.com/ibm-quantum", will_continue_work=true)
 
-Step 4: Scrape and extract key points
-  mcp_bright_data_scrape_as_markdown(url="https://example.com/quantum-news", will_continue_work=true)
+  Result meta shows:
+    → QUERY: SELECT substr(json_extract(result_json,'$.result'),1,2000) FROM __tool_results WHERE result_id='j1k2l3'
 
+Step 4: Extract key content
   sqlite_batch(queries="
-    SELECT substr(result_text, 1, 3000) FROM __tool_results WHERE result_id='j1k2l3'", will_continue_work=true)
+    SELECT substr(json_extract(result_json,'$.result'),1,3000)
+    FROM __tool_results WHERE result_id='j1k2l3'", will_continue_work=true)
 
-  Read the content, identify key points about the quantum computing development.
+  Read content, extract key findings.
 
-Step 5: Update progress and store findings
-  sqlite_batch(queries="
-    UPDATE research SET scraped=1, summary='IBM announces 1000-qubit processor...'
-    WHERE url='https://example.com/quantum-news'", will_continue_work=true)
+Step 5: Present findings (no more tools needed)
+  "## Quantum Computing Update
 
-Step 6: Check remaining work
-  sqlite_batch(queries="SELECT COUNT(*) FROM research WHERE scraped=0", will_continue_work=true)
+   **IBM's 1000-qubit processor** marks a major milestone in quantum computing...
 
-  If more URLs remain, go back to Step 3.
-
-Step 7: Compile and present research
-  sqlite_batch(queries="SELECT title, summary FROM research WHERE scraped=1", will_continue_work=false)
-
-  Synthesize findings into a coherent summary for the user.
+   Key developments:
+   - Error correction improved 10x
+   - Commercial availability expected 2025
+   ..."
 ```
+
+**Key pattern**: Use the `→ QUERY:` hint from result metadata. Don't guess paths.
 
 ---
 
@@ -2580,6 +2582,11 @@ def _get_system_instruction(
 
         "Keep your reasoning to yourself—the user sees your conclusion, not your process. "
         "Don't paste thinking headers ('Understanding the request', 'Decision') into chat. Just communicate the result. "
+
+        "Work silently, deliver beautifully. "
+        "Don't send play-by-play status updates ('Let me look into this...', 'I see that...', 'Let me try a different approach...'). "
+        "The user doesn't need a running commentary. Work quietly, then present polished results. "
+        "One focused message with findings beats five status updates explaining your process. "
 
         "If you catch yourself circling—repeating 'I should...', 'I need to...', 'Let me think...'—break the loop. "
         "Repeating analysis? Make a decision. Stuck between options? Pick one and try it. Missing info? Ask, or assume reasonably. "
