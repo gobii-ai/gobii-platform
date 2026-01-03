@@ -49,9 +49,20 @@ class ContentSkeleton:
 # SERP Extraction - Search results → items with {t, u, p, s}
 # ---------------------------------------------------------------------------
 
-_SERP_LINK_RE = re.compile(r"\[([^\]]{2,})\]\((https?://[^)]+)\)")
-_GOOGLE_INTERNAL = ('google.com', 'gstatic.com', 'googleapis.com')
-_USELESS_TITLES = {'read more', 'click here', 'learn more', 'see more', 'view', 'link'}
+# Multiple patterns to catch various markdown link styles
+_SERP_LINK_PATTERNS = [
+    # Standard markdown: [title](url) - title must be 2+ chars, no upper limit
+    re.compile(r"\[([^\]]{2,})\]\((https?://[^)]+)\)"),
+    # Empty bracket or short title links: [](url) or [x](url)
+    re.compile(r"\[([^\]]{0,1})\]\((https?://[^)]+)\)"),
+    # Reference-style: [title]: url
+    re.compile(r"^\[([^\]]{2,})\]:\s*(https?://\S+)", re.MULTILINE),
+]
+# Bare URL pattern as last resort
+_BARE_URL_RE = re.compile(r"(?<![(\[])(https?://[^\s\)\]\"'<>]{15,200})(?![)\]])")
+
+_GOOGLE_INTERNAL = ('google.com', 'gstatic.com', 'googleapis.com', 'googleusercontent.com')
+_USELESS_TITLES = {'read more', 'click here', 'learn more', 'see more', 'view', 'link', 'here', 'more'}
 
 
 def _title_from_url(url: str) -> str:
@@ -71,40 +82,75 @@ def _title_from_url(url: str) -> str:
     return domain
 
 
+def _is_useful_url(url: str) -> bool:
+    """Check if URL is worth including in skeleton."""
+    # Skip internal Google URLs
+    if any(domain in url for domain in _GOOGLE_INTERNAL):
+        return False
+    # Skip very short URLs (https://x.co = 12 chars minimum)
+    if len(url) < 12:
+        return False
+    return True
+
+
 def extract_serp_skeleton(markdown: str, query: str = "") -> ContentSkeleton:
     """Extract search results into compact skeleton.
 
     Items have: t=title, u=url, p=position
     Uses URL-derived title when link text is useless (e.g., "Read more")
+
+    Uses multiple extraction patterns to handle messy markdown:
+    1. Standard [title](url) links
+    2. Empty bracket [](url) links (derive title from URL)
+    3. Reference-style [title]: url links
+    4. Bare URLs as last resort
     """
     items = []
     seen_urls = set()
 
-    for match in _SERP_LINK_RE.finditer(markdown):
-        raw_title, url = match.groups()
+    def add_item(title: str, url: str) -> bool:
+        """Add item if valid and not duplicate. Returns True if added."""
+        if not _is_useful_url(url):
+            return False
 
-        # Skip internal/duplicate
-        if any(domain in url for domain in _GOOGLE_INTERNAL):
-            continue
-        # Normalize URL for dedup (strip fragment)
-        base_url = url.split('#')[0].split('?')[0]
+        # Normalize URL for dedup
+        base_url = url.split('#')[0].split('?')[0].rstrip('/')
         if base_url in seen_urls:
-            continue
+            return False
 
-        # Smart title: use link text or derive from URL
-        title = raw_title.strip()
-        if title.lower() in _USELESS_TITLES or len(title) < 4:
-            title = _title_from_url(url)
+        # Smart title: use provided or derive from URL
+        clean_title = title.strip() if title else ''
+        if clean_title.lower() in _USELESS_TITLES or len(clean_title) < 3:
+            clean_title = _title_from_url(url)
 
         seen_urls.add(base_url)
         items.append({
-            't': title[:100],
+            't': clean_title[:100],
             'u': url[:300],
             'p': len(items) + 1,
         })
+        return len(items) >= 12
 
+    # Try each pattern in order of preference
+    for pattern in _SERP_LINK_PATTERNS:
+        for match in pattern.finditer(markdown):
+            groups = match.groups()
+            if len(groups) == 2:
+                raw_title, url = groups
+            else:
+                continue
+
+            if add_item(raw_title, url):
+                break
         if len(items) >= 12:
             break
+
+    # If we found very few items, try bare URLs as fallback
+    if len(items) < 3:
+        for match in _BARE_URL_RE.finditer(markdown):
+            url = match.group(1).rstrip('.,;:')
+            if add_item('', url):
+                break
 
     return ContentSkeleton(
         kind='serp',
