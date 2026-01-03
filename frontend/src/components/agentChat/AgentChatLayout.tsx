@@ -25,6 +25,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  awaitingResponse?: boolean
   streaming?: StreamState | null
   thinkingCollapsedByCursor?: Record<string, boolean>
   onToggleThinking?: (cursor: string) => void
@@ -41,6 +42,7 @@ export function AgentChatLayout({
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
+  awaitingResponse = false,
   processingWebTasks = [],
   streaming,
   thinkingCollapsedByCursor,
@@ -64,7 +66,7 @@ export function AgentChatLayout({
   const hasStreamingContent = Boolean(streaming?.content?.trim())
   const showStreamingReasoning = hasStreamingReasoning
 
-  const showProcessingIndicator = Boolean((processingActive || isStreaming) && !hasMoreNewer)
+  const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
@@ -143,9 +145,9 @@ export function AgentChatLayout({
               <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
                 <ProcessingIndicator
                   agentFirstName={agentFirstName}
-                  active={Boolean(processingActive)}
+                  active={Boolean(processingActive || awaitingResponse)}
                   tasks={processingWebTasks}
-                  isStreaming={isStreaming}
+                  isStreaming={Boolean(isStreaming || awaitingResponse)}
                 />
               </div>
 

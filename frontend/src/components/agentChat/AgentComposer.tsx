@@ -76,20 +76,28 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     if ((!trimmed && attachments.length === 0) || disabled || isSending) {
       return
     }
+    const attachmentsSnapshot = attachments.slice()
     if (onSubmit) {
       try {
         setIsSending(true)
-        await onSubmit(trimmed, attachments)
+        setBody('')
+        setAttachments([])
+        if (fileInputRef.current) {
+          fileInputRef.current.value = ''
+        }
+        requestAnimationFrame(() => adjustTextareaHeight(true))
+        await onSubmit(trimmed, attachmentsSnapshot)
       } finally {
         setIsSending(false)
       }
+    } else {
+      setBody('')
+      setAttachments([])
+      if (fileInputRef.current) {
+        fileInputRef.current.value = ''
+      }
+      requestAnimationFrame(() => adjustTextareaHeight(true))
     }
-    setBody('')
-    setAttachments([])
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
-    requestAnimationFrame(() => adjustTextareaHeight(true))
   }, [adjustTextareaHeight, attachments, body, disabled, isSending, onSubmit])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -98,9 +106,11 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
   }
 
   const handleKeyDown = async (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    const isPlainEnter =
-      event.key === 'Enter' && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
-    if (!isPlainEnter || event.nativeEvent.isComposing) {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
+      return
+    }
+    const shouldSend = (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey
+    if (!shouldSend) {
       return
     }
     event.preventDefault()
@@ -228,8 +238,8 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
                 type="submit"
                 className="composer-send-button"
                 disabled={disabled || isSending || (!body.trim() && attachments.length === 0)}
-                title={isSending ? 'Sending' : 'Send'}
-                aria-label={isSending ? 'Sending message' : 'Send message'}
+                title={isSending ? 'Sending' : 'Send (Cmd/Ctrl+Enter)'}
+                aria-label={isSending ? 'Sending message' : 'Send message (Cmd/Ctrl+Enter)'}
               >
                 {isSending ? (
                   <span className="inline-flex items-center justify-center">
@@ -270,6 +280,7 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
                 ))}
               </div>
             ) : null}
+            <p className="composer-shortcut-hint">Cmd/Ctrl+Enter to send</p>
           </div>
         </form>
       </div>

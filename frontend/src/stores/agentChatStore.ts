@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 
 import type {
+  AgentMessage,
   ProcessingSnapshot,
   ProcessingWebTask,
   StreamEventPayload,
@@ -51,6 +52,146 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
   return coerceProcessingSnapshot(input)
 }
 
+const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
+
+type MessageSignature = {
+  text: string
+  attachmentsCount: number
+  timestampMs: number | null
+}
+
+function buildMessageSignature(message: AgentMessage): MessageSignature {
+  const text = (message.bodyText || message.bodyHtml || '').trim()
+  const attachmentsCount = message.attachments?.length ?? 0
+  const timestampMs = message.timestamp ? Date.parse(message.timestamp) : null
+  return {
+    text,
+    attachmentsCount,
+    timestampMs: Number.isNaN(timestampMs ?? NaN) ? null : timestampMs,
+  }
+}
+
+function isOptimisticMatch(event: TimelineEvent, signature: MessageSignature): boolean {
+  if (event.kind !== 'message') {
+    return false
+  }
+  if (event.message.status !== 'sending') {
+    return false
+  }
+  const optimisticSignature = buildMessageSignature(event.message)
+  if (!signature.text && signature.attachmentsCount === 0) {
+    return false
+  }
+  if (optimisticSignature.text !== signature.text) {
+    return false
+  }
+  if (optimisticSignature.attachmentsCount !== signature.attachmentsCount) {
+    return false
+  }
+  if (signature.timestampMs === null || optimisticSignature.timestampMs === null) {
+    return true
+  }
+  return Math.abs(signature.timestampMs - optimisticSignature.timestampMs) <= OPTIMISTIC_MATCH_WINDOW_MS
+}
+
+function removeOptimisticMatch(events: TimelineEvent[], signature: MessageSignature): { events: TimelineEvent[]; removed: boolean } {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (isOptimisticMatch(events[i], signature)) {
+      return { events: [...events.slice(0, i), ...events.slice(i + 1)], removed: true }
+    }
+  }
+  return { events, removed: false }
+}
+
+function removeOptimisticMatches(events: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
+  let nextEvents = events
+  for (const event of incoming) {
+    if (event.kind !== 'message' || event.message.isOutbound || event.message.status === 'sending') {
+      continue
+    }
+    const signature = buildMessageSignature(event.message)
+    const updated = removeOptimisticMatch(nextEvents, signature)
+    if (updated.removed) {
+      nextEvents = updated.events
+    }
+  }
+  return nextEvents
+}
+
+function updateOptimisticStatus(
+  events: TimelineEvent[],
+  clientId: string,
+  status: 'sending' | 'failed',
+  error?: string,
+): { events: TimelineEvent[]; updated: boolean } {
+  const index = events.findIndex(
+    (event) => event.kind === 'message' && event.message.clientId === clientId,
+  )
+  if (index < 0) {
+    return { events, updated: false }
+  }
+  const target = events[index]
+  if (target.kind !== 'message') {
+    return { events, updated: false }
+  }
+  const next = [...events]
+  next[index] = {
+    ...target,
+    message: {
+      ...target.message,
+      status,
+      error: error ?? target.message.error ?? null,
+    },
+  }
+  return { events: next, updated: true }
+}
+
+function hasAgentResponse(events: TimelineEvent[]): boolean {
+  return events.some((event) => {
+    if (event.kind === 'thinking') {
+      return true
+    }
+    return event.kind === 'message' && Boolean(event.message.isOutbound)
+  })
+}
+
+function buildOptimisticMessageEvent(body: string, attachments: File[]): { event: TimelineEvent; clientId: string } {
+  const now = Date.now()
+  const clientId = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+    ? `local-${crypto.randomUUID()}`
+    : `local-${now}-${Math.random().toString(16).slice(2, 10)}`
+  const cursor = `${now * 1000}:message:${clientId}`
+  const attachmentPayload = attachments.map((file, index) => ({
+    id: `${clientId}-file-${index}`,
+    filename: file.name,
+    url: '',
+    downloadUrl: null,
+    filespacePath: null,
+    filespaceNodeId: null,
+    fileSizeLabel: null,
+  }))
+
+  return {
+    clientId,
+    event: {
+      kind: 'message',
+      cursor,
+      message: {
+        id: clientId,
+        cursor,
+        bodyText: body,
+        isOutbound: false,
+        channel: 'web',
+        attachments: attachmentPayload,
+        timestamp: new Date(now).toISOString(),
+        relativeTimestamp: null,
+        clientId,
+        status: 'sending',
+      },
+    },
+  }
+}
+
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
@@ -65,6 +206,7 @@ export type AgentChatState = {
   hasMoreNewer: boolean
   hasUnseenActivity: boolean
   processingActive: boolean
+  awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   loading: boolean
   loadingOlder: boolean
@@ -106,6 +248,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   hasMoreNewer: false,
   hasUnseenActivity: false,
   processingActive: false,
+  awaitingResponse: false,
   processingWebTasks: [],
   loading: false,
   loadingOlder: false,
@@ -130,6 +273,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingClearOnDone: false,
       streamingThinkingCollapsed: false,
       thinkingCollapsedByCursor: {},
+      awaitingResponse: false,
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
     })
 
@@ -158,6 +302,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         autoScrollPinSuppressedUntil: null,
         pendingEvents: [],
         agentColorHex,
+        awaitingResponse: false,
       })
     } catch (error) {
       console.error('Failed to initialize agent chat:', error)
@@ -174,7 +319,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     try {
       const { processing_active, processing_snapshot } = await fetchProcessingStatus(agentId)
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
-      set({ processingActive: snapshot.active, processingWebTasks: snapshot.webTasks })
+      set((state) => ({
+        processingActive: snapshot.active,
+        processingWebTasks: snapshot.webTasks,
+        awaitingResponse: snapshot.active ? false : state.awaitingResponse,
+      }))
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to refresh processing status',
@@ -197,9 +346,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       })
       const incoming = prepareTimelineEvents(snapshot.events)
       const hasThinkingEvent = incoming.some((event) => event.kind === 'thinking')
+      const hasAgentActivity = hasAgentResponse(incoming)
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
+      const shouldClearAwaiting = hasAgentActivity || processingSnapshot.active
       set((current) => {
         const agentColorHex = snapshot.agent_color_hex
           ? normalizeHexColor(snapshot.agent_color_hex)
@@ -217,20 +368,24 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
               : allowThinkingClear
                 ? current.streamingClearOnDone
                 : false
+        const baseEvents = removeOptimisticMatches(current.events, incoming)
+        const basePendingEvents = removeOptimisticMatches(current.pendingEvents, incoming)
         if (!current.autoScrollPinned) {
-          const pendingEvents = mergeTimelineEvents(current.pendingEvents, incoming)
+          const pendingEvents = mergeTimelineEvents(basePendingEvents, incoming)
           return {
+            events: baseEvents,
             processingActive: processingSnapshot.active,
             processingWebTasks: processingSnapshot.webTasks,
             pendingEvents,
             hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
             streaming: nextStreaming,
             streamingClearOnDone: nextStreamingClearOnDone,
+            awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
             refreshingLatest: false,
             agentColorHex,
           }
         }
-        const merged = mergeTimelineEvents(current.events, incoming)
+        const merged = mergeTimelineEvents(baseEvents, incoming)
         const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
         const events = merged.slice(windowStart)
         const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
@@ -248,6 +403,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           pendingEvents: [],
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
+          awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
           refreshingLatest: false,
           agentColorHex,
         }
@@ -312,7 +468,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         limit: TIMELINE_WINDOW_SIZE,
       })
       const incoming = prepareTimelineEvents(snapshot.events)
-      const merged = mergeTimelineEvents(state.events, incoming)
+      const baseEvents = removeOptimisticMatches(state.events, incoming)
+      const merged = mergeTimelineEvents(baseEvents, incoming)
       const windowStart = Math.max(0, merged.length - TIMELINE_WINDOW_SIZE)
       const events = merged.slice(windowStart)
       const oldestCursor = events.length ? events[0].cursor : null
@@ -322,6 +479,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
+      const hasAgentActivity = hasAgentResponse(incoming)
+      const shouldClearAwaiting = hasAgentActivity || processingSnapshot.active
       set((current) => ({
         events,
         oldestCursor,
@@ -332,6 +491,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingWebTasks: processingSnapshot.webTasks,
         loadingNewer: false,
         agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+        awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
       }))
     } catch (error) {
       set({
@@ -367,6 +527,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         loading: false,
         pendingEvents: [],
         agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+        awaitingResponse: false,
       }))
     } catch (error) {
       set({
@@ -385,54 +546,90 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     if (!trimmed && attachments.length === 0) {
       return
     }
+    const { event: optimisticEvent, clientId } = buildOptimisticMessageEvent(trimmed, attachments)
+    set({ awaitingResponse: true })
+    get().receiveRealtimeEvent(optimisticEvent)
     try {
       const event = await sendAgentMessage(state.agentId, trimmed, attachments)
       get().receiveRealtimeEvent(event)
     } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : 'Failed to send message',
+      const message = error instanceof Error ? error.message : 'Failed to send message'
+      set((current) => {
+        const updatedEvents = updateOptimisticStatus(current.events, clientId, 'failed', message)
+        const updatedPending = updateOptimisticStatus(current.pendingEvents, clientId, 'failed', message)
+        return {
+          events: updatedEvents.events,
+          pendingEvents: updatedPending.events,
+          awaitingResponse: false,
+          error: message,
+        }
       })
       throw error
     }
   },
 
   receiveRealtimeEvent(event) {
-    const state = get()
     const normalized = normalizeTimelineEvent(event)
-    const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
-    const hasStreamingContent = Boolean(state.streaming?.content?.trim())
-    const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
-    const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done && allowThinkingClear
-    const shouldFlagThinkingClear = normalized.kind === 'thinking' && state.streaming && !state.streaming.done && allowThinkingClear
-    const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
-    const nextStreamingClearOnDone =
-      shouldClearStream || shouldClearThinkingStream
-        ? false
-        : shouldFlagThinkingClear
-          ? true
-          : allowThinkingClear
-            ? state.streamingClearOnDone
-            : false
-    if (!state.autoScrollPinned) {
-      const pendingEvents = mergeTimelineEvents(state.pendingEvents, [normalized])
-      set({
-        pendingEvents,
-        hasUnseenActivity: true,
+    set((state) => {
+      let events = state.events
+      let pendingEvents = state.pendingEvents
+      let awaitingResponse = state.awaitingResponse
+
+      if (normalized.kind === 'message' && !normalized.message.isOutbound && normalized.message.status !== 'sending') {
+        const signature = buildMessageSignature(normalized.message)
+        const updatedEvents = removeOptimisticMatch(events, signature)
+        if (updatedEvents.removed) {
+          events = updatedEvents.events
+        }
+        const updatedPending = removeOptimisticMatch(pendingEvents, signature)
+        if (updatedPending.removed) {
+          pendingEvents = updatedPending.events
+        }
+      }
+
+      const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
+      const hasStreamingContent = Boolean(state.streaming?.content?.trim())
+      const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
+      const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done && allowThinkingClear
+      const shouldFlagThinkingClear = normalized.kind === 'thinking' && state.streaming && !state.streaming.done && allowThinkingClear
+      const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
+      const nextStreamingClearOnDone =
+        shouldClearStream || shouldClearThinkingStream
+          ? false
+          : shouldFlagThinkingClear
+            ? true
+            : allowThinkingClear
+              ? state.streamingClearOnDone
+              : false
+
+      if (normalized.kind === 'thinking' || normalized.kind === 'steps' || shouldClearStream) {
+        awaitingResponse = false
+      }
+
+      if (!state.autoScrollPinned) {
+        const mergedPending = mergeTimelineEvents(pendingEvents, [normalized])
+        return {
+          events,
+          pendingEvents: mergedPending,
+          hasUnseenActivity: true,
+          streaming: nextStreaming,
+          streamingClearOnDone: nextStreamingClearOnDone,
+          awaitingResponse,
+        }
+      }
+
+      const merged = mergeTimelineEvents(events, [normalized])
+      const newestCursor = merged.length ? merged[merged.length - 1].cursor : null
+      const oldestCursor = merged.length ? merged[0].cursor : null
+      return {
+        events: merged,
+        newestCursor,
+        oldestCursor,
+        pendingEvents: [],
         streaming: nextStreaming,
         streamingClearOnDone: nextStreamingClearOnDone,
-      })
-      return
-    }
-    const events = mergeTimelineEvents(state.events, [normalized])
-    const newestCursor = events.length ? events[events.length - 1].cursor : null
-    const oldestCursor = events.length ? events[0].cursor : null
-    set({
-      events,
-      newestCursor,
-      oldestCursor,
-      pendingEvents: [],
-      streaming: nextStreaming,
-      streamingClearOnDone: nextStreamingClearOnDone,
+        awaitingResponse,
+      }
     })
   },
 
@@ -447,6 +644,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     let shouldRefreshLatest = false
 
     set((state) => {
+      const awaitingResponse = false
       const base =
         isStart || !state.streaming || state.streaming.streamId !== payload.stream_id
           ? { streamId: payload.stream_id, reasoning: '', content: '', done: false }
@@ -467,7 +665,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         : state.hasUnseenActivity
 
       if (isDone && !next.reasoning && !next.content) {
-        return { streaming: null, hasUnseenActivity, streamingLastUpdatedAt: now, streamingClearOnDone: false }
+        return {
+          streaming: null,
+          hasUnseenActivity,
+          streamingLastUpdatedAt: now,
+          streamingClearOnDone: false,
+          awaitingResponse,
+        }
       }
 
       const hasStreamingContent = Boolean(next.content.trim())
@@ -479,6 +683,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             hasUnseenActivity,
             streamingClearOnDone: false,
             streamingLastUpdatedAt: now,
+            awaitingResponse,
           }
         }
         shouldRefreshLatest = true
@@ -488,6 +693,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streamingThinkingCollapsed: true,
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
+          awaitingResponse,
         }
       }
 
@@ -498,6 +704,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streamingThinkingCollapsed: false,
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
+          awaitingResponse,
         }
       }
 
@@ -510,6 +717,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         streamingClearOnDone: nextStreamingClearOnDone,
         streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
         streamingLastUpdatedAt: now,
+        awaitingResponse,
       }
     })
 
@@ -540,6 +748,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       processingActive: snapshot.active,
       processingWebTasks: snapshot.webTasks,
       hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
+      awaitingResponse: snapshot.active ? false : state.awaitingResponse,
     }))
   },
 

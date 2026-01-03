@@ -110,6 +110,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
+  const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
@@ -244,12 +245,24 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     prevProcessingActiveRef.current = processingActive
   }
 
+  const pendingScrollFrameRef = useRef<number | null>(null)
+
   const scrollToBottom = useCallback(() => {
+    if (pendingScrollFrameRef.current !== null) {
+      return
+    }
     const scroller = getScrollContainer()
-    requestAnimationFrame(() => {
+    pendingScrollFrameRef.current = requestAnimationFrame(() => {
+      pendingScrollFrameRef.current = null
       window.scrollTo({ top: scroller.scrollHeight })
     })
   }, [getScrollContainer])
+
+  useEffect(() => () => {
+    if (pendingScrollFrameRef.current !== null) {
+      cancelAnimationFrame(pendingScrollFrameRef.current)
+    }
+  }, [])
 
   useLayoutEffect(() => {
     // Use the captured decision from before the DOM update
@@ -273,20 +286,14 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
 
   const handleJumpToLatest = async () => {
     await jumpToLatest()
-    const scroller = getScrollContainer()
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: scroller.scrollHeight })
-      setAutoScrollPinned(true)
-    })
+    scrollToBottom()
+    setAutoScrollPinned(true)
   }
 
   const handleSend = async (body: string, attachments: File[] = []) => {
     await sendMessage(body, attachments)
     if (!autoScrollPinned) return
-    const scroller = getScrollContainer()
-    requestAnimationFrame(() => {
-      window.scrollTo({ top: scroller.scrollHeight })
-    })
+    scrollToBottom()
   }
 
   const handleToggleThinking = useCallback(
@@ -364,6 +371,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
         oldestCursor={events.length ? events[0].cursor : null}
         newestCursor={events.length ? events[events.length - 1].cursor : null}
         processingActive={processingActive}
+        awaitingResponse={awaitingResponse}
         processingWebTasks={processingWebTasks}
         streaming={streaming}
         thinkingCollapsedByCursor={thinkingCollapsedByCursor}

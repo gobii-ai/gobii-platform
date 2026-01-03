@@ -98,6 +98,26 @@ class HttpRequestJsonParsingTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_headers_string_json_is_parsed(self, mock_request, mock_proxy):
+        """JSON string headers should be parsed into a header dict."""
+        mock_proxy.return_value = None
+
+        mock_request.return_value = _make_mock_response(
+            content=b"ok",
+            content_type="text/plain",
+        )
+
+        headers = json.dumps({"User-Agent": "agent/1.0"})
+        execute_http_request(
+            self.agent,
+            {"method": "GET", "url": "https://api.example.com/data", "headers": headers},
+        )
+
+        _, kwargs = mock_request.call_args
+        self.assertEqual(kwargs["headers"]["User-Agent"], "agent/1.0")
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_nested_json_is_directly_queryable(self, mock_request, mock_proxy):
         """Nested JSON structures should be directly accessible without json.loads."""
         mock_proxy.return_value = None
