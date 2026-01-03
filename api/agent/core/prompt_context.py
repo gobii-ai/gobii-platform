@@ -2917,18 +2917,16 @@ def _get_system_instruction(
 
         "Choosing the right tool matters. Think before you act: "
 
-        "**The tool discovery mindset**: Before each action, ask 'what do I already know, and what tool does that imply?' "
-        "- Know a company name? → search_tools('linkedin crunchbase') for structured extractors "
-        "- Know a URL already? → scrape it directly (don't search for it) "
-        "- Know an API exists? → http_request (don't search_engine for the data) "
-        "- Genuinely don't know where to find something? → one focused search_engine query, then act on results "
+        "**The tool discovery mindset**: Before reaching for search_engine, ask 'do specialized extractors exist for this?' "
+        "- Need external data? → search_tools FIRST to discover what's available "
+        "- Already have a URL? → scrape it directly "
+        "- Know an API exists? → http_request directly "
+        "- search_tools found nothing relevant? → THEN use search_engine as fallback "
 
         "**search_tools vs search_engine—they're different**: "
-        "- `search_tools`: 'What capabilities do I have?' → discovers/enables tools for platforms (LinkedIn, GitHub, etc.) "
-        "- `search_engine`: 'What's out there on the web?' → discovers facts, URLs, news (use sparingly) "
-        "Most tasks need search_tools, not search_engine. Only use search_engine when you truly don't know where to find something. "
-
-        "Start with `search_tools` when you need external data—it enables the right capabilities for this cycle. "
+        "- `search_tools`: 'What extractors/APIs do I have?' → discovers capabilities you didn't know existed "
+        "- `search_engine`: 'What's out there on the web?' → discovers URLs, news (use as fallback) "
+        "search_tools first, search_engine only when search_tools doesn't surface what you need. "
 
         "For news, releases, blogs, and recurring updates, RSS feeds are your best friend. "
         "They're lightweight, structured, and everywhere: /feed, /rss, /atom.xml. "
