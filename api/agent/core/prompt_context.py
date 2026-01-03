@@ -579,6 +579,19 @@ Don't include empty strings in query arrays.
 - Column aliases can't be reused in same SELECT: `SELECT a+b AS sum, sum*2` fails → use subquery or repeat expression
 - Has: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
+**Text analysis functions** (available for deeper analysis):
+- `column REGEXP 'pattern'` - regex match (returns 1/0)
+- `regexp_extract(column, 'pattern')` - extract first match
+- `regexp_extract(column, '(group)', 1)` - extract capture group
+- `word_count(column)` - count words
+- `char_count(column)` - count characters
+
+Example: Find emails in text
+```sql
+SELECT regexp_extract(content, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+') as email
+FROM documents WHERE content REGEXP '@.*\\.com'
+```
+
 **UNION/UNION ALL column mismatch**: All SELECTs in a UNION must have the same number of columns.
 Wrong: `SELECT 'header' UNION ALL SELECT col1, col2 FROM t` (1 column vs 2 columns - fails!)
 Right: Run separate queries, or pad with empty columns:

@@ -1,12 +1,53 @@
 """SQLite guardrails for agent-managed databases."""
 
 import logging
+import math
 import re
 import sqlite3
 import time
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Safe custom functions for text analysis (no I/O, pure computation)
+# ---------------------------------------------------------------------------
+
+def _regexp(pattern: str, string: Optional[str]) -> bool:
+    """REGEXP function for pattern matching in queries."""
+    if string is None or pattern is None:
+        return False
+    try:
+        return bool(re.search(pattern, string))
+    except re.error:
+        return False
+
+
+def _regexp_extract(string: Optional[str], pattern: str, group: int = 0) -> Optional[str]:
+    """Extract first regex match from string.
+
+    Usage: regexp_extract(column, 'pattern') or regexp_extract(column, '(group)', 1)
+    """
+    if string is None or pattern is None:
+        return None
+    try:
+        match = re.search(pattern, string)
+        return match.group(group) if match else None
+    except (re.error, IndexError):
+        return None
+
+
+def _word_count(string: Optional[str]) -> int:
+    """Count words in a string."""
+    if not string:
+        return 0
+    return len(string.split())
+
+
+def _char_count(string: Optional[str]) -> int:
+    """Count characters in a string."""
+    return len(string) if string else 0
 
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
@@ -152,6 +193,15 @@ def _make_progress_handler(conn_id: int):
     return handler
 
 
+def _register_safe_functions(conn: sqlite3.Connection) -> None:
+    """Register safe custom functions for text analysis."""
+    conn.create_function("REGEXP", 2, _regexp)
+    conn.create_function("regexp_extract", 2, _regexp_extract)
+    conn.create_function("regexp_extract", 3, _regexp_extract)  # With group arg
+    conn.create_function("word_count", 1, _word_count)
+    conn.create_function("char_count", 1, _char_count)
+
+
 def open_guarded_sqlite_connection(
     db_path: str,
     *,
@@ -167,6 +217,8 @@ def open_guarded_sqlite_connection(
         conn.enable_load_extension(False)
     except Exception:
         logger.debug("Failed to disable SQLite load_extension", exc_info=True)
+    # Register safe analysis functions
+    _register_safe_functions(conn)
     if hasattr(conn, "setlimit") and hasattr(sqlite3, "SQLITE_LIMIT_ATTACHED"):
         try:
             conn.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)
