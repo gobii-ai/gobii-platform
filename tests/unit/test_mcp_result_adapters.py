@@ -527,11 +527,10 @@ class MarkdownSerpParserTests(SimpleTestCase):
 
 @tag("batch_mcp_tools")
 class BrightDataSearchEngineMarkdownSerpTests(SimpleTestCase):
-    """Tests for BrightDataSearchEngineAdapter handling markdown SERP."""
+    """Tests for BrightDataSearchEngineAdapter skeleton transformation."""
 
-    def test_parses_markdown_serp_to_organic_array(self):
-        """When result contains markdown SERP, adapter should extract organic results."""
-        # Content must be >500 chars to trigger SERP parsing
+    def test_transforms_markdown_serp_to_skeleton(self):
+        """Markdown SERP should be transformed to universal skeleton format."""
         filler = "x" * 400
         payload = {
             "status": "success",
@@ -549,34 +548,38 @@ class BrightDataSearchEngineMarkdownSerpTests(SimpleTestCase):
         result = DummyResult(json.dumps(payload))
 
         adapted = adapter.adapt(result)
-        cleaned = json.loads(adapted.content[0].text)
+        output = json.loads(adapted.content[0].text)
 
-        self.assertIn("organic", cleaned)
-        self.assertEqual(len(cleaned["organic"]), 2)
-        self.assertEqual(cleaned["organic"][0]["title"], "Article One")
-        self.assertEqual(cleaned["organic"][0]["link"], "https://news.example.com/article-1")
-        self.assertEqual(cleaned["_parsed_from"], "markdown_serp")
+        # Should use universal skeleton format
+        self.assertEqual(output["kind"], "serp")
+        self.assertIn("items", output)
+        self.assertEqual(len(output["items"]), 2)
+        # Items use compact keys: t=title, u=url, p=position
+        self.assertEqual(output["items"][0]["t"], "Article One")
+        self.assertEqual(output["items"][0]["u"], "https://news.example.com/article-1")
+        self.assertEqual(output["items"][0]["p"], 1)
 
-    def test_preserves_existing_organic_array(self):
-        """When result already has organic array, adapter should keep it."""
+    def test_converts_existing_organic_to_skeleton(self):
+        """Existing organic array should be converted to skeleton format."""
         payload = {
             "organic": [
-                {"title": "Existing", "link": "https://example.com/existing"}
+                {"title": "Existing Result", "link": "https://example.com/existing", "position": 1}
             ]
         }
         adapter = BrightDataSearchEngineAdapter()
         result = DummyResult(json.dumps(payload))
 
         adapted = adapter.adapt(result)
-        cleaned = json.loads(adapted.content[0].text)
+        output = json.loads(adapted.content[0].text)
 
-        self.assertEqual(len(cleaned["organic"]), 1)
-        self.assertEqual(cleaned["organic"][0]["title"], "Existing")
-        self.assertNotIn("_parsed_from", cleaned)
+        # Should convert to skeleton format
+        self.assertEqual(output["kind"], "serp")
+        self.assertEqual(len(output["items"]), 1)
+        self.assertEqual(output["items"][0]["t"], "Existing Result")
+        self.assertEqual(output["items"][0]["u"], "https://example.com/existing")
 
-    def test_truncates_large_markdown_result(self):
-        """Large markdown content should be truncated after parsing."""
-        # Need >5000 chars, SERP indicators, AND extractable links to trigger truncation
+    def test_includes_compression_meta_for_large_results(self):
+        """Large results should include compression metadata."""
         large_content = (
             "Google Search\n\nSkip to main content\n\n"
             "[Real Article](https://example.com/article)\n\n"
@@ -590,16 +593,18 @@ class BrightDataSearchEngineMarkdownSerpTests(SimpleTestCase):
         result = DummyResult(json.dumps(payload))
 
         adapted = adapter.adapt(result)
-        cleaned = json.loads(adapted.content[0].text)
+        output = json.loads(adapted.content[0].text)
 
-        # Result should be truncated to ~2000 + truncation marker
-        self.assertLess(len(cleaned["result"]), 2500)
-        self.assertIn("...[truncated]", cleaned["result"])
-        # Should still have parsed organic results
-        self.assertIn("organic", cleaned)
+        # Should have skeleton with compression stats
+        self.assertEqual(output["kind"], "serp")
+        self.assertIn("items", output)
+        self.assertIn("_meta", output)
+        self.assertIn("ratio", output["_meta"])
+        # Raw markdown should NOT be included (skeleton replaces it)
+        self.assertNotIn("result", output)
 
     def test_skips_parsing_when_no_serp_indicators(self):
-        """When result doesn't look like SERP, don't try to parse it."""
+        """When result doesn't look like SERP, pass through unchanged."""
         payload = {
             "status": "success",
             "result": "Just some random markdown content without SERP indicators."
@@ -608,13 +613,15 @@ class BrightDataSearchEngineMarkdownSerpTests(SimpleTestCase):
         result = DummyResult(json.dumps(payload))
 
         adapted = adapter.adapt(result)
-        cleaned = json.loads(adapted.content[0].text)
+        output = json.loads(adapted.content[0].text)
 
-        self.assertNotIn("organic", cleaned)
-        self.assertNotIn("_parsed_from", cleaned)
+        # Should pass through unchanged
+        self.assertNotIn("kind", output)
+        self.assertNotIn("items", output)
+        self.assertEqual(output["result"], payload["result"])
 
     def test_handles_empty_parsed_results_gracefully(self):
-        """When SERP has indicators but no extractable links, don't add empty organic."""
+        """When SERP has indicators but no extractable links, pass through."""
         payload = {
             "status": "success",
             "result": """
@@ -627,10 +634,11 @@ class BrightDataSearchEngineMarkdownSerpTests(SimpleTestCase):
         result = DummyResult(json.dumps(payload))
 
         adapted = adapter.adapt(result)
-        cleaned = json.loads(adapted.content[0].text)
+        output = json.loads(adapted.content[0].text)
 
-        # Should not add empty organic array
-        self.assertNotIn("organic", cleaned)
+        # Should pass through without skeleton (no items to extract)
+        self.assertNotIn("kind", output)
+        self.assertNotIn("items", output)
 
 
 @tag("batch_mcp_tools")

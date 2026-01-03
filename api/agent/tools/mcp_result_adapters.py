@@ -117,7 +117,13 @@ def _parse_markdown_serp(markdown: str, query: str = "") -> List[dict]:
 
 
 class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
-    """Parse Bright Data search engine results (structured JSON or markdown SERP)."""
+    """Transform search results into universal skeleton format.
+
+    Output: {kind: "serp", items: [{t, u, p}...], _meta: {...}}
+
+    The insight: SERP and scraped pages use the SAME structure.
+    Agent learns ONE pattern: json_each(result_json, '$.items')
+    """
 
     server_name = "brightdata"
     tool_name = "search_engine"
@@ -128,32 +134,54 @@ class BrightDataSearchEngineAdapter(BrightDataAdapterBase):
             return result
 
         first_block, payload = parsed
+        original_bytes = len(first_block.text.encode('utf-8'))
 
-        # Case 1: Already structured JSON with organic array
+        # Case 1: Already structured JSON with organic array - convert to skeleton
         organic_results = payload.get("organic")
         if isinstance(organic_results, list) and organic_results:
             for item in organic_results:
                 if isinstance(item, dict):
                     _strip_image_fields(item)
-            first_block.text = json.dumps(payload, ensure_ascii=False)
+            # Convert organic format to skeleton format
+            items = [
+                {"t": item.get("title", "")[:100], "u": item.get("link", "")[:300], "p": item.get("position", i+1)}
+                for i, item in enumerate(organic_results[:12])
+                if isinstance(item, dict)
+            ]
+            skeleton_output = {
+                "kind": "serp",
+                "items": items,
+                "status": payload.get("status"),
+            }
+            if original_bytes > 1000:
+                skeleton_bytes = len(json.dumps(skeleton_output).encode('utf-8'))
+                skeleton_output["_meta"] = {
+                    "original_bytes": original_bytes,
+                    "ratio": f"{100 * (1 - skeleton_bytes / original_bytes):.0f}%",
+                }
+            first_block.text = json.dumps(skeleton_output, ensure_ascii=False)
             return result
 
-        # Case 2: Markdown SERP in $.result - parse it to structured data
+        # Case 2: Markdown SERP in $.result - extract to skeleton
         markdown_content = payload.get("result")
         if isinstance(markdown_content, str) and len(markdown_content) > 500:
-            # Check if it looks like a SERP
             lower_content = markdown_content[:2000].lower()
             if any(ind in lower_content for ind in _SERP_INDICATORS):
-                parsed_results = _parse_markdown_serp(markdown_content)
-                if parsed_results:
-                    # Reorder: put organic FIRST so preview shows useful data
-                    truncated_raw = markdown_content[:2000] + "...[truncated]" if len(markdown_content) > 5000 else markdown_content
-                    payload = {
-                        "organic": parsed_results,
-                        "_parsed_from": "markdown_serp",
+                skeleton = extract_serp_skeleton(markdown_content)
+                if skeleton.items:
+                    skeleton_output = {
+                        "kind": "serp",
+                        "items": skeleton.items,
                         "status": payload.get("status"),
-                        "result": truncated_raw,
                     }
+                    if original_bytes > 1000:
+                        skeleton_bytes = len(json.dumps(skeleton_output).encode('utf-8'))
+                        skeleton_output["_meta"] = {
+                            "original_bytes": original_bytes,
+                            "ratio": f"{100 * (1 - skeleton_bytes / original_bytes):.0f}%",
+                        }
+                    first_block.text = json.dumps(skeleton_output, ensure_ascii=False)
+                    return result
 
         first_block.text = json.dumps(payload, ensure_ascii=False)
         return result
