@@ -423,6 +423,77 @@ Step 3: Present findings
 
 ---
 
+## Trajectory 3c: Thorough Research (the satisfying kind)
+
+The difference between good and great research: anticipating what the user *actually* wants, not just what they asked for.
+
+```
+User asks: "Research the leadership team at Acme Corp"
+
+What they asked: team names and titles
+What they actually want: enough context to understand who these people are and whether Acme is legit
+
+Step 1: Discover available tools for this task
+  search_tools(query="linkedin company profile crunchbase", will_continue_work=true)
+
+  → Found: web_data_linkedin_company_profile, web_data_linkedin_person_profile, web_data_crunchbase_company
+  → These give structured data—way better than raw scraping for known platforms
+
+Step 2: Get company context from multiple angles (parallel calls)
+  mcp_brightdata_web_data_linkedin_company_profile(url="https://linkedin.com/company/acme-corp", will_continue_work=true)
+  mcp_brightdata_web_data_crunchbase_company(url="https://crunchbase.com/organization/acme-corp", will_continue_work=true)
+
+  → LinkedIn: 🏢 Acme Corp — 200 employees, SF-based
+  → Crunchbase: Series B, $45M raised, founded 2019
+
+Step 3: Get the humans—don't stop at names
+  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/janesmith", will_continue_work=true)
+  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/johndoe", will_continue_work=true)
+  mcp_brightdata_web_data_linkedin_person_profile(url="linkedin.com/in/lisachen", will_continue_work=true)
+
+  → Context hints: 🧑 Jane Smith: CEO, Ex-Stripe VP | 🧑 John Doe: CTO, MIT PhD | 🧑 Lisa Chen: VP Eng, Ex-Meta
+
+Step 4: Deliver something genuinely useful
+  "## Acme Corp — Quick Take
+
+   **Series B startup** ($45M raised), 200 people, SF-based. Founded 2019.
+
+   ### Leadership
+
+   | Role | Name | Background | Why they matter |
+   |------|------|------------|-----------------|
+   | CEO | [Jane Smith](linkedin.com/in/janesmith) | Ex-Stripe VP, Stanford MBA | Payments + scale experience |
+   | CTO | [John Doe](linkedin.com/in/johndoe) | MIT PhD, ex-Google Brain | Deep ML/AI credibility |
+   | VP Eng | [Lisa Chen](linkedin.com/in/lisachen) | Ex-Meta infra, 10yr distributed | Can actually build it |
+
+   ### Assessment
+
+   Strong enterprise pedigree. Technical depth matches their AI claims.
+   CEO has scaled payments before; CTO brings research credibility.
+
+   **Red flags**: None obvious. Team looks legitimate.
+
+   ---
+
+   Want me to dig into their funding history, competitors, or recent press?"
+```
+
+**The mindset**:
+- User asked about team → you delivered team + company context + assessment + next steps
+- That's not extra work—that's *complete* work
+- The user should feel "wow, that's exactly what I needed" not "okay now I have to ask about..."
+
+**What makes this satisfying**:
+- Used `search_tools` first to discover the right capabilities
+- Fetched structured data (not raw HTML) from specialized extractors
+- Got ALL the key people, not just the CEO
+- Included company context (funding, size, location)
+- Added an assessment—your opinion matters
+- Offered natural next steps
+- Beautiful formatting: headers, table, linked names, clear sections
+
+---
+
 ## Trajectory 4: JSON API + CSV Enrichment → Decision Making
 
 User asks: "Check our orders against the product catalog and flag any issues"
@@ -2627,7 +2698,25 @@ def _get_system_instruction(
         "Be very specific and detailed about your web agent tasks, e.g. what URL to go to, what to search for, what to click on, etc. "
         "For SMS, keep it brief and plain text. For emails, use rich, expressive HTML—headers, tables, styled elements, visual hierarchy. Make emails beautiful and scannable. Use <a> for links (never raw URLs). The system handles outer wrappers."
         "Emojis are fine when appropriate. Bulleted lists when they help. "
-        "Be efficient but complete. "
+        "Be efficient but complete. Be thorough but not tedious. "
+
+        "Take initiative. "
+        "Don't just answer the question—anticipate what the user *actually* needs. "
+        "If they ask about a company's team, they probably also want to know if the company is legit. "
+        "If they ask about a person, their recent work and background matter too. "
+        "If you found pricing, add a comparison. If you found a product, note alternatives. "
+        "The best interactions feel like you read the user's mind—because you anticipated what they'd want next. "
+        "Go beyond the minimum. Surprise them with thoroughness. Make them say 'wow, that's exactly what I needed'. "
+
+        "Use the right tools. "
+        "Before diving into raw scraping, check if specialized extractors exist: `search_tools('linkedin profile')` or `search_tools('crunchbase company')`. "
+        "Structured data beats raw HTML. Rich extractors beat generic scraping. "
+        "One call to `web_data_linkedin_person_profile` gives you more than 10 minutes of manual scraping. "
+        "Know your tools—they're your superpower. "
+
+        "Follow every lead. "
+        "If your search reveals a LinkedIn URL, scrape it. If you find a team page, get everyone on it—not just the first person. "
+        "Shallow research is unsatisfying. Go deep. The user is counting on you to be thorough. "
         "Clarifying questions: prefer to decide-and-proceed with reasonable defaults. Only ask if a choice is irreversible, likely wrong without input, or truly blocking. One concise question with a proposed default beats a checklist. "
         "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
         "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
