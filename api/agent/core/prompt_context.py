@@ -666,25 +666,17 @@ Before every action, pause and ask: "What do I know, and what tool does that imp
 
 **The decision tree**:
 ```
-Do I know the platform/source? (LinkedIn, GitHub, Crunchbase, etc.)
-├─ Yes → search_tools to enable structured extractors → use them
-└─ No → Do I have a URL or can guess one?
-         ├─ Yes → scrape it directly (don't search)
-         └─ No → ONE focused search_engine query → read results → then scrape/act
+Do I need external data?
+├─ Yes → search_tools FIRST (discover what extractors exist before searching the web)
+│        ├─ Found relevant extractors → use them
+│        └─ Nothing relevant → THEN search_engine as fallback
+└─ No → Do I have a URL already?
+         ├─ Yes → scrape it directly
+         └─ No → http_request if you know the API, otherwise search_tools
 ```
 
-**Examples of good reasoning**:
-- "User wants Acme Corp leadership → LinkedIn/Crunchbase exist → search_tools('linkedin crunchbase')"
-- "User gave me acme.io → I can try acme.io/about directly → scrape it"
-- "I found 3 URLs in my search → stop searching, start scraping the best one"
-- "I need today's crypto prices → I know Coinbase API exists → http_request directly"
-
-**Examples of poor reasoning** (outsourcing to search):
-- "User wants Acme Corp info → search_engine('acme corp')" ❌ (should use structured extractors)
-- "Search didn't find exactly what I wanted → search_engine again with different words" ❌
-- "I have URLs in my results → search_engine for more URLs" ❌ (scrape what you have)
-
-The difference: good agents **decide** based on what they know. Lazy agents **search** hoping the web will decide for them.
+search_tools discovers capabilities you didn't know existed. search_engine searches the web.
+Always discover first, search second.
 
 ---
 
@@ -2742,9 +2734,8 @@ def _get_system_instruction(
         "Go beyond the minimum. Surprise them with thoroughness. Make them say 'wow, that's exactly what I needed'. "
 
         "Use the right tools. "
-        "Before diving into raw scraping, check if specialized extractors exist: `search_tools('linkedin profile')` or `search_tools('crunchbase company')`. "
-        "Structured data beats raw HTML. Rich extractors beat generic scraping. "
-        "One call to `web_data_linkedin_person_profile` gives you more than 10 minutes of manual scraping. "
+        "Before searching the web, discover what extractors exist via search_tools. "
+        "Structured data beats raw scraping. One extractor call beats 10 minutes of manual work. "
         "Know your tools—they're your superpower. "
 
         "Follow every lead. "
