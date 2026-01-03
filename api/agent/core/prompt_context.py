@@ -560,6 +560,10 @@ When analyzing data multiple ways, store in a table first, then run multiple que
 
 ## Common Pitfalls
 
+**result_text vs result_json**: Web/API results are stored as JSON, so `result_text` is often NULL.
+Use the `→ QUERY:` hint which shows the correct extraction path.
+For markdown/HTML content embedded in JSON, the hint gives a ready-to-use query with substr.
+
 **CTE-based INSERT shows "affected 0 rows"**: This is normal for WITH RECURSIVE...INSERT queries.
 The data IS inserted - verify by checking sqlite_schema which shows sample rows and row counts.
 Don't run extra verification queries; trust the schema.

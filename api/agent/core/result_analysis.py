@@ -2152,11 +2152,12 @@ def _generate_compact_summary(
                     parts.append(f"  → GET XML: {extract_query}")
 
                 elif emb.format in ("html", "markdown"):
-                    # Prominent guidance - this is TEXT inside JSON wrapper
+                    # Give a complete, ready-to-use query with substr
                     parts.append(f"\n  📄 {emb.format.upper()} in {emb.path} (~{emb.line_count} lines)")
-                    parts.append(f"  ⚠️ result_text=NULL (use json_extract, not result_text)")
-                    parts.append(f"  → {extract_query}")
-                    parts.append(f"  → Then: substr(text,1,2000) to extract chunks")
+                    parts.append(
+                        f"  → QUERY: SELECT substr(json_extract(result_json,'{emb.path}'),1,2000) "
+                        f"FROM __tool_results WHERE result_id='{result_id}'"
+                    )
 
     else:
         # Text data
