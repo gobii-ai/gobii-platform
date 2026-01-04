@@ -1186,20 +1186,52 @@ User: "Find contact emails from their team page"
 [Turn 1] Scrape
   scrape_as_markdown(url="https://acme.io/team", will_continue_work=true)
 
-[Turn 2] Extract patterns into structured table
+[Turn 2] Extract patterns with layered context strategies (single query)
   -- Hint showed: result_id='<id>', excerpt in $.<text_field>
-  -- Use ACTUAL result_id and text field path from hint
+  -- One query tries multiple extraction strategies; UNION ALL + GROUP BY dedupes
   sqlite_batch(sql="
-    CREATE TABLE extracted (match TEXT PRIMARY KEY, context TEXT);
-    INSERT OR IGNORE INTO extracted (match, context)
-    SELECT LOWER(TRIM(regexp_extract(ctx.value, '<your_regex_pattern>'))),
-           COALESCE(TRIM(substr(ctx.value, 1, 80)), '')
-    FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
-           '<your_regex_pattern>', 60, 20), '[]')) AS ctx
-    WHERE result_id='<result_id_from_hint>'
-      AND regexp_extract(ctx.value, '<your_regex_pattern>') IS NOT NULL;
-    SELECT match, context FROM extracted", will_continue_work=true)
+    WITH
+    -- Strategy A: tight context (40 chars) with exact pattern
+    tight AS (
+      SELECT regexp_extract(ctx.value, '<pattern>') as match, ctx.value as context, 1 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern>', 40, 25), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context (80 chars) with looser pattern
+    medium AS (
+      SELECT regexp_extract(ctx.value, '<looser_pattern>') as match, ctx.value as context, 2 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<looser_pattern>', 80, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: wide context (120 chars) catching more surrounding text
+    wide AS (
+      SELECT regexp_extract(ctx.value, '<pattern>') as match, ctx.value as context, 3 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern>', 120, 15), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy D: section-based for structured documents
+    sections AS (
+      SELECT regexp_extract(sec.value, '<pattern>') as match, substr(sec.value, 1, 150) as context, 4 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) sec
+      WHERE result_id='<result_id_from_hint>' AND sec.value LIKE '%<keyword>%'
+    ),
+    -- ... add more strategies as needed: different delimiters, substr_range for positional, etc.
+    combined AS (
+      SELECT * FROM tight WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM medium WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM wide WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM sections WHERE match IS NOT NULL
+      -- UNION ALL SELECT * FROM <more_strategies> ...
+    )
+    -- Dedupe: keep best (lowest priority = tightest) context per match
+    SELECT LOWER(TRIM(match)) as match, context, MIN(priority) as strategy
+    FROM combined
+    GROUP BY LOWER(TRIM(match))
+    ORDER BY strategy, match", will_continue_work=true)
 
 [Turn 3] Deliver—emails, roles, and context from team_contacts table
   send_chat_message(body="## 👥 Acme Team Directory
@@ -1456,23 +1488,59 @@ User: "What pricing tiers does this company offer?"
 [Turn 1] Scrape
   scrape_as_markdown(url="https://bigcorp.com/pricing", will_continue_work=true)
 
-[Turn 2] Extract price contexts (not raw prices—*contexts* that explain them)
+[Turn 2] Extract with layered strategies (single query, multiple approaches)
   -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
-  -- Use ACTUAL result_id and text path from hint
+  -- One query cascades through context sizes and pattern variations
   sqlite_batch(sql="
-    CREATE TABLE contexts (
-      id INTEGER PRIMARY KEY, context TEXT, extracted TEXT, category TEXT
-    );
-    INSERT INTO contexts (context, extracted)
-    SELECT TRIM(ctx.value),
-           COALESCE(regexp_extract(ctx.value, '<pattern_to_find>'), '')
-    FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
-           '<pattern_to_find>', 80, 15), '[]')) AS ctx
-    WHERE result_id='<result_id_from_hint>'
-      AND NULLIF(TRIM(ctx.value), '') IS NOT NULL;
-
-    SELECT context, extracted FROM contexts WHERE extracted != ''", will_continue_work=true)
+    WITH
+    -- Strategy A: tight context around exact pattern
+    tight AS (
+      SELECT regexp_extract(ctx.value, '<exact_pattern>') as val, ctx.value as context, 1 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<exact_pattern>', 50, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context with pattern variations
+    medium AS (
+      SELECT regexp_extract(ctx.value, '<pattern_variant>') as val, ctx.value as context, 2 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern_variant>', 80, 15), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: wide context for sparse documents
+    wide AS (
+      SELECT regexp_extract(ctx.value, '<exact_pattern>') as val, ctx.value as context, 3 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<exact_pattern>', 120, 10), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy D: line-by-line for tabular/list data
+    lines AS (
+      SELECT regexp_extract(ln.value, '<exact_pattern>') as val, ln.value as context, 4 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n'), '[]')) ln
+      WHERE result_id='<result_id_from_hint>' AND ln.value LIKE '%<keyword>%'
+    ),
+    -- Strategy E: paragraph-level for prose
+    paragraphs AS (
+      SELECT regexp_extract(p.value, '<exact_pattern>') as val, substr(p.value, 1, 200) as context, 5 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) p
+      WHERE result_id='<result_id_from_hint>' AND p.value LIKE '%<keyword>%'
+    ),
+    -- ... Strategy F, G, H: positional chunks, heading-based, table row extraction, etc.
+    combined AS (
+      SELECT * FROM tight WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM medium WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM wide WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM lines WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM paragraphs WHERE val IS NOT NULL AND val != ''
+      -- UNION ALL ... more strategies as data requires
+    )
+    SELECT val, context, MIN(priority) as best_strategy
+    FROM combined
+    GROUP BY LOWER(TRIM(val))
+    ORDER BY best_strategy", will_continue_work=true)
 
   -- Returns context windows like:
   -- "...Starter Plan $49/month Perfect for small teams up to 5 users. Includes..."
@@ -1601,43 +1669,62 @@ User: "Extract all the key facts from this company's about page"
 [Turn 1] Scrape the page
   scrape_as_markdown(url="https://bigstartup.io/about", will_continue_work=true)
 
-[Turn 2] First pass: extract sections for navigation
+[Turn 2] Extract structure + content in single pass (adaptive sectioning)
   -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
-  -- Use ACTUAL result_id and text path from hint
+  -- One query: try multiple section delimiters, extract patterns from each
   sqlite_batch(sql="
-    CREATE TABLE page_sections (
-      section_num INTEGER PRIMARY KEY, heading TEXT, content TEXT
-    );
-    INSERT INTO page_sections (section_num, heading, content)
-    SELECT ROW_NUMBER() OVER () as num,
-           COALESCE(TRIM(regexp_extract(s.value, '^#+\\s*(.+)', 1)), '(untitled)'),
-           COALESCE(s.value, '')
-    FROM __tool_results,
-         json_each(COALESCE(split_sections(json_extract(result_json,'$.<text_field>'), '<delimiter>'), '[]')) AS s
-    WHERE result_id='<result_id_from_hint>'
-      AND NULLIF(TRIM(s.value), '') IS NOT NULL;
-
-    SELECT section_num, heading, char_count(content) as size FROM page_sections",
-    will_continue_work=true)
-
-  -- Returns section inventory to guide next pass
-
-[Turn 3] Second pass: extract patterns with context from relevant sections
-  -- Filter to sections relevant to task; use headings from Turn 2 results
-  sqlite_batch(sql="
-    CREATE TABLE findings (
-      id INTEGER PRIMARY KEY, section TEXT, context TEXT, extracted TEXT
-    );
-    INSERT INTO findings (section, context, extracted)
-    SELECT COALESCE(ps.heading, ''),
-           COALESCE(TRIM(ctx.value), ''),
-           regexp_extract(ctx.value, '<pattern_to_extract>')
-    FROM page_sections ps,
-         json_each(COALESCE(grep_context_all(ps.content, '<pattern_to_find>', 60, 10), '[]')) AS ctx
-    WHERE ps.heading IN ('<relevant>', '<sections>', '<from_turn_2>')
-      AND ctx.value IS NOT NULL;
-
-    SELECT section, extracted, COALESCE(substr(context, 1, 80), '') FROM findings WHERE extracted IS NOT NULL", will_continue_work=true)
+    WITH
+    -- Try markdown heading delimiter first
+    by_headings AS (
+      SELECT regexp_extract(s.value, '^#+\\s*(.+)', 1) as heading,
+             s.value as content, 1 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n## '), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND TRIM(s.value) != ''
+    ),
+    -- Fallback: double-newline paragraphs
+    by_paragraphs AS (
+      SELECT regexp_extract(s.value, '^[A-Z][^.!?]*') as heading,
+             s.value as content, 2 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND TRIM(s.value) != ''
+        AND NOT EXISTS (SELECT 1 FROM by_headings)
+    ),
+    -- Fallback: single-newline for dense text
+    by_lines AS (
+      SELECT NULL as heading, s.value as content, 3 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND LENGTH(TRIM(s.value)) > 20
+        AND NOT EXISTS (SELECT 1 FROM by_headings)
+        AND NOT EXISTS (SELECT 1 FROM by_paragraphs WHERE LENGTH(content) > 100)
+    ),
+    -- ... more delimiters: <hr>, <br>, bullet points, numbered lists, etc.
+    all_sections AS (
+      SELECT * FROM by_headings
+      UNION ALL SELECT * FROM by_paragraphs
+      UNION ALL SELECT * FROM by_lines
+    ),
+    -- Now extract patterns from each section with multiple context sizes
+    extractions AS (
+      SELECT
+        COALESCE(heading, '(no heading)') as section,
+        regexp_extract(ctx.value, '<pattern>') as extracted,
+        ctx.value as context,
+        section_strategy,
+        CASE WHEN LENGTH(ctx.value) <= 60 THEN 1
+             WHEN LENGTH(ctx.value) <= 100 THEN 2
+             ELSE 3 END as context_quality
+      FROM all_sections, json_each(COALESCE(
+        grep_context_all(content, '<pattern>', 80, 10), '[]')) ctx
+      WHERE content LIKE '%<keyword>%'
+    )
+    SELECT section, extracted, context, MIN(section_strategy + context_quality) as quality
+    FROM extractions
+    WHERE extracted IS NOT NULL
+    GROUP BY LOWER(TRIM(extracted))
+    ORDER BY quality", will_continue_work=true)
 
 [Turn 4] Synthesize and deliver—facts from key_facts, structure from page_sections
   send_chat_message(body="## 🏢 BigStartup Company Profile
@@ -1747,26 +1834,62 @@ User: "Analyze their job postings to understand tech stack"
 [Turn 1] Scrape careers page
   scrape_as_markdown(url="https://company.io/careers", will_continue_work=true)
 
-[Turn 2] First pass: find keyword mentions with context
+[Turn 2] First pass: find keyword mentions with context (one big adaptive query)
   -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
   -- Use ACTUAL result_id and text path from hint
   sqlite_batch(sql="
-    CREATE TABLE mentions (
-      id INTEGER PRIMARY KEY, keyword TEXT, context TEXT
-    );
-    INSERT INTO mentions (keyword, context)
-    SELECT TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|<keyword3>|...)', 1)),
-           COALESCE(TRIM(ctx.value), '')
-    FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
-           '<keyword1>|<keyword2>|<keyword3>|...', 100, 25), '[]')) AS ctx
-    WHERE result_id='<result_id_from_hint>'
-      AND regexp_extract(ctx.value, '(<keyword1>|<keyword2>|...)', 1) IS NOT NULL;
+    CREATE TABLE mentions (id INTEGER PRIMARY KEY, keyword TEXT, context TEXT, strategy INT);
 
-    SELECT keyword, COUNT(*) as n FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY n DESC",
+    WITH
+    -- Strategy A: tight context (60 chars) - precise snippets
+    tight AS (
+      SELECT LOWER(TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|<keyword3>|...)', 1))) as kw,
+             COALESCE(TRIM(ctx.value), '') as ctx, 1 as priority
+      FROM __tool_results,
+           json_each(COALESCE(grep_context_all(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'),
+                      json_extract(result_json,'$.text'), ''),
+             '<keyword1>|<keyword2>|<keyword3>|...', 60, 30), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context (100 chars) - more surrounding text
+    medium AS (
+      SELECT LOWER(TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|...)', 1))) as kw,
+             COALESCE(TRIM(ctx.value), '') as ctx, 2 as priority
+      FROM __tool_results,
+           json_each(COALESCE(grep_context_all(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'), ''),
+             '<keyword1>|<keyword2>|...', 100, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: section-based (job listings often have sections)
+    by_section AS (
+      SELECT LOWER(TRIM(regexp_extract(s.value, '(<keyword1>|<keyword2>|...)', 1))) as kw,
+             SUBSTR(COALESCE(TRIM(s.value), ''), 1, 150) as ctx, 3 as priority
+      FROM __tool_results,
+           json_each(COALESCE(split_sections(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'), ''), '\n\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>'
+        AND (s.value LIKE '%<keyword1>%' OR s.value LIKE '%<keyword2>%')
+    ),
+    -- ... add more: by_bullets, by_headings, wider context, case variations ...
+    combined AS (
+      SELECT * FROM tight WHERE kw IS NOT NULL AND kw != ''
+      UNION ALL SELECT * FROM medium WHERE kw IS NOT NULL AND kw != ''
+      UNION ALL SELECT * FROM by_section WHERE kw IS NOT NULL AND kw != ''
+      -- UNION ALL SELECT * FROM <more_strategies> ...
+    )
+    INSERT INTO mentions (keyword, context, strategy)
+    SELECT kw, ctx, MIN(priority) FROM combined GROUP BY kw, ctx ORDER BY priority;
+
+    SELECT keyword, COUNT(*) as n, MIN(strategy) as best_strat
+    FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY n DESC",
     will_continue_work=true)
 
-  -- Returns: Python|8, Kubernetes|6, React|5, PostgreSQL|4...
+  -- Returns: Python|8|1, Kubernetes|6|1, React|5|2, PostgreSQL|4|1...
 
 [Turn 3] Decision point—dig deeper on top findings
   sqlite_batch(sql="
