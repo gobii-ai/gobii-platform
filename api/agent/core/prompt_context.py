@@ -188,6 +188,50 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return complete agent trajectories demonstrating data retrieval, storage, and analysis."""
     return """
+## How This System Works
+
+**Two brains, one workflow.**
+
+**SQLite** handles precision:
+- Querying: `json_extract()`, `json_each()`, JOINs, WHERE clauses
+- Math: AVG, SUM, SQRT, percentiles, statistics
+- Logic: CASE expressions, set operations, NOT EXISTS, recursive CTEs
+- Memory: Tables persist—build incrementally across turns
+- Scale: Millions of rows, no problem
+
+**You** handle fuzziness:
+- Deciding what matters in messy text
+- Pattern recognition too subtle for regex
+- Synthesizing findings into coherent narratives
+- Judgment calls when data is ambiguous
+
+**You write, SQLite executes.** You craft the queries—the logic, the language, the intent. SQLite runs them—the computation, the math, the heavy lifting. You're the programmer; SQLite is the runtime.
+
+**SQLite filters, you interpret.** Raw data is too big for context. SQLite extracts the goldilocks amount—enough to understand, small enough to fit. You read the distilled result and make sense of the mess.
+
+---
+
+### By Data Type
+
+**Structured JSON** (APIs, extractors):
+→ Copy the `→ QUERY:` from the hint — it has the correct paths
+→ Never guess paths like `$.hits` or `$.items` — every API nests differently
+→ The hint might show `$.content.hits` or `$.data.results` — use exactly what it shows
+
+**Text blobs** (scraped pages, markdown):
+→ `grep_context_all(text, 'pattern', 60, 10)` — context windows around matches
+→ `split_sections(text, '\n\n')` — iterate paragraphs
+→ `substr_range(text, 0, 3000)` — batched extraction
+→ Never pull raw blobs into context—extract what you need
+
+**CSV/tabular**:
+→ Parse inline for quick looks
+→ `CREATE TABLE ... AS` for complex analysis
+
+**The hint is your map.** It shows `result_id`, exact paths, and a ready-to-run query. Copy it, don't improvise.
+
+---
+
 ## Working with External Data
 
 When you fetch data from APIs or web sources, results are stored in `__tool_results`.
@@ -222,12 +266,12 @@ CAST(REPLACE(REPLACE(COALESCE(json_extract(i.value,'$.price'),'0'), '$',''), ','
 The paths (`$.score`, `$.name`, etc.) come from your hint's FIELDS—these patterns just make them resilient to NULL/empty values.
 
 ```sql
--- persist tool outputs into a durable table
+-- persist tool outputs into a durable table (use path from YOUR hint)
 CREATE TABLE IF NOT EXISTS items AS
 SELECT json_extract(i.value,'$.title') AS title,
        json_extract(i.value,'$.url') AS url
-FROM __tool_results, json_each(result_json,'$.items') AS i
-WHERE result_id='...';
+FROM __tool_results, json_each(result_json,'$.<path_from_hint>') AS i
+WHERE result_id='<result_id_from_hint>';
 ```
 
 ---
@@ -2443,6 +2487,8 @@ Example hint you might see:
 Use the QUERY as a starting point. Add or change fields based on what you need from FIELDS.
 The paths ($.content.hits) and fields ($.title, $.points) are specific to this result.
 Different tools return different structures—check the hint for each one.
+
+**Common mistake**: Guessing `$.hits` when the hint shows `$.content.hits`. Copy the path exactly.
 ```
 
 **Note**: Documentation examples use placeholder paths like `$.items` or `$.excerpt`. Your actual hint will show the real paths for that result—use those instead.
