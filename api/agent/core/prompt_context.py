@@ -198,12 +198,28 @@ Context space is limited, so query thoughtfully:
 - Use `substr(text, 1, 2000)` for raw text fields
 - Extract specific fields rather than entire blobs
 
+**Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively:
 ```sql
--- extracts what you need
-SELECT json_extract(i.value,'$.title'), json_extract(i.value,'$.url')
-FROM __tool_results, json_each(result_json,'$.items') AS i
-WHERE result_id='...' LIMIT 25
+-- COALESCE chains: try fields from hint, fall back gracefully
+SELECT COALESCE(json_extract(i.value,'$.score'), json_extract(i.value,'$.points'), 0) as score,
+       COALESCE(json_extract(i.value,'$.name'), json_extract(i.value,'$.title'), 'Untitled') as label
+
+-- Fallback sorting: if primary field is NULL, secondary takes over
+ORDER BY COALESCE(json_extract(i.value,'$.rating'), 0) DESC,
+         COALESCE(json_extract(i.value,'$.reviews'), 0) DESC,
+         json_extract(i.value,'$.created_at') DESC
+
+-- Handle empty strings and NULL uniformly
+WHERE COALESCE(NULLIF(json_extract(i.value,'$.status'), ''), 'active') = 'active'
+
+-- Safe length check for arrays that might not exist
+CASE WHEN json_extract(i.value,'$.tags') IS NOT NULL
+     THEN json_array_length(json_extract(i.value,'$.tags')) ELSE 0 END as tag_count
+
+-- Numeric extraction from mixed formats (hint shows price field, but value might be "$99" or 99)
+CAST(REPLACE(REPLACE(COALESCE(json_extract(i.value,'$.price'),'0'), '$',''), ',','') AS REAL) as price
 ```
+The paths (`$.score`, `$.name`, etc.) come from your hint's FIELDS—these patterns just make them resilient to NULL/empty values.
 
 ```sql
 -- persist tool outputs into a durable table
