@@ -744,6 +744,8 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
+**will_continue_work rule**: Fetching data you still need to process or present? → `will_continue_work=true`. Done and ready to sleep? → `will_continue_work=false` or omit it. Forgetting this after a fetch = your work stops before you present results.
+
 ## Smooth Patterns
 
 **result_json first**: Web/API results live in `result_json`. `scrape_as_markdown` outputs are normalized to `{kind, title, items, excerpt}`—query `$.items` or `$.excerpt`. Use the `→ QUERY:` hint for the exact path.
