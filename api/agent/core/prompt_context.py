@@ -726,12 +726,106 @@ User: "What are the top mass transit systems by ridership?"
     ORDER BY CAST(json_extract(r.value,'$.ridership_millions') AS REAL) DESC
     LIMIT 10", will_continue_work=true)
 
-[Turn 3] Deliver with rich formatting
-  send_chat_message(body="## Top Transit Systems by Ridership
-  | System | City | Annual Riders |
-  |--------|------|---------------|
-  | Tokyo Metro | Tokyo | 3.6B |
-  | Moscow Metro | Moscow | 2.5B |...")
+[Turn 3] Deliver—use extracted data including URLs from the result set
+  -- Query included: SELECT name, city, ridership, details_url, lines, founded FROM ...
+  send_chat_message(body="## 🚇 World's Busiest Metro Systems
+
+> **The question**: Which transit systems move the most people?
+> **The answer**: Asia dominates—7 of 10 are there—moving **21.4 billion** annually.
+
+---
+
+### 🌏 By Region
+
+#### Asia-Pacific · 7 systems · 16.2B riders
+
+<details>
+<summary><b>🥇 Tokyo Metro</b> — 3.6 billion riders/year</summary>
+
+The world's busiest. 13 lines, 290 stations.
+
+| Metric | Value |
+|--------|-------|
+| Daily riders | 9.8 million |
+| Peak capacity | 200% (they hire professional pushers) |
+| Oldest line | Ginza (1927) |
+| Notable | Only metro with a dedicated poetry car |
+
+→ [Full profile](${details_url})
+
+</details>
+
+<details>
+<summary><b>🥈 Shanghai Metro</b> — 2.3B riders</summary>
+
+From zero to world's largest network in 30 years.
+
+| Metric | Value |
+|--------|-------|
+| Track length | 831 km (#1 globally) |
+| Lines | 20 |
+| Growth | +12% YoY |
+
+→ [Full profile](${details_url})
+
+</details>
+
+<details>
+<summary><b>Beijing, Seoul, Delhi, Hong Kong, Guangzhou</b> — 10.3B combined</summary>
+
+| System | Riders | Notable |
+|--------|--------|---------|
+| Beijing | 2.1B | 27 lines, rapid expansion |
+| Seoul | 2.0B | Integrated with KTX high-speed |
+| Delhi | 1.8B | Fastest growing (+18% YoY) |
+| ... | | |
+
+</details>
+
+#### Europe · 2 systems · 4.0B riders
+
+<details>
+<summary><b>Moscow & Paris</b></summary>
+
+| System | Riders | Character |
+|--------|--------|-----------|
+| Moscow | 2.5B | Stalin's palaces underground—74 heritage stations |
+| Paris | 1.5B | Oldest after London, densest coverage |
+
+</details>
+
+#### Americas · 1 system · 1.2B riders
+
+<details>
+<summary><b>New York MTA</b></summary>
+
+The only American system in top 10. 24/7 operation (unique globally).
+472 stations—more than any system, but aging infrastructure.
+
+</details>
+
+---
+
+### 📈 Momentum
+
+```
+Delhi     ████████████████████ +18%  ← fastest
+Shanghai  ██████████████       +12%
+Cairo     ███████████          +9%
+Jakarta   █████████            +7%
+```
+
+---
+
+### 💡 Insight
+
+> The gap between Asian and Western systems is *widening*.
+> China added more metro track in 2023 than the US has *total*.
+
+---
+
+*Source: [TransitData.org](${source_url}) · Q3 2024 data*
+*See also: [Methodology](${source_url}/methodology)*")
 ```
 
 ### Pattern B: Search → Work Queue → Iterative Scraping → Synthesize
@@ -770,11 +864,120 @@ User: "Research the top 3 AI infrastructure companies"
 
 [Turns 5-6] Repeat scrape pattern for remaining URLs
 
-[Turn 7] Synthesize and deliver
-  sqlite_batch(sql="SELECT title, url, summary FROM research_queue WHERE scraped=1")
-  send_chat_message(body="## AI Infrastructure Leaders
-  ### [Company A](https://...)
-  {summary}...")
+[Turn 7] Synthesize—URLs and summaries come from research_queue
+  sqlite_batch(sql="SELECT title, url, summary, funding, customers FROM research_queue WHERE scraped=1")
+  send_chat_message(body="## 🏗️ AI Infrastructure: The Emerging Stack
+
+> **Research scope**: Analyzed 5 companies across compute, orchestration, and inference layers.
+> **Key finding**: The AI stack is fragmenting—vertical integration is losing to best-of-breed.
+
+---
+
+### The Stack
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  APPLICATIONS   (OpenAI, Anthropic, Midjourney...)      │
+├─────────────────────────────────────────────────────────┤
+│  INFERENCE      Modal, Replicate, Baseten               │
+├─────────────────────────────────────────────────────────┤
+│  ORCHESTRATION  Anyscale (Ray), Determined AI           │
+├─────────────────────────────────────────────────────────┤
+│  COMPUTE        CoreWeave, Lambda Labs, Together        │
+├─────────────────────────────────────────────────────────┤
+│  HARDWARE       NVIDIA, AMD, custom ASICs               │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🔍 Deep Dives
+
+<details>
+<summary><b>CoreWeave</b> — Compute Layer — <code>$2.3B raised</code></summary>
+
+#### [coreweave.com](${url})
+
+> *\"We're not a cloud company. We're a GPU finance company.\"*
+> — CEO Michael Intrator
+
+**The pitch**: Bare-metal GPU clusters, 80% cheaper than hyperscalers.
+
+**Why they're winning**:
+- When OpenAI needed to scale past Azure → they called CoreWeave
+- 45,000+ NVIDIA H100s deployed
+- $8B in contracted revenue
+
+**Customers**: OpenAI · Mistral · Stability AI · Microsoft (overflow)
+
+**Risk**: Single-supplier dependency on NVIDIA
+
+</details>
+
+<details>
+<summary><b>Anyscale</b> — Orchestration Layer — <code>$320M raised</code></summary>
+
+#### [anyscale.com](${url})
+
+**The pitch**: Ray framework—distribute any Python across any cluster.
+
+**Why they're winning**:
+- Ray runs 70% of LLM training at hyperscalers
+- 30k GitHub stars, massive community
+- From UC Berkeley's RISELab (same team as Spark)
+
+**Customers**: OpenAI · Uber · Spotify · Instacart · ByteDance
+
+| Metric | Value |
+|--------|-------|
+| GitHub stars | 30k |
+| Contributors | 900+ |
+| Production clusters | 10,000+ |
+
+</details>
+
+<details>
+<summary><b>Modal</b> — Inference Layer — <code>$65M raised</code></summary>
+
+#### [modal.com](${url})
+
+**The pitch**: Serverless for ML. Deploy models in seconds, pay per inference.
+
+**Why they're winning**:
+- Cold start: <500ms (vs 30s+ on Lambda)
+- GPU containers that scale to zero
+- Developer UX that feels magical
+
+**Customers**: Ramp · Harvey · Suno · indie hackers
+
+</details>
+
+...
+
+---
+
+### 📊 Funding Landscape
+
+```
+CoreWeave  ████████████████████████ $2.3B  (Series C)
+Anyscale   ██████                   $320M  (Series C)
+Lambda     █████                    $250M  (Series B)
+Modal      ██                       $65M   (Series B)
+```
+
+---
+
+### 💡 Investment Thesis
+
+> **Compute** (CoreWeave) → **Orchestration** (Anyscale) → **Inference** (Modal)
+>
+> Each layer is becoming a distinct market. The winners will be
+> specialists, not generalists. Watch for M&A as hyperscalers
+> try to buy their way back in.
+
+---
+
+*Sources: Company pages, Crunchbase, TechCrunch · Scraped ${date}*")
 ```
 
 The queue table (`scraped=0/1`) tracks progress across turns.
@@ -817,12 +1020,91 @@ User: "Compare inventory against supplier catalog"
     WHERE c.sku IS NULL OR i.qty > c.stock;
     SELECT issue, COUNT(*) as n FROM discrepancies GROUP BY issue", will_continue_work=true)
 
-[Turn 6] Deliver actionable report
-  send_chat_message(body="## Inventory Discrepancies
-  | Issue | Count |
-  |-------|-------|
-  | Missing | 12 |
-  | Exceeds | 8 |...")
+[Turn 6] Deliver actionable report—all data from discrepancies + inventory tables
+  sqlite_batch(sql="SELECT sku, issue, our_qty, supplier_qty, location, last_sold FROM discrepancies d JOIN inventory i USING(sku) ORDER BY issue, our_qty DESC")
+  send_chat_message(body="## 📦 Inventory Health Check
+
+> **Scope**: Cross-referenced 847 SKUs against supplier catalog
+> **Result**: 97.6% aligned · 20 discrepancies need attention
+
+---
+
+### Summary
+
+```
+Aligned        ████████████████████████████████████████ 827 (97.6%)
+Missing        ████                                      12 (1.4%)
+Overstock      ██                                         8 (0.9%)
+```
+
+---
+
+### 🚨 Critical: Supplier No Longer Carries (12 SKUs)
+
+<details open>
+<summary><b>WDG-45xx Series</b> — Widget line, possibly discontinued</summary>
+
+| SKU | Stock | Location | Velocity | Risk |
+|-----|-------|----------|----------|------|
+| WDG-4521 | 234 | Warehouse B | 47/week | 🔴 **5 weeks runway** — bestseller |
+| WDG-4522 | 189 | Warehouse B | 31/week | 🔴 **6 weeks runway** |
+| WDG-4523 | 156 | Warehouse B | 28/week | 🟡 6 weeks |
+| WDG-4524 | 98 | Warehouse B | 12/week | 🟢 8 weeks |
+
+**Pattern**: Entire WDG-45xx line affected. Likely supplier discontinuation.
+
+**Recommended actions**:
+1. Contact supplier re: discontinuation timeline
+2. Source alternative supplier (see [approved vendors](${vendors_url}))
+3. Consider customer communication if substitutes unavailable
+
+</details>
+
+<details>
+<summary><b>Other Missing</b> — 4 additional SKUs (low risk)</summary>
+
+| SKU | Stock | Velocity | Notes |
+|-----|-------|----------|-------|
+| CMP-0892 | 45 | 2/week | 22 weeks runway, slow mover |
+| ACC-1122 | 23 | 1/week | Accessory, easy to substitute |
+| ... | | | |
+
+No immediate action needed.
+
+</details>
+
+---
+
+### ⚡ Overstock Risk: Our Stock > Supplier Capacity (8 SKUs)
+
+<details>
+<summary><b>MNT-22xx Series</b> — Monitor mounts</summary>
+
+| SKU | We Have | Supplier Has | Gap | Issue |
+|-----|---------|--------------|-----|-------|
+| MNT-2201 | 500 | 120 | -380 | Supplier on allocation |
+| MNT-2202 | 340 | 85 | -255 | Supplier on allocation |
+| MNT-2203 | 220 | 60 | -160 | |
+
+**What happened**: Supplier shifted production, now on allocation.
+
+**Recommended actions**:
+1. Pause reorders until Q2
+2. Monitor competitor pricing (they may face same constraint)
+3. Consider 5% price increase while supply tight
+
+</details>
+
+---
+
+### ✅ Healthy: 827 SKUs (97.6%)
+
+No action needed. Next recommended audit: 30 days.
+
+---
+
+*Generated from inventory sync · ${timestamp}*
+*Data: [Internal Inventory](${inv_url}) × [Supplier Catalog](${catalog_url})*")
 ```
 
 Creating `discrepancies` as a table lets you query it multiple ways.
@@ -848,11 +1130,70 @@ User: "Find contact emails from their team page"
     WHERE result_id='team-789';
     SELECT email, context FROM team_contacts", will_continue_work=true)
 
-[Turn 3] Deliver
-  send_chat_message(body="## Team Contacts
-  | Email | Context |
-  |-------|---------|
-  | jane@acme.io | \"...CEO and co-founder...\" |...")
+[Turn 3] Deliver—emails, roles, and context from team_contacts table
+  send_chat_message(body="## 👥 Acme Team Directory
+
+> Extracted **12 contacts** from [acme.io/team](${source_url})
+> Pattern: `firstname@acme.io` — likely applies to unlisted members too
+
+---
+
+### 🎯 Leadership
+
+<details open>
+<summary>Executive Team (4)</summary>
+
+| | Name | Role | Contact | Background |
+|-|------|------|---------|------------|
+| 👤 | **Jane Chen** | CEO & Co-founder | [jane@acme.io](mailto:jane@acme.io) | Ex-Stripe, Stanford CS |
+| 👤 | **Marcus Webb** | CTO | [marcus@acme.io](mailto:marcus@acme.io) | Ex-Google Brain, PhD MIT |
+| 👤 | **Priya Sharma** | VP Engineering | [priya@acme.io](mailto:priya@acme.io) | Ex-Meta, 15 YoE |
+| 👤 | **David Kim** | VP Sales | [david@acme.io](mailto:david@acme.io) | Ex-Salesforce |
+
+</details>
+
+### 🏢 Department Heads
+
+<details>
+<summary>Engineering & Product (4)</summary>
+
+| Name | Role | Focus Area |
+|------|------|------------|
+| Alex Rivera | Head of Platform | Infrastructure, DevOps |
+| Sam Okonkwo | Head of Design | Product design, UX research |
+| Lin Zhang | Head of ML | Model training, MLOps |
+| Jordan Lee | Head of Frontend | React, mobile |
+
+</details>
+
+<details>
+<summary>Go-to-Market (4)</summary>
+
+| Name | Role | Territory/Focus |
+|------|------|-----------------|
+| Maria Santos | Head of Marketing | Brand, content |
+| Chris Johnson | Enterprise Sales | Fortune 500 |
+| Aisha Patel | Customer Success | Retention, expansion |
+| Tom Wilson | Partnerships | Integrations, channels |
+
+</details>
+
+---
+
+### 📧 Email Pattern
+
+```
+Confirmed: firstname@acme.io
+Examples:  jane@acme.io, marcus@acme.io, priya@acme.io
+
+For unlisted team members, try:
+  → firstname@acme.io (most likely)
+  → firstname.lastname@acme.io (fallback)
+```
+
+---
+
+*Source: [acme.io/team](${source_url}) · Scraped ${date}*")
 ```
 
 `grep_context_all` + `regexp_extract` turns messy text into queryable rows.
@@ -886,12 +1227,89 @@ User: "Get all open issues from the repo"
     SELECT COUNT(*) FROM issues", will_continue_work=true)
   -- Returns: 147 total (page had <100, done)
 
-[Turn 5] Analyze and deliver
-  sqlite_batch(sql="SELECT labels, COUNT(*) as n FROM issues GROUP BY labels ORDER BY n DESC")
-  send_chat_message(body="## Open Issues: 147
-  | Label | Count |
-  |-------|-------|
-  | bug | 34 |...")
+[Turn 5] Analyze and deliver—all data from issues table with aggregations
+  sqlite_batch(sql="SELECT labels, COUNT(*) as n, GROUP_CONCAT(number), MIN(created_at) as oldest FROM issues GROUP BY labels ORDER BY n DESC")
+  send_chat_message(body="## 🎫 acme/app Issue Tracker
+
+> **147 open issues** fetched via GitHub API
+> **Health**: ⚠️ Bug backlog growing — needs attention
+
+---
+
+### 📊 Distribution
+
+```
+bug           ██████████████████████████████████ 34  (23%)
+enhancement   ████████████████████████████       28  (19%)
+documentation ███████████████████                19  (13%)
+tech-debt     ███████████████                    15  (10%)
+help-wanted   ████████████                       12  (8%)
+other         ███████████████████████████████████████  39  (27%)
+              ─────────────────────────────────────────
+              Total: 147 open issues
+```
+
+---
+
+### 🔥 Hotspots
+
+<details open>
+<summary><b>Bugs</b> — 34 open, ▲8 this week</summary>
+
+#### Critical (3)
+| # | Title | Age | Assignee |
+|---|-------|-----|----------|
+| [#142](${repo_url}/issues/142) | Auth token refresh race condition | 2d | @marcus |
+| [#139](${repo_url}/issues/139) | Memory leak in WebSocket handler | 5d | — |
+| [#134](${repo_url}/issues/134) | Data corruption on concurrent writes | 8d | @priya |
+
+#### Aging (needs triage)
+| # | Title | Age | Last Activity |
+|---|-------|-----|---------------|
+| [#89](${repo_url}/issues/89) | Async race condition in queue processor | **47d** | 21d ago |
+| [#76](${repo_url}/issues/76) | Intermittent 500s on /api/export | **52d** | 30d ago |
+
+> ⚠️ Issues over 30 days old without activity should be triaged or closed.
+
+</details>
+
+<details>
+<summary><b>Tech Debt</b> — 15 open, ▲5 this week</summary>
+
+| # | Title | Blocked By |
+|---|-------|------------|
+| [#138](${repo_url}/issues/138) | Migrate to new auth library | — |
+| [#131](${repo_url}/issues/131) | Remove deprecated API endpoints | [#138](${repo_url}/issues/138) |
+| [#127](${repo_url}/issues/127) | Upgrade React to v19 | — |
+
+**Pattern**: Auth migration blocking 3 downstream issues. Prioritize [#138](${repo_url}/issues/138).
+
+</details>
+
+<details>
+<summary><b>Community</b> — 12 help-wanted</summary>
+
+Good first issues for contributors:
+
+| # | Title | Difficulty |
+|---|-------|------------|
+| [#136](${repo_url}/issues/136) | Add dark mode toggle | 🟢 Easy |
+| [#125](${repo_url}/issues/125) | Improve error messages | 🟢 Easy |
+| [#118](${repo_url}/issues/118) | Add CSV export option | 🟡 Medium |
+
+</details>
+
+---
+
+### 💡 Recommendations
+
+1. **Triage aging bugs** — 5 issues over 30 days, 2 over 50 days
+2. **Unblock auth migration** — [#138](${repo_url}/issues/138) is blocking 3 issues
+3. **Clear help-wanted** — 12 good-first-issues ready for contributors
+
+---
+
+*Source: [GitHub API](${repo_url}) · [View all issues](${repo_url}/issues) · Fetched ${timestamp}*")
 ```
 
 Row count vs page size determines if more fetching is needed.
@@ -949,13 +1367,103 @@ User: "What pricing tiers does this company offer?"
     SELECT tier, price, substr(context, 1, 100) FROM pricing_contexts ORDER BY
       CAST(REPLACE(REPLACE(price, '$', ''), ',', '') AS REAL)", will_continue_work=true)
 
-[Turn 4] Deliver structured findings
-  send_chat_message(body="## BigCorp Pricing
-  | Tier | Price | Notes |
-  |------|-------|-------|
-  | Starter | $49/mo | Up to 5 users |
-  | Professional | $199/mo | Unlimited users, API |
-  | Enterprise | Custom | Contact sales |")
+[Turn 4] Deliver structured findings—tiers, prices, features from pricing_contexts
+  send_chat_message(body="## 💰 BigCorp Pricing Analysis
+
+> Extracted from [bigcorp.com/pricing](${source_url})
+> **Model**: Usage-based with tier floors · **Discount**: Annual = 2 months free
+
+---
+
+### Plans at a Glance
+
+```
+                    Starter    Pro        Enterprise
+                    ─────────  ─────────  ───────────
+Monthly price       $49        $199       Custom
+Annual price        $490       $1,990     Negotiated
+                    (save $98) (save $398)
+
+Users               5          Unlimited  Unlimited
+API access          ❌         ✅         ✅
+SSO/SAML            ❌         ❌         ✅
+SLA                 —          99.9%      99.99%
+Support             Email      Priority   Dedicated CSM
+```
+
+---
+
+### 📋 Detailed Breakdown
+
+<details open>
+<summary><b>Starter</b> — $49/month</summary>
+
+**Best for**: Small teams getting started
+
+| Feature | Included |
+|---------|----------|
+| Users | Up to 5 |
+| Projects | 10 |
+| Storage | 10 GB |
+| API access | ❌ |
+| Integrations | Slack, GitHub |
+
+**Limitations**:
+- No API access (deal-breaker for automation)
+- No audit logs
+- Community support only
+
+</details>
+
+<details>
+<summary><b>Professional</b> — $199/month</summary>
+
+**Best for**: Growing teams with technical needs
+
+| Feature | Included |
+|---------|----------|
+| Users | Unlimited |
+| Projects | Unlimited |
+| Storage | 100 GB |
+| API access | ✅ 10k calls/mo |
+| Integrations | All + Webhooks |
+
+**Notable**:
+- API included (10k calls/month, then $0.001/call)
+- Priority support (4hr response SLA)
+- 99.9% uptime SLA
+
+</details>
+
+<details>
+<summary><b>Enterprise</b> — Custom pricing</summary>
+
+**Best for**: Compliance-heavy orgs, 100+ users
+
+| Feature | Included |
+|---------|----------|
+| Everything in Pro | ✅ |
+| SSO/SAML | ✅ |
+| Audit logs | ✅ (1 year retention) |
+| Custom contracts | ✅ |
+| Dedicated CSM | ✅ |
+
+**Typical pricing**: $15-25/user/month (volume discounts)
+
+</details>
+
+---
+
+### 💡 Recommendation
+
+> **For most teams**: Start with **Pro** ($199/mo)
+> - API access unlocks automation
+> - Unlimited users future-proofs growth
+> - Annual billing saves $398/year
+
+---
+
+*Scraped from [bigcorp.com/pricing](${source_url}) · ${date}*")
 ```
 
 The key: `grep_context_all` gives you 80-char windows around each `$` sign—enough context for pattern matching and human understanding, without overwhelming.
@@ -1004,16 +1512,100 @@ User: "Extract all the key facts from this company's about page"
 
     SELECT section, value, substr(fact_context, 1, 80) FROM key_facts", will_continue_work=true)
 
-[Turn 4] Synthesize and deliver
-  send_chat_message(body="## BigStartup Key Facts
+[Turn 4] Synthesize and deliver—facts from key_facts, structure from page_sections
+  send_chat_message(body="## 🏢 BigStartup Company Profile
 
-  **Scale**
-  - 2.3 million users across 40 countries
-  - 850 employees globally
+> Compiled from [bigstartup.io/about](${source_url})
+> **TL;DR**: Series C startup, 2.3M users, 850 employees, 180% growth
 
-  **Growth**
-  - 180% YoY growth
-  - Series C: $120 million raised")
+---
+
+### 📈 By the Numbers
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                                                          │
+│   2.3M          40           850          $120M          │
+│   users      countries    employees    Series C          │
+│                                                          │
+│   ████████████████████████████████████████████████████   │
+│   Founded 2019    ━━━━━━━━━━━━━━━━━━━━━━━━━━━>  Today    │
+│                   ↑              ↑            ↑          │
+│               Seed ($4M)    Series A     Series C        │
+│                              ($18M)       ($120M)        │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🚀 Growth Story
+
+<details open>
+<summary><b>The Trajectory</b></summary>
+
+| Year | Milestone | Users | Employees |
+|------|-----------|-------|-----------|
+| 2019 | Founded (YC W19) | — | 3 |
+| 2020 | Seed round ($4M) | 12k | 15 |
+| 2021 | Series A ($18M) | 180k | 85 |
+| 2022 | International expansion | 800k | 320 |
+| 2023 | Series C ($120M) | 2.3M | 850 |
+
+**Growth rate**: 180% YoY (user growth)
+**Burn multiple**: 1.2x (efficient for stage)
+
+</details>
+
+---
+
+### 🌍 Presence
+
+<details>
+<summary><b>Global Footprint</b></summary>
+
+| Region | Countries | % Users | Office |
+|--------|-----------|---------|--------|
+| North America | 2 | 45% | SF (HQ), NYC |
+| Europe | 18 | 35% | London, Berlin |
+| APAC | 12 | 15% | Singapore |
+| LATAM | 8 | 5% | São Paulo |
+
+**Languages**: EN, DE, FR, ES, PT, JA, ZH
+
+</details>
+
+---
+
+### 👥 Leadership
+
+<details>
+<summary><b>Executive Team</b></summary>
+
+| Name | Role | Background |
+|------|------|------------|
+| Sarah Chen | CEO | Ex-Stripe, Stanford CS |
+| Mike Patel | CTO | Ex-Google, MIT PhD |
+| Lisa Wang | CFO | Ex-Goldman, Wharton MBA |
+| ... | | |
+
+→ Full team: [bigstartup.io/team](${team_url})
+
+</details>
+
+---
+
+### 💡 What They Actually Do
+
+> *\"We're building the operating system for [industry].\"*
+
+**Product**: SaaS platform for [specific use case]
+**Customers**: Mid-market and enterprise (avg deal: $48k ACV)
+**Moat**: Network effects + proprietary data
+
+---
+
+*Source: [bigstartup.io/about](${source_url}) · Extracted ${date}*")
 ```
 
 `split_sections` breaks the page into manageable chunks; `grep_context_all` finds metrics within each.
@@ -1059,14 +1651,104 @@ User: "Analyze their job postings to understand tech stack"
   -- "Python|...Senior Python Engineer to lead our ML infrastructure..."
   -- "Python|...Experience with Python, FastAPI, and async patterns..."
 
-[Turn 4] Synthesize tech stack picture
-  send_chat_message(body="## Tech Stack Analysis
+[Turn 4] Synthesize tech stack picture—tech and contexts from tech_mentions
+  send_chat_message(body="## 🛠️ TechCorp Engineering Stack
 
-  **Primary Languages**: Python (ML/backend), TypeScript (frontend)
-  **Infrastructure**: Kubernetes on AWS, PostgreSQL + Redis
-  **Focus Areas**: ML infrastructure, async backend patterns
+> Analyzed **23 job postings** from [company.io/careers](${source_url})
+> **Signal**: Heavy ML investment, scaling infrastructure team
 
-  **Hiring Signals**: Heavy ML investment (3 senior ML roles), scaling infra team")
+---
+
+### Stack Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       FRONTEND                               │
+│   React ████████████  TypeScript ██████████  Next.js ████   │
+├─────────────────────────────────────────────────────────────┤
+│                       BACKEND                                │
+│   Python ████████████████  FastAPI ████████  Go ████        │
+├─────────────────────────────────────────────────────────────┤
+│                       DATA/ML                                │
+│   PyTorch ██████████  Ray ██████  Spark ████                │
+├─────────────────────────────────────────────────────────────┤
+│                    INFRASTRUCTURE                            │
+│   Kubernetes ████████████  AWS ██████████  Terraform ████   │
+├─────────────────────────────────────────────────────────────┤
+│                      STORAGE                                 │
+│   PostgreSQL ██████████  Redis ██████  S3 ████              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🔥 Technology Heatmap
+
+| Technology | Mentions | Roles | Signal |
+|------------|----------|-------|--------|
+| Python | 18 | ML, Backend, Data | Core language |
+| Kubernetes | 14 | Infra, Platform, SRE | Heavy containerization |
+| React | 12 | Frontend, Full-stack | Standard frontend |
+| PostgreSQL | 9 | Backend, Data | Primary datastore |
+| PyTorch | 8 | ML, Research | ML-first culture |
+| Go | 4 | Infra, Performance | High-perf services |
+
+---
+
+### 🎯 Role Analysis
+
+<details open>
+<summary><b>ML Engineering</b> — 6 open roles (26% of postings)</summary>
+
+| Role | Level | Key Tech | Focus |
+|------|-------|----------|-------|
+| Sr. ML Engineer | L5 | PyTorch, Ray | Training infrastructure |
+| ML Platform Engineer | L5 | Kubernetes, MLflow | Model serving |
+| Research Engineer | L4 | PyTorch, JAX | Experimentation |
+| ... | | | |
+
+**Insight**: Building serious ML infra—not just using APIs.
+*\"...own the end-to-end ML lifecycle from training to production...\"*
+
+</details>
+
+<details>
+<summary><b>Infrastructure</b> — 5 open roles (22%)</summary>
+
+| Role | Level | Key Tech |
+|------|-------|----------|
+| Sr. Platform Engineer | L5 | Kubernetes, Terraform |
+| SRE | L4-L5 | AWS, Prometheus |
+| Database Engineer | L5 | PostgreSQL, Redis |
+
+**Insight**: Scaling challenges. Multiple mentions of \"10x growth\".
+
+</details>
+
+<details>
+<summary><b>Backend & Frontend</b> — 12 open roles (52%)</summary>
+
+Mostly Python/FastAPI backend, React/TypeScript frontend.
+Standard modern stack, nothing unusual.
+
+</details>
+
+---
+
+### 💡 Key Takeaways
+
+1. **ML-first**: 26% of roles are ML—not typical for non-AI companies
+2. **Scale mode**: Heavy Kubernetes investment, multiple SRE roles
+3. **Python shop**: Backend is Python/FastAPI, not Go/Rust
+4. **Standard frontend**: React/TypeScript, no exotic choices
+
+> **Culture signal**: They're building ML infrastructure in-house,
+> not just wrapping APIs. Expect hard distributed systems problems.
+
+---
+
+*Extracted from [company.io/careers](${source_url}) · ${date}*
+*See also: [Engineering blog](${blog_url})*")
 ```
 
 First pass finds what's mentioned; second pass extracts *why* it matters from context.
