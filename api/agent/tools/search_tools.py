@@ -161,14 +161,39 @@ def _search_with_llm(
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
     system_prompt = (
-        "You are a tool selection assistant. Your ONLY job is to call enable_tools with relevant tool names.\n\n"
-        "IMPORTANT: You MUST call the enable_tools function. Do not respond with text - just call the function.\n\n"
-        "How to match tools:\n"
-        "- 'linkedin' in query → select tools containing 'linkedin' (e.g., web_data_linkedin_company_profile)\n"
-        "- 'crunchbase' in query → select tools containing 'crunchbase'\n"
-        "- 'instagram' in query → select tools containing 'instagram'\n"
-        "- etc.\n\n"
-        "Match keywords in the query to tool names. When in doubt, include the tool."
+        "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n\n"
+        "## Examples\n\n"
+        "**Query:** \"Research Stripe as a company\"\n"
+        "**Tools:** `search_engine`, `scrape_as_markdown`, `web_data_linkedin_company_profile`, "
+        "`web_data_crunchbase_company`, `web_data_yahoo_finance_business`\n"
+        "**External resources:**\n"
+        "- Stripe Developer Docs | Official API documentation | https://stripe.com/docs/api\n"
+        "- Stripe Status | Service status page | https://status.stripe.com\n\n"
+        "**Query:** \"Find info about Elon Musk\"\n"
+        "**Tools:** `search_engine`, `scrape_as_markdown`, `web_data_linkedin_person_profile`, "
+        "`web_data_x_posts`, `web_data_instagram_profiles`\n"
+        "**External resources:**\n"
+        "- Wikipedia | Elon Musk biography | https://en.wikipedia.org/wiki/Elon_Musk\n\n"
+        "**Query:** \"Analyze sentiment on Nike products\"\n"
+        "**Tools:** `search_engine`, `scrape_as_markdown`, `web_data_amazon_product`, "
+        "`web_data_amazon_product_reviews`, `web_data_reddit_posts`, `web_data_x_posts`\n"
+        "**External resources:**\n"
+        "- Nike Investor Relations | Official financial data | https://investors.nike.com\n\n"
+        "**Query:** \"Job openings at Google\"\n"
+        "**Tools:** `search_engine`, `scrape_as_markdown`, `web_data_linkedin_job_listings`, "
+        "`web_data_linkedin_company_profile`\n"
+        "**External resources:**\n"
+        "- Google Careers | Official job board | https://careers.google.com\n\n"
+        "**Query:** \"Bitcoin price and trends\"\n"
+        "**Tools:** `search_engine`, `scrape_as_markdown`, `web_data_yahoo_finance_business`, `web_data_reddit_posts`\n"
+        "**External resources:**\n"
+        "- CoinGecko API | Free crypto prices API | https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd\n"
+        "- CoinMarketCap | Crypto market data | https://coinmarketcap.com/currencies/bitcoin/\n\n"
+        "## Rules\n"
+        "- ALWAYS include `search_engine` and `scrape_as_markdown` for any research\n"
+        "- Include ALL tools that MIGHT be useful, not just exact keyword matches\n"
+        "- For external_resources: only include URLs you are CERTAIN exist (well-known sites)\n"
+        "- Format: Name | Brief description | Full URL"
     )
     user_prompt = (
         f"Query: {query}\n\n"
@@ -200,8 +225,8 @@ def _search_with_llm(
                     "function": {
                         "name": "enable_tools",
                         "description": (
-                            "Enable multiple tools in one call. Provide the exact full names "
-                            "from the catalog above."
+                            "Enable tools and optionally suggest external resources. "
+                            "Use exact full names from the catalog."
                         ),
                         "parameters": {
                             "type": "object",
@@ -212,7 +237,21 @@ def _search_with_llm(
                                     "minItems": 1,
                                     "maxItems": max_items,
                                     "description": "List of full tool names to enable",
-                                }
+                                },
+                                "external_resources": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {"type": "string", "description": "Resource name"},
+                                            "description": {"type": "string", "description": "Brief description"},
+                                            "url": {"type": "string", "description": "Full URL"},
+                                        },
+                                        "required": ["name", "description", "url"],
+                                    },
+                                    "maxItems": 5,
+                                    "description": "Public APIs, websites, or datasets with verified URLs",
+                                },
                             },
                             "required": ["tool_names"],
                         },
@@ -257,6 +296,7 @@ def _search_with_llm(
                 content_text = getattr(message, "content", None) or ""
 
                 requested: List[str] = []
+                external_resources: List[Dict[str, str]] = []
                 tool_calls = getattr(message, "tool_calls", None) or []
                 for tool_call in tool_calls:
                     try:
@@ -275,6 +315,19 @@ def _search_with_llm(
                             for name in names:
                                 if isinstance(name, str) and name not in requested:
                                     requested.append(name)
+                        # Extract external resources
+                        resources = arguments.get("external_resources") or []
+                        if isinstance(resources, list):
+                            for res in resources:
+                                if isinstance(res, dict) and res.get("name") and res.get("url"):
+                                    # Validate URL looks real (starts with http)
+                                    url = res.get("url", "")
+                                    if url.startswith("http://") or url.startswith("https://"):
+                                        external_resources.append({
+                                            "name": str(res.get("name", ""))[:100],
+                                            "description": str(res.get("description", ""))[:200],
+                                            "url": url[:500],
+                                        })
                     except Exception:  # pragma: no cover - defensive parsing
                         logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
 
@@ -362,6 +415,9 @@ def _search_with_llm(
                             "invalid": enabled_result.get("invalid", []),
                         }
                     )
+                # Include external resources if any were suggested
+                if external_resources:
+                    response_payload["external_resources"] = external_resources
                 return response_payload
 
             except Exception as exc:  # pragma: no cover - failover loop
