@@ -3198,7 +3198,7 @@ def build_prompt_context(
     
     # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
-    
+
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
@@ -3211,7 +3211,18 @@ def build_prompt_context(
         proactive_context=proactive_context,
         implied_send_active=implied_send_active,
     )
-    
+
+    # ── Static ICL (first in prompt for caching, never shrinks) ─────────────
+    # This must be the FIRST group so it forms a stable prefix across requests.
+    # LLM prompt caching requires identical prefixes; dynamic content comes after.
+    static_icl_group = prompt.group("static_icl", weight=1)
+    static_icl_group.section_text(
+        "sqlite_examples",
+        _get_sqlite_examples(),
+        weight=1,
+        non_shrinkable=True,
+    )
+
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
 
@@ -3451,13 +3462,7 @@ def build_prompt_context(
         weight=2,
         non_shrinkable=True,
     )
-    variable_group.section_text(
-        "sqlite_examples",
-        _get_sqlite_examples(),
-        weight=2,
-        non_shrinkable=True
-    )
-    
+
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 
