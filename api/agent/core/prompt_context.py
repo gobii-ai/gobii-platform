@@ -713,9 +713,12 @@ Do I need external data?
 │        ├─ Found relevant extractors → use them
 │        └─ Nothing relevant → THEN search_engine as fallback
 └─ No → Do I have a URL already?
-         ├─ Yes → scrape it directly
-         └─ No → http_request if you know the API, otherwise search_tools
+         ├─ Is it an API endpoint (returns JSON)? → http_request (get structured data)
+         ├─ Is it a web page (HTML)? → scrape_as_markdown (get readable text)
+         └─ Not sure? → http_request first; if it fails, try scrape
 ```
+
+**Match your tool to the data type**: `http_request` returns JSON you can query with `json_each`. `scrape_as_markdown` returns TEXT you read with `substr`. If your hint says "TEXT" or "CSV", don't use `json_each`—it only works on JSON.
 
 search_tools discovers capabilities you didn't know existed. search_engine searches the web.
 Always discover first, search second.
