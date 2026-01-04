@@ -242,7 +242,7 @@ class SqliteBatchToolTests(TestCase):
             message = results[0].get("message", "")
             # Should not have warning since we used LIMIT
             self.assertNotIn("TRUNCATED", message)
-            self.assertNotIn("⚠️", message)
+            self.assertNotIn("[!]", message)
 
     # -------------------------------------------------------------------------
     # Auto-correction tests
@@ -300,7 +300,7 @@ class SqliteBatchToolTests(TestCase):
         corrected, corrections = _autocorrect_cte_typos(sql)
         self.assertIn("FROM comments", corrected)
         self.assertEqual(len(corrections), 1)
-        self.assertIn("'comment'→'comments'", corrections[0])
+        self.assertIn("'comment'->'comments'", corrections[0])
 
     def test_autocorrect_cte_plural_to_singular(self):
         """Auto-corrects 'items' to 'item' when CTE is 'item'."""
@@ -348,7 +348,7 @@ class SqliteBatchToolTests(TestCase):
 
             # Message should note the auto-fix
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
-            self.assertIn("'number'→'numbers'", out.get("message", ""))
+            self.assertIn("'number'->'numbers'", out.get("message", ""))
 
     # -------------------------------------------------------------------------
     # Table reference extraction tests
@@ -396,7 +396,7 @@ class SqliteBatchToolTests(TestCase):
         corrected, fix = _autocorrect_ambiguous_column(sql, "species")
         self.assertIn("iris.species", corrected)
         self.assertIsNotNone(fix)
-        self.assertIn("'species'→'iris.species'", fix)
+        self.assertIn("'species'->'iris.species'", fix)
 
     def test_autocorrect_ambiguous_column_order_by(self):
         """Fixes ambiguous column in ORDER BY clause."""
@@ -458,7 +458,7 @@ class SqliteBatchToolTests(TestCase):
             # Should succeed because ambiguous column was auto-fixed
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
-            self.assertIn("'species'→'iris.species'", out.get("message", ""))
+            self.assertIn("'species'->'iris.species'", out.get("message", ""))
 
     def test_autocorrect_failure_shows_original_error(self):
         """When auto-correction fails, shows original error not retry error."""
@@ -674,7 +674,7 @@ class SqliteBatchToolTests(TestCase):
         sql = "WITH users AS (SELECT 1) SELECT * FROM user"
         fixed, fix = _fix_singular_plural_tables(sql, "no such table: user")
         self.assertIn("FROM users", fixed)
-        self.assertIn("'user' → 'users'", fix)
+        self.assertIn("'user' -> 'users'", fix)
 
     def test_fix_singular_plural_tables_plural_to_singular(self):
         """Fixes 'items' to 'item' when CTE is 'item'."""

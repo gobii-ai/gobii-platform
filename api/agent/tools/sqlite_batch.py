@@ -122,14 +122,14 @@ def _fix_python_operators(sql: str) -> tuple[str, str | None]:
         new_sql = re.sub(r'(?<![\'"])\s*==\s*(?![\'"])', ' = ', sql)
         if new_sql != sql:
             sql = new_sql
-            corrections.append("== → =")
+            corrections.append("'==' -> '='")
 
     # && to AND (outside strings)
     if '&&' in sql:
         new_sql = re.sub(r'\s*&&\s*', ' AND ', sql)
         if new_sql != sql:
             sql = new_sql
-            corrections.append("&& → AND")
+            corrections.append("'&&' -> 'AND'")
 
     # || for logical OR is tricky - in SQLite || is string concat
     # Only fix if it looks like logical OR context (between conditions)
@@ -155,20 +155,20 @@ def _fix_dialect_functions(sql: str) -> tuple[str, str | None]:
         new_sql = re.sub(r'\bIIIF\(', 'IIF(', new_sql, flags=re.IGNORECASE)
         if new_sql != sql:
             sql = new_sql
-            corrections.append("IF() → IIF()")
+            corrections.append("IF() -> IIF()")
 
     # ILIKE -> LIKE (PostgreSQL case-insensitive like)
     # Note: SQLite LIKE is case-insensitive for ASCII by default
     if re.search(r'\bILIKE\b', sql, re.IGNORECASE):
         sql = re.sub(r'\bILIKE\b', 'LIKE', sql, flags=re.IGNORECASE)
-        corrections.append("ILIKE → LIKE")
+        corrections.append("ILIKE -> LIKE")
 
     # NVL2(x, y, z) -> IIF(x IS NOT NULL, y, z) - Oracle style
     nvl2_match = re.search(r'\bNVL2\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)', sql, re.IGNORECASE)
     if nvl2_match:
         replacement = f"IIF({nvl2_match.group(1)} IS NOT NULL, {nvl2_match.group(2)}, {nvl2_match.group(3)})"
         sql = sql[:nvl2_match.start()] + replacement + sql[nvl2_match.end():]
-        corrections.append("NVL2() → IIF()")
+        corrections.append("NVL2() -> IIF()")
 
     # CONCAT(a, b) -> (a || b) - MySQL/PostgreSQL style
     # Handle simple 2-arg case
@@ -176,17 +176,17 @@ def _fix_dialect_functions(sql: str) -> tuple[str, str | None]:
     while re.search(concat_pattern, sql, re.IGNORECASE):
         sql = re.sub(concat_pattern, r'(\1 || \2)', sql, count=1, flags=re.IGNORECASE)
         if "CONCAT" not in [c.split()[0] for c in corrections]:
-            corrections.append("CONCAT() → ||")
+            corrections.append("CONCAT() -> ||")
 
     # STRING_AGG(col, sep) -> GROUP_CONCAT(col, sep) - PostgreSQL style
     if re.search(r'\bSTRING_AGG\s*\(', sql, re.IGNORECASE):
         sql = re.sub(r'\bSTRING_AGG\s*\(', 'GROUP_CONCAT(', sql, flags=re.IGNORECASE)
-        corrections.append("STRING_AGG() → GROUP_CONCAT()")
+        corrections.append("STRING_AGG() -> GROUP_CONCAT()")
 
     # ARRAY_AGG -> GROUP_CONCAT (PostgreSQL)
     if re.search(r'\bARRAY_AGG\s*\(', sql, re.IGNORECASE):
         sql = re.sub(r'\bARRAY_AGG\s*\(', 'GROUP_CONCAT(', sql, flags=re.IGNORECASE)
-        corrections.append("ARRAY_AGG() → GROUP_CONCAT()")
+        corrections.append("ARRAY_AGG() -> GROUP_CONCAT()")
 
     if corrections:
         return sql, ", ".join(corrections)
@@ -209,20 +209,20 @@ def _fix_dialect_syntax(sql: str) -> tuple[str, str | None]:
         # Add LIMIT if not already present
         if not re.search(r'\bLIMIT\s+\d+', sql, re.IGNORECASE):
             sql = sql.rstrip().rstrip(';') + f' LIMIT {n}'
-        corrections.append(f"TOP {n} → LIMIT {n}")
+        corrections.append(f"TOP {n} -> LIMIT {n}")
 
     # TRUNCATE TABLE x -> DELETE FROM x (SQLite doesn't have TRUNCATE)
     truncate_match = re.search(r'\bTRUNCATE\s+(?:TABLE\s+)?(\w+)', sql, re.IGNORECASE)
     if truncate_match:
         table = truncate_match.group(1)
         sql = re.sub(r'\bTRUNCATE\s+(?:TABLE\s+)?\w+', f'DELETE FROM {table}', sql, flags=re.IGNORECASE)
-        corrections.append("TRUNCATE → DELETE FROM")
+        corrections.append("TRUNCATE -> DELETE FROM")
 
     # :: type cast -> CAST(x AS type) (PostgreSQL style)
     cast_match = re.search(r'(\w+)::(\w+)', sql)
     if cast_match:
         sql = re.sub(r'(\w+)::(\w+)', r'CAST(\1 AS \2)', sql)
-        corrections.append(":: → CAST()")
+        corrections.append(":: -> CAST()")
 
     if corrections:
         return sql, ", ".join(corrections)
@@ -309,7 +309,7 @@ def _fix_singular_plural_tables(sql: str, error_msg: str) -> tuple[str, str | No
             # Replace missing with variant
             pattern = rf'\b{re.escape(missing)}\b'
             sql = re.sub(pattern, variant, sql, flags=re.IGNORECASE)
-            return sql, f"'{missing}' → '{variant}'"
+            return sql, f"'{missing}' -> '{variant}'"
 
     return sql, None
 
@@ -333,7 +333,7 @@ def _fix_singular_plural_columns(sql: str, error_msg: str) -> tuple[str, str | N
         if variant.lower() in [a.lower() for a in aliases]:
             pattern = rf'\b{re.escape(missing)}\b'
             sql = re.sub(pattern, variant, sql, flags=re.IGNORECASE)
-            return sql, f"'{missing}' → '{variant}'"
+            return sql, f"'{missing}' -> '{variant}'"
 
     return sql, None
 
@@ -378,7 +378,7 @@ def _fix_json_key_vs_alias(sql: str, error_msg: str) -> tuple[str, str | None]:
                     before = sql[:from_match.end()]
                     after_fixed = re.sub(usage_pattern, alias, after_select, flags=re.IGNORECASE)
                     if after_fixed != after_select:
-                        return before + after_fixed, f"'{missing}' → '{alias}' (use alias, not JSON key)"
+                        return before + after_fixed, f"'{missing}' -> '{alias}' (use alias, not JSON key)"
 
     return sql, None
 
@@ -512,7 +512,7 @@ def _autocorrect_ambiguous_column(sql: str, column_name: str) -> tuple[str, str 
     corrected = re.sub(pattern, replace_unqualified, sql, flags=re.IGNORECASE)
 
     if corrected != sql:
-        return corrected, f"'{column_name}'→'{main_alias}.{column_name}'"
+        return corrected, f"'{column_name}'->'{main_alias}.{column_name}'"
     return sql, None
 
 
@@ -564,7 +564,7 @@ def _autocorrect_cte_typos(sql: str) -> tuple[str, list[str]]:
                 # Replace this specific reference (case-insensitive, word boundary)
                 pattern = rf'\b{re.escape(ref)}\b'
                 sql = re.sub(pattern, cte_name, sql, flags=re.IGNORECASE)
-                corrections.append(f"'{ref}'→'{cte_name}'")
+                corrections.append(f"'{ref}'->'{cte_name}'")
                 break
 
     return sql, corrections
@@ -621,7 +621,7 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
     # Hard cap on rows
     if total_rows > MAX_RESULT_ROWS:
         rows = rows[:MAX_RESULT_ROWS]
-        warning = f" ⚠️ TRUNCATED: {total_rows} rows → {MAX_RESULT_ROWS}. Add LIMIT to your query."
+        warning = f" [!] TRUNCATED: {total_rows} rows -> {MAX_RESULT_ROWS}. Add LIMIT to your query."
 
     # Check byte size
     try:
@@ -630,13 +630,13 @@ def _enforce_result_limits(rows: List[Dict[str, Any]], query: str) -> tuple[List
             # Progressively reduce until under limit
             while len(rows) > 10 and len(json.dumps(rows, default=str).encode('utf-8')) > MAX_RESULT_BYTES:
                 rows = rows[:len(rows) // 2]
-            warning = f" ⚠️ TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
+            warning = f" [!] TRUNCATED to {len(rows)} rows (size limit). Use LIMIT and specific columns."
     except Exception:
         pass
 
     # Warn about missing LIMIT even if not truncated
     if not warning and total_rows > WARN_RESULT_ROWS and not has_limit:
-        warning = f" ⚠️ Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
+        warning = f" [!] Large result ({total_rows} rows). Consider adding LIMIT for efficiency."
 
     return rows, warning
 
@@ -910,7 +910,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         else:
             msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
             if all_corrections:
-                msg = f"⚠️ AUTO-CORRECTED: {', '.join(all_corrections)}. Write correct SQL next time. " + msg
+                msg = f"[!] AUTO-CORRECTED: {', '.join(all_corrections)}. Write correct SQL next time. " + msg
 
         response: Dict[str, Any] = {
             "status": "error" if had_error else "ok",
