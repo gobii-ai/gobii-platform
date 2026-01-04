@@ -704,13 +704,15 @@ Step 6: Present findings (no tool call — just text)
 
 ## Micro Trajectories: Common Efficient Patterns
 
-These show the core rhythm: fetch → extract (using hint metadata) → evolve schema → decide → iterate or deliver.
+These show the core rhythm: fetch → extract → *leave traces* → notice patterns → follow them → deliver.
+
+**The DB is your turing tape**. Each turn reads state, transforms it, writes new state. The interesting behavior *emerges* from this loop—you don't plan everything upfront. You leave traces (tables, columns, views) that shape what you notice next. Like stigmergy: ants leave pheromones that guide other ants. Your tables are pheromones.
 
 **`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or schema in context. Never guess field names; the hint tells you what exists.
 
 **Defensive querying**: Real-world data is messy. Use CTEs to cascade through the primary path/fields from hints, then common alternatives as fallback. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
 
-**Schema evolution**: SQLite is your working memory. Lean hard on it—CREATE TABLE, ALTER TABLE, CREATE TABLE AS, views, indexes. As understanding deepens, evolve your schema. CTEs let you "map" one shape to another in a single pass. Think functionally: CTEs are function composition, SELECT is map, WHERE is filter, GROUP BY is reduce, CASE WHEN is pattern matching.
+**Schema evolution**: SQLite is living state, not dead storage. Lean hard on it—CREATE TABLE, ALTER TABLE, CREATE TABLE AS, views, indexes. As understanding deepens, evolve your schema. Each query can leave something behind for the next. CTEs are function composition; chain them: raw → mapped → filtered → enriched. The schema you end with is rarely the schema you started with.
 
 ### Pattern A: API Fetch → Extract → Deliver
 
@@ -901,9 +903,9 @@ User: "Research the top 3 AI infrastructure companies"
 [Turn 1] Search
   search_engine(query="top AI infrastructure companies 2024", will_continue_work=true)
 
-[Turn 2] Create work queue from results (cascading field/structure fallbacks)
+[Turn 2] Leave trace: create work queue (this table guides all future turns)
   -- Hint showed: result_id='<id>', SKELETON: $.<path> with {<url_field>, <title_field>, ...}
-  -- Use ACTUAL fields from hint. Cascade through common alternatives as fallback.
+  -- The queue is stigmergy: each turn reads it, updates it, leaves state for the next turn.
   sqlite_batch(sql="
     CREATE TABLE research_queue (
       url TEXT PRIMARY KEY, title TEXT, scraped INT DEFAULT 0, summary TEXT
@@ -989,11 +991,14 @@ User: "Research the top 3 AI infrastructure companies"
       customers = (SELECT COALESCE(NULLIF(TRIM(customers_raw),''), '') FROM extractions e WHERE e.url = research_queue.url)
     WHERE scraped=1;
 
-    -- Verify evolution: schema now has derived columns
+    -- Pattern emerged: companies cluster into layers (wasn't planned, was discovered)
     SELECT layer, COUNT(*) as n, GROUP_CONCAT(title) FROM research_queue WHERE scraped=1 GROUP BY layer",
     will_continue_work=true)
 
-[Turn 8] Synthesize—use evolved schema (research_queue with extracted structure)
+  -- Bloom: the "layer" column didn't exist until summaries revealed the pattern.
+  -- Now it shapes how we present findings. Traces → patterns → structure.
+
+[Turn 8] Synthesize—structure emerged from traces; present what bloomed
   sqlite_batch(sql="SELECT title, url, summary, funding, customers, layer FROM research_queue WHERE scraped=1 ORDER BY layer")
   send_chat_message(body="## 🏗️ AI Infrastructure: The Emerging Stack
 
@@ -1262,7 +1267,7 @@ No action needed. Next recommended audit: 30 days.
 *Data: [Internal Inventory](${inv_url}) × [Supplier Catalog](${catalog_url})*")
 ```
 
-Creating `discrepancies` as a table lets you query it multiple ways.
+`discrepancies` emerged from the JOIN of `inventory` and `catalog`. Neither table alone showed the risk—only their combination did. This is emergence: the whole reveals what the parts couldn't.
 
 ### Pattern D: Text Scrape → Pattern Extraction
 
@@ -1466,13 +1471,14 @@ User: "Get all open issues from the repo"
 [Turn 3] Fetch page 2
   http_request(url="...?per_page=100&page=2", will_continue_work=true)
 
-[Turn 4] Accumulate and check
+[Turn 4] Accumulate—each page adds to the tape; check if more to fetch
   -- Hint showed: result_id='gh-2', PATH: $.content (47 items)
   sqlite_batch(sql="INSERT OR REPLACE INTO issues ...WHERE result_id='gh-2';
     SELECT COUNT(*) FROM issues", will_continue_work=true)
-  -- Returns: 147 total (page had <100, done)
+  -- Returns: 147 total (page had <100, done fetching)
+  -- The tape now holds all items. Patterns can emerge that weren't visible in any single page.
 
-[Turn 5] Evolve schema—derive analytics columns in one pass
+[Turn 5] Evolve schema—now that we have the full picture, derive what it reveals
   sqlite_batch(sql="
     -- Evolve: add computed columns for analysis
     ALTER TABLE items ADD COLUMN age_days INT;
@@ -1625,6 +1631,17 @@ Row count vs page size determines if more fetching is needed.
 | Normalize text→struct | `regexp_extract(col, '<pattern>') as field` in CTE, then UPDATE from CTE |
 
 CTEs are function composition. Chain them: `WITH raw AS (...), mapped AS (SELECT ... FROM raw), filtered AS (SELECT ... FROM mapped WHERE ...), reduced AS (SELECT ..., COUNT(*) FROM filtered GROUP BY ...) SELECT * FROM reduced`
+
+**Emergence patterns** (let the data guide you):
+| Moment | What to do |
+|--------|------------|
+| Initial extraction reveals clusters | Add a classification column, GROUP BY it |
+| One category dominates | Drill into it: `WHERE category = (SELECT ... ORDER BY COUNT(*) DESC LIMIT 1)` |
+| Unexpected field appears in many rows | ALTER TABLE to capture it, UPDATE to extract it |
+| Two tables share a key | JOIN them—the combination reveals what neither showed alone |
+| Pattern repeats across sources | CREATE VIEW to make it queryable everywhere |
+
+The best insights weren't planned—they emerged from traces left by earlier queries. Each turn's output is the next turn's input. The tape evolves; so does your understanding.
 
 ### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
 
@@ -1972,9 +1989,9 @@ User: "Extract all the key facts from this company's about page"
 
 `split_sections` breaks the page into manageable chunks; `grep_context_all` finds metrics within each.
 
-### Pattern H: Iterative Refinement → Drill Down on Interesting Findings
+### Pattern H: Iterative Refinement → Let Findings Guide You
 
-When initial extraction reveals something worth exploring deeper.
+The classic emergence pattern: cast a wide net, see what surfaces, follow the interesting threads. You don't know what you'll find until you look. The first query leaves traces; the second query notices patterns in those traces; the third follows them. This is how insights *bloom*.
 
 ```
 User: "Analyze their job postings to understand tech stack"
@@ -2062,10 +2079,13 @@ User: "Analyze their job postings to understand tech stack"
       END
     WHERE keyword IS NOT NULL;
 
-    -- Aggregate by new classifications
+    -- Aggregate: what pattern emerged? Which layer dominates?
     SELECT layer, COUNT(DISTINCT keyword) as tech_count, SUM((SELECT COUNT(*) FROM mentions m2 WHERE m2.keyword=mentions.keyword)) as total_mentions
     FROM mentions WHERE layer != 'other' GROUP BY layer ORDER BY total_mentions DESC",
     will_continue_work=true)
+
+  -- Emergence: Started with raw keywords. Now we see: "backend-heavy, ML-investing, scaling infra."
+  -- The structure wasn't in the data—it emerged from how we queried it.
 
   -- Returns: backend|4|32, infra|3|24, frontend|2|17, ml|2|14...
 
