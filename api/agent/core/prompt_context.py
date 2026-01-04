@@ -704,11 +704,13 @@ Step 6: Present findings (no tool call — just text)
 
 ## Micro Trajectories: Common Efficient Patterns
 
-These show the core rhythm: fetch → extract (using hint metadata) → smart schema management → decide → iterate or deliver.
+These show the core rhythm: fetch → extract (using hint metadata) → evolve schema → decide → iterate or deliver.
 
 **`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or schema in context. Never guess field names; the hint tells you what exists.
 
 **Defensive querying**: Real-world data is messy. Use CTEs to cascade through the primary path/fields from hints, then common alternatives as fallback. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
+
+**Schema evolution**: SQLite is your working memory. Lean hard on it—CREATE TABLE, ALTER TABLE, CREATE TABLE AS, views, indexes. As understanding deepens, evolve your schema. CTEs let you "map" one shape to another in a single pass. Think functionally: CTEs are function composition, SELECT is map, WHERE is filter, GROUP BY is reduce, CASE WHEN is pattern matching.
 
 ### Pattern A: API Fetch → Extract → Deliver
 
@@ -757,7 +759,39 @@ User: "What are the top mass transit systems by ridership?"
     ORDER BY metric DESC
     LIMIT 10", will_continue_work=true)
 
-[Turn 3] Deliver—use extracted data including URLs from the result set
+[Turn 3] Evolve schema—persist + derive in one pass (functional: map raw → enriched)
+  sqlite_batch(sql="
+    -- Materialize extraction, then derive classifications in single CTE chain
+    CREATE TABLE systems AS
+    WITH raw AS (
+      SELECT r.value as item FROM __tool_results,
+        json_each(COALESCE(json_extract(result_json,'$.<array_field>'),
+          json_extract(result_json,'$.items'), '[]')) AS r
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    mapped AS (  -- map: extract fields → normalized columns
+      SELECT
+        COALESCE(NULLIF(TRIM(json_extract(item,'$.<field1>')),''), '(unknown)') as name,
+        COALESCE(TRIM(json_extract(item,'$.<loc_field>')), '') as location,
+        COALESCE(CAST(json_extract(item,'$.<numeric_field>') AS REAL), 0) as metric,
+        COALESCE(TRIM(json_extract(item,'$.<url_field>')), '') as details_url
+      FROM raw
+    ),
+    classified AS (  -- map: metric → tier (pattern matching via CASE)
+      SELECT *, CASE
+        WHEN metric >= 2000 THEN 'tier1'
+        WHEN metric >= 500 THEN 'tier2'
+        ELSE 'tier3' END as tier,
+      CASE WHEN location LIKE '%Asia%' OR location IN ('Tokyo','Beijing','Shanghai','Seoul','Delhi')
+           THEN 'asia-pacific' ELSE 'other' END as region
+      FROM mapped WHERE metric > 0
+    )
+    SELECT * FROM classified ORDER BY metric DESC;
+    -- Now you have: systems(name, location, metric, details_url, tier, region)
+    SELECT tier, region, COUNT(*) as n, SUM(metric) as total FROM systems GROUP BY tier, region",
+    will_continue_work=true)
+
+[Turn 4] Deliver—use evolved schema (systems table with derived columns)
   -- Query included: SELECT name, city, ridership, details_url, lines, founded FROM ...
   send_chat_message(body="## 🚇 World's Busiest Metro Systems
 
@@ -928,8 +962,39 @@ User: "Research the top 3 AI infrastructure companies"
 
 [Turns 5-6] Repeat scrape pattern for remaining URLs
 
-[Turn 7] Synthesize—URLs and summaries come from research_queue
-  sqlite_batch(sql="SELECT title, url, summary, funding, customers FROM research_queue WHERE scraped=1")
+[Turn 7] Evolve schema—extract structured fields from summaries in one pass
+  -- Understanding deepened: summaries contain funding, customers, layer info
+  sqlite_batch(sql="
+    -- Evolve: add columns discovered during scraping
+    ALTER TABLE research_queue ADD COLUMN funding TEXT;
+    ALTER TABLE research_queue ADD COLUMN layer TEXT;
+    ALTER TABLE research_queue ADD COLUMN customers TEXT;
+
+    -- Map: summary text → structured fields (functional extraction)
+    WITH extractions AS (
+      SELECT url,
+        regexp_extract(summary, '\\$([\\d.]+[BMK])(?:\\s+(?:raised|funding|valuation))?', 0) as funding_raw,
+        regexp_extract(summary, '(?:customers?|clients?|used by)[:\\s]+([^.]+)', 1) as customers_raw,
+        CASE
+          WHEN summary LIKE '%GPU%' OR summary LIKE '%compute%' OR summary LIKE '%H100%' THEN 'compute'
+          WHEN summary LIKE '%orchestrat%' OR summary LIKE '%Ray%' OR summary LIKE '%distributed%' THEN 'orchestration'
+          WHEN summary LIKE '%inference%' OR summary LIKE '%deploy%' OR summary LIKE '%serverless%' THEN 'inference'
+          ELSE 'other'
+        END as layer_class
+      FROM research_queue WHERE scraped=1
+    )
+    UPDATE research_queue SET
+      funding = (SELECT COALESCE(NULLIF(TRIM(funding_raw),''), 'undisclosed') FROM extractions e WHERE e.url = research_queue.url),
+      layer = (SELECT layer_class FROM extractions e WHERE e.url = research_queue.url),
+      customers = (SELECT COALESCE(NULLIF(TRIM(customers_raw),''), '') FROM extractions e WHERE e.url = research_queue.url)
+    WHERE scraped=1;
+
+    -- Verify evolution: schema now has derived columns
+    SELECT layer, COUNT(*) as n, GROUP_CONCAT(title) FROM research_queue WHERE scraped=1 GROUP BY layer",
+    will_continue_work=true)
+
+[Turn 8] Synthesize—use evolved schema (research_queue with extracted structure)
+  sqlite_batch(sql="SELECT title, url, summary, funding, customers, layer FROM research_queue WHERE scraped=1 ORDER BY layer")
   send_chat_message(body="## 🏗️ AI Infrastructure: The Emerging Stack
 
 > **Research scope**: Analyzed 5 companies across compute, orchestration, and inference layers.
@@ -1078,18 +1143,39 @@ User: "Compare inventory against supplier catalog"
     INSERT INTO catalog SELECT c1, c2, CAST(c3 AS REAL), CAST(c4 AS INT) FROM p3",
     will_continue_work=true)
 
-[Turn 5] Cross-reference for discrepancies
+[Turn 5] Cross-reference + evolve—derive discrepancies with risk scores in one pass
   sqlite_batch(sql="
+    -- Create derived table via CTE chain (join → classify → score)
     CREATE TABLE discrepancies AS
-    SELECT i.sku, i.qty as our_qty, COALESCE(c.stock, 0) as supplier_qty, i.location,
-           CASE WHEN c.sku IS NULL THEN 'MISSING'
-                WHEN i.qty > COALESCE(c.stock, 0) THEN 'EXCEEDS'
-                ELSE 'OK' END as issue
-    FROM inventory i LEFT JOIN catalog c ON TRIM(i.sku) = TRIM(c.sku)
-    WHERE c.sku IS NULL OR i.qty > COALESCE(c.stock, 0);
-    SELECT issue, COUNT(*) as n FROM discrepancies GROUP BY issue", will_continue_work=true)
+    WITH joined AS (
+      SELECT i.sku, i.qty as our_qty, COALESCE(c.stock, 0) as supplier_qty,
+             i.location, i.velocity, i.last_sold,
+             CASE WHEN c.sku IS NULL THEN 'MISSING'
+                  WHEN i.qty > COALESCE(c.stock, 0) THEN 'EXCEEDS'
+                  ELSE 'OK' END as issue
+      FROM inventory i LEFT JOIN catalog c ON TRIM(i.sku) = TRIM(c.sku)
+      WHERE c.sku IS NULL OR i.qty > COALESCE(c.stock, 0)
+    ),
+    scored AS (  -- map: raw discrepancy → risk assessment
+      SELECT *,
+        CASE WHEN velocity > 30 THEN 'critical'
+             WHEN velocity > 10 THEN 'high'
+             WHEN velocity > 3 THEN 'medium'
+             ELSE 'low' END as risk_level,
+        CAST(our_qty / NULLIF(velocity, 0) AS INT) as weeks_runway,
+        SUBSTR(sku, 1, INSTR(sku, '-')-1) as product_line  -- extract prefix for grouping
+      FROM joined
+    )
+    SELECT * FROM scored;
 
-[Turn 6] Deliver actionable report—all data from discrepancies + inventory tables
+    -- Create monitoring view for ongoing use
+    CREATE VIEW risk_summary AS
+    SELECT product_line, issue, risk_level, COUNT(*) as n, SUM(our_qty) as total_units
+    FROM discrepancies GROUP BY product_line, issue, risk_level;
+
+    SELECT issue, risk_level, COUNT(*) as n FROM discrepancies GROUP BY issue, risk_level ORDER BY risk_level", will_continue_work=true)
+
+[Turn 6] Deliver—use evolved schema (discrepancies with risk scores + risk_summary view)
   sqlite_batch(sql="SELECT sku, issue, our_qty, supplier_qty, location, last_sold FROM discrepancies d JOIN inventory i USING(sku) ORDER BY issue, our_qty DESC")
   send_chat_message(body="## 📦 Inventory Health Check
 
@@ -1228,12 +1314,34 @@ User: "Find contact emails from their team page"
       -- UNION ALL SELECT * FROM <more_strategies> ...
     )
     -- Dedupe: keep best (lowest priority = tightest) context per match
-    SELECT LOWER(TRIM(match)) as match, context, MIN(priority) as strategy
-    FROM combined
-    GROUP BY LOWER(TRIM(match))
-    ORDER BY strategy, match", will_continue_work=true)
+    deduped AS (
+      SELECT LOWER(TRIM(match)) as match, context, MIN(priority) as strategy
+      FROM combined GROUP BY LOWER(TRIM(match))
+    )
+    SELECT * FROM deduped ORDER BY strategy, match;
 
-[Turn 3] Deliver—emails, roles, and context from team_contacts table
+    -- Evolve: persist + classify in one pass
+    CREATE TABLE team_contacts AS
+    WITH extracted AS (SELECT * FROM (<previous_extraction_query>) sub),
+    classified AS (  -- map: context → role classification
+      SELECT match as email,
+        regexp_extract(context, '([A-Z][a-z]+ [A-Z][a-z]+)') as name,
+        CASE
+          WHEN context LIKE '%CEO%' OR context LIKE '%CTO%' OR context LIKE '%VP%' THEN 'leadership'
+          WHEN context LIKE '%Engineer%' OR context LIKE '%Developer%' THEN 'engineering'
+          WHEN context LIKE '%Sales%' OR context LIKE '%Account%' THEN 'sales'
+          WHEN context LIKE '%Design%' THEN 'design'
+          ELSE 'other'
+        END as department,
+        context, strategy
+      FROM extracted
+    )
+    SELECT * FROM classified;
+
+    SELECT department, COUNT(*) as n FROM team_contacts GROUP BY department ORDER BY n DESC",
+    will_continue_work=true)
+
+[Turn 3] Deliver—use evolved schema (team_contacts with name, department)
   send_chat_message(body="## 👥 Acme Team Directory
 
 > Extracted **12 contacts** from [acme.io/team](${source_url})
@@ -1364,8 +1472,38 @@ User: "Get all open issues from the repo"
     SELECT COUNT(*) FROM issues", will_continue_work=true)
   -- Returns: 147 total (page had <100, done)
 
-[Turn 5] Analyze and deliver—all data from issues table with aggregations
-  sqlite_batch(sql="SELECT labels, COUNT(*) as n, GROUP_CONCAT(number), MIN(created_at) as oldest FROM issues GROUP BY labels ORDER BY n DESC")
+[Turn 5] Evolve schema—derive analytics columns in one pass
+  sqlite_batch(sql="
+    -- Evolve: add computed columns for analysis
+    ALTER TABLE items ADD COLUMN age_days INT;
+    ALTER TABLE items ADD COLUMN priority TEXT;
+    ALTER TABLE items ADD COLUMN category TEXT;
+
+    -- Map: raw fields → derived analytics (functional transformation)
+    UPDATE items SET
+      age_days = CAST((julianday('now') - julianday(<date_field>)) AS INT),
+      priority = CASE
+        WHEN <title_field> LIKE '%critical%' OR <title_field> LIKE '%urgent%' THEN 'critical'
+        WHEN age_days > 30 THEN 'aging'
+        ELSE 'normal'
+      END,
+      category = CASE
+        WHEN <title_field> LIKE '%bug%' OR <title_field> LIKE '%fix%' THEN 'bug'
+        WHEN <title_field> LIKE '%feat%' OR <title_field> LIKE '%add%' THEN 'enhancement'
+        WHEN <title_field> LIKE '%doc%' THEN 'documentation'
+        ELSE 'other'
+      END;
+
+    -- Create derived view for common analysis pattern
+    CREATE VIEW issue_health AS
+    SELECT category, priority, COUNT(*) as n, AVG(age_days) as avg_age
+    FROM items GROUP BY category, priority;
+
+    SELECT * FROM issue_health ORDER BY n DESC",
+    will_continue_work=true)
+
+[Turn 6] Analyze and deliver—use evolved schema with derived columns
+  sqlite_batch(sql="SELECT category, priority, n, avg_age FROM issue_health; SELECT * FROM items WHERE priority='critical' ORDER BY age_days DESC LIMIT 5")
   send_chat_message(body="## 🎫 acme/app Issue Tracker
 
 > **147 open issues** fetched via GitHub API
@@ -1476,7 +1614,17 @@ Row count vs page size determines if more fetching is needed.
 | Structure varies | `json_each(COALESCE($.<primary>, $.items, $.results, '[]'))` |
 | Field name varies | `COALESCE(NULLIF($.<primary>,''), NULLIF($.title,''), ...)` |
 
-Use CTEs to normalize varying structures into a consistent shape, then query the normalized form. See patterns A, B, E for examples.
+**Schema evolution** (map one shape → another):
+| Goal | Pattern |
+|------|---------|
+| Persist + derive | `CREATE TABLE t AS WITH raw AS (...), mapped AS (...), classified AS (...) SELECT * FROM classified` |
+| Add column later | `ALTER TABLE t ADD COLUMN <col> <type>; UPDATE t SET <col> = <expr>` |
+| Batch transform | `WITH src AS (SELECT ...) UPDATE t SET x=(SELECT expr FROM src WHERE src.id=t.id)` |
+| Classify via CASE | `CASE WHEN x LIKE '%pat%' THEN 'a' WHEN y > 100 THEN 'b' ELSE 'c' END` |
+| Create view | `CREATE VIEW v AS SELECT <agg>, <group> FROM t GROUP BY <group>` |
+| Normalize text→struct | `regexp_extract(col, '<pattern>') as field` in CTE, then UPDATE from CTE |
+
+CTEs are function composition. Chain them: `WITH raw AS (...), mapped AS (SELECT ... FROM raw), filtered AS (SELECT ... FROM mapped WHERE ...), reduced AS (SELECT ..., COUNT(*) FROM filtered GROUP BY ...) SELECT * FROM reduced`
 
 ### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
 
@@ -1891,17 +2039,44 @@ User: "Analyze their job postings to understand tech stack"
 
   -- Returns: Python|8|1, Kubernetes|6|1, React|5|2, PostgreSQL|4|1...
 
-[Turn 3] Decision point—dig deeper on top findings
+[Turn 3] Evolve schema—classify keywords into stack layers (functional: keyword → category)
   sqlite_batch(sql="
-    -- Look at contexts for top keywords to understand patterns
-    SELECT keyword, COALESCE(context, '') as context FROM mentions
-    WHERE keyword IS NOT NULL
-      AND keyword IN (SELECT keyword FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY COUNT(*) DESC LIMIT 3)
-    LIMIT 10", will_continue_work=true)
+    -- Evolve: add classification columns based on domain knowledge
+    ALTER TABLE mentions ADD COLUMN layer TEXT;
+    ALTER TABLE mentions ADD COLUMN role_signal TEXT;
 
-  -- Returns contexts showing how each keyword is used
+    -- Map: keyword → layer classification (pattern matching via CASE)
+    UPDATE mentions SET
+      layer = CASE
+        WHEN keyword IN ('react','typescript','vue','angular','next.js','tailwind') THEN 'frontend'
+        WHEN keyword IN ('python','fastapi','go','rust','node','java','spring') THEN 'backend'
+        WHEN keyword IN ('pytorch','tensorflow','ray','mlflow','huggingface') THEN 'ml'
+        WHEN keyword IN ('kubernetes','docker','terraform','aws','gcp','azure') THEN 'infra'
+        WHEN keyword IN ('postgresql','redis','mongodb','elasticsearch','kafka') THEN 'data'
+        ELSE 'other'
+      END,
+      role_signal = CASE
+        WHEN context LIKE '%senior%' OR context LIKE '%lead%' OR context LIKE '%staff%' THEN 'senior'
+        WHEN context LIKE '%intern%' OR context LIKE '%junior%' OR context LIKE '%entry%' THEN 'junior'
+        ELSE 'mid'
+      END
+    WHERE keyword IS NOT NULL;
 
-[Turn 4] Synthesize findings—keywords and contexts from mentions table
+    -- Aggregate by new classifications
+    SELECT layer, COUNT(DISTINCT keyword) as tech_count, SUM((SELECT COUNT(*) FROM mentions m2 WHERE m2.keyword=mentions.keyword)) as total_mentions
+    FROM mentions WHERE layer != 'other' GROUP BY layer ORDER BY total_mentions DESC",
+    will_continue_work=true)
+
+  -- Returns: backend|4|32, infra|3|24, frontend|2|17, ml|2|14...
+
+[Turn 4] Drill deeper on top layer with evolved schema
+  sqlite_batch(sql="
+    SELECT keyword, layer, COUNT(*) as n, GROUP_CONCAT(DISTINCT role_signal) as roles
+    FROM mentions WHERE layer=(SELECT layer FROM mentions GROUP BY layer ORDER BY COUNT(*) DESC LIMIT 1)
+    GROUP BY keyword ORDER BY n DESC",
+    will_continue_work=true)
+
+[Turn 5] Synthesize—use evolved schema (mentions with layer + role_signal)
   send_chat_message(body="## 🛠️ TechCorp Engineering Stack
 
 > Analyzed **23 job postings** from [company.io/careers](${source_url})
