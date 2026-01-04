@@ -744,6 +744,13 @@ For CSV data, the content is a text string (not JSON). Extract it first:
 SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
 ```
 
+**JSON stored as TEXT**: Some APIs return JSON wrapped as a string inside another field. When you see:
+```
+🧩 JSON DATA in $.result - JSON stored as TEXT
+→ QUERY: SELECT ... FROM json_each(json_extract(result_json,'$.result')) AS r
+```
+The `json_extract()` unwraps the TEXT string first, then `json_each()` iterates the array inside. Copy the QUERY hint exactly—it has the right nesting for that result.
+
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
 **`will_continue_work`** — your signal for whether you need another turn:

@@ -2218,7 +2218,7 @@ def _generate_compact_summary(
                         parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
 
                 elif emb.format == "json":
-                    parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT")
+                    parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT (use json_extract to unwrap, then json_each)")
                     parts.append(f"  → GET JSON: {extract_query}")
 
                     if emb.json_info and not parent_path:
