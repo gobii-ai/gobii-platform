@@ -78,15 +78,19 @@ class ToolCostTests(TestCase):
         )
 
     def test_get_most_expensive_tool_cost_uses_highest_db_value(self):
+        config = TaskCreditConfig.objects.get(singleton_id=1)
+        config.default_task_cost = Decimal("0.10")
+        config.save()
+
         ToolCreditCost.objects.bulk_create(
             [
                 ToolCreditCost(tool_name="mcp_brightdata_search_engine", credit_cost=Decimal("0.10")),
-                ToolCreditCost(tool_name="sqlite_batch", credit_cost=Decimal("0.80")),
+                ToolCreditCost(tool_name="sqlite_batch", credit_cost=Decimal("0.20")),
             ]
         )
         clear_tool_credit_cost_cache()
 
-        self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.80"))
+        self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.20"))
 
     def test_get_most_expensive_tool_cost_defaults_when_no_override_above_default(self):
         config = TaskCreditConfig.objects.get(singleton_id=1)

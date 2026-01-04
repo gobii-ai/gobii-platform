@@ -1828,7 +1828,7 @@ def _generate_query_patterns(
 
             if arr.table_info:
                 table = arr.table_info
-                col_names = table.columns[:5] if table.columns else []
+                col_names = table.columns[:2] if table.columns else []  # Limit to 2 for clarity
                 extracts = ", ".join(
                     f"json_extract(r.value,'$[{idx}]') AS "
                     f"{_safe_sql_identifier(name, f'col{idx + 1}')}"
@@ -1865,8 +1865,8 @@ def _generate_query_patterns(
             # prefix field paths with the wrapper key
             field_prefix = f".{arr.item_data_key}" if arr.item_data_key else ""
 
-            # Build field extracts
-            fields = arr.item_fields[:5]
+            # Build field extracts - limit to 2 fields for clarity in hint
+            fields = arr.item_fields[:2]
             if fields:
                 extracts = ", ".join(f"json_extract(r.value,'${field_prefix}.{f}')" for f in fields)
                 patterns.list_all = (
@@ -1976,18 +1976,24 @@ def _generate_compact_summary(
             arr = json_analysis.primary_array
             path = arr.path
 
-            # QUERY FIRST - most important, put at top
+            # PATH FIRST - the exact path is critical, most common mistake is wrong path
+            if arr.item_data_key:
+                parts.append(f"→ PATH: {path} ({arr.length} items, fields in $.{arr.item_data_key})")
+            else:
+                parts.append(f"→ PATH: {path} ({arr.length} items)")
+
+            # QUERY - ready-to-use example (limited fields for clarity)
             if query_patterns and query_patterns.list_all:
                 parts.append(f"→ QUERY: {query_patterns.list_all}")
             else:
-                # Generate inline if no pattern
+                # Generate inline if no pattern - limit to 2 fields for readability
                 if path == "$":
                     each_expr = "json_each(result_json)"
                 else:
                     each_expr = f"json_each(result_json,'{path}')"
                 if arr.table_info and arr.table_info.columns:
                     extracts = ", ".join(
-                        f"json_extract(r.value,'$[{idx}]')" for idx, _ in enumerate(arr.table_info.columns[:3])
+                        f"json_extract(r.value,'$[{idx}]')" for idx, _ in enumerate(arr.table_info.columns[:2])
                     )
                     row_filter = ""
                     if arr.table_info.has_header:
@@ -1999,7 +2005,7 @@ def _generate_compact_summary(
                     )
                 else:
                     field_prefix = f".{arr.item_data_key}" if arr.item_data_key else ""
-                    fields_to_show = arr.item_fields[:3]
+                    fields_to_show = arr.item_fields[:2]  # Limit to 2 fields for clarity
                     if fields_to_show:
                         extracts = ", ".join(f"json_extract(r.value,'${field_prefix}.{f}')" for f in fields_to_show)
                         parts.append(
@@ -2014,13 +2020,6 @@ def _generate_compact_summary(
                             f"FROM __tool_results, {each_expr} AS r "
                             f"WHERE result_id='{result_id}' LIMIT 25"
                         )
-
-            # PATH explicitly labeled - critical for correct queries
-            # Include item_data_key if present so agent knows full path
-            if arr.item_data_key:
-                parts.append(f"  PATH: {path} ({arr.length} items, fields in $.{arr.item_data_key})")
-            else:
-                parts.append(f"  PATH: {path} ({arr.length} items)")
 
             if arr.table_info:
                 table = arr.table_info

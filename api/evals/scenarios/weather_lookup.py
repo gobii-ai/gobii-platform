@@ -3,7 +3,7 @@ import json
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentStep
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage
 
 
 @register_scenario
@@ -18,6 +18,12 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     ]
 
     def run(self, run_id: str, agent_id: str) -> None:
+        original_charter = (
+            PersistentAgent.objects.filter(id=agent_id)
+            .values_list("charter", flat=True)
+            .first()
+            or ""
+        )
         # Task 1: Inject Prompt
         self.record_task_result(
             run_id,
@@ -74,21 +80,20 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             task_name="verify_charter_update"
         )
 
-        from api.models import PersistentAgentToolCall
-        charter_updates = PersistentAgentToolCall.objects.filter(
-            step__agent_id=agent_id,
-            step__created_at__gte=msg.timestamp,
-            tool_name__in=['update_charter', 'charter_updater']
+        updated_charter = (
+            PersistentAgent.objects.filter(id=agent_id)
+            .values_list("charter", flat=True)
+            .first()
+            or ""
         )
-
-        if charter_updates.exists():
+        if updated_charter.strip() and updated_charter.strip() != original_charter.strip():
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_charter_update",
-                observed_summary="Charter update tool called.",
-                artifacts={"tool_call": charter_updates.first()}
+                observed_summary="Charter updated.",
+                artifacts={"charter": updated_charter},
             )
         else:
             self.record_task_result(
@@ -96,7 +101,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_charter_update",
-                observed_summary="No charter update tool called."
+                observed_summary="Charter did not change."
             )
 
         # Task 3: Verify HTTP Request (Judge)

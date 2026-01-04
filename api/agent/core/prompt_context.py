@@ -71,11 +71,9 @@ from .promptree import Prompt
 from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
-from ..tools.charter_updater import get_update_charter_tool
 from ..tools.email_sender import get_send_email_tool
 from ..tools.peer_dm import get_send_agent_message_tool
 from ..tools.request_contact_permission import get_request_contact_permission_tool
-from ..tools.schedule_updater import get_update_schedule_tool
 from ..tools.search_tools import get_search_tools_tool
 from ..tools.secure_credentials_request import get_secure_credentials_request_tool
 from ..tools.sms_sender import get_send_sms_tool
@@ -83,7 +81,7 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
-from ..tools.sqlite_state import get_sqlite_schema_prompt
+from ..tools.sqlite_state import AGENT_CONFIG_TABLE, get_sqlite_schema_prompt
 from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
@@ -447,31 +445,34 @@ Step 11: Deliver something genuinely useful
    **Company Profile**
    | Metric | Value |
    |--------|-------|
+   | Company | [Acme Corp](https://linkedin.com/company/acme-corp) ([Crunchbase](https://crunchbase.com/organization/acme-corp)) |
    | Employees | 847 |
    | HQ | San Francisco |
-   | Stage | Series C ($120M raised) |
+   | Stage | [Series C](https://crunchbase.com/funding-round/acme-series-c) ($120M raised) |
    | Founded | 2018 |
+   | Website | [acme.io](https://acme.io) |
 
-   **Pricing**
+   **[Pricing](https://acme.io/pricing)**
    | Tier | Monthly | Notes |
    |------|---------|-------|
    | Starter | $49 | Up to 5 users |
    | Professional | $199 | Unlimited users |
-   | Enterprise | Custom | Contact sales |
+   | Enterprise | Custom | [Contact sales](https://acme.io/contact) |
 
    **Leadership**
    | Name | Role | Background |
    |------|------|------------|
-   | [Jane Smith](linkedin.com/in/janesmith-ceo) | CEO | Ex-Stripe, Stanford MBA |
-   | [John Doe](linkedin.com/in/johndoe-cto) | CTO | Ex-Google, MIT CS PhD |
-   | [Sarah Chen](linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-Salesforce, 8yr enterprise |
+   | [Jane Smith](https://linkedin.com/in/janesmith-ceo) | CEO | Ex-[Stripe](https://linkedin.com/company/stripe), Stanford MBA |
+   | [John Doe](https://linkedin.com/in/johndoe-cto) | CTO | Ex-[Google](https://linkedin.com/company/google), MIT CS PhD |
+   | [Sarah Chen](https://linkedin.com/in/sarahchen-vpsales) | VP Sales | Ex-[Salesforce](https://linkedin.com/company/salesforce), 8yr enterprise |
 
    **Assessment**
-   Well-funded Series C with strong enterprise pedigree. Pricing suggests mid-market
-   focus ($199 sweet spot). Leadership team has scaled similar companies before.
+   Well-funded [Series C](https://crunchbase.com/funding-round/acme-series-c) with strong enterprise pedigree.
+   [Pricing](https://acme.io/pricing) suggests mid-market focus ($199 sweet spot).
+   Leadership team has scaled similar companies before.
 
-   **For Partnership**: They're hiring aggressively (23 open roles) which signals
-   growth mode—good time to approach. VP Sales is the obvious first contact.
+   **For Partnership**: They're [hiring aggressively](https://linkedin.com/company/acme-corp/jobs) (23 open roles) which signals
+   growth mode—good time to approach. [Sarah Chen](https://linkedin.com/in/sarahchen-vpsales) is the obvious first contact.
 
    ---
    Want me to find Sarah's email, research their competitors, or draft outreach?"
@@ -513,6 +514,12 @@ SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
 - Have a URL or can guess one? → scrape directly
 - Need to discover what's out there? → one `search_engine` query, then act on results
 - Have scraped content? → `grep_context_all` to extract with context, not just `substr`
+
+**Using tool parameters**: When a tool has optional parameters, use the exact names from the schema:
+```
+mcp_bright_data_web_data_youtube_comments(url="https://youtube.com/watch?v=abc", num_of_comments="25")
+mcp_bright_data_web_data_google_maps_reviews(url="https://maps.google.com/...", days_limit="7")
+```
 
 ---
 
@@ -699,8 +706,11 @@ Always discover first, search second.
 
 ## Key Patterns
 
-Each result includes a `→ QUERY: ...` hint with the correct paths for that specific result.
-Different tools return different structures, so use the provided query rather than guessing.
+Each result includes `→ PATH:` and `→ QUERY:` hints with the exact paths for that result.
+The PATH is the correct json_each path—use it exactly as shown, not a guess based on field names.
+`http_request` wraps responses in `$.content`, so the path is `$.content.hits`, not `$.hits`.
+
+Tool schemas are your source of truth for parameter names. The schema says `num_of_comments`? Use exactly that—not `num_comments`, not `comment_count`. Trust the schema.
 
 For JSON arrays, load into tables with INSERT...SELECT:
 ```sql
@@ -714,8 +724,6 @@ For CSV data, the content is a text string (not JSON). Extract it first:
 ```sql
 SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
 ```
-
-http_request wraps responses in $.content, so paths are $.content.items not $.items.
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
@@ -1470,7 +1478,7 @@ def build_prompt_context(
             "Tools only (no message)\n"
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: update_charter(...)\n\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
             "Note: A message-only response means you're finished. "
             "If you still have work to do after replying, include a tool call."
         )
@@ -1489,7 +1497,7 @@ def build_prompt_context(
             "Tools only (no message)\n"
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: update_charter(...)\n\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
             "Note: Without an active web chat session, text-only output is never delivered."
         )
 
@@ -1571,6 +1579,18 @@ def build_prompt_context(
         sqlite_note,
         weight=1,
         non_shrinkable=True
+    )
+    agent_config_note = (
+        f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
+        "(single row, id=1). It resets every LLM call and is applied after tools run. "
+        "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
+        "Clear schedule with schedule=NULL or ''."
+    )
+    variable_group.section_text(
+        "agent_config_note",
+        agent_config_note,
+        weight=2,
+        non_shrinkable=True,
     )
     variable_group.section_text(
         "sqlite_examples",
@@ -2078,11 +2098,11 @@ def add_budget_awareness_sections(
                     sections.append(
                         (
                             "low_steps_warning",
-                            (
-                                "Warning: You are running low on steps for this cycle. "
-                                "Make sure your schedule is appropriate (use 'update_schedule' if needed). "
-                                "It's OK to work incrementally and continue in a later cycle if you cannot complete everything now."
-                            ),
+                        (
+                            "Warning: You are running low on steps for this cycle. "
+                            "Make sure your schedule is appropriate (update __agent_config.schedule via sqlite_batch if needed). "
+                            "It's OK to work incrementally and continue in a later cycle if you cannot complete everything now."
+                        ),
                             2,
                             True,
                         )
@@ -2378,18 +2398,22 @@ def _get_formatting_guidance(
     if primary_medium == "WEB":
         return (
             "Web chat formatting (rich markdown):\n"
-            "Make your output beautiful and scannable:\n"
-            "• **Bold** for emphasis, ## headers for sections\n"
-            "• Bullet/numbered lists for multiple items\n"
-            "• Tables for comparative data (use | col1 | col2 | format)\n"
-            "• Short paragraphs (2-3 sentences max)\n"
-            "Example with table:\n"
-            '  "## Current Prices\n\n'
-            "  | Asset | Price | 24h |\n"
-            "  |-------|-------|-----|\n"
-            "  | BTC | $67k | +2.3% |\n"
-            "  | ETH | $3.4k | +1.8% |\n\n"
-            '  Looking bullish! Want alerts?"'
+            "Make your output visually satisfying—not just informative:\n"
+            "• ## Headers to frame sections—give structure to your response\n"
+            "• **Tables for any structured data**—3+ items with attributes? Use a table.\n"
+            "• **Bold** key metrics, names, and takeaways\n"
+            "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
+            "• Short insight after data (1-2 sentences)\n"
+            "• End with a forward prompt\n\n"
+            "Pattern: Header → Table → Insight → Offer\n"
+            "Example:\n"
+            '  "## 📊 Current Prices\n\n'
+            "  | Asset | Price | 24h | Signal |\n"
+            "  |-------|-------|-----|--------|\n"
+            "  | BTC | **$67k** | +2.3% 📈 | Bullish |\n"
+            "  | ETH | **$3.4k** | +1.8% 📈 | Neutral |\n\n"
+            "  Strong day—BTC broke $66k resistance. ETH following.\n\n"
+            '  Want alerts on specific levels?"'
         )
     elif primary_medium == "SMS":
         return (
@@ -2607,22 +2631,22 @@ def _get_system_instruction(
             "**Stop** — request fully handled, nothing left to do:\n"
             "- 'hi' → 'Hey! What can I help with?' — done.\n"
             "- 'thanks!' → 'Anytime!' — done.\n"
-            "- 'remember I like bullet points' → update_charter('Prefers bullet points') + 'Got it!' — done.\n"
-            "- 'actually make it weekly not daily' → update_schedule('0 9 * * 1') + 'Updated to weekly!' — done.\n"
-            "- 'pause the updates for now' → update_schedule(null) + 'Paused. Let me know when to resume.' — done.\n"
+            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + 'Got it!' — done.\n"
+            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + 'Updated to weekly!' — done.\n"
+            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + 'Paused. Let me know when to resume.' — done.\n"
             "- Cron fires, nothing new → (empty response) — done.\n\n"
             "**Continue** — still have work to do:\n"
             "- 'what's bitcoin?' → http_request(will_continue_work=true) → 'BTC is $67k' — now done.\n"
-            "- 'track HN daily' → update_charter + update_schedule + http_request(will_continue_work=true) → report first digest — now done.\n"
-            "- 'check the news, and make it a morning thing' → update_schedule('0 9 * * *') + http_request(will_continue_work=true) → report news — now done.\n"
-            "- 'find competitors and keep me posted weekly' → update_charter + update_schedule + search_tools(will_continue_work=true) → ...keep working.\n"
+            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report first digest — now done.\n"
+            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report news — now done.\n"
+            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
             "- Fetched data but haven't reported → will_continue_work=true.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → update_charter('Keep updates concise') + 'Will do!'\n"
-            "- User: 'can you check this every hour?' → update_schedule('0 * * * *') + 'Now checking hourly!'\n"
-            "- User: 'I'm more interested in AI startups specifically' → update_charter('Focus on AI startups') + continue current work.\n"
-            "- User: 'actually twice a day would be better' → update_schedule('0 9,18 * * *') + 'Updated to 9am and 6pm!'\n"
-            "- User: 'also watch for funding news' → update_charter('...also track funding announcements') + 'Added to my radar!'\n\n"
+            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + 'Will do!'\n"
+            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + 'Now checking hourly!'\n"
+            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
+            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + 'Updated to 9am and 6pm!'\n"
+            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + 'Added to my radar!'\n\n"
             "**The rule:** Did you complete what they asked? Charter/schedule updates are bookkeeping—do them eagerly, but the task might just be starting.\n"
         )
     else:
@@ -2631,22 +2655,22 @@ def _get_system_instruction(
             "**Stop** — request fully handled, nothing left to do:\n"
             "- 'hi' → send_email('Hey! What can I help with?') — done.\n"
             "- 'thanks!' → send_email('Anytime!') — done.\n"
-            "- 'remember I like bullet points' → update_charter('Prefers bullet points') + send_email('Got it!') — done.\n"
-            "- 'actually make it weekly not daily' → update_schedule('0 9 * * 1') + send_email('Updated to weekly!') — done.\n"
-            "- 'pause the updates for now' → update_schedule(null) + send_email('Paused.') — done.\n"
+            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + send_email('Got it!') — done.\n"
+            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + send_email('Updated to weekly!') — done.\n"
+            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + send_email('Paused.') — done.\n"
             "- Cron fires, nothing new → (empty response) — done.\n\n"
             "**Continue** — still have work to do:\n"
             "- 'what's bitcoin?' → http_request(will_continue_work=true) → send_email('BTC is $67k') — now done.\n"
-            "- 'track HN daily' → update_charter + update_schedule + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
-            "- 'check the news, and make it a morning thing' → update_schedule('0 9 * * *') + http_request(will_continue_work=true) → send_email(news) — now done.\n"
-            "- 'find competitors and keep me posted weekly' → update_charter + update_schedule + search_tools(will_continue_work=true) → ...keep working.\n"
+            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
+            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(news) — now done.\n"
+            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
             "- Fetched data but haven't sent it → will_continue_work=true.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → update_charter('Keep updates concise') + send_email('Will do!')\n"
-            "- User: 'can you check this every hour?' → update_schedule('0 * * * *') + send_email('Now checking hourly!')\n"
-            "- User: 'I'm more interested in AI startups specifically' → update_charter('Focus on AI startups') + continue current work.\n"
-            "- User: 'actually twice a day would be better' → update_schedule('0 9,18 * * *') + send_email('Updated to 9am and 6pm!')\n"
-            "- User: 'also watch for funding news' → update_charter('...also track funding announcements') + send_email('Added!')\n\n"
+            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + send_email('Will do!')\n"
+            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + send_email('Now checking hourly!')\n"
+            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
+            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + send_email('Updated to 9am and 6pm!')\n"
+            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + send_email('Added!')\n\n"
             "**The rule:** Did you complete what they asked? Charter/schedule updates are bookkeeping—do them eagerly, but the task might just be starting.\n"
         )
 
@@ -2670,8 +2694,8 @@ def _get_system_instruction(
         "Tool output (French), user in English: \"Erreur: permission refusee\"\n"
         "Assistant (English): \"The tool reported a permission error. I'll retry with the correct permissions or ask for approval if needed.\"\n\n"
 
-        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, call update_charter right away—ideally alongside your greeting. "
-        "You control your schedule. Use update_schedule when needed, but prefer less frequent over more. "
+        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
+        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
         "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
         "Ask about timezone if relevant. "
 
@@ -2695,7 +2719,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        "→ update_charter('Monitor competitor pricing. Track changes daily, alert on significant moves.')\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing. Track changes daily, alert on significant moves.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -2703,7 +2727,7 @@ def _get_system_instruction(
         "User: 'Actually, focus just on their enterprise plans, not consumer'\n"
         "Before: 'Monitor competitor pricing. Track changes daily.'\n"
         "After:  'Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.'\n"
-        "→ update_charter('Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.')\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User adds a preference:**\n"
@@ -2711,7 +2735,7 @@ def _get_system_instruction(
         "User: 'Send me updates via Slack, not email'\n"
         "Before: 'Scout AI startups weekly.'\n"
         "After:  'Scout AI startups weekly. User prefers Slack for updates.'\n"
-        "→ update_charter('Scout AI startups weekly. User prefers Slack for updates.')\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout AI startups weekly. User prefers Slack for updates.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User gives entirely new instructions:**\n"
@@ -2719,15 +2743,15 @@ def _get_system_instruction(
         "User: 'Forget the startup stuff. I need you to track my portfolio stocks instead.'\n"
         "Before: 'Scout AI startups. Track YC, Product Hunt.'\n"
         "After:  'Track user portfolio stocks. Monitor prices and news.'\n"
-        "→ update_charter('Track user portfolio stocks. Monitor prices and news.')\n"
-        "→ update_schedule(...) if timing changes\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track user portfolio stocks. Monitor prices and news.' WHERE id=1;\")\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n"
         "```\n\n"
 
         "### Schedule updates:\n"
         "Update your schedule when timing requirements change:\n"
-        "- User says 'check every hour' → `update_schedule('0 * * * *')`\n"
-        "- User says 'weekly on Fridays' → `update_schedule('0 9 * * 5')`\n"
-        "- User says 'stop the daily checks' → `update_schedule('')` (clears schedule)\n\n"
+        "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
+        "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
+        "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
         "**Golden rule**: If the user's words imply your job/purpose/timing has changed, update your charter and/or schedule *in that same response*. Don't wait.\n\n"
 
@@ -2813,17 +2837,22 @@ def _get_system_instruction(
         "Show the numbers. If the API gave you points, comments, votes, prices, timestamps—display them prominently. "
         "These metrics help users decide what's worth their attention. Hiding them makes your output less useful. "
 
-        "  Missing metrics: '[Article Title](url) — Interesting read' "
-        "  With metrics: '[Article Title](url) — **847 pts** · [234 comments](url) · 3h ago' "
+        "  Missing metrics: '[Article Title](←url) — Interesting read' "
+        "  With metrics: '[Article Title](←item.url) — **847 pts** · [234 comments](←item.comments_url) · 3h ago' "
         "  Even better as a table: "
         "    '| Story | 🔺 | 💬 |\\n"
         "    |-------|-----|-----|\\n"
-        "    | [Article Title](url) | 847 | [234](comments_url) |' "
+        "    | [Article Title](←item.url) | 847 | [234](←item.comments_url) |' "
 
-        "Tables vs lists—choose based on the data: "
-        "  • Tables: when comparing across multiple attributes (price + rating + stock, points + comments + time) "
-        "  • Bulleted lists: when each item needs a sentence of context or the attributes vary "
-        "  • Numbered lists: when rank or sequence matters "
+        "Tables are your superpower. When in doubt, use a table. "
+        "Tables create instant visual structure—scannable, professional, satisfying. Bullets feel like notes; tables feel like deliverables. "
+        "  • Got 3+ items with 2+ attributes each? → Table. "
+        "  • Comparing things? → Table. "
+        "  • Showing a list of people, companies, products, articles? → Table. "
+        "  • Status update with multiple metrics? → Table. "
+        "  • Research findings? → Table with sources as links. "
+        "Bullets are for: varied-length commentary, single-attribute lists, or when items need a full sentence each. "
+        "Numbered lists are for: ranked results or sequential steps. "
 
         "Make every element functional: "
         "  • Titles should BE links, not have separate 'read more' links "
@@ -2837,16 +2866,49 @@ def _get_system_instruction(
         "  • Group related items with headers: '## 🔥 Hot' / '## 📈 Rising' "
         "  • Emoji as visual anchors: 🔺 points, 💬 comments, ⏰ time, 💰 price "
 
-        "Example—a feed with personality: "
+        "Structure transforms information into insight. A beautiful response has: "
+        "  1. A clear header that frames what's coming "
+        "  2. Visual data (table, key metrics, status indicators) "
+        "  3. Brief interpretation or insight (1-2 sentences) "
+        "  4. A forward-looking prompt or offer "
+        "This pattern works for everything: research summaries, status updates, recommendations, competitive analysis. "
+
+        "Example—a feed with personality (←item.url means 'url field from this item in the result'): "
         "'## What's hot on the front page\\n\\n"
         "| | Story | 🔺 | 💬 |\\n"
         "|---|-------|-----|-----|\\n"
-        "| 🔥 | [I quit my $500k job](url) | 1.2k | [847](url) |\\n"
-        "| 🚀 | [Show: Built this in a weekend](url) | 634 | [201](url) |\\n"
-        "| 🧠 | [The math behind transformers](url) | 445 | [89](url) |\\n\\n"
+        "| 🔥 | [I quit my $500k job](←item.url) | 1.2k | [847](←item.comments_url) |\\n"
+        "| 🚀 | [Show: Built this in a weekend](←item.url) | 634 | [201](←item.comments_url) |\\n"
+        "| 🧠 | [The math behind transformers](←item.url) | 445 | [89](←item.comments_url) |\\n\\n"
         "Heavy on career and AI today. Want me to watch for anything specific?' "
 
+        "Example—research turned beautiful (←pricing_url from each company's scraped page): "
+        "'## 🔬 Competitor Pricing Analysis\\n\\n"
+        "| Company | Starter | Pro | Enterprise | Free Tier |\\n"
+        "|---------|---------|-----|------------|-----------|\\n"
+        "| [Acme](←pricing_url) | $29/mo | $99/mo | Custom | ✓ 14 days |\\n"
+        "| [Rival](←pricing_url) | $39/mo | $149/mo | $499/mo | ✗ |\\n"
+        "| [NewCo](←pricing_url) | Free | $79/mo | Custom | ✓ Always |\\n\\n"
+        "**Insight**: NewCo is disrupting with a freemium model. Acme's mid-tier is 30% cheaper than Rival.\\n\\n"
+        "Want me to dig into feature comparisons or customer reviews?' "
+
+        "Example—status update with structure: "
+        "'## 📊 Weekly Portfolio Summary\\n\\n"
+        "| Asset | Value | Change | Allocation |\\n"
+        "|-------|-------|--------|------------|\\n"
+        "| BTC | $12,400 | +8.2% 📈 | 45% |\\n"
+        "| ETH | $6,200 | +3.1% 📈 | 28% |\\n"
+        "| SOL | $2,100 | -2.4% 📉 | 12% |\\n"
+        "| Cash | $3,300 | — | 15% |\\n\\n"
+        "**Total**: $24,000 (+5.7% this week)\\n\\n"
+        "Strong week! BTC leading the charge. Want me to set alerts for any positions?' "
+
         "The goal: a user should be able to scan your output and immediately see what matters, click what interests them, and understand the landscape—all in seconds. "
+
+        "Elevate the ordinary. Even simple information deserves presentation: "
+        "  Plain: 'Here are some options: Option A, Option B, Option C' "
+        "  Elevated: '## Your Options\\n| Option | Best For | Price |\\n|--------|----------|-------|\\n| A | Speed | $10 |\\n| B | Quality | $25 |\\n| C | Balance | $15 |\\n\\nI'd lean toward B for your use case.' "
+        "The second version takes the same information and makes it *satisfying* to receive. That's the standard. "
 
         "For long-running tasks (first time or in response to a message), let the user know you're on it before diving in. Skip this for scheduled/cron triggers. "
         "Email uses HTML, not markdown. SMS is plain text. Save the **bold** and [links](url) for web chat. "
@@ -2855,6 +2917,12 @@ def _get_system_instruction(
 
         "Sources are sacred. When you fetch data from the world, you're bringing back knowledge—and knowledge deserves attribution. "
         "Every fact you retrieve should carry its origin, woven naturally into your message. The user should be able to trace any claim back to its source with a single click. "
+
+        "Link generously. When in doubt, add the link. Every company name, every person, every product, every article, every thread you mention—if you fetched a URL for it, make it clickable. "
+        "Your data is full of URLs. Use them all. A response with ten elegant links is better than one with two. The user can ignore links they don't need; they can't click links you didn't include. "
+
+        "Mine your data for links. A LinkedIn profile gives you the person's URL, their company's URL, previous companies, education. A Crunchbase response has the company, investors, founders, funding rounds—each with URLs. "
+        "Search results give you URLs for every item. Scraped pages have embedded links. Extract them, store them, weave them into your output. "
 
         "Here's the difference between good and great: "
         "  Sourceless: 'Bitcoin is at $67,000.' (Where did this come from? The user can't verify.) "
@@ -2873,14 +2941,18 @@ def _get_system_instruction(
         "  Sourced: 'Lively AI safety discussion brewing ([HN](https://news.ycombinator.com/item?id=12345)).' "
 
         "The principle: if you fetched it, cite it. The URL you called is the source. "
+        "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
+
+        "IDs work the same way. When an API returns objectID, id, story_id, or any identifier, that's your key to fetch details later—store it alongside the display data. "
+        "Never guess an ID for a follow-up API call. If you need an ID you didn't store, query your saved data or re-fetch. A hallucinated ID will fetch the wrong thing or fail. "
 
         "Now, make those citations beautiful—raw URLs are visual noise. "
-        "In web chat, use markdown links: [descriptive text](url) "
-        "In email, use HTML: <a href=\"url\">descriptive text</a> "
-        "In SMS, keep it compact but present: 'BTC $67k — coinbase.com/v2/prices/BTC-USD' "
+        "In web chat, use markdown links: [descriptive text](←url from result) "
+        "In email, use HTML: <a href=\"←url from result\">descriptive text</a> "
+        "In SMS, keep it compact but present: 'BTC $67k — coinbase.com/...' "
 
-        "Weave sources into the narrative. A parenthetical ([source](url)) works beautifully for data. "
-        "For articles, the title becomes the link: [The Future of AI](url). "
+        "Weave sources into the narrative. A parenthetical ([source](←api_url)) works beautifully for data. "
+        "For articles, the title becomes the link: [The Future of AI](←article.url). "
         "Multiple sources? A clean list with linked titles beats a wall of URLs. "
 
         "The goal: every claim verifiable, every message beautiful. "
@@ -2908,6 +2980,12 @@ def _get_system_instruction(
 
         "Beautiful writing and links are not mutually exclusive. The soul is in the prose; the utility is in the links. "
         "If you fetched data about specific items (posts, comments, threads, products), the user should be able to click through to each one. "
+
+        "A densely-linked paragraph reads beautifully: "
+        "'[Acme Corp](https://linkedin.com/company/acme) just raised their [Series B](https://crunchbase.com/funding-round/acme-series-b)—$45M led by [Sequoia](https://sequoia.com/companies/acme). "
+        "Their CEO [Jane Smith](https://linkedin.com/in/janesmith) previously built [Widgetly](https://crunchbase.com/organization/widgetly), and CTO [John Doe](https://linkedin.com/in/johndoe) comes from Google. "
+        "They're [hiring aggressively](https://linkedin.com/company/acme/jobs) (23 open roles) and their [pricing](https://acme.io/pricing) starts at $49/mo.' "
+        "Every proper noun is a doorway. Every fact is verifiable. That's the standard. "
 
         "Whitespace is your friend. Let your messages breathe. "
         "A cramped wall of text is hard to read; generous spacing makes information scannable. "
@@ -2953,8 +3031,8 @@ def _get_system_instruction(
         "Getting Hacker News data: "
         "  search_tools('hacker news api') → finds http_request is available "
         "  http_request(url='https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30') "
-        "  → Response has hits[].{objectID, title, url, points}. Build links: news.ycombinator.com/item?id={objectID} "
-        "  Other endpoints: /search_by_date for newest, /items/{id} for full thread with comments. "
+        "  → Response has hits[].{objectID, title, url, points}. objectID is the key—store it for links and follow-ups. "
+        "  Discussion link: news.ycombinator.com/item?id={objectID}. Comments: /items/{objectID}. "
         "  Tags: story, ask_hn, show_hn, author_{username}, story_{id}. "
 
         "Getting Reddit data (requires User-Agent header): "
@@ -3054,7 +3132,7 @@ def _get_system_instruction(
 
         "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
 
-        "Call update_schedule when you need to continue work later. "
+        "Update __agent_config.schedule via sqlite_batch when you need to continue work later. "
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
@@ -3149,7 +3227,7 @@ def _get_system_instruction(
                     "**Example A — Simple greeting, no task:**\n"
                     "User: 'hi'\n"
                     "→ send_email('Hey there! I'm Jo, your new agent 🙂 What can I help you with?')\n"
-                    "→ update_charter('Awaiting instructions', will_continue_work=false)\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Awaiting instructions' WHERE id=1;\", will_continue_work=false)\n"
                     "That's it—stop there. No task was given, so don't keep processing.\n\n"
 
                     "---\n\n"
@@ -3157,8 +3235,7 @@ def _get_system_instruction(
                     "**Example B — Monitoring task:**\n"
                     "User: 'track bitcoin for me'\n"
                     "→ send_email('Hey! I'm Max 👋 I'll track bitcoin for you and keep you posted—excited to help!')\n"
-                    "→ update_charter('Track bitcoin prices for user. Monitor daily and alert on significant moves.')\n"
-                    "→ update_schedule('0 9 * * *')  # daily at 9am\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track bitcoin prices for user. Monitor daily and alert on significant moves.', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('cryptocurrency price API', will_continue_work=true)\n"
                     "[Next cycle: fetch current price, report to user, store baseline in DB]\n\n"
 
@@ -3167,8 +3244,7 @@ def _get_system_instruction(
                     "**Example C — Research/scouting task:**\n"
                     "User: 'help me find promising AI startups to invest in'\n"
                     "→ send_email('Hey! I'm Riley 👋 I'll scout AI startups for you—love this kind of research!')\n"
-                    "→ update_charter('Scout promising AI startups. Look for early traction, strong teams, innovative tech.')\n"
-                    "→ update_schedule('0 10 * * 1')  # weekly on Monday mornings\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout promising AI startups. Look for early traction, strong teams, innovative tech.', schedule='0 10 * * 1' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('web search startup research', will_continue_work=true)\n"
                     "[Next cycle: search YC, Product Hunt, TechCrunch; compile first batch of candidates]\n\n"
 
@@ -3177,8 +3253,7 @@ def _get_system_instruction(
                     "**Example D — OSS project scouting:**\n"
                     "User: 'scout open source projects with early traction that could become companies'\n"
                     "→ send_email('Hey! I'm Sam 👋 I'll hunt for promising OSS projects. Excited to dig into GitHub!')\n"
-                    "→ update_charter('Scout OSS projects with early traction. Look for: growing stars, active maintainers, commercial potential. Use YC/trends as reference for what's hot.')\n"
-                    "→ update_schedule('0 9 * * 1,4')  # twice weekly\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout OSS projects with early traction. Look for: growing stars, active maintainers, commercial potential. Use YC/trends as reference for what is hot.', schedule='0 9 * * 1,4' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('GitHub API web scraping', will_continue_work=true)\n"
                     "[Next cycle: research trending repos, check recent YC batch for category signals, start building a candidate list]\n\n"
 
@@ -3187,7 +3262,7 @@ def _get_system_instruction(
                     "**Example E — Data gathering task:**\n"
                     "User: 'compile a list of all restaurants in downtown Seattle with their ratings'\n"
                     "→ send_email('Hey! I'm Dana 👋 I'll compile that restaurant list for you—on it!')\n"
-                    "→ update_charter('Compile downtown Seattle restaurant list with ratings from Google Maps, Yelp.')\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Compile downtown Seattle restaurant list with ratings from Google Maps, Yelp.' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('Google Maps Yelp restaurant data', will_continue_work=true)\n"
                     "[Next cycle: start gathering data, store in SQLite, report progress]\n\n"
 
@@ -3196,8 +3271,7 @@ def _get_system_instruction(
                     "**Example F — Ongoing monitoring with alerts:**\n"
                     "User: 'monitor my competitor's pricing and alert me if they change'\n"
                     "→ send_email('Hey! I'm Alex 👋 I'll keep an eye on your competitor's pricing and let you know about any changes!')\n"
-                    "→ update_charter('Monitor competitor pricing. Track changes and alert user immediately on significant updates.')\n"
-                    "→ update_schedule('0 */6 * * *')  # every 6 hours\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing. Track changes and alert user immediately on significant updates.', schedule='0 */6 * * *' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('web scraping price monitoring', will_continue_work=true)\n"
                     "[Next cycle: scrape current prices, store baseline in DB for comparison]\n\n"
 
@@ -3206,8 +3280,7 @@ def _get_system_instruction(
                     "**Example G — Social media/content task:**\n"
                     "User: 'track mentions of our brand on Twitter and summarize sentiment'\n"
                     "→ send_email('Hey! I'm Jordan 👋 I'll track your brand mentions and keep you posted on the vibe!')\n"
-                    "→ update_charter('Monitor Twitter for brand mentions. Analyze sentiment and summarize daily.')\n"
-                    "→ update_schedule('0 18 * * *')  # daily evening summary\n"
+                    "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor Twitter for brand mentions. Analyze sentiment and summarize daily.', schedule='0 18 * * *' WHERE id=1;\", will_continue_work=true)\n"
                     "→ search_tools('Twitter API social media monitoring', will_continue_work=true)\n"
                     "[Next cycle: pull recent mentions, analyze sentiment, send first report]\n\n"
 
@@ -3693,8 +3766,6 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_sms_tool(),
         get_send_chat_tool(),
         get_spawn_web_task_tool(agent),
-        get_update_schedule_tool(),
-        get_update_charter_tool(),
         get_secure_credentials_request_tool(),
         # MCP management tools
         get_search_tools_tool(),
