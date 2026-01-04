@@ -61,7 +61,8 @@ _PREFERRED_ARRAY_KEYS = {
     "rows",
     "records",
     "entries",
-    "children",
+    # Note: "children" removed - often refers to nested IDs (like HN comment IDs),
+    # not the primary data the user wants. Let object_ratio scoring handle it.
 }
 
 
@@ -85,6 +86,9 @@ class ArrayInfo:
     nested_arrays: List[str] = field(default_factory=list)  # paths relative to item
     item_data_key: Optional[str] = None  # e.g., "data" if items are {"kind": ..., "data": {...actual fields...}}
     table_info: Optional[TableInfo] = None
+    is_scalar: bool = False  # True if array contains primitives (int, str) not objects
+    scalar_type: Optional[str] = None  # "integer", "string", "number", "boolean", "mixed" if is_scalar
+    is_nested: bool = False  # True if this array is inside another array (e.g., $.hits[*].children)
 
 
 @dataclass
@@ -909,7 +913,48 @@ def _detect_table_array(arr: List[Any]) -> Optional[TableInfo]:
     )
 
 
-def _analyze_array(arr: List, path: str) -> ArrayInfo:
+def _detect_scalar_array(arr: List) -> Tuple[bool, Optional[str]]:
+    """Detect if array contains scalar primitives (not objects/arrays).
+
+    Returns (is_scalar, scalar_type) where scalar_type is one of:
+    "integer", "number", "string", "boolean", "mixed", or None if not scalar.
+    """
+    if not arr:
+        return False, None
+
+    sample = arr[:10]
+    types_seen = set()
+
+    for item in sample:
+        if isinstance(item, dict) or isinstance(item, list):
+            return False, None  # Not a scalar array
+        elif isinstance(item, bool):
+            types_seen.add("boolean")
+        elif isinstance(item, int):
+            types_seen.add("integer")
+        elif isinstance(item, float):
+            types_seen.add("number")
+        elif isinstance(item, str):
+            types_seen.add("string")
+        elif item is None:
+            types_seen.add("null")
+
+    if not types_seen:
+        return False, None
+
+    # Determine scalar type
+    types_seen.discard("null")  # null doesn't change the type
+    if len(types_seen) == 0:
+        return True, "null"
+    elif len(types_seen) == 1:
+        return True, types_seen.pop()
+    elif types_seen == {"integer", "number"}:
+        return True, "number"  # integers and floats mixed -> number
+    else:
+        return True, "mixed"
+
+
+def _analyze_array(arr: List, path: str, is_nested: bool = False) -> ArrayInfo:
     """Analyze a JSON array."""
     length = len(arr)
     table_info = _detect_table_array(arr)
@@ -918,7 +963,24 @@ def _analyze_array(arr: List, path: str) -> ArrayInfo:
             path=path,
             length=length,
             table_info=table_info,
+            is_nested=is_nested,
         )
+
+    # Check if this is a scalar array (integers, strings, etc.)
+    is_scalar, scalar_type = _detect_scalar_array(arr)
+    if is_scalar:
+        # For scalar arrays, generate a simple sample
+        sample_items = arr[:3]
+        sample_str = str(sample_items) if sample_items else None
+        return ArrayInfo(
+            path=path,
+            length=length,
+            item_sample=sample_str,
+            is_scalar=True,
+            scalar_type=scalar_type,
+            is_nested=is_nested,
+        )
+
     item_fields, field_types, sample, item_data_key = _analyze_array_item_fields(arr)
 
     # Check for nested arrays in first item
@@ -938,6 +1000,7 @@ def _analyze_array(arr: List, path: str) -> ArrayInfo:
         item_sample=sample,
         nested_arrays=nested,
         item_data_key=item_data_key,
+        is_nested=is_nested,
     )
 
 
@@ -1073,23 +1136,31 @@ def _detect_patterns(data: Any, wrapper_path: Optional[str]) -> DetectedPatterns
     return patterns
 
 
-def _find_all_arrays(data: Any, current_path: str = "$", depth: int = 0) -> List[Tuple[str, List]]:
-    """Recursively find all arrays in JSON structure."""
+def _find_all_arrays(
+    data: Any, current_path: str = "$", depth: int = 0, inside_array: bool = False
+) -> List[Tuple[str, List, bool]]:
+    """Recursively find all arrays in JSON structure.
+
+    Returns list of (path, array_data, is_nested) tuples.
+    is_nested=True for arrays inside other arrays (e.g., $.hits[0].children).
+    Uses [0] instead of [*] for nested paths since SQLite doesn't support wildcards.
+    """
     if depth > MAX_DEPTH:
         return []
 
     results = []
 
     if isinstance(data, list) and len(data) > 0:
-        results.append((current_path, data))
+        results.append((current_path, data, inside_array))
         # Also check inside first item for nested arrays
         if isinstance(data[0], dict):
             for key, val in data[0].items():
-                nested = _find_all_arrays(val, f"{current_path}[*].{key}", depth + 1)
+                # Use [0] not [*] - SQLite doesn't support wildcards in JSON paths
+                nested = _find_all_arrays(val, f"{current_path}[0].{key}", depth + 1, inside_array=True)
                 results.extend(nested)
     elif isinstance(data, dict):
         for key, val in data.items():
-            nested = _find_all_arrays(val, f"{current_path}.{key}", depth + 1)
+            nested = _find_all_arrays(val, f"{current_path}.{key}", depth + 1, inside_array=inside_array)
             results.extend(nested)
 
     return results
@@ -1274,7 +1345,7 @@ def analyze_json(data: Any, result_id: str, *, detect_embedded_content: bool = T
     if isinstance(data, list):
         # Direct array at root
         analysis.pattern = "array"
-        analysis.primary_array = _analyze_array(data, "$")
+        analysis.primary_array = _analyze_array(data, "$", is_nested=False)
         analysis.detected_patterns = _detect_patterns(data, None)
         if detect_embedded_content:
             analysis.embedded_contents = _detect_embedded_contents(data)
@@ -1285,34 +1356,47 @@ def analyze_json(data: Any, result_id: str, *, detect_embedded_content: bool = T
         wrapper_path, unwrapped = _detect_wrapper_path(data)
         analysis.wrapper_path = wrapper_path
 
-        # Find all arrays
+        # Find all arrays - returns (path, array_data, is_nested) tuples
         all_arrays = _find_all_arrays(data)
 
         if all_arrays:
-            def array_score(entry: Tuple[str, List]) -> Tuple[int, float, int, int]:
-                path, arr = entry
+            def array_score(entry: Tuple[str, List, bool]) -> Tuple[int, int, float, int, int]:
+                path, arr, is_nested = entry
                 depth = path.count(".")
                 length = len(arr)
                 sample_items = arr[:5] if isinstance(arr, list) else []
                 object_count = sum(1 for item in sample_items if isinstance(item, dict))
                 object_ratio = object_count / max(1, len(sample_items))
+
+                # Nested arrays (inside other arrays) get heavily penalized
+                # They're rarely what the user wants as the primary target
+                nested_penalty = 0 if not is_nested else -10
+
+                # Object arrays are strongly preferred over scalar arrays
+                # Scalar arrays like [123, 456] are usually IDs, not the main data
+                is_scalar = object_ratio == 0 and length > 0
+                scalar_penalty = 0 if not is_scalar else -5
+
                 path_bonus = 0
                 tokens = [t for t in re.split(r"[.\[]", path.replace("$", "")) if t]
                 for key in _PREFERRED_ARRAY_KEYS:
                     if key in tokens:
                         path_bonus += 1
-                return (path_bonus, object_ratio, length, -depth)
+
+                # Score tuple: (nested_penalty, scalar_penalty, object_ratio, length, -depth)
+                # Nested and scalar penalties come first to ensure they're decisive
+                return (nested_penalty, scalar_penalty, object_ratio, length, -depth)
 
             all_arrays.sort(key=array_score, reverse=True)
 
             # Primary array is the most prominent one
-            primary_path, primary_arr = all_arrays[0]
-            analysis.primary_array = _analyze_array(primary_arr, primary_path)
+            primary_path, primary_arr, primary_is_nested = all_arrays[0]
+            analysis.primary_array = _analyze_array(primary_arr, primary_path, is_nested=primary_is_nested)
 
             # Secondary arrays (different paths)
-            for path, arr in all_arrays[1:5]:
+            for path, arr, is_nested in all_arrays[1:5]:
                 if path != primary_path and not path.startswith(primary_path + "["):
-                    analysis.secondary_arrays.append(_analyze_array(arr, path))
+                    analysis.secondary_arrays.append(_analyze_array(arr, path, is_nested=is_nested))
 
             if len(primary_arr) > 1:
                 analysis.pattern = "paginated_list" if _detect_pagination(data).detected else "collection"
@@ -1979,8 +2063,21 @@ def _generate_compact_summary(
             # PATH FIRST - the exact path is critical, most common mistake is wrong path
             if arr.item_data_key:
                 parts.append(f"→ PATH: {path} ({arr.length} items, fields in $.{arr.item_data_key})")
+            elif arr.is_scalar:
+                parts.append(f"→ PATH: {path} ({arr.length} {arr.scalar_type}s)")
             else:
                 parts.append(f"→ PATH: {path} ({arr.length} items)")
+
+            # FIELDS - help agent understand what's in the array
+            if arr.is_scalar:
+                # Scalar array - emphasize using r.value directly
+                parts.append(f"→ FIELDS: scalar {arr.scalar_type}s — use r.value directly, not json_extract")
+            elif arr.item_fields:
+                # Object array - show available fields
+                fields_preview = ", ".join(arr.item_fields[:6])
+                if len(arr.item_fields) > 6:
+                    fields_preview += ", ..."
+                parts.append(f"→ FIELDS: {fields_preview}")
 
             # QUERY - ready-to-use example (limited fields for clarity)
             if query_patterns and query_patterns.list_all:
@@ -2003,6 +2100,13 @@ def _generate_compact_summary(
                         f"FROM __tool_results, {each_expr} AS r "
                         f"WHERE result_id='{result_id}'{row_filter} LIMIT 25"
                     )
+                elif arr.is_scalar:
+                    # Scalar array - r.value IS the value, don't use json_extract
+                    parts.append(
+                        f"→ QUERY: SELECT r.value "
+                        f"FROM __tool_results, {each_expr} AS r "
+                        f"WHERE result_id='{result_id}' LIMIT 25"
+                    )
                 else:
                     field_prefix = f".{arr.item_data_key}" if arr.item_data_key else ""
                     fields_to_show = arr.item_fields[:2]  # Limit to 2 fields for clarity
@@ -2014,7 +2118,7 @@ def _generate_compact_summary(
                             f"WHERE result_id='{result_id}' LIMIT 25"
                         )
                     else:
-                        # Primitive array (numbers, strings) - just show value directly
+                        # Fallback - just show value directly
                         parts.append(
                             f"→ QUERY: SELECT r.value "
                             f"FROM __tool_results, {each_expr} AS r "
@@ -2114,7 +2218,7 @@ def _generate_compact_summary(
                         parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
 
                 elif emb.format == "json":
-                    parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT")
+                    parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT (use json_extract to unwrap, then json_each)")
                     parts.append(f"  → GET JSON: {extract_query}")
 
                     if emb.json_info and not parent_path:

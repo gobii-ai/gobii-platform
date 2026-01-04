@@ -2408,10 +2408,14 @@ def _run_agent_loop(
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
                 )
+                has_user_facing_message = any(
+                    name in MESSAGE_TOOL_NAMES for name in tool_names if name
+                )
             except Exception:
                 # Defensive fallback: assume we have actionable work so the agent keeps processing
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
+                has_user_facing_message = False
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
@@ -2551,6 +2555,11 @@ def _run_agent_loop(
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
+                    exec_params = tool_params
+                    if tool_name == "sqlite_batch":
+                        exec_params = dict(tool_params)
+                        exec_params["_has_user_facing_message"] = has_user_facing_message
+
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
                     close_old_connections()
 
@@ -2564,25 +2573,25 @@ def _run_agent_loop(
                         result = mock_result
                     elif tool_name == "spawn_web_task":
                         # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
-                        result = execute_spawn_web_task(agent, tool_params)
+                        result = execute_spawn_web_task(agent, exec_params)
                     elif tool_name == "send_email":
-                        result = execute_send_email(agent, tool_params)
+                        result = execute_send_email(agent, exec_params)
                     elif tool_name == "send_sms":
-                        result = execute_send_sms(agent, tool_params)
+                        result = execute_send_sms(agent, exec_params)
                     elif tool_name == "send_chat_message":
-                        result = execute_send_chat_message(agent, tool_params)
+                        result = execute_send_chat_message(agent, exec_params)
                     elif tool_name == "send_agent_message":
-                        result = execute_send_agent_message(agent, tool_params)
+                        result = execute_send_agent_message(agent, exec_params)
                     elif tool_name == "send_webhook_event":
-                        result = execute_send_webhook_event(agent, tool_params)
+                        result = execute_send_webhook_event(agent, exec_params)
                     elif tool_name == "update_schedule":
-                        result = execute_update_schedule(agent, tool_params)
+                        result = execute_update_schedule(agent, exec_params)
                     elif tool_name == "update_charter":
-                        result = execute_update_charter(agent, tool_params)
+                        result = execute_update_charter(agent, exec_params)
                     elif tool_name == "secure_credentials_request":
-                        result = execute_secure_credentials_request(agent, tool_params)
+                        result = execute_secure_credentials_request(agent, exec_params)
                     elif tool_name == "enable_database":
-                        result = execute_enable_database(agent, tool_params)
+                        result = execute_enable_database(agent, exec_params)
                         before_count = len(tools)
                         tools = get_agent_tools(agent)
                         after_count = len(tools)
@@ -2593,9 +2602,9 @@ def _run_agent_loop(
                             after_count,
                         )
                     elif tool_name == "request_contact_permission":
-                        result = execute_request_contact_permission(agent, tool_params)
+                        result = execute_request_contact_permission(agent, exec_params)
                     elif tool_name == "search_tools":
-                        result = execute_search_tools(agent, tool_params)
+                        result = execute_search_tools(agent, exec_params)
                         # After search_tools auto-enables relevant tools, refresh tool definitions
                         before_count = len(tools)
                         tools = get_agent_tools(agent)
@@ -2608,7 +2617,7 @@ def _run_agent_loop(
                         )
                     else:
                         # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
-                        result = execute_enabled_tool(agent, tool_name, tool_params)
+                        result = execute_enabled_tool(agent, tool_name, exec_params)
 
                     result_content = json.dumps(result)
                     # Log result summary

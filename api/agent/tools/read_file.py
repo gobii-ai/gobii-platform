@@ -102,6 +102,7 @@ def get_read_file_tool() -> Dict[str, Any]:
             "name": "read_file",
             "description": (
                 "Read a file from the agent filesystem and return the text content as markdown. "
+                "Not for tool results; use sqlite_batch on __tool_results instead. "
                 "Uses OCR for images to return a detailed description. "
                 "Supports images, PDFs, text files, office documents, and more."
             ),

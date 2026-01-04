@@ -1398,6 +1398,102 @@
   background: rgba(99, 102, 241, 0.45);
 }
 
+/* External Resources (APIs, websites, datasets) */
+.external-resources-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.external-resource-card {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-radius: 0.85rem;
+  border: 1px solid rgba(203, 213, 225, 0.5);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(248, 250, 252, 0.95) 100%);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.external-resource-card:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.08);
+}
+
+.external-resource-icon {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.5rem;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, rgba(139, 92, 246, 0.1) 100%);
+  color: #6366f1;
+}
+
+.external-resource-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.external-resource-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.external-resource-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #1e293b;
+}
+
+.external-resource-link {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  border-radius: 0.35rem;
+  color: #94a3b8;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.external-resource-link:hover {
+  color: #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.external-resource-description {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: #64748b;
+  margin: 0;
+}
+
+.external-resource-url {
+  font-size: 0.72rem;
+  color: #6366f1;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 0.15s ease;
+}
+
+.external-resource-url:hover {
+  color: #4f46e5;
+  text-decoration: underline;
+}
+
 .tool-search-result-card {
   border-radius: 0.85rem;
   border: 1px solid rgba(203, 213, 225, 0.55);

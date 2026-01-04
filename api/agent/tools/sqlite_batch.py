@@ -207,6 +207,15 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         will_continue_work = will_continue_work_raw.lower() == "true"
     else:
         will_continue_work = None
+    user_message_raw = params.get("_has_user_facing_message", None)
+    if user_message_raw is None:
+        has_user_facing_message = False
+    elif isinstance(user_message_raw, bool):
+        has_user_facing_message = user_message_raw
+    elif isinstance(user_message_raw, str):
+        has_user_facing_message = user_message_raw.lower() == "true"
+    else:
+        has_user_facing_message = bool(user_message_raw)
 
     db_path = _sqlite_db_path_var.get(None)
     if not db_path:
@@ -286,7 +295,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             "message": error_message if had_error else f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}",
         }
 
-        if not had_error and will_continue_work is False:
+        if not had_error and will_continue_work is False and has_user_facing_message:
             response["auto_sleep_ok"] = True
 
         return response

@@ -198,12 +198,28 @@ Context space is limited, so query thoughtfully:
 - Use `substr(text, 1, 2000)` for raw text fields
 - Extract specific fields rather than entire blobs
 
+**Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively:
 ```sql
--- extracts what you need
-SELECT json_extract(i.value,'$.title'), json_extract(i.value,'$.url')
-FROM __tool_results, json_each(result_json,'$.items') AS i
-WHERE result_id='...' LIMIT 25
+-- COALESCE chains: try fields from hint, fall back gracefully
+SELECT COALESCE(json_extract(i.value,'$.score'), json_extract(i.value,'$.points'), 0) as score,
+       COALESCE(json_extract(i.value,'$.name'), json_extract(i.value,'$.title'), 'Untitled') as label
+
+-- Fallback sorting: if primary field is NULL, secondary takes over
+ORDER BY COALESCE(json_extract(i.value,'$.rating'), 0) DESC,
+         COALESCE(json_extract(i.value,'$.reviews'), 0) DESC,
+         json_extract(i.value,'$.created_at') DESC
+
+-- Handle empty strings and NULL uniformly
+WHERE COALESCE(NULLIF(json_extract(i.value,'$.status'), ''), 'active') = 'active'
+
+-- Safe length check for arrays that might not exist
+CASE WHEN json_extract(i.value,'$.tags') IS NOT NULL
+     THEN json_array_length(json_extract(i.value,'$.tags')) ELSE 0 END as tag_count
+
+-- Numeric extraction from mixed formats (hint shows price field, but value might be "$99" or 99)
+CAST(REPLACE(REPLACE(COALESCE(json_extract(i.value,'$.price'),'0'), '$',''), ',','') AS REAL) as price
 ```
+The paths (`$.score`, `$.name`, etc.) come from your hint's FIELDS—these patterns just make them resilient to NULL/empty values.
 
 ```sql
 -- persist tool outputs into a durable table
@@ -225,11 +241,11 @@ Step 1: Fetch the data
   http_request(url="https://api.example.com/products", will_continue_work=true)
 
   Result meta shows:
-    QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category'), json_extract(p.value,'$.price')
-           FROM __tool_results, json_each(result_json,'$.content.products') AS p
-           WHERE result_id='a1b2c3' LIMIT 25
-    PATH: $.content.products (847 items)
-    FIELDS: id, name, category, price, stock, created_at
+    → PATH: $.content.products (847 items)
+    → FIELDS: id, name, category, price, stock, created_at
+    → QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category')
+             FROM __tool_results, json_each(result_json,'$.content.products') AS p
+             WHERE result_id='a1b2c3' LIMIT 25
 
 Step 2: Since we need multiple analyses, persist raw tool output and a clean table
   sqlite_batch(sql="
@@ -260,16 +276,18 @@ Step 3: Category breakdown
 
   Result: Electronics|312|149.99|9.99|899.99, Clothing|245|45.50|12.00|299.00, ...
 
-Step 4: Find outliers - products priced unusually high or low for their category
+Step 4: Find outliers (need to see results before presenting)
   sqlite_batch(sql="
     SELECT p.name, p.category, p.price, cat.avg_price
     FROM products p
     JOIN (SELECT category, AVG(price) as avg_price FROM products GROUP BY category) cat
       ON p.category = cat.category
     WHERE p.price > cat.avg_price * 2 OR p.price < cat.avg_price * 0.3
-    ORDER BY p.category, p.price DESC LIMIT 20", will_continue_work=false)
+    ORDER BY p.category, p.price DESC LIMIT 20", will_continue_work=true)
 
-Step 5: Present findings
+  Result: Widget-Pro|Electronics|899.99|149.99, Budget-Tee|Clothing|12.00|45.50, ...
+
+Step 5: Present findings (no tool call — just text)
   "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
    averaging $149.99. Found 23 pricing outliers that may need review..."
 ```
@@ -384,12 +402,12 @@ Step 4: Check what else might be useful—pricing? job openings?
   → For pricing: need to scrape acme.io/pricing directly
 
 Step 5: Scrape their pricing page + get job listings (parallel)
-  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing", will_continue_work=true)
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing")
   mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
 
 Step 6: Extract pricing tiers from messy webpage content
   sqlite_batch(sql="
-    SELECT grep_context_all(json_extract(result_json,'$.result'), '\\$[\\d,]+', 50, 10)
+    SELECT grep_context_all(json_extract(result_json,'$.excerpt'), '\\$[\\d,]+', 50, 10)
     FROM __tool_results WHERE result_id='pricing123'", will_continue_work=true)
 
   → "...Starter: $49/mo for up to 5 users..."
@@ -502,18 +520,18 @@ COALESCE(json_extract(r,'$.full_name'), json_extract(r,'$.name'), 'Unknown')
  FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3)
 
 -- Extract emails from scraped page content
-SELECT regexp_find_all(json_extract(result_json,'$.result'),
+SELECT regexp_find_all(json_extract(result_json,'$.excerpt'),
   '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
 
 -- Find prices with surrounding context to understand what they're for
-SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
+SELECT grep_context_all(json_extract(result_json,'$.excerpt'), '\\$[\\d,]+', 50, 10)
 ```
 
 **Tool selection logic**:
 - Know the company/person? → `search_tools` to find structured extractors
 - Have a URL or can guess one? → scrape directly
 - Need to discover what's out there? → one `search_engine` query, then act on results
-- Have scraped content? → `grep_context_all` to extract with context, not just `substr`
+- Have scraped content? → `json_extract(result_json,'$.excerpt')` or `json_each(...'$.items')` + `grep_context_all`
 
 **Using tool parameters**: When a tool has optional parameters, use the exact names from the schema:
 ```
@@ -660,7 +678,7 @@ Step 4: Find discrepancies - items where counts don't match
 
   Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
 
-Step 5: Summarize by issue type for decision making
+Step 5: Summarize by issue type (need to see results before presenting)
   sqlite_batch(sql="
     SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
     FROM (
@@ -670,11 +688,11 @@ Step 5: Summarize by issue type for decision making
              ABS(COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance
       FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
       WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
-    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=false)
+    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=true)
 
   Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
 
-Step 6: Present findings with prioritized recommendations
+Step 6: Present findings (no tool call — just text)
   "Found 67 inventory discrepancies across 3 categories:
    - 42 count mismatches (1,847 units total variance) - priority for recount
    - 20 items in warehouse not in system - need to add to inventory
@@ -695,9 +713,12 @@ Do I need external data?
 │        ├─ Found relevant extractors → use them
 │        └─ Nothing relevant → THEN search_engine as fallback
 └─ No → Do I have a URL already?
-         ├─ Yes → scrape it directly
-         └─ No → http_request if you know the API, otherwise search_tools
+         ├─ Is it an API endpoint (returns JSON)? → http_request (get structured data)
+         ├─ Is it a web page (HTML)? → scrape_as_markdown (get readable text)
+         └─ Not sure? → http_request first; if it fails, try scrape
 ```
+
+**Match your tool to the data type**: `http_request` returns JSON you can query with `json_each`. `scrape_as_markdown` returns TEXT you read with `substr`. If your hint says "TEXT" or "CSV", don't use `json_each`—it only works on JSON.
 
 search_tools discovers capabilities you didn't know existed. search_engine searches the web.
 Always discover first, search second.
@@ -706,30 +727,119 @@ Always discover first, search second.
 
 ## Key Patterns
 
-Each result includes `→ PATH:` and `→ QUERY:` hints with the exact paths for that result.
-The PATH is the correct json_each path—use it exactly as shown, not a guess based on field names.
-`http_request` wraps responses in `$.content`, so the path is `$.content.hits`, not `$.hits`.
+**Hints contain your actual values.** Each tool result includes metadata with:
+- `result_id='abc123...'` — the ID for this specific result
+- `→ PATH:` or `→ QUERY:` — the paths that work for this data structure
+- `→ FIELDS:` — the field names available in this result
 
-Tool schemas are your source of truth for parameter names. The schema says `num_of_comments`? Use exactly that—not `num_comments`, not `comment_count`. Trust the schema.
+Use these as reference when writing your queries.
 
-For JSON arrays, load into tables with INSERT...SELECT:
-```sql
-INSERT INTO mytable (col1, col2)
-  SELECT json_extract(r.value,'$.field1'), json_extract(r.value,'$.field2')
-  FROM __tool_results, json_each(result_json,'$.content.items') AS r
-  WHERE result_id='...'
 ```
+Example hint you might see:
+  result_id=7f3a2b1c-..., in_db=1, bytes=22558
+  → PATH: $.content.hits (30 items)
+  → FIELDS: title, points, url, objectID
+  → QUERY: SELECT json_extract(r.value,'$.title'), json_extract(r.value,'$.points')
+           FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+           WHERE result_id='7f3a2b1c-...' LIMIT 25
+
+Use the QUERY as a starting point. Add or change fields based on what you need from FIELDS.
+The paths ($.content.hits) and fields ($.title, $.points) are specific to this result.
+Different tools return different structures—check the hint for each one.
+```
+
+**Note**: Documentation examples use placeholder paths like `$.items` or `$.excerpt`. Your actual hint will show the real paths for that result—use those instead.
+
+Tool schemas show the correct parameter names. If the schema says `num_of_comments`, use that form rather than variations like `num_comments` or `comment_count`.
 
 For CSV data, the content is a text string (not JSON). Extract it first:
 ```sql
 SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
 ```
 
+**JSON stored as TEXT**: Some APIs return JSON wrapped as a string inside another field. When you see:
+```
+🧩 JSON DATA in $.result - JSON stored as TEXT
+→ QUERY: SELECT ... FROM json_each(json_extract(result_json,'$.result'),'$.items') AS r
+```
+The `json_extract()` unwraps the TEXT, then `json_each(value, '$.items')` navigates to the array inside—two separate steps. Paths can't traverse "through" TEXT fields. Use the hint's structure as your guide—the paths (`$.result`, `$.items`) and `result_id` are specific to that result.
+
+**Advanced patterns**:
+
+Correlate data across tool calls—e.g., join search results with scraped pages:
+```sql
+-- Use paths and result_id from each tool's actual hint (these are placeholders):
+CREATE TABLE hits AS SELECT json_extract(r.value,'$.<title-field>') as title,
+                            json_extract(r.value,'$.<url-field>') as url
+  FROM __tool_results, json_each(<your-json_each-expression-from-hint>) AS r
+  WHERE result_id='<your-result-id-from-hint>';
+-- Join with scraped data using fields from the scrape tool's hint:
+SELECT h.title, json_extract(t.result_json,'$.<content-field-from-scrape-hint>')
+FROM hits h JOIN __tool_results t ON json_extract(t.result_json,'$.<url-field>') = h.url;
+```
+
+Track state across cycles with your own tables (they persist in your SQLite database):
+```sql
+CREATE TABLE IF NOT EXISTS research_log (ts TEXT, note TEXT);
+INSERT INTO research_log VALUES (datetime('now'), 'Found 5 candidates, 2 look promising');
+```
+
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
+
+**`will_continue_work`** — your signal for whether you need another turn:
+
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│ true   →  "I'll need another turn to see results or continue working"  │
+│ false  →  "This response is complete—my answer is here"                │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+A natural rhythm emerges: you can't present what you haven't seen yet. Each query needs another turn to read and synthesize the results.
+
+```
+User: "What's trending on Hacker News?"
+
+[Turn 1] Fetch the data
+         → http_request(url="hn.algolia.com/api/v1/...", will_continue_work=true)
+
+[Turn 2] Extract what matters
+         → sqlite_batch(sql="SELECT title, points, url FROM ...", will_continue_work=true)
+
+[Turn 3] Share the findings
+         "Here's what's trending on HN today:
+          1. **Show HN: I built a thing** (423 points)
+          2. **Why Rust is taking over** (312 points)..."
+```
+
+Turn 2 uses `true` because you want to see the results before presenting. Turn 3 is pure text—no tool needed, just your synthesis.
+
+**A deeper research flow**:
+```
+User: "Find Acme Corp's top product and summarize customer sentiment"
+
+[Turn 1] → http_request(url="api.acme.com/products", will_continue_work=true)
+
+[Turn 2] → sqlite_batch(sql="SELECT name, rating FROM ... LIMIT 5", will_continue_work=true)
+
+[Turn 3] ProWidget leads at 4.8★. Let me get its reviews...
+         → http_request(url="api.acme.com/products/prowidget/reviews", will_continue_work=true)
+
+[Turn 4] → sqlite_batch(sql="SELECT text, rating FROM ... LIMIT 50", will_continue_work=true)
+
+[Turn 5] 50 reviews in hand. One more query to see the distribution...
+         → sqlite_batch(sql="SELECT rating, COUNT(*) GROUP BY rating", will_continue_work=true)
+
+[Turn 6] "**ProWidget** is Acme's top-rated product (4.8★). Customers love the
+          build quality and ease of use. The few critical reviews mention
+          shipping delays rather than product issues."
+```
+
+Each turn flows into the next. The final turn needs no tool—just your thoughtful summary.
 
 ## Smooth Patterns
 
-**result_json first**: Web/API results live in `result_json`. Use the `→ QUERY:` hint for the exact path.
+**result_json first**: Web/API results live in `result_json`. `scrape_as_markdown` outputs are normalized to `{kind, title, items, excerpt}`—query `$.items` or `$.excerpt`. Use the `→ QUERY:` hint for the exact path.
 For markdown/HTML content embedded in JSON, the hint provides a ready-to-run `substr` query.
 
 **CTE-based INSERT**: WITH RECURSIVE...INSERT queries can report 0 affected rows; rely on sqlite_schema for row counts and samples.
@@ -766,25 +876,30 @@ LIMIT 50
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
 -- Find emails on a page
-SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
 -- → "john@acme.com|sales@acme.com|support@acme.com"
 
 -- Find phone numbers
-SELECT regexp_find_all(result_text, '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
 -- → "555-123-4567|555.987.6543|(555) 111-2222"
 
 -- Find prices with context (to understand what each price is for)
-SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 5)
+SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\$[\\d,]+', 50, 5)
 -- → "...Product A: $299.99 - Free shipping..."
 -- → "...Was $499, now $349 (30% off)..."
 
 -- Find all URLs
-SELECT regexp_find_all(result_text, 'https?://[^\\s<>\"]+')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  'https?://[^\\s<>\"]+')
 ```
 
 **Always get context**: Use context-aware matches so each price has meaning.
 ```sql
-SELECT grep_context_all(result_text, '\\$\\d+', 40, 5)
+SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\$\\d+', 40, 5)
 -- → "...Basic plan: $99/month, Pro plan: $199/month..."
 -- → "...shipping fee: $49 for orders under..."
 ```
@@ -1571,8 +1686,9 @@ def build_prompt_context(
 
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
-        "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
-        "to keep durable data across cycles. CREATE TABLE AS SELECT is a fast way to persist tool results."
+        "for this cycle only and is dropped before persistence. Query it with sqlite_batch (not read_file). "
+        "Create your own tables with sqlite_batch to keep durable data across cycles. "
+        "CREATE TABLE AS SELECT is a fast way to persist tool results."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -1596,7 +1712,7 @@ def build_prompt_context(
         "sqlite_examples",
         _get_sqlite_examples(),
         weight=2,
-        shrinker="hmt"
+        non_shrinkable=True
     )
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
