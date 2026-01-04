@@ -102,6 +102,8 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
         return " FIX: Create the table first with CREATE TABLE before querying it."
     if "syntax error" in error_lower:
         return " FIX: Check SQL syntax - common issues: missing quotes, commas, or parentheses."
+    if "wrong number of arguments" in error_lower:
+        return " FIX: Check parentheses in nested function calls - a ')' is likely misplaced."
     if "unique constraint" in error_lower:
         return " FIX: Use INSERT OR REPLACE or INSERT OR IGNORE to handle duplicate keys."
     return ""

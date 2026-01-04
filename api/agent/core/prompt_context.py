@@ -228,7 +228,7 @@ def _get_sqlite_examples() -> str:
 → Parse inline for quick looks
 → `CREATE TABLE ... AS` for complex analysis
 
-**The hint is your map.** It shows `result_id`, exact paths, and a ready-to-run query. Copy it, don't improvise.
+**The hint is your map.** It shows `result_id`, exact paths, and a ready-to-run query. Copy identifiers exactly—don't retype from memory.
 
 ---
 
@@ -243,7 +243,8 @@ Context space is limited, so query thoughtfully:
 - Extract specific fields rather than entire blobs
 
 **Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively.
-Names must match exactly—`points` vs `point` will fail. Check your aliases in ORDER BY/WHERE.
+
+**Before executing**: Trace every identifier back to its source. Table names → `sqlite_schema` or your CTE. Column names → your SELECT aliases or `→ FIELDS:` hint. Paths → `→ PATH:` hint. `points` vs `point` will fail—if you can't point to where a name came from, it's wrong.
 ```sql
 -- COALESCE chains: try fields from hint, fall back gracefully
 SELECT COALESCE(json_extract(i.value,'$.score'), json_extract(i.value,'$.points'), 0) as score,
@@ -753,7 +754,7 @@ These show the core rhythm: fetch → extract → *leave traces* → notice patt
 
 **The DB is your turing tape**. Each turn reads state, transforms it, writes new state. The interesting behavior *emerges* from this loop—you don't plan everything upfront. You leave traces (tables, columns, views) that shape what you notice next. Like stigmergy: ants leave pheromones that guide other ants. Your tables are pheromones.
 
-**`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or schema in context. Never guess field names; the hint tells you what exists.
+**`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or sqlite_schema. Every identifier in your query must trace back to something concrete in context—if you can't point to where it came from, don't use it.
 
 **Defensive querying**: Real-world data is messy. Use CTEs to cascade through the primary path/fields from hints, then common alternatives as fallback. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
 
@@ -2489,7 +2490,7 @@ Use the QUERY as a starting point. Add or change fields based on what you need f
 The paths ($.content.hits) and fields ($.title, $.points) are specific to this result.
 Different tools return different structures—check the hint for each one.
 
-**Common mistake**: Guessing `$.hits` when the hint shows `$.content.hits`. Copy the path exactly.
+**Common mistakes**: Guessing `$.hits` when hint shows `$.content.hits`. Using `point` when you defined `points`. Referencing `hit` when your CTE is `hits`. Every name must trace to its source—copy, don't retype.
 ```
 
 **Note**: Documentation examples use placeholder paths like `$.items` or `$.excerpt`. Your actual hint will show the real paths for that result—use those instead.
