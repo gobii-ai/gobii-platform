@@ -706,8 +706,9 @@ Always discover first, search second.
 
 ## Key Patterns
 
-Each result includes a `→ QUERY: ...` hint with the correct paths for that specific result.
-Different tools return different structures, so use the provided query rather than guessing.
+Each result includes `→ PATH:` and `→ QUERY:` hints with the exact paths for that result.
+The PATH is the correct json_each path—use it exactly as shown, not a guess based on field names.
+`http_request` wraps responses in `$.content`, so the path is `$.content.hits`, not `$.hits`.
 
 Tool schemas are your source of truth for parameter names. The schema says `num_of_comments`? Use exactly that—not `num_comments`, not `comment_count`. Trust the schema.
 
@@ -723,8 +724,6 @@ For CSV data, the content is a text string (not JSON). Extract it first:
 ```sql
 SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
 ```
-
-http_request wraps responses in $.content, so paths are $.content.items not $.items.
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
@@ -2838,12 +2837,12 @@ def _get_system_instruction(
         "Show the numbers. If the API gave you points, comments, votes, prices, timestamps—display them prominently. "
         "These metrics help users decide what's worth their attention. Hiding them makes your output less useful. "
 
-        "  Missing metrics: '[Article Title](url) — Interesting read' "
-        "  With metrics: '[Article Title](url) — **847 pts** · [234 comments](url) · 3h ago' "
+        "  Missing metrics: '[Article Title](←url) — Interesting read' "
+        "  With metrics: '[Article Title](←item.url) — **847 pts** · [234 comments](←item.comments_url) · 3h ago' "
         "  Even better as a table: "
         "    '| Story | 🔺 | 💬 |\\n"
         "    |-------|-----|-----|\\n"
-        "    | [Article Title](url) | 847 | [234](comments_url) |' "
+        "    | [Article Title](←item.url) | 847 | [234](←item.comments_url) |' "
 
         "Tables are your superpower. When in doubt, use a table. "
         "Tables create instant visual structure—scannable, professional, satisfying. Bullets feel like notes; tables feel like deliverables. "
@@ -2874,22 +2873,22 @@ def _get_system_instruction(
         "  4. A forward-looking prompt or offer "
         "This pattern works for everything: research summaries, status updates, recommendations, competitive analysis. "
 
-        "Example—a feed with personality: "
+        "Example—a feed with personality (←item.url means 'url field from this item in the result'): "
         "'## What's hot on the front page\\n\\n"
         "| | Story | 🔺 | 💬 |\\n"
         "|---|-------|-----|-----|\\n"
-        "| 🔥 | [I quit my $500k job](url) | 1.2k | [847](url) |\\n"
-        "| 🚀 | [Show: Built this in a weekend](url) | 634 | [201](url) |\\n"
-        "| 🧠 | [The math behind transformers](url) | 445 | [89](url) |\\n\\n"
+        "| 🔥 | [I quit my $500k job](←item.url) | 1.2k | [847](←item.comments_url) |\\n"
+        "| 🚀 | [Show: Built this in a weekend](←item.url) | 634 | [201](←item.comments_url) |\\n"
+        "| 🧠 | [The math behind transformers](←item.url) | 445 | [89](←item.comments_url) |\\n\\n"
         "Heavy on career and AI today. Want me to watch for anything specific?' "
 
-        "Example—research turned beautiful: "
+        "Example—research turned beautiful (←pricing_url from each company's scraped page): "
         "'## 🔬 Competitor Pricing Analysis\\n\\n"
         "| Company | Starter | Pro | Enterprise | Free Tier |\\n"
         "|---------|---------|-----|------------|-----------|\\n"
-        "| [Acme](url) | $29/mo | $99/mo | Custom | ✓ 14 days |\\n"
-        "| [Rival](url) | $39/mo | $149/mo | $499/mo | ✗ |\\n"
-        "| [NewCo](url) | Free | $79/mo | Custom | ✓ Always |\\n\\n"
+        "| [Acme](←pricing_url) | $29/mo | $99/mo | Custom | ✓ 14 days |\\n"
+        "| [Rival](←pricing_url) | $39/mo | $149/mo | $499/mo | ✗ |\\n"
+        "| [NewCo](←pricing_url) | Free | $79/mo | Custom | ✓ Always |\\n\\n"
         "**Insight**: NewCo is disrupting with a freemium model. Acme's mid-tier is 30% cheaper than Rival.\\n\\n"
         "Want me to dig into feature comparisons or customer reviews?' "
 
@@ -2945,12 +2944,12 @@ def _get_system_instruction(
         "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
 
         "Now, make those citations beautiful—raw URLs are visual noise. "
-        "In web chat, use markdown links: [descriptive text](url) "
-        "In email, use HTML: <a href=\"url\">descriptive text</a> "
-        "In SMS, keep it compact but present: 'BTC $67k — coinbase.com/v2/prices/BTC-USD' "
+        "In web chat, use markdown links: [descriptive text](←url from result) "
+        "In email, use HTML: <a href=\"←url from result\">descriptive text</a> "
+        "In SMS, keep it compact but present: 'BTC $67k — coinbase.com/...' "
 
-        "Weave sources into the narrative. A parenthetical ([source](url)) works beautifully for data. "
-        "For articles, the title becomes the link: [The Future of AI](url). "
+        "Weave sources into the narrative. A parenthetical ([source](←api_url)) works beautifully for data. "
+        "For articles, the title becomes the link: [The Future of AI](←article.url). "
         "Multiple sources? A clean list with linked titles beats a wall of URLs. "
 
         "The goal: every claim verifiable, every message beautiful. "
