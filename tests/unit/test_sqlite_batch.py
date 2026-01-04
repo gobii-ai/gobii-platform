@@ -17,6 +17,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_dialect_functions,
     _fix_dialect_syntax,
     _fix_escaped_quotes,
+    _fix_json_key_vs_alias,
     _fix_python_operators,
     _fix_singular_plural_columns,
     _fix_singular_plural_tables,
@@ -686,6 +687,51 @@ class SqliteBatchToolTests(TestCase):
         sql = "SELECT x AS points FROM t ORDER BY point"
         fixed, fix = _fix_singular_plural_columns(sql, "no such column: point")
         self.assertIn("ORDER BY points", fixed)
+
+    # -------------------------------------------------------------------------
+    # JSON key vs alias fix tests
+    # -------------------------------------------------------------------------
+
+    def test_fix_json_key_vs_alias_order_by(self):
+        """Fixes ORDER BY using JSON key instead of alias."""
+        sql = """SELECT json_extract(r.value,'$.objectID') as comment_id
+                 FROM t ORDER BY objectID"""
+        fixed, fix = _fix_json_key_vs_alias(sql, "no such column: objectID")
+        self.assertIn("ORDER BY comment_id", fixed)
+        self.assertIn("objectID", fix)
+        self.assertIn("comment_id", fix)
+
+    def test_fix_json_key_vs_alias_where_clause(self):
+        """Fixes WHERE clause using JSON key instead of alias."""
+        sql = """SELECT json_extract(data,'$.user_id') as uid
+                 FROM t WHERE user_id = 123"""
+        fixed, fix = _fix_json_key_vs_alias(sql, "no such column: user_id")
+        self.assertIn("WHERE uid = 123", fixed)
+
+    def test_fix_json_key_vs_alias_preserves_select(self):
+        """Doesn't modify the SELECT clause itself."""
+        sql = """SELECT json_extract(r.value,'$.objectID') as comment_id
+                 FROM t ORDER BY objectID"""
+        fixed, fix = _fix_json_key_vs_alias(sql, "no such column: objectID")
+        # The SELECT clause should still have objectID in the json_extract
+        self.assertIn("$.objectID", fixed)
+        # But ORDER BY should use the alias
+        self.assertIn("ORDER BY comment_id", fixed)
+
+    def test_fix_json_key_vs_alias_real_world_example(self):
+        """Fixes the exact query from the user's example."""
+        sql = """SELECT
+          json_extract(r.value,'$.author') as author,
+          json_extract(r.value,'$.objectID') as comment_id,
+          json_extract(r.value,'$.parent_id') as parent_id
+        FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+        WHERE result_id='test'
+        ORDER BY objectID
+        LIMIT 20"""
+        fixed, fix = _fix_json_key_vs_alias(sql, "no such column: objectID")
+        self.assertIn("ORDER BY comment_id", fixed)
+        # Verify the SELECT clause json_extract is unchanged
+        self.assertIn("json_extract(r.value,'$.objectID') as comment_id", fixed)
 
     # -------------------------------------------------------------------------
     # Integration tests for combined fixes

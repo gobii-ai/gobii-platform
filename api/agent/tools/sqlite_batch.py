@@ -338,6 +338,51 @@ def _fix_singular_plural_columns(sql: str, error_msg: str) -> tuple[str, str | N
     return sql, None
 
 
+def _fix_json_key_vs_alias(sql: str, error_msg: str) -> tuple[str, str | None]:
+    """Fix when LLM uses JSON key name instead of SQL alias in ORDER BY/WHERE.
+
+    Example: SELECT json_extract(x, '$.objectID') as comment_id ... ORDER BY objectID
+    Should be: ORDER BY comment_id
+    """
+    match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
+    if not match:
+        return sql, None
+
+    missing = match.group(1)
+    missing_lower = missing.lower()
+
+    # Look for patterns like: json_extract(..., '$.{missing}') as {alias}
+    # or: json_extract(..., '$.{missing}') AS {alias}
+    # The missing column might be the JSON key, and we should use the alias instead
+    patterns = [
+        # json_extract with the missing key, followed by AS alias
+        rf"json_extract\s*\([^)]*['\"]\.{re.escape(missing)}['\"][^)]*\)\s+[Aa][Ss]\s+(\w+)",
+        # Also check for $.key.missing or $[key].missing patterns
+        rf"json_extract\s*\([^)]*['\"][^'\"]*{re.escape(missing)}['\"][^)]*\)\s+[Aa][Ss]\s+(\w+)",
+    ]
+
+    for pattern in patterns:
+        alias_match = re.search(pattern, sql, re.IGNORECASE)
+        if alias_match:
+            alias = alias_match.group(1)
+            # Only fix if the missing column appears after SELECT (in ORDER BY, WHERE, etc.)
+            # Find where SELECT ends (roughly after FROM)
+            from_match = re.search(r'\bFROM\b', sql, re.IGNORECASE)
+            if from_match:
+                after_select = sql[from_match.end():]
+                # Check if missing appears in ORDER BY, GROUP BY, HAVING, or WHERE after FROM
+                usage_pattern = rf'\b{re.escape(missing)}\b'
+                if re.search(usage_pattern, after_select, re.IGNORECASE):
+                    # Replace the missing column with the alias in ORDER BY/GROUP BY/HAVING
+                    # Be careful to only replace after FROM clause
+                    before = sql[:from_match.end()]
+                    after_fixed = re.sub(usage_pattern, alias, after_select, flags=re.IGNORECASE)
+                    if after_fixed != after_select:
+                        return before + after_fixed, f"'{missing}' → '{alias}' (use alias, not JSON key)"
+
+    return sql, None
+
+
 def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]:
     """Apply all SQL fixes and return (fixed_sql, list_of_corrections)."""
     corrections = []
@@ -378,6 +423,10 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
             corrections.append(fix)
 
         sql, fix = _fix_singular_plural_columns(sql, error_msg)
+        if fix:
+            corrections.append(fix)
+
+        sql, fix = _fix_json_key_vs_alias(sql, error_msg)
         if fix:
             corrections.append(fix)
 
@@ -809,6 +858,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 corrected_query, col_fix = _fix_singular_plural_columns(corrected_query, orig_exc_str)
                 if col_fix:
                     query_corrections.append(col_fix)
+
+                # 4. JSON key used instead of SQL alias (e.g., ORDER BY objectID instead of comment_id)
+                corrected_query, json_fix = _fix_json_key_vs_alias(corrected_query, orig_exc_str)
+                if json_fix:
+                    query_corrections.append(json_fix)
 
                 # If we made corrections, retry
                 if query_corrections and corrected_query != query:
