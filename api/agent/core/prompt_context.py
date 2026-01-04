@@ -1718,8 +1718,91 @@ The best insights weren't planned—they emerged from traces left by earlier que
 | All ancestors | `WITH RECURSIVE up AS (SELECT * FROM t WHERE id=:start UNION ALL SELECT t.* FROM t JOIN up ON t.id=up.parent) SELECT * FROM up` |
 | Generate date/number range | `WITH RECURSIVE rng(d) AS (SELECT :start UNION ALL SELECT d+1 FROM rng WHERE d<:end) SELECT * FROM rng` |
 | Hierarchical sum (rollup) | `WITH RECURSIVE roll AS (SELECT id,parent,val FROM t UNION ALL SELECT r.id,t.parent,r.val FROM roll r JOIN t ON r.parent=t.id) SELECT id,SUM(val) FROM roll GROUP BY id` |
-| Find all paths A→B | `WITH RECURSIVE paths(node,path) AS (SELECT :start,:start UNION ALL SELECT e.dst,path\|\|'→'||e.dst FROM paths JOIN edges e ON node=e.src WHERE path NOT LIKE '%'||e.dst||'%') SELECT path FROM paths WHERE node=:end` |
+| Find all paths A→B | `WITH RECURSIVE paths(node,path) AS (SELECT :start,:start UNION ALL SELECT e.dst,path\\|\\|'→'\\|\\|e.dst FROM paths JOIN edges e ON node=e.src WHERE path NOT LIKE '%'\\|\\|e.dst\\|\\|'%') SELECT path FROM paths WHERE node=:end` |
 | Detect cycles | `WITH RECURSIVE walk(node,path,cycle) AS (...WHERE path LIKE '%'||node||'%'...) SELECT * FROM walk WHERE cycle=1` |
+
+---
+
+**Advanced SQLite mini-programs** (verified examples—study these):
+
+1. **All paths with costs (cycle-safe)**
+   ```
+   routes: (A→B,5), (B→C,3), (C→D,2), (A→C,10), (B→D,8)
+
+   WITH RECURSIVE paths(node, path, total) AS (
+       SELECT 'A', 'A', 0
+       UNION ALL
+       SELECT r.dst, path||'→'||r.dst, total+r.cost
+       FROM paths p JOIN routes r ON p.node=r.src
+       WHERE path NOT LIKE '%'||r.dst||'%'
+   )
+   SELECT path, total FROM paths WHERE node='D' ORDER BY total
+
+   → ('A→B→C→D', 10), ('A→C→D', 12), ('A→B→D', 13)
+   ```
+
+2. **Full outer join** (SQLite lacks FULL OUTER—use UNION)
+   ```
+   jan: (Widget,100),(Gadget,80)  |  feb: (Gadget,90),(Gizmo,50)
+
+   SELECT COALESCE(j.product, f.product), j.sales, f.sales
+   FROM jan j LEFT JOIN feb f ON j.product=f.product
+   UNION
+   SELECT COALESCE(j.product, f.product), j.sales, f.sales
+   FROM feb f LEFT JOIN jan j ON f.product=j.product
+
+   → (Gadget,80,90), (Gizmo,NULL,50), (Widget,100,NULL)
+   ```
+
+3. **Gap-fill sparse time series**
+   ```
+   readings: (day=1,10), (day=3,15), (day=6,12)
+
+   WITH RECURSIVE days(d) AS (SELECT 1 UNION ALL SELECT d+1 FROM days WHERE d<7)
+   SELECT d.d, COALESCE(r.val, LAG(r.val) OVER (ORDER BY d.d), 0)
+   FROM days d LEFT JOIN readings r ON d.d=r.day
+
+   → 1:10, 2:10, 3:15, 4:15, 5:0, 6:12, 7:12
+   ```
+
+4. **JSON array → aggregation**
+   ```
+   orders: (1,'["apple","banana"]'), (2,'["apple","cherry"]')
+
+   SELECT j.value, COUNT(*) FROM orders, json_each(orders.items) j GROUP BY j.value
+
+   → (apple,2), (banana,1), (cherry,1)
+   ```
+
+5. **Hierarchical rollup** (each node = own + all descendants)
+   ```
+   org: CEO(100)→CTO(80)→Eng1(50),Eng2(45)  CEO→CFO(70)→Acct1(40)
+
+   WITH RECURSIVE descendants AS (
+       SELECT id as ancestor, id as descendant, budget FROM org
+       UNION ALL
+       SELECT d.ancestor, o.id, o.budget FROM descendants d JOIN org o ON o.parent=d.descendant
+   )
+   SELECT ancestor, SUM(budget) FROM descendants GROUP BY ancestor ORDER BY 2 DESC
+
+   → CEO:385, CTO:175, CFO:110, Eng1:50, Eng2:45, Acct1:40
+   ```
+
+6. **Universal quantification** ("all X have Y")
+   ```
+   students: Alice,Bob,Carol  |  required: Math,English,Science
+   completed: Alice(all 3), Bob(Math,English), Carol(Math only)
+
+   SELECT s.name FROM students s WHERE NOT EXISTS (
+       SELECT 1 FROM required r WHERE NOT EXISTS (
+           SELECT 1 FROM completed c WHERE c.student_id=s.id AND c.course=r.course
+       )
+   )
+
+   → Alice  (only one who completed ALL required)
+   ```
+
+---
 
 ### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
 
@@ -2307,7 +2390,7 @@ First pass finds what's mentioned; second pass extracts *why* it matters from co
 | `grep_context_all(text, pattern, chars, max)` | Find pattern matches with surrounding context | JSON array for `json_each` |
 | `regexp_extract(text, pattern)` | Extract first regex match | String or NULL |
 | `regexp_extract(text, pattern, group)` | Extract capture group | String or NULL |
-| `regexp_find_all(text, pattern)` | Find all matches | `"match1\|match2\|..."` |
+| `regexp_find_all(text, pattern)` | Find all matches | `"match1\\|match2\\|..."` |
 | `split_sections(text, delim)` | Split by delimiter (default: `\n\n`) | JSON array for `json_each` |
 | `substr_range(text, start, end)` | Extract substring by position | String |
 | `char_count(text)` / `word_count(text)` | Count chars/words | Integer |
