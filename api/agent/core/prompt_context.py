@@ -225,11 +225,11 @@ Step 1: Fetch the data
   http_request(url="https://api.example.com/products", will_continue_work=true)
 
   Result meta shows:
-    QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category'), json_extract(p.value,'$.price')
-           FROM __tool_results, json_each(result_json,'$.content.products') AS p
-           WHERE result_id='a1b2c3' LIMIT 25
-    PATH: $.content.products (847 items)
-    FIELDS: id, name, category, price, stock, created_at
+    → PATH: $.content.products (847 items)
+    → FIELDS: id, name, category, price, stock, created_at
+    → QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category')
+             FROM __tool_results, json_each(result_json,'$.content.products') AS p
+             WHERE result_id='a1b2c3' LIMIT 25
 
 Step 2: Since we need multiple analyses, persist raw tool output and a clean table
   sqlite_batch(sql="
@@ -384,12 +384,12 @@ Step 4: Check what else might be useful—pricing? job openings?
   → For pricing: need to scrape acme.io/pricing directly
 
 Step 5: Scrape their pricing page + get job listings (parallel)
-  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing", will_continue_work=true)
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing")
   mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
 
 Step 6: Extract pricing tiers from messy webpage content
   sqlite_batch(sql="
-    SELECT grep_context_all(json_extract(result_json,'$.result'), '\\$[\\d,]+', 50, 10)
+    SELECT grep_context_all(json_extract(result_json,'$.excerpt'), '\\$[\\d,]+', 50, 10)
     FROM __tool_results WHERE result_id='pricing123'", will_continue_work=true)
 
   → "...Starter: $49/mo for up to 5 users..."
@@ -502,18 +502,18 @@ COALESCE(json_extract(r,'$.full_name'), json_extract(r,'$.name'), 'Unknown')
  FROM json_each(json_extract(result_json,'$.experience')) AS e LIMIT 3)
 
 -- Extract emails from scraped page content
-SELECT regexp_find_all(json_extract(result_json,'$.result'),
+SELECT regexp_find_all(json_extract(result_json,'$.excerpt'),
   '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
 
 -- Find prices with surrounding context to understand what they're for
-SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 10)
+SELECT grep_context_all(json_extract(result_json,'$.excerpt'), '\\$[\\d,]+', 50, 10)
 ```
 
 **Tool selection logic**:
 - Know the company/person? → `search_tools` to find structured extractors
 - Have a URL or can guess one? → scrape directly
 - Need to discover what's out there? → one `search_engine` query, then act on results
-- Have scraped content? → `grep_context_all` to extract with context, not just `substr`
+- Have scraped content? → `json_extract(result_json,'$.excerpt')` or `json_each(...'$.items')` + `grep_context_all`
 
 **Using tool parameters**: When a tool has optional parameters, use the exact names from the schema:
 ```
@@ -720,6 +720,23 @@ INSERT INTO mytable (col1, col2)
   WHERE result_id='...'
 ```
 
+**Modifying the QUERY hint**: The `→ QUERY:` hint is ready-to-run. To customize it, use the field names from `→ FIELDS:`:
+```
+→ PATH: $.content.hits (30 items)
+→ FIELDS: title, points, url, objectID, num_comments
+→ QUERY: SELECT json_extract(r.value,'$.title'), json_extract(r.value,'$.points') FROM ...
+```
+To add sorting or more fields, copy the pattern and use exact field names from FIELDS:
+```sql
+SELECT json_extract(r.value,'$.title') AS title,
+       json_extract(r.value,'$.points') AS points,
+       json_extract(r.value,'$.num_comments') AS comments
+FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+WHERE result_id='...'
+ORDER BY points DESC  -- use the alias, or json_extract(...) again
+LIMIT 25
+```
+
 For CSV data, the content is a text string (not JSON). Extract it first:
 ```sql
 SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id='...'
@@ -727,9 +744,46 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
+**`will_continue_work`** — your signal for "I'm not done yet":
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Fetching data to process?  →  will_continue_work=true           │
+│ Presenting final results?  →  will_continue_work=false (or omit)│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+A realistic flow—notice how every fetch uses `true` until the final presentation:
+
+```
+User: "Find me the best-reviewed product from Acme Corp and summarize customer sentiment"
+
+  → http_request(url="api.acme.com/products", will_continue_work=true)
+  → sqlite_batch(sql="SELECT id, name, avg_rating FROM ... ORDER BY avg_rating DESC LIMIT 5",
+                 will_continue_work=true)
+
+    Result: ProWidget (4.8★), MegaTool (4.6★), BasicKit (4.2★)...
+    Decision: ProWidget has highest rating—fetch its reviews for sentiment analysis
+
+  → http_request(url="api.acme.com/products/prowidget/reviews?limit=50",
+                 will_continue_work=true)
+  → sqlite_batch(sql="SELECT json_extract(r.value,'$.text'), json_extract(r.value,'$.rating') FROM ...",
+                 will_continue_work=true)
+
+    Now I have 50 reviews. Let me analyze themes...
+
+  → sqlite_batch(sql="SELECT rating, COUNT(*), GROUP_CONCAT(substr(text,1,100)) FROM reviews GROUP BY rating",
+                 will_continue_work=false)
+
+  → "**ProWidget** is Acme's top-rated product (4.8★). Customers love the build quality
+     and ease of use. The few negative reviews mention shipping delays, not the product itself."
+```
+
+Every fetch along the way needs `will_continue_work=true`—initial requests, follow-up requests, all of them. Only the final analysis step that leads directly to your response uses `false`.
+
 ## Smooth Patterns
 
-**result_json first**: Web/API results live in `result_json`. Use the `→ QUERY:` hint for the exact path.
+**result_json first**: Web/API results live in `result_json`. `scrape_as_markdown` outputs are normalized to `{kind, title, items, excerpt}`—query `$.items` or `$.excerpt`. Use the `→ QUERY:` hint for the exact path.
 For markdown/HTML content embedded in JSON, the hint provides a ready-to-run `substr` query.
 
 **CTE-based INSERT**: WITH RECURSIVE...INSERT queries can report 0 affected rows; rely on sqlite_schema for row counts and samples.
@@ -766,25 +820,30 @@ LIMIT 50
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
 -- Find emails on a page
-SELECT regexp_find_all(result_text, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
 -- → "john@acme.com|sales@acme.com|support@acme.com"
 
 -- Find phone numbers
-SELECT regexp_find_all(result_text, '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
 -- → "555-123-4567|555.987.6543|(555) 111-2222"
 
 -- Find prices with context (to understand what each price is for)
-SELECT grep_context_all(result_text, '\\$[\\d,]+', 50, 5)
+SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\$[\\d,]+', 50, 5)
 -- → "...Product A: $299.99 - Free shipping..."
 -- → "...Was $499, now $349 (30% off)..."
 
 -- Find all URLs
-SELECT regexp_find_all(result_text, 'https?://[^\\s<>\"]+')
+SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  'https?://[^\\s<>\"]+')
 ```
 
 **Always get context**: Use context-aware matches so each price has meaning.
 ```sql
-SELECT grep_context_all(result_text, '\\$\\d+', 40, 5)
+SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
+  '\\$\\d+', 40, 5)
 -- → "...Basic plan: $99/month, Pro plan: $199/month..."
 -- → "...shipping fee: $49 for orders under..."
 ```
@@ -1571,8 +1630,9 @@ def build_prompt_context(
 
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
-        "for this cycle only and is dropped before persistence. Create your own tables with sqlite_batch "
-        "to keep durable data across cycles. CREATE TABLE AS SELECT is a fast way to persist tool results."
+        "for this cycle only and is dropped before persistence. Query it with sqlite_batch (not read_file). "
+        "Create your own tables with sqlite_batch to keep durable data across cycles. "
+        "CREATE TABLE AS SELECT is a fast way to persist tool results."
     )
     variable_group.section_text(
         "sqlite_note",

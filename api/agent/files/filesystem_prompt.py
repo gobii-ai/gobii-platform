@@ -57,7 +57,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     """
     fs_id = _get_default_filespace_id(agent)
     if not fs_id:
-        return "No filespace configured for this agent."
+        return "No filespace configured for this agent. Tool results live in SQLite __tool_results."
 
     # Fetch files ordered by path for readability
     files: QuerySet[AgentFsNode] = (
@@ -68,10 +68,11 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     )
 
     if not files.exists():
-        return "No files available in the agent filesystem."
+        return "No files available in the agent filesystem. Tool results live in SQLite __tool_results."
 
-    lines: List[str] = []
-    total_bytes = 0
+    header = "Files in agent filespace (use read_file; tool results are in SQLite __tool_results):"
+    lines: List[str] = [header]
+    total_bytes = len(header.encode("utf-8"))
     max_bytes = 30000
 
     for node in files.iterator():
@@ -91,4 +92,3 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
         total_bytes += line_len
 
     return "\n".join(lines)
-
