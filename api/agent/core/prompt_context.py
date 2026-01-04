@@ -998,7 +998,21 @@ User: "Research the top 3 AI infrastructure companies"
   -- Bloom: the "layer" column didn't exist until summaries revealed the pattern.
   -- Now it shapes how we present findings. Traces → patterns → structure.
 
-[Turn 8] Synthesize—structure emerged from traces; present what bloomed
+[Turn 8] Consistency check—find contradictions in extracted data
+  sqlite_batch(sql="
+    -- Do any companies claim conflicting layers? (contradiction detection)
+    SELECT r1.title, r1.layer as claim1, r2.layer as claim2
+    FROM research_queue r1 JOIN research_queue r2
+      ON r1.title = r2.title AND r1.layer != r2.layer;
+    -- Sanity check: is funding monotonic with layer? (compute > orchestration > inference)
+    SELECT * FROM research_queue WHERE
+      (layer = 'inference' AND CAST(REPLACE(REPLACE(funding,'$',''),'B','000') AS REAL) >
+       (SELECT MAX(CAST(REPLACE(REPLACE(funding,'$',''),'B','000') AS REAL)) FROM research_queue WHERE layer='compute'));
+    -- Universal check: do ALL compute companies mention GPUs?
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM research_queue WHERE layer='compute' AND summary NOT LIKE '%GPU%')
+           THEN 'ANOMALY: compute company without GPU mention' ELSE 'OK' END")
+
+[Turn 9] Synthesize—structure emerged from traces; contradictions resolved
   sqlite_batch(sql="SELECT title, url, summary, funding, customers, layer FROM research_queue WHERE scraped=1 ORDER BY layer")
   send_chat_message(body="## 🏗️ AI Infrastructure: The Emerging Stack
 
@@ -1180,8 +1194,17 @@ User: "Compare inventory against supplier catalog"
 
     SELECT issue, risk_level, COUNT(*) as n FROM discrepancies GROUP BY issue, risk_level ORDER BY risk_level", will_continue_work=true)
 
-[Turn 6] Deliver—use evolved schema (discrepancies with risk scores + risk_summary view)
-  sqlite_batch(sql="SELECT sku, issue, our_qty, supplier_qty, location, last_sold FROM discrepancies d JOIN inventory i USING(sku) ORDER BY issue, our_qty DESC")
+[Turn 6] Set reasoning—precise logic about inventory state
+  sqlite_batch(sql="
+    -- Set difference: what's in our inventory but NOT in supplier catalog?
+    SELECT sku FROM inventory EXCEPT SELECT sku FROM catalog;
+    -- Set intersection: what do we BOTH have? (safe to reorder)
+    SELECT sku FROM inventory INTERSECT SELECT sku FROM catalog;
+    -- Logical implication check: IF high_velocity THEN should have safety_stock
+    SELECT sku FROM inventory WHERE velocity > 20 AND qty < 50;  -- violations
+    -- Dependency reasoning: which product_lines are entirely at risk?
+    SELECT product_line FROM discrepancies GROUP BY product_line
+    HAVING COUNT(*) = (SELECT COUNT(*) FROM inventory i2 WHERE SUBSTR(i2.sku,1,INSTR(i2.sku,'-')-1) = product_line)")
   send_chat_message(body="## 📦 Inventory Health Check
 
 > **Scope**: Cross-referenced 847 SKUs against supplier catalog
@@ -1500,16 +1523,33 @@ User: "Get all open issues from the repo"
         ELSE 'other'
       END;
 
-    -- Create derived view for common analysis pattern
-    CREATE VIEW issue_health AS
-    SELECT category, priority, COUNT(*) as n, AVG(age_days) as avg_age
-    FROM items GROUP BY category, priority;
+    -- Statistical reasoning: percentiles, outlier detection
+    CREATE VIEW issue_stats AS
+    WITH ranked AS (
+      SELECT *,
+        PERCENT_RANK() OVER (ORDER BY age_days) as age_percentile,
+        (SELECT AVG(age_days) FROM items) as mean_age,
+        (SELECT AVG(age_days * age_days) - AVG(age_days) * AVG(age_days) FROM items) as variance
+      FROM items
+    )
+    SELECT *,
+      CASE WHEN age_days > mean_age + 2 * SQRT(variance) THEN 'outlier' ELSE 'normal' END as age_status,
+      CASE WHEN age_percentile > 0.9 THEN 'top_decile' ELSE NULL END as attention
+    FROM ranked;
 
-    SELECT * FROM issue_health ORDER BY n DESC",
+    -- Derive: category health + find statistical outliers
+    SELECT category, COUNT(*) as n, ROUND(AVG(age_days),1) as avg_age,
+           SUM(CASE WHEN age_status='outlier' THEN 1 ELSE 0 END) as outliers
+    FROM issue_stats GROUP BY category ORDER BY outliers DESC",
     will_continue_work=true)
 
-[Turn 6] Analyze and deliver—use evolved schema with derived columns
-  sqlite_batch(sql="SELECT category, priority, n, avg_age FROM issue_health; SELECT * FROM items WHERE priority='critical' ORDER BY age_days DESC LIMIT 5")
+[Turn 6] Analyze—use statistical view for precise reasoning
+  sqlite_batch(sql="
+    -- What categories have outlier issues? (ages > 2 std dev from mean)
+    SELECT category, <id_field>, age_days, age_percentile FROM issue_stats
+    WHERE age_status='outlier' ORDER BY age_days DESC;
+    -- Are all critical issues being addressed? (logic: critical → assigned)
+    SELECT * FROM items WHERE priority='critical' AND assignee IS NULL")
   send_chat_message(body="## 🎫 acme/app Issue Tracker
 
 > **147 open issues** fetched via GitHub API
@@ -1642,6 +1682,19 @@ CTEs are function composition. Chain them: `WITH raw AS (...), mapped AS (SELECT
 | Pattern repeats across sources | CREATE VIEW to make it queryable everywhere |
 
 The best insights weren't planned—they emerged from traces left by earlier queries. Each turn's output is the next turn's input. The tape evolves; so does your understanding.
+
+**Logic & reasoning** (let SQL do the hard thinking):
+| Goal | Pattern |
+|------|---------|
+| Set difference (A not in B) | `SELECT * FROM a WHERE id NOT IN (SELECT id FROM b)` or `EXCEPT` |
+| Set intersection | `SELECT * FROM a INTERSECT SELECT * FROM b` |
+| Transitive closure | `WITH RECURSIVE tc AS (SELECT ... UNION SELECT ... FROM tc JOIN edges) SELECT * FROM tc` |
+| Find contradictions | `SELECT * FROM claims c1 JOIN claims c2 ON c1.subject=c2.subject WHERE c1.value != c2.value` |
+| If X implies Y | `SELECT * FROM facts WHERE condition_x AND NOT condition_y` (violations) |
+| Percentile/rank | `SELECT *, PERCENT_RANK() OVER (ORDER BY metric) as pct FROM t` |
+| Statistical outliers | `WHERE ABS(val - (SELECT AVG(val) FROM t)) > 2 * (SELECT STDEV(val) FROM t)` |
+| All X have property Y? | `SELECT NOT EXISTS (SELECT 1 FROM x WHERE NOT has_property_y)` |
+| Dependency chain | `WITH RECURSIVE deps AS (...) SELECT * FROM deps` |
 
 ### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
 
@@ -2089,14 +2142,38 @@ User: "Analyze their job postings to understand tech stack"
 
   -- Returns: backend|4|32, infra|3|24, frontend|2|17, ml|2|14...
 
-[Turn 4] Drill deeper on top layer with evolved schema
+[Turn 4] Dependency reasoning—what tech requires what? (recursive CTE)
+  sqlite_batch(sql="
+    -- Build dependency graph from co-occurrence patterns
+    CREATE TABLE tech_deps AS
+    SELECT DISTINCT m1.keyword as tech, m2.keyword as requires
+    FROM mentions m1 JOIN mentions m2 ON m1.context = m2.context
+    WHERE m1.keyword != m2.keyword AND m1.layer IN ('backend','ml') AND m2.layer = 'infra';
+
+    -- Transitive closure: if A requires B and B requires C, then A requires C
+    WITH RECURSIVE all_deps AS (
+      SELECT tech, requires, 1 as depth FROM tech_deps
+      UNION
+      SELECT ad.tech, td.requires, ad.depth + 1
+      FROM all_deps ad JOIN tech_deps td ON ad.requires = td.tech
+      WHERE ad.depth < 5
+    )
+    SELECT tech, GROUP_CONCAT(DISTINCT requires) as full_dependency_chain
+    FROM all_deps GROUP BY tech;
+
+    -- Logical query: which infra is required by ALL ml tools? (universal quantification)
+    SELECT requires FROM tech_deps WHERE tech IN (SELECT keyword FROM mentions WHERE layer='ml')
+    GROUP BY requires HAVING COUNT(DISTINCT tech) = (SELECT COUNT(DISTINCT keyword) FROM mentions WHERE layer='ml')",
+    will_continue_work=true)
+
+[Turn 5] Drill deeper on top layer with evolved schema
   sqlite_batch(sql="
     SELECT keyword, layer, COUNT(*) as n, GROUP_CONCAT(DISTINCT role_signal) as roles
     FROM mentions WHERE layer=(SELECT layer FROM mentions GROUP BY layer ORDER BY COUNT(*) DESC LIMIT 1)
     GROUP BY keyword ORDER BY n DESC",
     will_continue_work=true)
 
-[Turn 5] Synthesize—use evolved schema (mentions with layer + role_signal)
+[Turn 6] Synthesize—use evolved schema (mentions with layer + role_signal + dependencies)
   send_chat_message(body="## 🛠️ TechCorp Engineering Stack
 
 > Analyzed **23 job postings** from [company.io/careers](${source_url})
