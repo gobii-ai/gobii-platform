@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
 import type { ReactNode } from 'react'
-import { ChevronDown, ChevronUp, CalendarClock, Clock, Repeat } from 'lucide-react'
+import { ChevronDown, ChevronUp, CalendarClock, Clock, Repeat, ExternalLink, Globe, Database, Code } from 'lucide-react'
 
 import { MarkdownViewer } from '../../common/MarkdownViewer'
 import { StructuredDataTable } from '../../common/StructuredDataTable'
@@ -686,6 +686,51 @@ export function SearchToolDetail({ entry }: ToolDetailProps) {
                 {tool.note ? <p className="tool-search-suggestion-note">{tool.note}</p> : null}
               </li>
             ))}
+          </ul>
+        </Section>
+      ) : null}
+
+      {outcome.externalResources.length ? (
+        <Section title="Public resources">
+          <ul className="external-resources-list">
+            {outcome.externalResources.map((resource, idx) => {
+              const isApi = resource.url.includes('/api') || resource.name.toLowerCase().includes('api')
+              const isData = resource.name.toLowerCase().includes('data') || resource.name.toLowerCase().includes('dataset')
+              const ResourceIcon = isApi ? Code : isData ? Database : Globe
+              return (
+                <li key={`${resource.name}-${idx}`} className="external-resource-card">
+                  <div className="external-resource-icon">
+                    <ResourceIcon className="h-4 w-4" />
+                  </div>
+                  <div className="external-resource-content">
+                    <div className="external-resource-header">
+                      <span className="external-resource-name">{resource.name}</span>
+                      <a
+                        href={resource.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="external-resource-link"
+                        title="Open in new tab"
+                      >
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                    </div>
+                    {resource.description ? (
+                      <p className="external-resource-description">{resource.description}</p>
+                    ) : null}
+                    <a
+                      href={resource.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="external-resource-url"
+                    >
+                      {resource.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 60)}
+                      {resource.url.length > 68 ? '…' : ''}
+                    </a>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </Section>
       ) : null}

@@ -7,6 +7,12 @@ export type NormalizedToolSuggestion = {
   source?: string | null
 }
 
+export type ExternalResource = {
+  name: string
+  description: string | null
+  url: string
+}
+
 export type ToolSearchOutcome = {
   status: string | null
   message: string | null
@@ -16,6 +22,7 @@ export type ToolSearchOutcome = {
   alreadyEnabledTools: string[]
   evictedTools: string[]
   invalidTools: string[]
+  externalResources: ExternalResource[]
 }
 
 const EMPTY_OUTCOME: ToolSearchOutcome = {
@@ -27,6 +34,7 @@ const EMPTY_OUTCOME: ToolSearchOutcome = {
   alreadyEnabledTools: [],
   evictedTools: [],
   invalidTools: [],
+  externalResources: [],
 }
 
 function softenToolTerminology(value: string): string {
@@ -168,6 +176,25 @@ export function parseToolSearchResult(input: unknown): ToolSearchOutcome {
   const evictedTools = collectStrings((input as { evicted?: unknown }).evicted)
   const invalidTools = collectStrings((input as { invalid?: unknown }).invalid)
 
+  // Parse external resources (APIs, websites, datasets)
+  const externalResourcesRaw = (input as { external_resources?: unknown }).external_resources
+  const externalResources: ExternalResource[] = []
+  if (Array.isArray(externalResourcesRaw)) {
+    for (const item of externalResourcesRaw) {
+      if (isRecord(item) && isNonEmptyString(item.name) && isNonEmptyString(item.url)) {
+        const url = item.url.trim()
+        // Only include if URL looks valid
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          externalResources.push({
+            name: item.name.trim(),
+            description: isNonEmptyString(item.description) ? item.description.trim() : null,
+            url,
+          })
+        }
+      }
+    }
+  }
+
   return {
     status,
     message,
@@ -177,6 +204,7 @@ export function parseToolSearchResult(input: unknown): ToolSearchOutcome {
     alreadyEnabledTools,
     evictedTools,
     invalidTools,
+    externalResources,
   }
 }
 
