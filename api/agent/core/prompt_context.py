@@ -2943,6 +2943,9 @@ def _get_system_instruction(
         "The principle: if you fetched it, cite it. The URL you called is the source. "
         "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
 
+        "IDs work the same way. When an API returns objectID, id, story_id, or any identifier, that's your key to fetch details later—store it alongside the display data. "
+        "Never guess an ID for a follow-up API call. If you need an ID you didn't store, query your saved data or re-fetch. A hallucinated ID will fetch the wrong thing or fail. "
+
         "Now, make those citations beautiful—raw URLs are visual noise. "
         "In web chat, use markdown links: [descriptive text](←url from result) "
         "In email, use HTML: <a href=\"←url from result\">descriptive text</a> "
@@ -3028,8 +3031,8 @@ def _get_system_instruction(
         "Getting Hacker News data: "
         "  search_tools('hacker news api') → finds http_request is available "
         "  http_request(url='https://hn.algolia.com/api/v1/search?tags=front_page&hitsPerPage=30') "
-        "  → Response has hits[].{objectID, title, url, points}. Build links: news.ycombinator.com/item?id={objectID} "
-        "  Other endpoints: /search_by_date for newest, /items/{id} for full thread with comments. "
+        "  → Response has hits[].{objectID, title, url, points}. objectID is the key—store it for links and follow-ups. "
+        "  Discussion link: news.ycombinator.com/item?id={objectID}. Comments: /items/{objectID}. "
         "  Tags: story, ask_hn, show_hn, author_{username}, story_{id}. "
 
         "Getting Reddit data (requires User-Agent header): "
