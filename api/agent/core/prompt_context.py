@@ -747,9 +747,28 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 **JSON stored as TEXT**: Some APIs return JSON wrapped as a string inside another field. When you see:
 ```
 🧩 JSON DATA in $.result - JSON stored as TEXT
-→ QUERY: SELECT ... FROM json_each(json_extract(result_json,'$.result')) AS r
+→ QUERY: SELECT ... FROM json_each(json_extract(result_json,'$.result'),'$.items') AS r
 ```
-The `json_extract()` unwraps the TEXT string first, then `json_each()` iterates the array inside. Copy the QUERY hint exactly—it has the right nesting for that result.
+The `json_extract()` unwraps the TEXT, then `json_each(value, '$.items')` navigates to the array inside—two separate steps. Paths can't traverse "through" TEXT fields. Copy the QUERY hint exactly—the paths (`$.result`, `$.items`) and `result_id` all come from the hint.
+
+**Advanced patterns**:
+
+Correlate data across tool calls—e.g., join search results with scraped pages:
+```sql
+-- Step 1: Extract URLs from search (paths and result_id from that tool's → QUERY: hint)
+CREATE TABLE hits AS SELECT json_extract(r.value,'$.title') as title, json_extract(r.value,'$.url') as url
+  FROM __tool_results, json_each(json_extract(result_json,'$.result'),'$.items') AS r
+  WHERE result_id='<from-search-hint>';
+-- Step 2: After scraping those URLs, join on the URL field (from scrape tool's → FIELDS: hint)
+SELECT h.title, json_extract(t.result_json,'$.excerpt') FROM hits h
+  JOIN __tool_results t ON json_extract(t.result_json,'$.url') = h.url;
+```
+
+Track state across cycles with your own tables (they persist in your SQLite database):
+```sql
+CREATE TABLE IF NOT EXISTS research_log (ts TEXT, note TEXT);
+INSERT INTO research_log VALUES (datetime('now'), 'Found 5 candidates, 2 look promising');
+```
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
