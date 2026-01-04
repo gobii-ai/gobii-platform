@@ -382,3 +382,49 @@ class ImpliedSendTests(TestCase):
         ).first()
         self.assertIsNotNone(correction_step)
         self.assertFalse(mock_send_email.called)
+
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_reasoning_only_content_list_auto_sleeps(
+        self,
+        mock_completion,
+        mock_build_prompt,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        msg = MagicMock()
+        msg.tool_calls = []
+        msg.content = [{"type": "thinking", "text": "Plan the response."}]
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 3):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 1)
+
+        reasoning_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith=INTERNAL_REASONING_PREFIX,
+        ).first()
+        self.assertIsNotNone(reasoning_step)
+        self.assertIn("Plan the response.", reasoning_step.description)
+
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Message delivery requires explicit send tools",
+        ).first()
+        self.assertIsNone(correction_step)
