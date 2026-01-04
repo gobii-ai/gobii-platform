@@ -705,9 +705,10 @@ Step 6: Present findings (no tool call — just text)
 ## Micro Trajectories: Common Efficient Patterns
 
 These show the core rhythm: fetch → extract (using hint metadata) → smart schema management → decide → iterate or deliver.
-Values like `result_id`, paths, and field names come from the previous tool's hint—use those, not guesses.
 
-**Defensive querying**: Real-world data is messy. Use CTEs to cascade through possible structures (`$.items`, `$.results`, `$.data`, root array) and field names (`$.title`, `$.name`, `$.t`) in one query. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
+**`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or schema in context. Never guess field names; the hint tells you what exists.
+
+**Defensive querying**: Real-world data is messy. Use CTEs to cascade through the primary path/fields from hints, then common alternatives as fallback. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
 
 ### Pattern A: API Fetch → Extract → Deliver
 
@@ -718,38 +719,42 @@ User: "What are the top mass transit systems by ridership?"
   http_request(url="https://api.transitdata.org/systems?sort=ridership", will_continue_work=true)
 
 [Turn 2] Extract using hint metadata (with structure fallbacks)
-  -- Hint showed: result_id='transit-8f2a', PATH: $.systems (50 items), FIELDS: name, city, ridership_millions
-  -- But structure can vary—cascade through alternatives in one query
+  -- Hint showed: result_id='abc123', PATH: $.<array_field> (N items), FIELDS: <field1>, <field2>, <field3>
+  -- Use the ACTUAL path/fields from hint. Cascade through common alternatives as fallback.
   sqlite_batch(sql="
     WITH extract AS (
-      -- Try $.systems first (expected), then $.items, $.results, or root array
+      -- Primary path from hint; fallback to common alternatives
       SELECT r.value as item FROM __tool_results,
         json_each(COALESCE(
-          json_extract(result_json,'$.systems'),
+          json_extract(result_json,'$.<array_field>'),  -- from hint PATH
           json_extract(result_json,'$.items'),
           json_extract(result_json,'$.results'),
           CASE WHEN json_type(result_json)='array' THEN result_json ELSE '[]' END
         )) AS r
-      WHERE result_id='transit-8f2a'
+      WHERE result_id='<result_id_from_hint>'
     )
     SELECT
+      -- Field names from hint FIELDS; cascade through likely alternatives
       COALESCE(
+        NULLIF(TRIM(json_extract(item,'$.<field1>')), ''),
         NULLIF(TRIM(json_extract(item,'$.name')), ''),
         NULLIF(TRIM(json_extract(item,'$.title')), ''),
-        NULLIF(TRIM(json_extract(item,'$.system_name')), ''),
         '(unknown)'
-      ) as name,
-      COALESCE(TRIM(json_extract(item,'$.city')), TRIM(json_extract(item,'$.location')), '') as city,
+      ) as label,
       COALESCE(
-        CAST(json_extract(item,'$.ridership_millions') AS REAL),
-        CAST(json_extract(item,'$.ridership') AS REAL) / 1000000.0,
-        CAST(json_extract(item,'$.annual_riders') AS REAL) / 1000000.0,
+        TRIM(json_extract(item,'$.<field2>')),
+        TRIM(json_extract(item,'$.description')), ''
+      ) as detail,
+      COALESCE(
+        CAST(json_extract(item,'$.<numeric_field>') AS REAL),
+        CAST(json_extract(item,'$.count') AS REAL),
+        CAST(json_extract(item,'$.value') AS REAL),
         0
-      ) as ridership
+      ) as metric
     FROM extract
-    WHERE json_extract(item,'$.name') IS NOT NULL
-       OR json_extract(item,'$.title') IS NOT NULL
-    ORDER BY ridership DESC
+    WHERE json_extract(item,'$.<field1>') IS NOT NULL
+       OR json_extract(item,'$.name') IS NOT NULL
+    ORDER BY metric DESC
     LIMIT 10", will_continue_work=true)
 
 [Turn 3] Deliver—use extracted data including URLs from the result set
@@ -863,34 +868,39 @@ User: "Research the top 3 AI infrastructure companies"
   search_engine(query="top AI infrastructure companies 2024", will_continue_work=true)
 
 [Turn 2] Create work queue from results (cascading field/structure fallbacks)
-  -- Hint showed: result_id='search-abc', SKELETON: $.items with {t, u, p}
-  -- Different search APIs use different schemas—handle all in one query
+  -- Hint showed: result_id='<id>', SKELETON: $.<path> with {<url_field>, <title_field>, ...}
+  -- Use ACTUAL fields from hint. Cascade through common alternatives as fallback.
   sqlite_batch(sql="
     CREATE TABLE research_queue (
       url TEXT PRIMARY KEY, title TEXT, scraped INT DEFAULT 0, summary TEXT
     );
     WITH parsed AS (
+      -- Primary path from hint; common alternatives as fallback
       SELECT r.value as item FROM __tool_results,
         json_each(COALESCE(
+          json_extract(result_json,'$.<path_from_hint>'),
           json_extract(result_json,'$.items'),
-          json_extract(result_json,'$.organic'),
           json_extract(result_json,'$.results'),
-          json_extract(result_json,'$.webPages.value'),
+          json_extract(result_json,'$.organic'),
           '[]'
         )) AS r
-      WHERE result_id='search-abc'
+      WHERE result_id='<result_id_from_hint>'
     ),
     normalized AS (
       SELECT
+        -- URL field from hint; common alternatives
         COALESCE(
-          NULLIF(TRIM(json_extract(item,'$.u')), ''),
+          NULLIF(TRIM(json_extract(item,'$.<url_field>')), ''),
           NULLIF(TRIM(json_extract(item,'$.url')), ''),
-          NULLIF(TRIM(json_extract(item,'$.link')), '')
+          NULLIF(TRIM(json_extract(item,'$.link')), ''),
+          NULLIF(TRIM(json_extract(item,'$.u')), '')
         ) as url,
+        -- Title field from hint; common alternatives
         COALESCE(
-          NULLIF(TRIM(json_extract(item,'$.t')), ''),
+          NULLIF(TRIM(json_extract(item,'$.<title_field>')), ''),
           NULLIF(TRIM(json_extract(item,'$.title')), ''),
           NULLIF(TRIM(json_extract(item,'$.name')), ''),
+          NULLIF(TRIM(json_extract(item,'$.t')), ''),
           '(untitled)'
         ) as title
       FROM parsed
@@ -1045,16 +1055,17 @@ User: "Compare inventory against supplier catalog"
   http_request(url="https://api.internal/inventory", will_continue_work=true)
 
 [Turn 2] Persist with clean schema
-  -- Hint showed: result_id='inv-123', PATH: $.items, FIELDS: sku, qty, location
+  -- Hint showed: result_id='<id>', PATH: $.<array>, FIELDS: <key_field>, <num_field>, <text_field>
+  -- Use ACTUAL field names from hint. Schema mirrors what you need for analysis.
   sqlite_batch(sql="
-    CREATE TABLE inventory (sku TEXT PRIMARY KEY, qty INT DEFAULT 0, location TEXT);
+    CREATE TABLE inventory (<key_field> TEXT PRIMARY KEY, <num_field> INT DEFAULT 0, <text_field> TEXT);
     INSERT OR IGNORE INTO inventory
-    SELECT TRIM(json_extract(r.value,'$.sku')),
-           COALESCE(CAST(json_extract(r.value,'$.qty') AS INT), 0),
-           COALESCE(TRIM(json_extract(r.value,'$.location')), 'UNKNOWN')
-    FROM __tool_results, json_each(result_json,'$.items') AS r
-    WHERE result_id='inv-123'
-      AND NULLIF(TRIM(json_extract(r.value,'$.sku')), '') IS NOT NULL", will_continue_work=true)
+    SELECT TRIM(json_extract(r.value,'$.<key_field>')),
+           COALESCE(CAST(json_extract(r.value,'$.<num_field>') AS INT), 0),
+           COALESCE(TRIM(json_extract(r.value,'$.<text_field>')), 'UNKNOWN')
+    FROM __tool_results, json_each(result_json,'$.<array_from_hint>') AS r
+    WHERE result_id='<result_id_from_hint>'
+      AND NULLIF(TRIM(json_extract(r.value,'$.<key_field>')), '') IS NOT NULL", will_continue_work=true)
 
 [Turn 3] Fetch supplier catalog
   http_request(url="https://supplier.com/catalog.csv", will_continue_work=true)
@@ -1176,18 +1187,19 @@ User: "Find contact emails from their team page"
   scrape_as_markdown(url="https://acme.io/team", will_continue_work=true)
 
 [Turn 2] Extract patterns into structured table
-  -- Hint showed: result_id='team-789', excerpt in $.excerpt
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field>
+  -- Use ACTUAL result_id and text field path from hint
   sqlite_batch(sql="
-    CREATE TABLE team_contacts (email TEXT PRIMARY KEY, context TEXT);
-    INSERT OR IGNORE INTO team_contacts (email, context)
-    SELECT LOWER(TRIM(regexp_extract(ctx.value, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}'))),
+    CREATE TABLE extracted (match TEXT PRIMARY KEY, context TEXT);
+    INSERT OR IGNORE INTO extracted (match, context)
+    SELECT LOWER(TRIM(regexp_extract(ctx.value, '<your_regex_pattern>'))),
            COALESCE(TRIM(substr(ctx.value, 1, 80)), '')
     FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.excerpt'),
-           '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}', 60, 20), '[]')) AS ctx
-    WHERE result_id='team-789'
-      AND regexp_extract(ctx.value, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}') IS NOT NULL;
-    SELECT email, context FROM team_contacts", will_continue_work=true)
+         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
+           '<your_regex_pattern>', 60, 20), '[]')) AS ctx
+    WHERE result_id='<result_id_from_hint>'
+      AND regexp_extract(ctx.value, '<your_regex_pattern>') IS NOT NULL;
+    SELECT match, context FROM extracted", will_continue_work=true)
 
 [Turn 3] Deliver—emails, roles, and context from team_contacts table
   send_chat_message(body="## 👥 Acme Team Directory
@@ -1266,41 +1278,49 @@ User: "Get all open issues from the repo"
   http_request(url="https://api.github.com/repos/acme/app/issues?per_page=100", will_continue_work=true)
 
 [Turn 2] Store and check if more pages needed (with structure fallbacks)
-  -- Hint showed: result_id='gh-1', PATH: $.content (100 items)
-  -- GitHub API might return in $.content, root array, or $.items depending on endpoint
+  -- Hint showed: result_id='<id>', PATH: $.<array> (N items), FIELDS: <id_field>, <title_field>, <date_field>
+  -- Use ACTUAL path/fields from hint. Cascade through common alternatives as fallback.
   sqlite_batch(sql="
-    CREATE TABLE IF NOT EXISTS issues (number INT PRIMARY KEY, title TEXT, labels TEXT, created_at TEXT);
-    WITH items AS (
-      -- Try multiple possible response structures
+    CREATE TABLE IF NOT EXISTS items (<id_field> INT PRIMARY KEY, <title_field> TEXT, <date_field> TEXT);
+    WITH parsed AS (
+      -- Primary path from hint; common alternatives as fallback
       SELECT r.value as item FROM __tool_results,
         json_each(COALESCE(
-          json_extract(result_json,'$.content'),
+          json_extract(result_json,'$.<array_from_hint>'),
           json_extract(result_json,'$.items'),
+          json_extract(result_json,'$.results'),
           CASE WHEN json_type(result_json)='array' THEN result_json ELSE NULL END,
           '[]'
         )) AS r
-      WHERE result_id='gh-1'
+      WHERE result_id='<result_id_from_hint>'
     )
-    INSERT OR REPLACE INTO issues
+    INSERT OR REPLACE INTO items
     SELECT
-      COALESCE(CAST(json_extract(item,'$.number') AS INT), CAST(json_extract(item,'$.id') AS INT)),
+      -- ID field from hint; common alternatives
       COALESCE(
+        CAST(json_extract(item,'$.<id_field>') AS INT),
+        CAST(json_extract(item,'$.id') AS INT),
+        CAST(json_extract(item,'$.number') AS INT)
+      ),
+      -- Title field from hint; common alternatives
+      COALESCE(
+        NULLIF(TRIM(json_extract(item,'$.<title_field>')), ''),
         NULLIF(TRIM(json_extract(item,'$.title')), ''),
         NULLIF(TRIM(json_extract(item,'$.name')), ''),
         '(no title)'
       ),
-      COALESCE((SELECT GROUP_CONCAT(TRIM(
-        COALESCE(json_extract(l.value,'$.name'), json_extract(l.value,'$.label'), l.value)
-      )) FROM json_each(COALESCE(json_extract(item,'$.labels'), '[]')) AS l), ''),
+      -- Date field from hint; common alternatives
       COALESCE(
+        json_extract(item,'$.<date_field>'),
         json_extract(item,'$.created_at'),
         json_extract(item,'$.createdAt'),
         json_extract(item,'$.date'),
         ''
       )
-    FROM items
-    WHERE json_extract(item,'$.number') IS NOT NULL OR json_extract(item,'$.id') IS NOT NULL;
-    SELECT COUNT(*) as fetched FROM issues", will_continue_work=true)
+    FROM parsed
+    WHERE json_extract(item,'$.<id_field>') IS NOT NULL
+       OR json_extract(item,'$.id') IS NOT NULL;
+    SELECT COUNT(*) as fetched FROM items", will_continue_work=true)
   -- Returns: fetched=100 (hit limit, need page 2)
 
 [Turn 3] Fetch page 2
@@ -1403,12 +1423,14 @@ Row count vs page size determines if more fetching is needed.
 
 | Hint Shows | Your Query Uses |
 |------------|-----------------|
-| `result_id='abc123'` | `WHERE result_id='abc123'` |
-| `→ PATH: $.items (N items)` | `json_each(result_json,'$.items')` |
-| `→ FIELDS: title, url, score` | `COALESCE(TRIM(json_extract(r.value,'$.title')), '')` |
-| `→ QUERY: SELECT...` | Start with this, add defensive wrappers |
-| `SKELETON: $.items[0].{t,u,p}` | `json_extract(r.value,'$.t')` for title |
+| `result_id='<actual_id>'` | `WHERE result_id='<actual_id>'` — copy exactly |
+| `→ PATH: $.<path> (N items)` | `json_each(result_json,'$.<path>')` — use the actual path |
+| `→ FIELDS: <f1>, <f2>, <f3>` | `json_extract(r.value,'$.<f1>')` — use actual field names |
+| `→ QUERY: SELECT...` | Start with this suggested query, add defensive wrappers |
+| `SKELETON: $.<path>[0].{a,b,c}` | `json_extract(r.value,'$.a')` — these are the real short names |
 | `excerpt in $.excerpt` | `json_extract(result_json,'$.excerpt')` |
+
+**Key point**: `<angle_bracket>` values in examples are placeholders. Replace with ACTUAL values from hint metadata, existing tables, or schema you created.
 
 **Defensive patterns**:
 | Problem | Solution |
@@ -1418,9 +1440,9 @@ Row count vs page size determines if more fetching is needed.
 | Empty string should be null | `NULLIF(TRIM(x), '')` |
 | Need integer from string | `CAST(json_extract(...) AS INT)` |
 | `grep_context_all` returns null | `COALESCE(grep_context_all(...), '[]')` |
-| Skip rows with null key | `WHERE field IS NOT NULL OR alt_field IS NOT NULL` |
-| Structure varies | `json_each(COALESCE($.items, $.results, $.data, '[]'))` |
-| Field name varies | `COALESCE(NULLIF($.title,''), NULLIF($.name,''), NULLIF($.t,''))` |
+| Skip rows with null key | `WHERE <field> IS NOT NULL OR <alt_field> IS NOT NULL` |
+| Structure varies | `json_each(COALESCE($.<primary>, $.items, $.results, '[]'))` |
+| Field name varies | `COALESCE(NULLIF($.<primary>,''), NULLIF($.title,''), ...)` |
 
 Use CTEs to normalize varying structures into a consistent shape, then query the normalized form. See patterns A, B, E for examples.
 
@@ -1435,21 +1457,22 @@ User: "What pricing tiers does this company offer?"
   scrape_as_markdown(url="https://bigcorp.com/pricing", will_continue_work=true)
 
 [Turn 2] Extract price contexts (not raw prices—*contexts* that explain them)
-  -- Hint showed: result_id='pricing-abc', excerpt in $.excerpt (24000 chars)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- Use ACTUAL result_id and text path from hint
   sqlite_batch(sql="
-    CREATE TABLE pricing_contexts (
-      id INTEGER PRIMARY KEY, context TEXT, price TEXT, tier TEXT
+    CREATE TABLE contexts (
+      id INTEGER PRIMARY KEY, context TEXT, extracted TEXT, category TEXT
     );
-    INSERT INTO pricing_contexts (context, price)
+    INSERT INTO contexts (context, extracted)
     SELECT TRIM(ctx.value),
-           COALESCE(regexp_extract(ctx.value, '\\$[\\d,]+(?:\\.\\d{2})?(?:/mo|/month|/yr|/year)?'), '')
+           COALESCE(regexp_extract(ctx.value, '<pattern_to_find>'), '')
     FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.excerpt'),
-           '\\$[\\d,]+', 80, 15), '[]')) AS ctx
-    WHERE result_id='pricing-abc'
+         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
+           '<pattern_to_find>', 80, 15), '[]')) AS ctx
+    WHERE result_id='<result_id_from_hint>'
       AND NULLIF(TRIM(ctx.value), '') IS NOT NULL;
 
-    SELECT context, price FROM pricing_contexts WHERE price != ''", will_continue_work=true)
+    SELECT context, extracted FROM contexts WHERE extracted != ''", will_continue_work=true)
 
   -- Returns context windows like:
   -- "...Starter Plan $49/month Perfect for small teams up to 5 users. Includes..."
@@ -1579,7 +1602,8 @@ User: "Extract all the key facts from this company's about page"
   scrape_as_markdown(url="https://bigstartup.io/about", will_continue_work=true)
 
 [Turn 2] First pass: extract sections for navigation
-  -- Hint showed: result_id='about-xyz', excerpt in $.excerpt (18000 chars)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- Use ACTUAL result_id and text path from hint
   sqlite_batch(sql="
     CREATE TABLE page_sections (
       section_num INTEGER PRIMARY KEY, heading TEXT, content TEXT
@@ -1589,30 +1613,31 @@ User: "Extract all the key facts from this company's about page"
            COALESCE(TRIM(regexp_extract(s.value, '^#+\\s*(.+)', 1)), '(untitled)'),
            COALESCE(s.value, '')
     FROM __tool_results,
-         json_each(COALESCE(split_sections(json_extract(result_json,'$.excerpt'), '\\n## '), '[]')) AS s
-    WHERE result_id='about-xyz'
+         json_each(COALESCE(split_sections(json_extract(result_json,'$.<text_field>'), '<delimiter>'), '[]')) AS s
+    WHERE result_id='<result_id_from_hint>'
       AND NULLIF(TRIM(s.value), '') IS NOT NULL;
 
     SELECT section_num, heading, char_count(content) as size FROM page_sections",
     will_continue_work=true)
 
-  -- Returns: 1|Our Story|1200, 2|The Team|3400, 3|Our Investors|800, 4|By the Numbers|600
+  -- Returns section inventory to guide next pass
 
-[Turn 3] Second pass: extract metrics/numbers with context from relevant sections
+[Turn 3] Second pass: extract patterns with context from relevant sections
+  -- Filter to sections relevant to task; use headings from Turn 2 results
   sqlite_batch(sql="
-    CREATE TABLE key_facts (
-      id INTEGER PRIMARY KEY, section TEXT, fact_context TEXT, value TEXT
+    CREATE TABLE findings (
+      id INTEGER PRIMARY KEY, section TEXT, context TEXT, extracted TEXT
     );
-    INSERT INTO key_facts (section, fact_context, value)
+    INSERT INTO findings (section, context, extracted)
     SELECT COALESCE(ps.heading, ''),
            COALESCE(TRIM(ctx.value), ''),
-           regexp_extract(ctx.value, '[\\d,]+\\.?\\d*\\s*(%|percent|million|billion|users|customers|employees|countries)')
+           regexp_extract(ctx.value, '<pattern_to_extract>')
     FROM page_sections ps,
-         json_each(COALESCE(grep_context_all(ps.content, '[\\d,]+\\s*(million|billion|users|employees|%|countries)', 60, 10), '[]')) AS ctx
-    WHERE ps.heading IN ('Our Story', 'By the Numbers', 'About Us')
+         json_each(COALESCE(grep_context_all(ps.content, '<pattern_to_find>', 60, 10), '[]')) AS ctx
+    WHERE ps.heading IN ('<relevant>', '<sections>', '<from_turn_2>')
       AND ctx.value IS NOT NULL;
 
-    SELECT section, value, COALESCE(substr(fact_context, 1, 80), '') FROM key_facts WHERE value IS NOT NULL", will_continue_work=true)
+    SELECT section, extracted, COALESCE(substr(context, 1, 80), '') FROM findings WHERE extracted IS NOT NULL", will_continue_work=true)
 
 [Turn 4] Synthesize and deliver—facts from key_facts, structure from page_sections
   send_chat_message(body="## 🏢 BigStartup Company Profile
@@ -1722,40 +1747,38 @@ User: "Analyze their job postings to understand tech stack"
 [Turn 1] Scrape careers page
   scrape_as_markdown(url="https://company.io/careers", will_continue_work=true)
 
-[Turn 2] First pass: find technology mentions with context
-  -- Hint showed: result_id='careers-123', excerpt in $.excerpt (18000 chars)
+[Turn 2] First pass: find keyword mentions with context
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- Use ACTUAL result_id and text path from hint
   sqlite_batch(sql="
-    CREATE TABLE tech_mentions (
-      id INTEGER PRIMARY KEY, tech TEXT, context TEXT
+    CREATE TABLE mentions (
+      id INTEGER PRIMARY KEY, keyword TEXT, context TEXT
     );
-    -- Look for common tech keywords
-    INSERT INTO tech_mentions (tech, context)
-    SELECT TRIM(regexp_extract(ctx.value, '(Python|Go|Rust|TypeScript|React|Kubernetes|AWS|GCP|PostgreSQL|Redis)', 1)),
+    INSERT INTO mentions (keyword, context)
+    SELECT TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|<keyword3>|...)', 1)),
            COALESCE(TRIM(ctx.value), '')
     FROM __tool_results,
-         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.excerpt'),
-           'Python|Go|Rust|TypeScript|React|Kubernetes|AWS|GCP|PostgreSQL|Redis', 100, 25), '[]')) AS ctx
-    WHERE result_id='careers-123'
-      AND regexp_extract(ctx.value, '(Python|Go|Rust|TypeScript|React|Kubernetes|AWS|GCP|PostgreSQL|Redis)', 1) IS NOT NULL;
+         json_each(COALESCE(grep_context_all(json_extract(result_json,'$.<text_field>'),
+           '<keyword1>|<keyword2>|<keyword3>|...', 100, 25), '[]')) AS ctx
+    WHERE result_id='<result_id_from_hint>'
+      AND regexp_extract(ctx.value, '(<keyword1>|<keyword2>|...)', 1) IS NOT NULL;
 
-    SELECT tech, COUNT(*) as mentions FROM tech_mentions WHERE tech IS NOT NULL GROUP BY tech ORDER BY mentions DESC",
+    SELECT keyword, COUNT(*) as n FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY n DESC",
     will_continue_work=true)
 
   -- Returns: Python|8, Kubernetes|6, React|5, PostgreSQL|4...
 
-[Turn 3] Decision point—dig deeper on top technologies
+[Turn 3] Decision point—dig deeper on top findings
   sqlite_batch(sql="
-    -- Look at contexts for top tech to understand seniority/focus
-    SELECT tech, COALESCE(context, '') as context FROM tech_mentions
-    WHERE tech IS NOT NULL
-      AND tech IN (SELECT tech FROM tech_mentions WHERE tech IS NOT NULL GROUP BY tech ORDER BY COUNT(*) DESC LIMIT 3)
+    -- Look at contexts for top keywords to understand patterns
+    SELECT keyword, COALESCE(context, '') as context FROM mentions
+    WHERE keyword IS NOT NULL
+      AND keyword IN (SELECT keyword FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY COUNT(*) DESC LIMIT 3)
     LIMIT 10", will_continue_work=true)
 
-  -- Returns contexts like:
-  -- "Python|...Senior Python Engineer to lead our ML infrastructure..."
-  -- "Python|...Experience with Python, FastAPI, and async patterns..."
+  -- Returns contexts showing how each keyword is used
 
-[Turn 4] Synthesize tech stack picture—tech and contexts from tech_mentions
+[Turn 4] Synthesize findings—keywords and contexts from mentions table
   send_chat_message(body="## 🛠️ TechCorp Engineering Stack
 
 > Analyzed **23 job postings** from [company.io/careers](${source_url})
