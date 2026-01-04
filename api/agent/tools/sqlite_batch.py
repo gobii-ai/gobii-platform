@@ -43,7 +43,31 @@ def _get_db_size_mb(db_path: str) -> float:
     return 0.0
 
 
-def _get_error_hint(error_msg: str) -> str:
+def _extract_cte_names(sql: str) -> list[str]:
+    """Extract CTE names from WITH clauses."""
+    # Match: WITH name AS, WITH RECURSIVE name AS, or , name AS (for multiple CTEs)
+    pattern = r'(?:WITH(?:\s+RECURSIVE)?|,)\s+(\w+)\s+AS\s*\('
+    return re.findall(pattern, sql, re.IGNORECASE)
+
+
+def _is_typo(s1: str, s2: str) -> bool:
+    """Check if s1 is likely a typo of s2 (off by 1 char)."""
+    s1, s2 = s1.lower(), s2.lower()
+    if s1 == s2:
+        return False
+    # Same length, 1 char different
+    if len(s1) == len(s2):
+        return sum(a != b for a, b in zip(s1, s2)) == 1
+    # Off by 1 char (missing or extra)
+    if abs(len(s1) - len(s2)) == 1:
+        longer, shorter = (s1, s2) if len(s1) > len(s2) else (s2, s1)
+        for i in range(len(longer)):
+            if longer[:i] + longer[i+1:] == shorter:
+                return True
+    return False
+
+
+def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
     if "union" in error_lower and "column" in error_lower:
@@ -51,6 +75,14 @@ def _get_error_hint(error_msg: str) -> str:
     if "no column named" in error_lower or "no such column" in error_lower:
         return " FIX: Check column name spelling matches your table schema."
     if "no such table" in error_lower:
+        # Extract the missing table name
+        match = re.search(r'no such table:\s*(\w+)', error_msg, re.IGNORECASE)
+        if match and sql:
+            missing = match.group(1)
+            cte_names = _extract_cte_names(sql)
+            for cte in cte_names:
+                if _is_typo(missing, cte):
+                    return f" FIX: Typo? You defined CTE '{cte}' but referenced '{missing}'."
         return " FIX: Create the table first with CREATE TABLE before querying it."
     if "syntax error" in error_lower:
         return " FIX: Check SQL syntax - common issues: missing quotes, commas, or parentheses."
@@ -277,7 +309,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             except Exception as exc:
                 conn.rollback()
                 had_error = True
-                hint = _get_error_hint(str(exc))
+                hint = _get_error_hint(str(exc), query)
                 error_message = f"Query {idx} failed: {exc}{hint}"
                 break
             finally:
