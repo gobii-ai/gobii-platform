@@ -1707,7 +1707,7 @@ The best insights weren't planned—they emerged from traces left by earlier que
 | Find contradictions | `SELECT * FROM claims c1 JOIN claims c2 ON c1.subject=c2.subject WHERE c1.value != c2.value` |
 | If X implies Y | `SELECT * FROM facts WHERE condition_x AND NOT condition_y` (violations) |
 | Percentile/rank | `SELECT *, PERCENT_RANK() OVER (ORDER BY metric) as pct FROM t` |
-| Statistical outliers | `WHERE ABS(val - (SELECT AVG(val) FROM t)) > 2 * (SELECT STDEV(val) FROM t)` |
+| Statistical outliers | `WHERE ABS(val - (SELECT AVG(val) FROM t)) > 2 * SQRT((SELECT AVG(val*val)-AVG(val)*AVG(val) FROM t))` |
 | All X have property Y? | `SELECT NOT EXISTS (SELECT 1 FROM x WHERE NOT has_property_y)` |
 
 **Recursive patterns** (WITH RECURSIVE for graph/tree logic, NOT for parsing messy text):
