@@ -6,7 +6,13 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
 
-from api.agent.tools.sqlite_batch import execute_sqlite_batch
+from api.agent.tools.sqlite_batch import (
+    execute_sqlite_batch,
+    _autocorrect_cte_typos,
+    _extract_cte_names,
+    _extract_select_aliases,
+    _is_typo,
+)
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.models import BrowserUseAgent, PersistentAgent
 
@@ -224,3 +230,109 @@ class SqliteBatchToolTests(TestCase):
             # Should not have warning since we used LIMIT
             self.assertNotIn("TRUNCATED", message)
             self.assertNotIn("⚠️", message)
+
+    # -------------------------------------------------------------------------
+    # Auto-correction tests
+    # -------------------------------------------------------------------------
+
+    def test_is_typo_missing_char(self):
+        """Detects typos where one char is missing (e.g., 'comment' vs 'comments')."""
+        self.assertTrue(_is_typo("comment", "comments"))
+        self.assertTrue(_is_typo("hit", "hits"))
+        self.assertTrue(_is_typo("item", "items"))
+        self.assertTrue(_is_typo("point", "points"))
+
+    def test_is_typo_extra_char(self):
+        """Detects typos where one char is extra."""
+        self.assertTrue(_is_typo("comments", "comment"))
+        self.assertTrue(_is_typo("itemss", "items"))
+
+    def test_is_typo_swapped_char(self):
+        """Detects typos where one char is different."""
+        self.assertTrue(_is_typo("commant", "comment"))
+        self.assertTrue(_is_typo("producs", "products"))
+
+    def test_is_typo_rejects_unrelated(self):
+        """Rejects strings that aren't typos."""
+        self.assertFalse(_is_typo("comment", "comment"))  # same
+        self.assertFalse(_is_typo("foo", "bar"))  # completely different
+        self.assertFalse(_is_typo("abc", "abcdef"))  # too different
+
+    def test_extract_cte_names_single(self):
+        """Extracts single CTE name."""
+        sql = "WITH comments AS (SELECT 1) SELECT * FROM comments"
+        self.assertEqual(_extract_cte_names(sql), ["comments"])
+
+    def test_extract_cte_names_multiple(self):
+        """Extracts multiple CTE names."""
+        sql = "WITH a AS (SELECT 1), b AS (SELECT 2), c AS (SELECT 3) SELECT * FROM a, b, c"
+        self.assertEqual(_extract_cte_names(sql), ["a", "b", "c"])
+
+    def test_extract_cte_names_recursive(self):
+        """Extracts CTE name from WITH RECURSIVE."""
+        sql = "WITH RECURSIVE nums AS (SELECT 1 UNION ALL SELECT n+1 FROM nums) SELECT * FROM nums"
+        self.assertEqual(_extract_cte_names(sql), ["nums"])
+
+    def test_extract_select_aliases(self):
+        """Extracts column aliases from SELECT."""
+        sql = "SELECT a AS foo, b AS bar, c AS baz FROM t"
+        aliases = _extract_select_aliases(sql)
+        self.assertIn("foo", aliases)
+        self.assertIn("bar", aliases)
+        self.assertIn("baz", aliases)
+
+    def test_autocorrect_cte_singular_to_plural(self):
+        """Auto-corrects 'comment' to 'comments' when CTE is 'comments'."""
+        sql = "WITH comments AS (SELECT 1) SELECT * FROM comment"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertIn("FROM comments", corrected)
+        self.assertEqual(len(corrections), 1)
+        self.assertIn("'comment'→'comments'", corrections[0])
+
+    def test_autocorrect_cte_plural_to_singular(self):
+        """Auto-corrects 'items' to 'item' when CTE is 'item'."""
+        sql = "WITH item AS (SELECT 1) SELECT * FROM items"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertIn("FROM item", corrected)
+        self.assertEqual(len(corrections), 1)
+
+    def test_autocorrect_preserves_correct_references(self):
+        """Doesn't change already-correct CTE references."""
+        sql = "WITH comments AS (SELECT 1) SELECT * FROM comments"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertEqual(sql, corrected)
+        self.assertEqual(corrections, [])
+
+    def test_autocorrect_preserves_tool_results_table(self):
+        """Doesn't try to 'fix' __tool_results."""
+        sql = "WITH results AS (SELECT 1) SELECT * FROM __tool_results"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertIn("__tool_results", corrected)
+        self.assertEqual(corrections, [])
+
+    def test_autocorrect_handles_join(self):
+        """Auto-corrects typos in JOIN clauses too."""
+        sql = "WITH items AS (SELECT 1 as id) SELECT * FROM __tool_results JOIN item ON 1=1"
+        corrected, corrections = _autocorrect_cte_typos(sql)
+        self.assertIn("JOIN items", corrected)
+        self.assertEqual(len(corrections), 1)
+
+    def test_autocorrect_integration_executes_successfully(self):
+        """Full integration: typo is fixed and query executes."""
+        with self._with_temp_db():
+            # Query has typo: 'number' instead of 'numbers'
+            sql = """
+            WITH numbers AS (SELECT 1 as n UNION ALL SELECT 2 UNION ALL SELECT 3)
+            SELECT * FROM number ORDER BY n
+            """
+            out = execute_sqlite_batch(self.agent, {"queries": sql})
+
+            # Should succeed because typo was auto-fixed
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["result"], [{"n": 1}, {"n": 2}, {"n": 3}])
+
+            # Message should note the auto-fix
+            self.assertIn("auto-fixed", out.get("message", ""))
+            self.assertIn("'number'→'numbers'", out.get("message", ""))

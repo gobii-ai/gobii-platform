@@ -73,6 +73,43 @@ def _is_typo(s1: str, s2: str) -> bool:
     return False
 
 
+def _autocorrect_cte_typos(sql: str) -> tuple[str, list[str]]:
+    """Auto-correct obvious CTE name typos (e.g., 'comment' -> 'comments').
+
+    Returns (corrected_sql, list_of_corrections).
+    Only corrects when there's exactly one CTE that's 1 char different.
+    """
+    cte_names = _extract_cte_names(sql)
+    if not cte_names:
+        return sql, []
+
+    cte_lower = {name.lower(): name for name in cte_names}
+    corrections = []
+
+    # Find table references in FROM/JOIN clauses (not after AS which defines aliases)
+    # Pattern: FROM/JOIN followed by identifier (not a subquery)
+    table_refs = re.findall(r'\b(?:FROM|JOIN)\s+(\w+)(?!\s*\()', sql, re.IGNORECASE)
+
+    for ref in table_refs:
+        ref_lower = ref.lower()
+        # Skip if it's already a valid CTE name
+        if ref_lower in cte_lower:
+            continue
+        # Skip common table names that shouldn't be auto-corrected
+        if ref_lower in ('__tool_results', 'sqlite_master', 'sqlite_schema'):
+            continue
+        # Check if it's a typo of any CTE
+        for cte_name in cte_names:
+            if _is_typo(ref, cte_name):
+                # Replace this specific reference (case-insensitive, word boundary)
+                pattern = rf'\b{re.escape(ref)}\b'
+                sql = re.sub(pattern, cte_name, sql, flags=re.IGNORECASE)
+                corrections.append(f"'{ref}'→'{cte_name}'")
+                break
+
+    return sql, corrections
+
+
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
@@ -276,6 +313,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     had_error = False
     error_message = ""
     only_write_queries = True
+    all_corrections: List[str] = []
 
     try:
         conn = open_guarded_sqlite_connection(db_path)
@@ -300,6 +338,12 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 break
 
             only_write_queries = only_write_queries and is_write_statement(query)
+
+            # Auto-correct obvious CTE typos (e.g., 'comment' -> 'comments')
+            query, cte_corrections = _autocorrect_cte_typos(query)
+            if cte_corrections:
+                all_corrections.extend(cte_corrections)
+
             try:
                 start_query_timer(conn)
                 cur.execute(query)
@@ -338,11 +382,19 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         if db_size_mb > 50:
             size_warning = " WARNING: DB SIZE EXCEEDS 50MB. YOU MUST EXECUTE MORE QUERIES TO SHRINK THE SIZE, OR THE WHOLE DB WILL BE WIPED!!!"
 
+        # Build success message with any auto-corrections noted
+        if had_error:
+            msg = error_message
+        else:
+            msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
+            if all_corrections:
+                msg += f" (auto-fixed typos: {', '.join(all_corrections)})"
+
         response: Dict[str, Any] = {
             "status": "error" if had_error else "ok",
             "results": results,
             "db_size_mb": round(db_size_mb, 2),
-            "message": error_message if had_error else f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}",
+            "message": msg,
         }
 
         if not had_error and will_continue_work is False and has_user_facing_message:
