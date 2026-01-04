@@ -702,6 +702,391 @@ Step 6: Present findings (no tool call — just text)
 
 ---
 
+## Micro Trajectories: Common Efficient Patterns
+
+These show the core rhythm: fetch → extract (using hint metadata) → smart schema management → decide → iterate or deliver.
+Values like `result_id`, paths, and field names come from the previous tool's hint—use those, not guesses.
+
+### Pattern A: API Fetch → Extract → Deliver
+
+```
+User: "What are the top mass transit systems by ridership?"
+
+[Turn 1] Fetch
+  http_request(url="https://api.transitdata.org/systems?sort=ridership", will_continue_work=true)
+
+[Turn 2] Extract using hint metadata
+  -- Hint showed: result_id='transit-8f2a', PATH: $.systems (50 items), FIELDS: name, city, ridership_millions, type
+  sqlite_batch(sql="
+    SELECT json_extract(r.value,'$.name') as name,
+           json_extract(r.value,'$.city') as city,
+           json_extract(r.value,'$.ridership_millions') as ridership
+    FROM __tool_results, json_each(result_json,'$.systems') AS r
+    WHERE result_id='transit-8f2a'
+    ORDER BY CAST(json_extract(r.value,'$.ridership_millions') AS REAL) DESC
+    LIMIT 10", will_continue_work=true)
+
+[Turn 3] Deliver with rich formatting
+  send_chat_message(body="## Top Transit Systems by Ridership
+  | System | City | Annual Riders |
+  |--------|------|---------------|
+  | Tokyo Metro | Tokyo | 3.6B |
+  | Moscow Metro | Moscow | 2.5B |...")
+```
+
+### Pattern B: Search → Work Queue → Iterative Scraping → Synthesize
+
+```
+User: "Research the top 3 AI infrastructure companies"
+
+[Turn 1] Search
+  search_engine(query="top AI infrastructure companies 2024", will_continue_work=true)
+
+[Turn 2] Create work queue from results
+  -- Hint showed: result_id='search-abc', SKELETON: $.items with {t, u, p}
+  sqlite_batch(sql="
+    CREATE TABLE research_queue (
+      url TEXT PRIMARY KEY, title TEXT, scraped INT DEFAULT 0, summary TEXT
+    );
+    INSERT OR IGNORE INTO research_queue (url, title)
+    SELECT json_extract(r.value,'$.u'), json_extract(r.value,'$.t')
+    FROM __tool_results, json_each(result_json,'$.items') AS r
+    WHERE result_id='search-abc' AND json_extract(r.value,'$.u') LIKE 'https://%'
+    LIMIT 5;
+    SELECT url, title FROM research_queue WHERE scraped=0 LIMIT 1", will_continue_work=true)
+
+[Turn 3] Scrape first target
+  scrape_as_markdown(url="https://example.com/company-a", will_continue_work=true)
+
+[Turn 4] Extract and mark complete, check remaining
+  -- Hint showed: result_id='scrape-xyz', excerpt in $.excerpt
+  sqlite_batch(sql="
+    UPDATE research_queue SET scraped=1,
+      summary=(SELECT substr(json_extract(result_json,'$.excerpt'),1,800)
+               FROM __tool_results WHERE result_id='scrape-xyz')
+    WHERE url='https://example.com/company-a';
+    SELECT COUNT(*) as remaining FROM research_queue WHERE scraped=0", will_continue_work=true)
+  -- Returns: remaining=2, continue scraping...
+
+[Turns 5-6] Repeat scrape pattern for remaining URLs
+
+[Turn 7] Synthesize and deliver
+  sqlite_batch(sql="SELECT title, url, summary FROM research_queue WHERE scraped=1")
+  send_chat_message(body="## AI Infrastructure Leaders
+  ### [Company A](https://...)
+  {summary}...")
+```
+
+The queue table (`scraped=0/1`) tracks progress across turns.
+
+### Pattern C: Multiple Sources → Normalize → Cross-Reference
+
+```
+User: "Compare inventory against supplier catalog"
+
+[Turn 1] Fetch internal inventory
+  http_request(url="https://api.internal/inventory", will_continue_work=true)
+
+[Turn 2] Persist with clean schema
+  -- Hint showed: result_id='inv-123', PATH: $.items, FIELDS: sku, qty, location
+  sqlite_batch(sql="
+    CREATE TABLE inventory (sku TEXT PRIMARY KEY, qty INT, location TEXT);
+    INSERT INTO inventory
+    SELECT json_extract(r.value,'$.sku'), json_extract(r.value,'$.qty'),
+           json_extract(r.value,'$.location')
+    FROM __tool_results, json_each(result_json,'$.items') AS r
+    WHERE result_id='inv-123'", will_continue_work=true)
+
+[Turn 3] Fetch supplier catalog
+  http_request(url="https://supplier.com/catalog.csv", will_continue_work=true)
+
+[Turn 4] Parse CSV into normalized table
+  -- Hint showed: result_id='cat-456', CSV in $.content, SCHEMA: sku,name,price,stock
+  sqlite_batch(sql="
+    CREATE TABLE catalog (sku TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
+    WITH RECURSIVE csv AS (...), lines AS (...), p1 AS (...), p2 AS (...), p3 AS (...)
+    INSERT INTO catalog SELECT c1, c2, CAST(c3 AS REAL), CAST(c4 AS INT) FROM p3",
+    will_continue_work=true)
+
+[Turn 5] Cross-reference for discrepancies
+  sqlite_batch(sql="
+    CREATE TABLE discrepancies AS
+    SELECT i.sku, i.qty as our_qty, c.stock as supplier_qty,
+           CASE WHEN c.sku IS NULL THEN 'MISSING' WHEN i.qty > c.stock THEN 'EXCEEDS' END as issue
+    FROM inventory i LEFT JOIN catalog c ON i.sku = c.sku
+    WHERE c.sku IS NULL OR i.qty > c.stock;
+    SELECT issue, COUNT(*) as n FROM discrepancies GROUP BY issue", will_continue_work=true)
+
+[Turn 6] Deliver actionable report
+  send_chat_message(body="## Inventory Discrepancies
+  | Issue | Count |
+  |-------|-------|
+  | Missing | 12 |
+  | Exceeds | 8 |...")
+```
+
+Creating `discrepancies` as a table lets you query it multiple ways.
+
+### Pattern D: Text Scrape → Pattern Extraction
+
+```
+User: "Find contact emails from their team page"
+
+[Turn 1] Scrape
+  scrape_as_markdown(url="https://acme.io/team", will_continue_work=true)
+
+[Turn 2] Extract patterns into structured table
+  -- Hint showed: result_id='team-789', excerpt in $.excerpt
+  sqlite_batch(sql="
+    CREATE TABLE team_contacts (email TEXT PRIMARY KEY, context TEXT);
+    INSERT OR IGNORE INTO team_contacts (email, context)
+    SELECT regexp_extract(ctx.value, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}'),
+           substr(ctx.value, 1, 80)
+    FROM __tool_results,
+         json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+           '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}', 60, 20)) AS ctx
+    WHERE result_id='team-789';
+    SELECT email, context FROM team_contacts", will_continue_work=true)
+
+[Turn 3] Deliver
+  send_chat_message(body="## Team Contacts
+  | Email | Context |
+  |-------|---------|
+  | jane@acme.io | \"...CEO and co-founder...\" |...")
+```
+
+`grep_context_all` + `regexp_extract` turns messy text into queryable rows.
+
+### Pattern E: Paginated API → Accumulate → Threshold Check
+
+```
+User: "Get all open issues from the repo"
+
+[Turn 1] Fetch first page
+  http_request(url="https://api.github.com/repos/acme/app/issues?per_page=100", will_continue_work=true)
+
+[Turn 2] Store and check if more pages needed
+  -- Hint showed: result_id='gh-1', PATH: $.content (100 items)
+  sqlite_batch(sql="
+    CREATE TABLE IF NOT EXISTS issues (number INT PRIMARY KEY, title TEXT, labels TEXT);
+    INSERT OR REPLACE INTO issues
+    SELECT json_extract(i.value,'$.number'), json_extract(i.value,'$.title'),
+           (SELECT GROUP_CONCAT(json_extract(l.value,'$.name'))
+            FROM json_each(json_extract(i.value,'$.labels')) AS l)
+    FROM __tool_results, json_each(result_json,'$.content') AS i WHERE result_id='gh-1';
+    SELECT COUNT(*) as fetched FROM issues", will_continue_work=true)
+  -- Returns: fetched=100 (hit limit, need page 2)
+
+[Turn 3] Fetch page 2
+  http_request(url="...?per_page=100&page=2", will_continue_work=true)
+
+[Turn 4] Accumulate and check
+  -- Hint showed: result_id='gh-2', PATH: $.content (47 items)
+  sqlite_batch(sql="INSERT OR REPLACE INTO issues ...WHERE result_id='gh-2';
+    SELECT COUNT(*) FROM issues", will_continue_work=true)
+  -- Returns: 147 total (page had <100, done)
+
+[Turn 5] Analyze and deliver
+  sqlite_batch(sql="SELECT labels, COUNT(*) as n FROM issues GROUP BY labels ORDER BY n DESC")
+  send_chat_message(body="## Open Issues: 147
+  | Label | Count |
+  |-------|-------|
+  | bug | 34 |...")
+```
+
+Row count vs page size determines if more fetching is needed.
+
+### Hint → Query Quick Reference
+
+| Hint Shows | Your Query Uses |
+|------------|-----------------|
+| `result_id='abc123'` | `WHERE result_id='abc123'` |
+| `→ PATH: $.items (N items)` | `json_each(result_json,'$.items')` |
+| `→ FIELDS: title, url, score` | `json_extract(r.value,'$.title')` etc. |
+| `→ QUERY: SELECT...` | Start with this, adapt as needed |
+| `SKELETON: $.items[0].{t,u,p}` | `json_extract(r.value,'$.t')` for title |
+| `excerpt in $.excerpt` | `json_extract(result_json,'$.excerpt')` |
+
+The hint tells you exactly what paths exist—use them.
+
+### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
+
+When dealing with big scraped pages (10k+ chars), don't dump everything—extract *context windows* around what matters.
+
+```
+User: "What pricing tiers does this company offer?"
+
+[Turn 1] Scrape
+  scrape_as_markdown(url="https://bigcorp.com/pricing", will_continue_work=true)
+
+[Turn 2] Extract price contexts (not raw prices—*contexts* that explain them)
+  -- Hint showed: result_id='pricing-abc', excerpt in $.excerpt (24000 chars)
+  sqlite_batch(sql="
+    CREATE TABLE pricing_contexts (
+      context TEXT, price TEXT, tier TEXT
+    );
+    INSERT INTO pricing_contexts (context, price)
+    SELECT ctx.value,
+           regexp_extract(ctx.value, '\\$[\\d,]+(?:\\.\\d{2})?(?:/mo|/month|/yr|/year)?')
+    FROM __tool_results,
+         json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+           '\\$[\\d,]+', 80, 15)) AS ctx
+    WHERE result_id='pricing-abc';
+
+    SELECT context, price FROM pricing_contexts", will_continue_work=true)
+
+  -- Returns context windows like:
+  -- "...Starter Plan $49/month Perfect for small teams up to 5 users. Includes..."
+  -- "...Professional $199/month Unlimited users, priority support, API access..."
+
+[Turn 3] Analyze contexts to extract tier names (LLM reads context, infers structure)
+  sqlite_batch(sql="
+    UPDATE pricing_contexts SET tier =
+      CASE WHEN context LIKE '%starter%' OR context LIKE '%basic%' THEN 'Starter'
+           WHEN context LIKE '%professional%' OR context LIKE '%pro %' THEN 'Professional'
+           WHEN context LIKE '%enterprise%' OR context LIKE '%business%' THEN 'Enterprise'
+           ELSE 'Other' END;
+    SELECT tier, price, substr(context, 1, 100) FROM pricing_contexts ORDER BY
+      CAST(REPLACE(REPLACE(price, '$', ''), ',', '') AS REAL)", will_continue_work=true)
+
+[Turn 4] Deliver structured findings
+  send_chat_message(body="## BigCorp Pricing
+  | Tier | Price | Notes |
+  |------|-------|-------|
+  | Starter | $49/mo | Up to 5 users |
+  | Professional | $199/mo | Unlimited users, API |
+  | Enterprise | Custom | Contact sales |")
+```
+
+The key: `grep_context_all` gives you 80-char windows around each `$` sign—enough context for pattern matching and human understanding, without overwhelming.
+
+### Pattern G: Deep Page Analysis → Multi-Pass Extraction
+
+For complex pages, extract different patterns in passes, building up structured data.
+
+```
+User: "Extract all the key facts from this company's about page"
+
+[Turn 1] Scrape the page
+  scrape_as_markdown(url="https://bigstartup.io/about", will_continue_work=true)
+
+[Turn 2] First pass: extract sections for navigation
+  -- Hint showed: result_id='about-xyz', excerpt in $.excerpt (18000 chars)
+  sqlite_batch(sql="
+    CREATE TABLE page_sections (
+      section_num INTEGER PRIMARY KEY, heading TEXT, content TEXT
+    );
+    INSERT INTO page_sections (section_num, heading, content)
+    SELECT ROW_NUMBER() OVER () as num,
+           regexp_extract(s.value, '^#+\\s*(.+)', 1),
+           s.value
+    FROM __tool_results,
+         json_each(split_sections(json_extract(result_json,'$.excerpt'), '\\n## ')) AS s
+    WHERE result_id='about-xyz';
+
+    SELECT section_num, heading, char_count(content) as size FROM page_sections",
+    will_continue_work=true)
+
+  -- Returns: 1|Our Story|1200, 2|The Team|3400, 3|Our Investors|800, 4|By the Numbers|600
+
+[Turn 3] Second pass: extract metrics/numbers with context from relevant sections
+  sqlite_batch(sql="
+    CREATE TABLE key_facts (
+      section TEXT, fact_context TEXT, value TEXT
+    );
+    INSERT INTO key_facts (section, fact_context, value)
+    SELECT ps.heading,
+           ctx.value,
+           regexp_extract(ctx.value, '[\\d,]+\\.?\\d*\\s*(%|percent|million|billion|users|customers|employees|countries)')
+    FROM page_sections ps,
+         json_each(grep_context_all(ps.content, '[\\d,]+\\s*(million|billion|users|employees|%|countries)', 60, 10)) AS ctx
+    WHERE ps.heading IN ('Our Story', 'By the Numbers', 'About Us');
+
+    SELECT section, value, substr(fact_context, 1, 80) FROM key_facts", will_continue_work=true)
+
+[Turn 4] Synthesize and deliver
+  send_chat_message(body="## BigStartup Key Facts
+
+  **Scale**
+  - 2.3 million users across 40 countries
+  - 850 employees globally
+
+  **Growth**
+  - 180% YoY growth
+  - Series C: $120 million raised")
+```
+
+`split_sections` breaks the page into manageable chunks; `grep_context_all` finds metrics within each.
+
+### Pattern H: Iterative Refinement → Drill Down on Interesting Findings
+
+When initial extraction reveals something worth exploring deeper.
+
+```
+User: "Analyze their job postings to understand tech stack"
+
+[Turn 1] Scrape careers page
+  scrape_as_markdown(url="https://company.io/careers", will_continue_work=true)
+
+[Turn 2] First pass: find technology mentions with context
+  -- Hint showed: result_id='careers-123', excerpt in $.excerpt (18000 chars)
+  sqlite_batch(sql="
+    CREATE TABLE tech_mentions (
+      tech TEXT, context TEXT, job_context TEXT
+    );
+    -- Look for common tech keywords
+    INSERT INTO tech_mentions (tech, context)
+    SELECT regexp_extract(ctx.value, '(Python|Go|Rust|TypeScript|React|Kubernetes|AWS|GCP|PostgreSQL|Redis)', 1),
+           ctx.value
+    FROM __tool_results,
+         json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+           'Python|Go|Rust|TypeScript|React|Kubernetes|AWS|GCP|PostgreSQL|Redis', 100, 25)) AS ctx
+    WHERE result_id='careers-123';
+
+    SELECT tech, COUNT(*) as mentions FROM tech_mentions GROUP BY tech ORDER BY mentions DESC",
+    will_continue_work=true)
+
+  -- Returns: Python|8, Kubernetes|6, React|5, PostgreSQL|4...
+
+[Turn 3] Decision point—dig deeper on top technologies
+  sqlite_batch(sql="
+    -- Look at contexts for top tech to understand seniority/focus
+    SELECT tech, context FROM tech_mentions
+    WHERE tech IN (SELECT tech FROM tech_mentions GROUP BY tech ORDER BY COUNT(*) DESC LIMIT 3)
+    LIMIT 10", will_continue_work=true)
+
+  -- Returns contexts like:
+  -- "Python|...Senior Python Engineer to lead our ML infrastructure..."
+  -- "Python|...Experience with Python, FastAPI, and async patterns..."
+
+[Turn 4] Synthesize tech stack picture
+  send_chat_message(body="## Tech Stack Analysis
+
+  **Primary Languages**: Python (ML/backend), TypeScript (frontend)
+  **Infrastructure**: Kubernetes on AWS, PostgreSQL + Redis
+  **Focus Areas**: ML infrastructure, async backend patterns
+
+  **Hiring Signals**: Heavy ML investment (3 senior ML roles), scaling infra team")
+```
+
+First pass finds what's mentioned; second pass extracts *why* it matters from context.
+
+### Text Analysis Functions Reference
+
+| Function | Usage | Returns |
+|----------|-------|---------|
+| `grep_context_all(text, pattern, chars, max)` | Find pattern matches with surrounding context | JSON array for `json_each` |
+| `regexp_extract(text, pattern)` | Extract first regex match | String or NULL |
+| `regexp_extract(text, pattern, group)` | Extract capture group | String or NULL |
+| `regexp_find_all(text, pattern)` | Find all matches | `"match1\|match2\|..."` |
+| `split_sections(text, delim)` | Split by delimiter (default: `\n\n`) | JSON array for `json_each` |
+| `substr_range(text, start, end)` | Extract substring by position | String |
+| `char_count(text)` / `word_count(text)` | Count chars/words | Integer |
+
+The pattern: use `grep_context_all` to get *windows of context* around patterns, then `json_each` to iterate, then `regexp_extract` to pull specific values from each window.
+
+---
+
 ## The Reasoning Mindset
 
 Before every action, pause and ask: "What do I know, and what tool does that imply?"
@@ -867,42 +1252,42 @@ LIMIT 50
 - Built-in aggregates: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
 **Text analysis functions** (grep-like search for large text):
-- `regexp_find_all(col, 'pattern')` - find ALL matches → "match1|match2|..."
-- `grep_context(col, 'pattern', 60)` - first match + 60 chars of surrounding context
-- `grep_context_all(col, 'pattern', 40, 5)` - up to 5 matches, each with context
-- `regexp_extract(col, 'pattern')` - extract first match only
+- `grep_context_all(col, 'pattern', 80, 10)` - JSON array of context windows → use with `json_each()`
+- `grep_context(col, 'pattern', 60)` - first match + 60 chars context → string
+- `regexp_extract(col, 'pattern')` - extract first match → string
+- `regexp_extract(col, '(group)', 1)` - extract capture group → string
+- `regexp_find_all(col, 'pattern')` - all matches → "match1|match2|..."
+- `split_sections(col, '\n\n')` - split by delimiter → JSON array for `json_each()`
+- `substr_range(col, 0, 3000)` - extract by position → string
+- `word_count(col)` / `char_count(col)` - count words/chars → integer
 - `col REGEXP 'pattern'` - boolean match (1/0)
 
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
--- Find emails on a page
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+-- Find emails with context (who is this email for?)
+SELECT regexp_extract(ctx.value, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-z]+') as email,
+       ctx.value as context
+FROM __tool_results,
+     json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+       '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+', 60, 10)) AS ctx
+WHERE result_id='...'
+-- → jane@acme.io | "...CEO Jane Smith - jane@acme.io - leads the..."
+
+-- Find prices with context (what is each price for?)
+SELECT regexp_extract(ctx.value, '\\$[\\d,]+') as price, ctx.value as context
+FROM __tool_results,
+     json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+       '\\$[\\d,]+', 80, 10)) AS ctx
+WHERE result_id='...'
+-- → $299 | "...Pro Plan: $299/month - unlimited users, priority..."
+
+-- Quick list of all emails (no context needed)
+SELECT regexp_find_all(json_extract(result_json,'$.excerpt'),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-z]+')
 -- → "john@acme.com|sales@acme.com|support@acme.com"
-
--- Find phone numbers
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
--- → "555-123-4567|555.987.6543|(555) 111-2222"
-
--- Find prices with context (to understand what each price is for)
-SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\$[\\d,]+', 50, 5)
--- → "...Product A: $299.99 - Free shipping..."
--- → "...Was $499, now $349 (30% off)..."
-
--- Find all URLs
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  'https?://[^\\s<>\"]+')
 ```
 
-**Always get context**: Use context-aware matches so each price has meaning.
-```sql
-SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\$\\d+', 40, 5)
--- → "...Basic plan: $99/month, Pro plan: $199/month..."
--- → "...shipping fee: $49 for orders under..."
-```
+**The key insight**: `grep_context_all` returns a JSON array you iterate with `json_each`. Each row is a context window—enough text for the LLM (or pattern matching) to understand *what* was found, not just *that* it was found.
 
 **UNION/UNION ALL alignment**: Keep column counts consistent; pad when needed.
 `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`

@@ -99,12 +99,13 @@ def _grep_context(string: Optional[str], pattern: str, context_chars: int = 100)
         return None
 
 
-def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 5) -> Optional[str]:
-    r"""Find all pattern matches with surrounding context, newline-separated.
+def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 10) -> Optional[str]:
+    r"""Find all pattern matches with surrounding context, as JSON array.
 
-    Usage: grep_context_all(column, '\$[\d,]+', 30, 5)
-    Returns multiple context snippets, one per line
+    Usage: SELECT ctx.value FROM json_each(grep_context_all(col, 'pattern', 60, 10)) AS ctx
+    Returns: JSON array of context snippets, usable with json_each()
     """
+    import json as json_module
     if string is None or pattern is None:
         return None
     try:
@@ -118,9 +119,34 @@ def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 
             prefix = "..." if start > 0 else ""
             suffix = "..." if end < len(string) else ""
             results.append(f"{prefix}{snippet}{suffix}")
-        return "\n".join(results) if results else None
+        return json_module.dumps(results) if results else None
     except re.error:
         return None
+
+
+def _split_sections(string: Optional[str], delimiter: str = "\n\n") -> Optional[str]:
+    r"""Split text into sections by delimiter, as JSON array for json_each.
+
+    Usage: SELECT s.value FROM json_each(split_sections(col, '\n\n')) AS s
+    Great for processing markdown by paragraph or section.
+    """
+    import json as json_module
+    if string is None:
+        return None
+    sections = [s.strip() for s in string.split(delimiter) if s.strip()]
+    return json_module.dumps(sections) if sections else None
+
+
+def _substr_range(string: Optional[str], start: int, end: int) -> Optional[str]:
+    """Extract substring by start and end position (0-indexed, exclusive end).
+
+    Usage: substr_range(col, 0, 3000) for first 3000 chars
+           substr_range(col, 3000, 6000) for next 3000 chars
+    Useful for batched processing of very large text.
+    """
+    if string is None:
+        return None
+    return string[start:end]
 
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
@@ -278,6 +304,9 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("grep_context_all", 2, _grep_context_all)
     conn.create_function("grep_context_all", 3, _grep_context_all)
     conn.create_function("grep_context_all", 4, _grep_context_all)  # With max_matches
+    conn.create_function("split_sections", 1, _split_sections)
+    conn.create_function("split_sections", 2, _split_sections)  # With delimiter
+    conn.create_function("substr_range", 3, _substr_range)
     conn.create_function("word_count", 1, _word_count)
     conn.create_function("char_count", 1, _char_count)
 
