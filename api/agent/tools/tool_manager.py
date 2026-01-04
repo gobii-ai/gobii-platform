@@ -589,10 +589,72 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
     return definitions
 
 
+def _normalize_mcp_tool_name(tool_name: str, catalog: Dict[str, "ToolCatalogEntry"]) -> Optional[str]:
+    """Try to find a matching MCP tool name using fuzzy matching.
+
+    Handles common LLM mistakes like:
+    - mcp_bright_data_... vs mcp_brightdata_...
+    - Extra underscores in server names
+    """
+    if not tool_name.startswith("mcp_"):
+        return None
+
+    # Try normalizing by removing underscores from the server name portion
+    # mcp_bright_data_tool -> mcp_brightdata_tool
+    normalized = tool_name.replace("mcp_bright_data_", "mcp_brightdata_")
+    if normalized in catalog:
+        return normalized
+
+    # Try finding a tool that matches when we normalize both names
+    tool_name_collapsed = tool_name.replace("_", "").lower()
+    for candidate in catalog:
+        if candidate.replace("_", "").lower() == tool_name_collapsed:
+            return candidate
+
+    return None
+
+
 def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolCatalogEntry]:
-    """Return catalog entry for the given tool name if available."""
+    """Return catalog entry for the given tool name if available.
+
+    Attempts fuzzy matching for MCP tools when exact match fails.
+    """
     catalog = _build_available_tool_index(agent)
-    return catalog.get(tool_name)
+
+    # Try exact match first
+    entry = catalog.get(tool_name)
+    if entry:
+        return entry
+
+    # Try fuzzy matching for MCP tools
+    if tool_name.startswith("mcp_"):
+        normalized_name = _normalize_mcp_tool_name(tool_name, catalog)
+        if normalized_name:
+            logger.info(
+                "Normalized MCP tool name '%s' -> '%s'",
+                tool_name, normalized_name
+            )
+            return catalog.get(normalized_name)
+
+        # Last resort: try MCP manager's resolve_tool_info which can discover tools
+        manager = _get_manager()
+        info = manager.resolve_tool_info(tool_name)
+        if info:
+            logger.info(
+                "Resolved MCP tool '%s' via manager discovery (server=%s)",
+                tool_name, info.server_name
+            )
+            return ToolCatalogEntry(
+                provider="mcp",
+                full_name=info.full_name,
+                description=info.description,
+                parameters=info.parameters,
+                tool_server=info.server_name,
+                tool_name=info.tool_name,
+                server_config_id=info.config_id,
+            )
+
+    return None
 
 
 def auto_enable_heuristic_tools(
@@ -697,11 +759,14 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
+    # Use the resolved tool name (may differ from input if normalized)
+    resolved_name = entry.full_name
+
     # Coerce params to match expected types (handles LLM passing "true" instead of true, etc.)
     params = _coerce_params_to_schema(params, entry.parameters)
 
     # Block sqlite execution for ineligible agents (even if previously enabled)
-    if tool_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
+    if resolved_name == SQLITE_TOOL_NAME and not is_sqlite_enabled_for_agent(agent):
         message = "Database tool is not available for this deployment."
         if getattr(settings, "GOBII_PROPRIETARY_MODE", False):
             message = (
@@ -713,29 +778,29 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
             "message": message,
         }
 
-    if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=tool_name).exists():
+    if not PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name=resolved_name).exists():
         auto_enable = _auto_enable_tool_for_execution(agent, entry)
         if auto_enable.get("status") != "success":
             return {
                 "status": "error",
-                "message": auto_enable.get("message", f"Tool '{tool_name}' is not enabled for this agent"),
+                "message": auto_enable.get("message", f"Tool '{resolved_name}' is not enabled for this agent"),
             }
 
     if entry.provider == "mcp":
-        return execute_mcp_tool(agent, tool_name, params)
+        return execute_mcp_tool(agent, resolved_name, params)
 
     if entry.provider == "builtin":
-        registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+        registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)
         executor = registry_entry.get("executor") if registry_entry else None
         if executor:
             try:
                 row = PersistentAgentEnabledTool.objects.filter(
                     agent=agent,
-                    tool_full_name=tool_name,
+                    tool_full_name=resolved_name,
                 ).first()
             except Exception:
                 row = None
-                logger.exception("Failed to load enabled entry for builtin tool %s", tool_name)
+                logger.exception("Failed to load enabled entry for builtin tool %s", resolved_name)
 
             if row:
                 try:
@@ -747,8 +812,8 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
                         update_fields.extend(metadata_updates)
                     row.save(update_fields=list(dict.fromkeys(update_fields)))
                 except Exception:
-                    logger.exception("Failed to record usage for builtin tool %s", tool_name)
+                    logger.exception("Failed to record usage for builtin tool %s", resolved_name)
 
             return executor(agent, params)
 
-    return {"status": "error", "message": f"Tool '{tool_name}' has no execution handler"}
+    return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}
