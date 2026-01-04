@@ -225,11 +225,11 @@ Step 1: Fetch the data
   http_request(url="https://api.example.com/products", will_continue_work=true)
 
   Result meta shows:
-    QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category'), json_extract(p.value,'$.price')
-           FROM __tool_results, json_each(result_json,'$.content.products') AS p
-           WHERE result_id='a1b2c3' LIMIT 25
-    PATH: $.content.products (847 items)
-    FIELDS: id, name, category, price, stock, created_at
+    → PATH: $.content.products (847 items)
+    → FIELDS: id, name, category, price, stock, created_at
+    → QUERY: SELECT json_extract(p.value,'$.name'), json_extract(p.value,'$.category')
+             FROM __tool_results, json_each(result_json,'$.content.products') AS p
+             WHERE result_id='a1b2c3' LIMIT 25
 
 Step 2: Since we need multiple analyses, persist raw tool output and a clean table
   sqlite_batch(sql="
@@ -718,6 +718,23 @@ INSERT INTO mytable (col1, col2)
   SELECT json_extract(r.value,'$.field1'), json_extract(r.value,'$.field2')
   FROM __tool_results, json_each(result_json,'$.content.items') AS r
   WHERE result_id='...'
+```
+
+**Modifying the QUERY hint**: The `→ QUERY:` hint is ready-to-run. To customize it, use the field names from `→ FIELDS:`:
+```
+→ PATH: $.content.hits (30 items)
+→ FIELDS: title, points, url, objectID, num_comments
+→ QUERY: SELECT json_extract(r.value,'$.title'), json_extract(r.value,'$.points') FROM ...
+```
+To add sorting or more fields, copy the pattern and use exact field names from FIELDS:
+```sql
+SELECT json_extract(r.value,'$.title') AS title,
+       json_extract(r.value,'$.points') AS points,
+       json_extract(r.value,'$.num_comments') AS comments
+FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+WHERE result_id='...'
+ORDER BY points DESC  -- use the alias, or json_extract(...) again
+LIMIT 25
 ```
 
 For CSV data, the content is a text string (not JSON). Extract it first:
