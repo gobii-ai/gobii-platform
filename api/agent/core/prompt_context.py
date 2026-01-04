@@ -1686,7 +1686,7 @@ Row count vs page size determines if more fetching is needed.
 | Create view | `CREATE VIEW v AS SELECT <agg>, <group> FROM t GROUP BY <group>` |
 | Normalize text→struct | `regexp_extract(col, '<pattern>') as field` in CTE, then UPDATE from CTE |
 
-CTEs are function composition. Chain them: `WITH raw AS (...), mapped AS (SELECT ... FROM raw), filtered AS (SELECT ... FROM mapped WHERE ...), reduced AS (SELECT ..., COUNT(*) FROM filtered GROUP BY ...) SELECT * FROM reduced`
+CTEs are function composition. Chain them (FROM name must match WITH exactly): `WITH raw AS (...), mapped AS (SELECT ... FROM raw), filtered AS (SELECT ... FROM mapped WHERE ...), reduced AS (SELECT ..., COUNT(*) FROM filtered GROUP BY ...) SELECT * FROM reduced`
 
 **Emergence patterns** (let the data guide you):
 | Moment | What to do |
