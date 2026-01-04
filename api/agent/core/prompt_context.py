@@ -243,7 +243,7 @@ Context space is limited, so query thoughtfully:
 - Extract specific fields rather than entire blobs
 
 **Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively.
-CTE names must match exactly: `WITH items AS (...) FROM items` — not `item`.
+Names must match exactly—`points` vs `point` will fail. Check your aliases in ORDER BY/WHERE.
 ```sql
 -- COALESCE chains: try fields from hint, fall back gracefully
 SELECT COALESCE(json_extract(i.value,'$.score'), json_extract(i.value,'$.points'), 0) as score,

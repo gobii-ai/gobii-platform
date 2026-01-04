@@ -50,6 +50,12 @@ def _extract_cte_names(sql: str) -> list[str]:
     return re.findall(pattern, sql, re.IGNORECASE)
 
 
+def _extract_select_aliases(sql: str) -> list[str]:
+    """Extract column aliases from SELECT clauses (e.g., 'as points')."""
+    pattern = r'\bAS\s+(\w+)'
+    return re.findall(pattern, sql, re.IGNORECASE)
+
+
 def _is_typo(s1: str, s2: str) -> bool:
     """Check if s1 is likely a typo of s2 (off by 1 char)."""
     s1, s2 = s1.lower(), s2.lower()
@@ -73,7 +79,17 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
     if "union" in error_lower and "column" in error_lower:
         return " FIX: All SELECTs in UNION/UNION ALL must have the same number of columns."
     if "no column named" in error_lower or "no such column" in error_lower:
-        return " FIX: Check column name spelling matches your table schema."
+        # Extract the missing column name
+        match = re.search(r'no such column:\s*(\w+)', error_msg, re.IGNORECASE)
+        if not match:
+            match = re.search(r'no column named\s+(\w+)', error_msg, re.IGNORECASE)
+        if match and sql:
+            missing = match.group(1)
+            aliases = _extract_select_aliases(sql)
+            for alias in aliases:
+                if _is_typo(missing, alias):
+                    return f" FIX: Typo? You defined alias '{alias}' but referenced '{missing}'."
+        return " FIX: Check column name spelling matches your SELECT aliases or table schema."
     if "no such table" in error_lower:
         # Extract the missing table name
         match = re.search(r'no such table:\s*(\w+)', error_msg, re.IGNORECASE)
