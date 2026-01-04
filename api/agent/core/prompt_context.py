@@ -789,11 +789,27 @@ User: "What are the top mass transit systems by ridership?"
       FROM mapped WHERE metric > 0
     )
     SELECT * FROM classified ORDER BY metric DESC;
-    -- Now you have: systems(name, location, metric, details_url, tier, region)
-    SELECT tier, region, COUNT(*) as n, SUM(metric) as total FROM systems GROUP BY tier, region",
+
+    -- Recursive: hierarchical rollup (region → tier → system) with running totals
+    WITH RECURSIVE hierarchy AS (
+      -- Level 0: root
+      SELECT 'world' as node, NULL as parent, 0 as depth, SUM(metric) as subtotal FROM systems
+      UNION ALL
+      -- Level 1: regions
+      SELECT region, 'world', 1, SUM(metric) FROM systems GROUP BY region
+      UNION ALL
+      -- Level 2: tiers within regions
+      SELECT region||'/'||tier, region, 2, SUM(metric) FROM systems GROUP BY region, tier
+      UNION ALL
+      -- Level 3: individual systems
+      SELECT region||'/'||tier||'/'||name, region||'/'||tier, 3, metric FROM systems
+    )
+    SELECT node, parent, depth, subtotal,
+           SUM(subtotal) OVER (ORDER BY depth, subtotal DESC) as cumulative
+    FROM hierarchy ORDER BY depth, subtotal DESC",
     will_continue_work=true)
 
-[Turn 4] Deliver—use evolved schema (systems table with derived columns)
+[Turn 4] Deliver—use evolved schema with hierarchical rollup
   -- Query included: SELECT name, city, ridership, details_url, lines, founded FROM ...
   send_chat_message(body="## 🚇 World's Busiest Metro Systems
 
@@ -1688,13 +1704,22 @@ The best insights weren't planned—they emerged from traces left by earlier que
 |------|---------|
 | Set difference (A not in B) | `SELECT * FROM a WHERE id NOT IN (SELECT id FROM b)` or `EXCEPT` |
 | Set intersection | `SELECT * FROM a INTERSECT SELECT * FROM b` |
-| Transitive closure | `WITH RECURSIVE tc AS (SELECT ... UNION SELECT ... FROM tc JOIN edges) SELECT * FROM tc` |
 | Find contradictions | `SELECT * FROM claims c1 JOIN claims c2 ON c1.subject=c2.subject WHERE c1.value != c2.value` |
 | If X implies Y | `SELECT * FROM facts WHERE condition_x AND NOT condition_y` (violations) |
 | Percentile/rank | `SELECT *, PERCENT_RANK() OVER (ORDER BY metric) as pct FROM t` |
 | Statistical outliers | `WHERE ABS(val - (SELECT AVG(val) FROM t)) > 2 * (SELECT STDEV(val) FROM t)` |
 | All X have property Y? | `SELECT NOT EXISTS (SELECT 1 FROM x WHERE NOT has_property_y)` |
-| Dependency chain | `WITH RECURSIVE deps AS (...) SELECT * FROM deps` |
+
+**Recursive patterns** (WITH RECURSIVE for graph/tree logic, NOT for parsing messy text):
+| Goal | Pattern |
+|------|---------|
+| Transitive closure | `WITH RECURSIVE tc(x,y) AS (SELECT a,b FROM edges UNION SELECT tc.x,e.b FROM tc JOIN edges e ON tc.y=e.a) SELECT * FROM tc` |
+| All descendants | `WITH RECURSIVE down AS (SELECT * FROM t WHERE id=:root UNION ALL SELECT t.* FROM t JOIN down d ON t.parent=d.id) SELECT * FROM down` |
+| All ancestors | `WITH RECURSIVE up AS (SELECT * FROM t WHERE id=:start UNION ALL SELECT t.* FROM t JOIN up ON t.id=up.parent) SELECT * FROM up` |
+| Generate date/number range | `WITH RECURSIVE rng(d) AS (SELECT :start UNION ALL SELECT d+1 FROM rng WHERE d<:end) SELECT * FROM rng` |
+| Hierarchical sum (rollup) | `WITH RECURSIVE roll AS (SELECT id,parent,val FROM t UNION ALL SELECT r.id,t.parent,r.val FROM roll r JOIN t ON r.parent=t.id) SELECT id,SUM(val) FROM roll GROUP BY id` |
+| Find all paths A→B | `WITH RECURSIVE paths(node,path) AS (SELECT :start,:start UNION ALL SELECT e.dst,path\|\|'→'||e.dst FROM paths JOIN edges e ON node=e.src WHERE path NOT LIKE '%'||e.dst||'%') SELECT path FROM paths WHERE node=:end` |
+| Detect cycles | `WITH RECURSIVE walk(node,path,cycle) AS (...WHERE path LIKE '%'||node||'%'...) SELECT * FROM walk WHERE cycle=1` |
 
 ### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
 
@@ -1944,7 +1969,7 @@ User: "Extract all the key facts from this company's about page"
     GROUP BY LOWER(TRIM(extracted))
     ORDER BY quality", will_continue_work=true)
 
-[Turn 4] Synthesize and deliver—facts from key_facts, structure from page_sections
+[Turn 3] Synthesize—LLM reads the goldilocks context, extracts the meaning
   send_chat_message(body="## 🏢 BigStartup Company Profile
 
 > Compiled from [bigstartup.io/about](${source_url})
