@@ -148,6 +148,24 @@ def _substr_range(string: Optional[str], start: int, end: int) -> Optional[str]:
         return None
     return string[start:end]
 
+
+def _json_length(json_str: Optional[str]) -> Optional[int]:
+    """Return length of JSON array or object (alias for json_array_length).
+
+    Agents often hallucinate 'json_length' instead of 'json_array_length'.
+    This provides a forgiving alias that handles both arrays and objects.
+    """
+    import json as json_module
+    if json_str is None:
+        return None
+    try:
+        data = json_module.loads(json_str)
+        if isinstance(data, (list, dict)):
+            return len(data)
+        return None
+    except (ValueError, TypeError):
+        return None
+
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
     sqlite3.SQLITE_DETACH,
@@ -309,6 +327,7 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("substr_range", 3, _substr_range)
     conn.create_function("word_count", 1, _word_count)
     conn.create_function("char_count", 1, _char_count)
+    conn.create_function("json_length", 1, _json_length)  # Alias for json_array_length
 
 
 def open_guarded_sqlite_connection(
