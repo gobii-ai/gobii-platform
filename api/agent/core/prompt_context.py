@@ -708,36 +708,30 @@ Always discover first, search second.
 
 ## Key Patterns
 
-Each result includes `→ PATH:` and `→ QUERY:` hints with the exact paths for that result.
-The PATH is the correct json_each path—use it exactly as shown, not a guess based on field names.
-`http_request` wraps responses in `$.content`, so the path is `$.content.hits`, not `$.hits`.
+**Hints contain your actual values.** Each tool result includes metadata with:
+- `result_id='abc123...'` — the ID for this specific result
+- `→ PATH:` or `→ QUERY:` — the paths that work for this data structure
+- `→ FIELDS:` — the field names available in this result
 
-Tool schemas are your source of truth for parameter names. The schema says `num_of_comments`? Use exactly that—not `num_comments`, not `comment_count`. Trust the schema.
+Use these as reference when writing your queries.
 
-For JSON arrays, load into tables with INSERT...SELECT:
-```sql
-INSERT INTO mytable (col1, col2)
-  SELECT json_extract(r.value,'$.field1'), json_extract(r.value,'$.field2')
-  FROM __tool_results, json_each(result_json,'$.content.items') AS r
-  WHERE result_id='...'
+```
+Example hint you might see:
+  result_id=7f3a2b1c-..., in_db=1, bytes=22558
+  → PATH: $.content.hits (30 items)
+  → FIELDS: title, points, url, objectID
+  → QUERY: SELECT json_extract(r.value,'$.title'), json_extract(r.value,'$.points')
+           FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+           WHERE result_id='7f3a2b1c-...' LIMIT 25
+
+Use the QUERY as a starting point. Add or change fields based on what you need from FIELDS.
+The paths ($.content.hits) and fields ($.title, $.points) are specific to this result.
+Different tools return different structures—check the hint for each one.
 ```
 
-**Modifying the QUERY hint**: The `→ QUERY:` hint is ready-to-run. To customize it, use the field names from `→ FIELDS:`:
-```
-→ PATH: $.content.hits (30 items)
-→ FIELDS: title, points, url, objectID, num_comments
-→ QUERY: SELECT json_extract(r.value,'$.title'), json_extract(r.value,'$.points') FROM ...
-```
-To add sorting or more fields, copy the pattern and use exact field names from FIELDS:
-```sql
-SELECT json_extract(r.value,'$.title') AS title,
-       json_extract(r.value,'$.points') AS points,
-       json_extract(r.value,'$.num_comments') AS comments
-FROM __tool_results, json_each(result_json,'$.content.hits') AS r
-WHERE result_id='...'
-ORDER BY points DESC  -- use the alias, or json_extract(...) again
-LIMIT 25
-```
+**Note**: Documentation examples use placeholder paths like `$.items` or `$.excerpt`. Your actual hint will show the real paths for that result—use those instead.
+
+Tool schemas show the correct parameter names. If the schema says `num_of_comments`, use that form rather than variations like `num_comments` or `comment_count`.
 
 For CSV data, the content is a text string (not JSON). Extract it first:
 ```sql
@@ -749,19 +743,20 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 🧩 JSON DATA in $.result - JSON stored as TEXT
 → QUERY: SELECT ... FROM json_each(json_extract(result_json,'$.result'),'$.items') AS r
 ```
-The `json_extract()` unwraps the TEXT, then `json_each(value, '$.items')` navigates to the array inside—two separate steps. Paths can't traverse "through" TEXT fields. Copy the QUERY hint exactly—the paths (`$.result`, `$.items`) and `result_id` all come from the hint.
+The `json_extract()` unwraps the TEXT, then `json_each(value, '$.items')` navigates to the array inside—two separate steps. Paths can't traverse "through" TEXT fields. Use the hint's structure as your guide—the paths (`$.result`, `$.items`) and `result_id` are specific to that result.
 
 **Advanced patterns**:
 
 Correlate data across tool calls—e.g., join search results with scraped pages:
 ```sql
--- Step 1: Extract URLs from search (paths and result_id from that tool's → QUERY: hint)
-CREATE TABLE hits AS SELECT json_extract(r.value,'$.title') as title, json_extract(r.value,'$.url') as url
-  FROM __tool_results, json_each(json_extract(result_json,'$.result'),'$.items') AS r
-  WHERE result_id='<from-search-hint>';
--- Step 2: After scraping those URLs, join on the URL field (from scrape tool's → FIELDS: hint)
-SELECT h.title, json_extract(t.result_json,'$.excerpt') FROM hits h
-  JOIN __tool_results t ON json_extract(t.result_json,'$.url') = h.url;
+-- Use paths and result_id from each tool's actual hint (these are placeholders):
+CREATE TABLE hits AS SELECT json_extract(r.value,'$.<title-field>') as title,
+                            json_extract(r.value,'$.<url-field>') as url
+  FROM __tool_results, json_each(<your-json_each-expression-from-hint>) AS r
+  WHERE result_id='<your-result-id-from-hint>';
+-- Join with scraped data using fields from the scrape tool's hint:
+SELECT h.title, json_extract(t.result_json,'$.<content-field-from-scrape-hint>')
+FROM hits h JOIN __tool_results t ON json_extract(t.result_json,'$.<url-field>') = h.url;
 ```
 
 Track state across cycles with your own tables (they persist in your SQLite database):
