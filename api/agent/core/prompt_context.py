@@ -260,16 +260,18 @@ Step 3: Category breakdown
 
   Result: Electronics|312|149.99|9.99|899.99, Clothing|245|45.50|12.00|299.00, ...
 
-Step 4: Find outliers - products priced unusually high or low for their category
+Step 4: Find outliers (need to see results before presenting)
   sqlite_batch(sql="
     SELECT p.name, p.category, p.price, cat.avg_price
     FROM products p
     JOIN (SELECT category, AVG(price) as avg_price FROM products GROUP BY category) cat
       ON p.category = cat.category
     WHERE p.price > cat.avg_price * 2 OR p.price < cat.avg_price * 0.3
-    ORDER BY p.category, p.price DESC LIMIT 20", will_continue_work=false)
+    ORDER BY p.category, p.price DESC LIMIT 20", will_continue_work=true)
 
-Step 5: Present findings
+  Result: Widget-Pro|Electronics|899.99|149.99, Budget-Tee|Clothing|12.00|45.50, ...
+
+Step 5: Present findings (no tool call — just text)
   "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
    averaging $149.99. Found 23 pricing outliers that may need review..."
 ```
@@ -660,7 +662,7 @@ Step 4: Find discrepancies - items where counts don't match
 
   Result: SKU-789|100|45|-55|Aisle-3|COUNT_MISMATCH, SKU-NEW|NULL|30|30|NULL|IN_WAREHOUSE_NOT_SYSTEM, ...
 
-Step 5: Summarize by issue type for decision making
+Step 5: Summarize by issue type (need to see results before presenting)
   sqlite_batch(sql="
     SELECT issue_type, COUNT(*) as count, SUM(ABS(variance)) as total_variance
     FROM (
@@ -670,11 +672,11 @@ Step 5: Summarize by issue type for decision making
              ABS(COALESCE(w.physical_count,0) - COALESCE(s.system_count,0)) as variance
       FROM system_inv s FULL OUTER JOIN warehouse_counts w ON s.sku = w.sku
       WHERE s.system_count != w.physical_count OR s.sku IS NULL OR w.sku IS NULL
-    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=false)
+    ) GROUP BY issue_type ORDER BY total_variance DESC", will_continue_work=true)
 
   Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
 
-Step 6: Present findings with prioritized recommendations
+Step 6: Present findings (no tool call — just text)
   "Found 67 inventory discrepancies across 3 categories:
    - 42 count mismatches (1,847 units total variance) - priority for recount
    - 20 items in warehouse not in system - need to add to inventory
@@ -744,42 +746,56 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
-**`will_continue_work`** — your signal for "I'm not done yet":
+**`will_continue_work`** — your signal for whether you need another turn:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ Fetching data to process?  →  will_continue_work=true           │
-│ Presenting final results?  →  will_continue_work=false (or omit)│
-└─────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│ true   →  "I'll need another turn to see results or continue working"  │
+│ false  →  "This response is complete—my answer is here"                │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
 
-A realistic flow—notice how every fetch uses `true` until the final presentation:
+A natural rhythm emerges: you can't present what you haven't seen yet. Each query needs another turn to read and synthesize the results.
 
 ```
-User: "Find me the best-reviewed product from Acme Corp and summarize customer sentiment"
+User: "What's trending on Hacker News?"
 
-  → http_request(url="api.acme.com/products", will_continue_work=true)
-  → sqlite_batch(sql="SELECT id, name, avg_rating FROM ... ORDER BY avg_rating DESC LIMIT 5",
-                 will_continue_work=true)
+[Turn 1] Fetch the data
+         → http_request(url="hn.algolia.com/api/v1/...", will_continue_work=true)
 
-    Result: ProWidget (4.8★), MegaTool (4.6★), BasicKit (4.2★)...
-    Decision: ProWidget has highest rating—fetch its reviews for sentiment analysis
+[Turn 2] Extract what matters
+         → sqlite_batch(sql="SELECT title, points, url FROM ...", will_continue_work=true)
 
-  → http_request(url="api.acme.com/products/prowidget/reviews?limit=50",
-                 will_continue_work=true)
-  → sqlite_batch(sql="SELECT json_extract(r.value,'$.text'), json_extract(r.value,'$.rating') FROM ...",
-                 will_continue_work=true)
-
-    Now I have 50 reviews. Let me analyze themes...
-
-  → sqlite_batch(sql="SELECT rating, COUNT(*), GROUP_CONCAT(substr(text,1,100)) FROM reviews GROUP BY rating",
-                 will_continue_work=false)
-
-  → "**ProWidget** is Acme's top-rated product (4.8★). Customers love the build quality
-     and ease of use. The few negative reviews mention shipping delays, not the product itself."
+[Turn 3] Share the findings
+         "Here's what's trending on HN today:
+          1. **Show HN: I built a thing** (423 points)
+          2. **Why Rust is taking over** (312 points)..."
 ```
 
-Every fetch along the way needs `will_continue_work=true`—initial requests, follow-up requests, all of them. Only the final analysis step that leads directly to your response uses `false`.
+Turn 2 uses `true` because you want to see the results before presenting. Turn 3 is pure text—no tool needed, just your synthesis.
+
+**A deeper research flow**:
+```
+User: "Find Acme Corp's top product and summarize customer sentiment"
+
+[Turn 1] → http_request(url="api.acme.com/products", will_continue_work=true)
+
+[Turn 2] → sqlite_batch(sql="SELECT name, rating FROM ... LIMIT 5", will_continue_work=true)
+
+[Turn 3] ProWidget leads at 4.8★. Let me get its reviews...
+         → http_request(url="api.acme.com/products/prowidget/reviews", will_continue_work=true)
+
+[Turn 4] → sqlite_batch(sql="SELECT text, rating FROM ... LIMIT 50", will_continue_work=true)
+
+[Turn 5] 50 reviews in hand. One more query to see the distribution...
+         → sqlite_batch(sql="SELECT rating, COUNT(*) GROUP BY rating", will_continue_work=true)
+
+[Turn 6] "**ProWidget** is Acme's top-rated product (4.8★). Customers love the
+          build quality and ease of use. The few critical reviews mention
+          shipping delays rather than product issues."
+```
+
+Each turn flows into the next. The final turn needs no tool—just your thoughtful summary.
 
 ## Smooth Patterns
 
@@ -1656,7 +1672,7 @@ def build_prompt_context(
         "sqlite_examples",
         _get_sqlite_examples(),
         weight=2,
-        shrinker="hmt"
+        non_shrinkable=True
     )
     
     # High priority sections (weight=10) - critical information that shouldn't shrink much
