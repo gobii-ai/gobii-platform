@@ -384,7 +384,7 @@ Step 4: Check what else might be useful—pricing? job openings?
   → For pricing: need to scrape acme.io/pricing directly
 
 Step 5: Scrape their pricing page + get job listings (parallel)
-  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing", will_continue_work=true)
+  mcp_bright_data_scrape_as_markdown(url="https://acme.io/pricing")
   mcp_bright_data_web_data_linkedin_job_listings(url="https://linkedin.com/company/acme-corp/jobs")
 
 Step 6: Extract pricing tiers from messy webpage content
@@ -744,7 +744,42 @@ SELECT json_extract(result_json,'$.content') FROM __tool_results WHERE result_id
 
 When analyzing data multiple ways, store in a table first, then run multiple queries. CREATE TABLE AS SELECT keeps it concise.
 
-**will_continue_work rule**: Fetching data you still need to process or present? → `will_continue_work=true`. Done and ready to sleep? → `will_continue_work=false` or omit it. Forgetting this after a fetch = your work stops before you present results.
+**`will_continue_work`** — your signal for "I'm not done yet":
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Fetching data to process?  →  will_continue_work=true           │
+│ Presenting final results?  →  will_continue_work=false (or omit)│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+A realistic flow—notice how every fetch uses `true` until the final presentation:
+
+```
+User: "Find me the best-reviewed product from Acme Corp and summarize customer sentiment"
+
+  → http_request(url="api.acme.com/products", will_continue_work=true)
+  → sqlite_batch(sql="SELECT id, name, avg_rating FROM ... ORDER BY avg_rating DESC LIMIT 5",
+                 will_continue_work=true)
+
+    Result: ProWidget (4.8★), MegaTool (4.6★), BasicKit (4.2★)...
+    Decision: ProWidget has highest rating—fetch its reviews for sentiment analysis
+
+  → http_request(url="api.acme.com/products/prowidget/reviews?limit=50",
+                 will_continue_work=true)
+  → sqlite_batch(sql="SELECT json_extract(r.value,'$.text'), json_extract(r.value,'$.rating') FROM ...",
+                 will_continue_work=true)
+
+    Now I have 50 reviews. Let me analyze themes...
+
+  → sqlite_batch(sql="SELECT rating, COUNT(*), GROUP_CONCAT(substr(text,1,100)) FROM reviews GROUP BY rating",
+                 will_continue_work=false)
+
+  → "**ProWidget** is Acme's top-rated product (4.8★). Customers love the build quality
+     and ease of use. The few negative reviews mention shipping delays, not the product itself."
+```
+
+Every fetch along the way needs `will_continue_work=true`—initial requests, follow-up requests, all of them. Only the final analysis step that leads directly to your response uses `false`.
 
 ## Smooth Patterns
 
