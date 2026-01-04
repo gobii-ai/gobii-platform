@@ -188,6 +188,50 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return complete agent trajectories demonstrating data retrieval, storage, and analysis."""
     return """
+## How This System Works
+
+**Two brains, one workflow.**
+
+**SQLite** handles precision:
+- Querying: `json_extract()`, `json_each()`, JOINs, WHERE clauses
+- Math: AVG, SUM, SQRT, percentiles, statistics
+- Logic: CASE expressions, set operations, NOT EXISTS, recursive CTEs
+- Memory: Tables persist—build incrementally across turns
+- Scale: Millions of rows, no problem
+
+**You** handle fuzziness:
+- Deciding what matters in messy text
+- Pattern recognition too subtle for regex
+- Synthesizing findings into coherent narratives
+- Judgment calls when data is ambiguous
+
+**You write, SQLite executes.** You craft the queries—the logic, the language, the intent. SQLite runs them—the computation, the math, the heavy lifting. You're the programmer; SQLite is the runtime.
+
+**SQLite filters, you interpret.** Raw data is too big for context. SQLite extracts the goldilocks amount—enough to understand, small enough to fit. You read the distilled result and make sense of the mess.
+
+---
+
+### By Data Type
+
+**Structured JSON** (APIs, extractors):
+→ Copy the `→ QUERY:` from the hint — it has the correct paths
+→ Never guess paths like `$.hits` or `$.items` — every API nests differently
+→ The hint might show `$.content.hits` or `$.data.results` — use exactly what it shows
+
+**Text blobs** (scraped pages, markdown):
+→ `grep_context_all(text, 'pattern', 60, 10)` — context windows around matches
+→ `split_sections(text, '\n\n')` — iterate paragraphs
+→ `substr_range(text, 0, 3000)` — batched extraction
+→ Never pull raw blobs into context—extract what you need
+
+**CSV/tabular**:
+→ Parse inline for quick looks
+→ `CREATE TABLE ... AS` for complex analysis
+
+**The hint is your map.** It shows `result_id`, exact paths, and a ready-to-run query. Copy identifiers exactly—don't retype from memory.
+
+---
+
 ## Working with External Data
 
 When you fetch data from APIs or web sources, results are stored in `__tool_results`.
@@ -198,7 +242,9 @@ Context space is limited, so query thoughtfully:
 - Use `substr(text, 1, 2000)` for raw text fields
 - Extract specific fields rather than entire blobs
 
-**Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively:
+**Write robust queries**: Real data is messy. Use fields from your `→ FIELDS:` hint, but wrap them defensively.
+
+**Before executing**: Trace every identifier back to its source. Table names → `sqlite_schema` or your CTE. Column names → your SELECT aliases or `→ FIELDS:` hint. Paths → `→ PATH:` hint. `points` vs `point` will fail—if you can't point to where a name came from, it's wrong.
 ```sql
 -- COALESCE chains: try fields from hint, fall back gracefully
 SELECT COALESCE(json_extract(i.value,'$.score'), json_extract(i.value,'$.points'), 0) as score,
@@ -222,12 +268,12 @@ CAST(REPLACE(REPLACE(COALESCE(json_extract(i.value,'$.price'),'0'), '$',''), ','
 The paths (`$.score`, `$.name`, etc.) come from your hint's FIELDS—these patterns just make them resilient to NULL/empty values.
 
 ```sql
--- persist tool outputs into a durable table
+-- persist tool outputs into a durable table (use path from YOUR hint)
 CREATE TABLE IF NOT EXISTS items AS
 SELECT json_extract(i.value,'$.title') AS title,
        json_extract(i.value,'$.url') AS url
-FROM __tool_results, json_each(result_json,'$.items') AS i
-WHERE result_id='...';
+FROM __tool_results, json_each(result_json,'$.<path_from_hint>') AS i
+WHERE result_id='<result_id_from_hint>';
 ```
 
 ---
@@ -702,6 +748,1703 @@ Step 6: Present findings (no tool call — just text)
 
 ---
 
+## Micro Trajectories: Common Efficient Patterns
+
+These show the core rhythm: fetch → extract → *leave traces* → notice patterns → follow them → deliver.
+
+**The DB is your turing tape**. Each turn reads state, transforms it, writes new state. The interesting behavior *emerges* from this loop—you don't plan everything upfront. You leave traces (tables, columns, views) that shape what you notice next. Like stigmergy: ants leave pheromones that guide other ants. Your tables are pheromones.
+
+**`<angle_brackets>` are placeholders**—replace with ACTUAL values from: hint metadata (result_id, paths, fields), tables you created, or sqlite_schema. Every identifier in your query must trace back to something concrete in context—if you can't point to where it came from, don't use it.
+
+**Defensive querying**: Real-world data is messy. Use CTEs to cascade through the primary path/fields from hints, then common alternatives as fallback. This is far cheaper than query-fail-retry loops. Wrap everything in `COALESCE`/`NULLIF`/`TRIM` to handle nulls, empties, and whitespace gracefully.
+
+**Schema evolution**: SQLite is living state, not dead storage. Lean hard on it—CREATE TABLE, ALTER TABLE, CREATE TABLE AS, views, indexes. As understanding deepens, evolve your schema. Each query can leave something behind for the next. CTEs are function composition; chain them: raw → mapped → filtered → enriched. The schema you end with is rarely the schema you started with.
+
+### Pattern A: API Fetch → Extract → Deliver
+
+```
+User: "What are the top mass transit systems by ridership?"
+
+[Turn 1] Fetch
+  http_request(url="https://api.transitdata.org/systems?sort=ridership", will_continue_work=true)
+
+[Turn 2] Extract using hint metadata (with structure fallbacks)
+  -- Hint showed: result_id='abc123', PATH: $.<array_field> (N items), FIELDS: <field1>, <field2>, <field3>
+  -- Use the ACTUAL path/fields from hint. Cascade through common alternatives as fallback.
+  sqlite_batch(sql="
+    WITH extract AS (
+      -- Primary path from hint; fallback to common alternatives
+      SELECT r.value as item FROM __tool_results,
+        json_each(COALESCE(
+          json_extract(result_json,'$.<array_field>'),  -- from hint PATH
+          json_extract(result_json,'$.items'),
+          json_extract(result_json,'$.results'),
+          CASE WHEN json_type(result_json)='array' THEN result_json ELSE '[]' END
+        )) AS r
+      WHERE result_id='<result_id_from_hint>'
+    )
+    SELECT
+      -- Field names from hint FIELDS; cascade through likely alternatives
+      COALESCE(
+        NULLIF(TRIM(json_extract(item,'$.<field1>')), ''),
+        NULLIF(TRIM(json_extract(item,'$.name')), ''),
+        NULLIF(TRIM(json_extract(item,'$.title')), ''),
+        '(unknown)'
+      ) as label,
+      COALESCE(
+        TRIM(json_extract(item,'$.<field2>')),
+        TRIM(json_extract(item,'$.description')), ''
+      ) as detail,
+      COALESCE(
+        CAST(json_extract(item,'$.<numeric_field>') AS REAL),
+        CAST(json_extract(item,'$.count') AS REAL),
+        CAST(json_extract(item,'$.value') AS REAL),
+        0
+      ) as metric
+    FROM extract
+    WHERE json_extract(item,'$.<field1>') IS NOT NULL
+       OR json_extract(item,'$.name') IS NOT NULL
+    ORDER BY metric DESC
+    LIMIT 10", will_continue_work=true)
+
+[Turn 3] Evolve schema—persist + derive in one pass (functional: map raw → enriched)
+  sqlite_batch(sql="
+    -- Materialize extraction, then derive classifications in single CTE chain
+    CREATE TABLE systems AS
+    WITH raw AS (
+      SELECT r.value as item FROM __tool_results,
+        json_each(COALESCE(json_extract(result_json,'$.<array_field>'),
+          json_extract(result_json,'$.items'), '[]')) AS r
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    mapped AS (  -- map: extract fields → normalized columns
+      SELECT
+        COALESCE(NULLIF(TRIM(json_extract(item,'$.<field1>')),''), '(unknown)') as name,
+        COALESCE(TRIM(json_extract(item,'$.<loc_field>')), '') as location,
+        COALESCE(CAST(json_extract(item,'$.<numeric_field>') AS REAL), 0) as metric,
+        COALESCE(TRIM(json_extract(item,'$.<url_field>')), '') as details_url
+      FROM raw
+    ),
+    classified AS (  -- map: metric → tier (pattern matching via CASE)
+      SELECT *, CASE
+        WHEN metric >= 2000 THEN 'tier1'
+        WHEN metric >= 500 THEN 'tier2'
+        ELSE 'tier3' END as tier,
+      CASE WHEN location LIKE '%Asia%' OR location IN ('Tokyo','Beijing','Shanghai','Seoul','Delhi')
+           THEN 'asia-pacific' ELSE 'other' END as region
+      FROM mapped WHERE metric > 0
+    )
+    SELECT * FROM classified ORDER BY metric DESC;
+
+    -- Recursive: hierarchical rollup (region → tier → system) with running totals
+    WITH RECURSIVE hierarchy AS (
+      -- Level 0: root
+      SELECT 'world' as node, NULL as parent, 0 as depth, SUM(metric) as subtotal FROM systems
+      UNION ALL
+      -- Level 1: regions
+      SELECT region, 'world', 1, SUM(metric) FROM systems GROUP BY region
+      UNION ALL
+      -- Level 2: tiers within regions
+      SELECT region||'/'||tier, region, 2, SUM(metric) FROM systems GROUP BY region, tier
+      UNION ALL
+      -- Level 3: individual systems
+      SELECT region||'/'||tier||'/'||name, region||'/'||tier, 3, metric FROM systems
+    )
+    SELECT node, parent, depth, subtotal,
+           SUM(subtotal) OVER (ORDER BY depth, subtotal DESC) as cumulative
+    FROM hierarchy ORDER BY depth, subtotal DESC",
+    will_continue_work=true)
+
+[Turn 4] Deliver—use evolved schema with hierarchical rollup
+  -- Query included: SELECT name, city, ridership, details_url, lines, founded FROM ...
+  send_chat_message(body="## 🚇 World's Busiest Metro Systems
+
+> **The question**: Which transit systems move the most people?
+> **The answer**: Asia dominates—7 of 10 are there—moving **21.4 billion** annually.
+
+---
+
+### 🌏 By Region
+
+#### Asia-Pacific · 7 systems · 16.2B riders
+
+<details>
+<summary><b>🥇 Tokyo Metro</b> — 3.6 billion riders/year</summary>
+
+The world's busiest. 13 lines, 290 stations.
+
+| Metric | Value |
+|--------|-------|
+| Daily riders | 9.8 million |
+| Peak capacity | 200% (they hire professional pushers) |
+| Oldest line | Ginza (1927) |
+| Notable | Only metro with a dedicated poetry car |
+
+→ [Full profile](${details_url})
+
+</details>
+
+<details>
+<summary><b>🥈 Shanghai Metro</b> — 2.3B riders</summary>
+
+From zero to world's largest network in 30 years.
+
+| Metric | Value |
+|--------|-------|
+| Track length | 831 km (#1 globally) |
+| Lines | 20 |
+| Growth | +12% YoY |
+
+→ [Full profile](${details_url})
+
+</details>
+
+<details>
+<summary><b>Beijing, Seoul, Delhi, Hong Kong, Guangzhou</b> — 10.3B combined</summary>
+
+| System | Riders | Notable |
+|--------|--------|---------|
+| Beijing | 2.1B | 27 lines, rapid expansion |
+| Seoul | 2.0B | Integrated with KTX high-speed |
+| Delhi | 1.8B | Fastest growing (+18% YoY) |
+| ... | | |
+
+</details>
+
+#### Europe · 2 systems · 4.0B riders
+
+<details>
+<summary><b>Moscow & Paris</b></summary>
+
+| System | Riders | Character |
+|--------|--------|-----------|
+| Moscow | 2.5B | Stalin's palaces underground—74 heritage stations |
+| Paris | 1.5B | Oldest after London, densest coverage |
+
+</details>
+
+#### Americas · 1 system · 1.2B riders
+
+<details>
+<summary><b>New York MTA</b></summary>
+
+The only American system in top 10. 24/7 operation (unique globally).
+472 stations—more than any system, but aging infrastructure.
+
+</details>
+
+---
+
+### 📈 Momentum
+
+```
+Delhi     ████████████████████ +18%  ← fastest
+Shanghai  ██████████████       +12%
+Cairo     ███████████          +9%
+Jakarta   █████████            +7%
+```
+
+---
+
+### 💡 Insight
+
+> The gap between Asian and Western systems is *widening*.
+> China added more metro track in 2023 than the US has *total*.
+
+---
+
+*Source: [TransitData.org](${source_url}) · Q3 2024 data*
+*See also: [Methodology](${source_url}/methodology)*")
+```
+
+### Pattern B: Search → Work Queue → Iterative Scraping → Synthesize
+
+```
+User: "Research the top 3 AI infrastructure companies"
+
+[Turn 1] Search
+  search_engine(query="top AI infrastructure companies 2024", will_continue_work=true)
+
+[Turn 2] Leave trace: create work queue (this table guides all future turns)
+  -- Hint showed: result_id='<id>', SKELETON: $.<path> with {<url_field>, <title_field>, ...}
+  -- The queue is stigmergy: each turn reads it, updates it, leaves state for the next turn.
+  sqlite_batch(sql="
+    CREATE TABLE research_queue (
+      url TEXT PRIMARY KEY, title TEXT, scraped INT DEFAULT 0, summary TEXT
+    );
+    WITH parsed AS (
+      -- Primary path from hint; common alternatives as fallback
+      SELECT r.value as item FROM __tool_results,
+        json_each(COALESCE(
+          json_extract(result_json,'$.<path_from_hint>'),
+          json_extract(result_json,'$.items'),
+          json_extract(result_json,'$.results'),
+          json_extract(result_json,'$.organic'),
+          '[]'
+        )) AS r
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    normalized AS (
+      SELECT
+        -- URL field from hint; common alternatives
+        COALESCE(
+          NULLIF(TRIM(json_extract(item,'$.<url_field>')), ''),
+          NULLIF(TRIM(json_extract(item,'$.url')), ''),
+          NULLIF(TRIM(json_extract(item,'$.link')), ''),
+          NULLIF(TRIM(json_extract(item,'$.u')), '')
+        ) as url,
+        -- Title field from hint; common alternatives
+        COALESCE(
+          NULLIF(TRIM(json_extract(item,'$.<title_field>')), ''),
+          NULLIF(TRIM(json_extract(item,'$.title')), ''),
+          NULLIF(TRIM(json_extract(item,'$.name')), ''),
+          NULLIF(TRIM(json_extract(item,'$.t')), ''),
+          '(untitled)'
+        ) as title
+      FROM parsed
+    )
+    INSERT OR IGNORE INTO research_queue (url, title)
+    SELECT url, title FROM normalized
+    WHERE url LIKE 'https://%' AND url IS NOT NULL
+    LIMIT 5;
+    SELECT url, title FROM research_queue WHERE scraped=0 LIMIT 1", will_continue_work=true)
+
+[Turn 3] Scrape first target
+  scrape_as_markdown(url="https://example.com/company-a", will_continue_work=true)
+
+[Turn 4] Extract and mark complete, check remaining
+  -- Hint showed: result_id='scrape-xyz', excerpt in $.excerpt
+  sqlite_batch(sql="
+    UPDATE research_queue SET scraped=1,
+      summary=COALESCE(
+        (SELECT TRIM(substr(json_extract(result_json,'$.excerpt'),1,800))
+         FROM __tool_results WHERE result_id='scrape-xyz'),
+        '(no content extracted)')
+    WHERE url='https://example.com/company-a';
+    SELECT COUNT(*) as remaining FROM research_queue WHERE scraped=0", will_continue_work=true)
+  -- Returns: remaining=2, continue scraping...
+
+[Turns 5-6] Repeat scrape pattern for remaining URLs
+
+[Turn 7] Evolve schema—extract structured fields from summaries in one pass
+  -- Understanding deepened: summaries contain funding, customers, layer info
+  sqlite_batch(sql="
+    -- Evolve: add columns discovered during scraping
+    ALTER TABLE research_queue ADD COLUMN funding TEXT;
+    ALTER TABLE research_queue ADD COLUMN layer TEXT;
+    ALTER TABLE research_queue ADD COLUMN customers TEXT;
+
+    -- Map: summary text → structured fields (functional extraction)
+    WITH extractions AS (
+      SELECT url,
+        regexp_extract(summary, '\\$([\\d.]+[BMK])(?:\\s+(?:raised|funding|valuation))?', 0) as funding_raw,
+        regexp_extract(summary, '(?:customers?|clients?|used by)[:\\s]+([^.]+)', 1) as customers_raw,
+        CASE
+          WHEN summary LIKE '%GPU%' OR summary LIKE '%compute%' OR summary LIKE '%H100%' THEN 'compute'
+          WHEN summary LIKE '%orchestrat%' OR summary LIKE '%Ray%' OR summary LIKE '%distributed%' THEN 'orchestration'
+          WHEN summary LIKE '%inference%' OR summary LIKE '%deploy%' OR summary LIKE '%serverless%' THEN 'inference'
+          ELSE 'other'
+        END as layer_class
+      FROM research_queue WHERE scraped=1
+    )
+    UPDATE research_queue SET
+      funding = (SELECT COALESCE(NULLIF(TRIM(funding_raw),''), 'undisclosed') FROM extractions e WHERE e.url = research_queue.url),
+      layer = (SELECT layer_class FROM extractions e WHERE e.url = research_queue.url),
+      customers = (SELECT COALESCE(NULLIF(TRIM(customers_raw),''), '') FROM extractions e WHERE e.url = research_queue.url)
+    WHERE scraped=1;
+
+    -- Pattern emerged: companies cluster into layers (wasn't planned, was discovered)
+    SELECT layer, COUNT(*) as n, GROUP_CONCAT(title) FROM research_queue WHERE scraped=1 GROUP BY layer",
+    will_continue_work=true)
+
+  -- Bloom: the "layer" column didn't exist until summaries revealed the pattern.
+  -- Now it shapes how we present findings. Traces → patterns → structure.
+
+[Turn 8] Consistency check—find contradictions in extracted data
+  sqlite_batch(sql="
+    -- Do any companies claim conflicting layers? (contradiction detection)
+    SELECT r1.title, r1.layer as claim1, r2.layer as claim2
+    FROM research_queue r1 JOIN research_queue r2
+      ON r1.title = r2.title AND r1.layer != r2.layer;
+    -- Sanity check: is funding monotonic with layer? (compute > orchestration > inference)
+    SELECT * FROM research_queue WHERE
+      (layer = 'inference' AND CAST(REPLACE(REPLACE(funding,'$',''),'B','000') AS REAL) >
+       (SELECT MAX(CAST(REPLACE(REPLACE(funding,'$',''),'B','000') AS REAL)) FROM research_queue WHERE layer='compute'));
+    -- Universal check: do ALL compute companies mention GPUs?
+    SELECT CASE WHEN EXISTS (SELECT 1 FROM research_queue WHERE layer='compute' AND summary NOT LIKE '%GPU%')
+           THEN 'ANOMALY: compute company without GPU mention' ELSE 'OK' END")
+
+[Turn 9] Synthesize—structure emerged from traces; contradictions resolved
+  sqlite_batch(sql="SELECT title, url, summary, funding, customers, layer FROM research_queue WHERE scraped=1 ORDER BY layer")
+  send_chat_message(body="## 🏗️ AI Infrastructure: The Emerging Stack
+
+> **Research scope**: Analyzed 5 companies across compute, orchestration, and inference layers.
+> **Key finding**: The AI stack is fragmenting—vertical integration is losing to best-of-breed.
+
+---
+
+### The Stack
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  APPLICATIONS   (OpenAI, Anthropic, Midjourney...)      │
+├─────────────────────────────────────────────────────────┤
+│  INFERENCE      Modal, Replicate, Baseten               │
+├─────────────────────────────────────────────────────────┤
+│  ORCHESTRATION  Anyscale (Ray), Determined AI           │
+├─────────────────────────────────────────────────────────┤
+│  COMPUTE        CoreWeave, Lambda Labs, Together        │
+├─────────────────────────────────────────────────────────┤
+│  HARDWARE       NVIDIA, AMD, custom ASICs               │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🔍 Deep Dives
+
+<details>
+<summary><b>CoreWeave</b> — Compute Layer — <code>$2.3B raised</code></summary>
+
+#### [coreweave.com](${url})
+
+> *\"We're not a cloud company. We're a GPU finance company.\"*
+> — CEO Michael Intrator
+
+**The pitch**: Bare-metal GPU clusters, 80% cheaper than hyperscalers.
+
+**Why they're winning**:
+- When OpenAI needed to scale past Azure → they called CoreWeave
+- 45,000+ NVIDIA H100s deployed
+- $8B in contracted revenue
+
+**Customers**: OpenAI · Mistral · Stability AI · Microsoft (overflow)
+
+**Risk**: Single-supplier dependency on NVIDIA
+
+</details>
+
+<details>
+<summary><b>Anyscale</b> — Orchestration Layer — <code>$320M raised</code></summary>
+
+#### [anyscale.com](${url})
+
+**The pitch**: Ray framework—distribute any Python across any cluster.
+
+**Why they're winning**:
+- Ray runs 70% of LLM training at hyperscalers
+- 30k GitHub stars, massive community
+- From UC Berkeley's RISELab (same team as Spark)
+
+**Customers**: OpenAI · Uber · Spotify · Instacart · ByteDance
+
+| Metric | Value |
+|--------|-------|
+| GitHub stars | 30k |
+| Contributors | 900+ |
+| Production clusters | 10,000+ |
+
+</details>
+
+<details>
+<summary><b>Modal</b> — Inference Layer — <code>$65M raised</code></summary>
+
+#### [modal.com](${url})
+
+**The pitch**: Serverless for ML. Deploy models in seconds, pay per inference.
+
+**Why they're winning**:
+- Cold start: <500ms (vs 30s+ on Lambda)
+- GPU containers that scale to zero
+- Developer UX that feels magical
+
+**Customers**: Ramp · Harvey · Suno · indie hackers
+
+</details>
+
+...
+
+---
+
+### 📊 Funding Landscape
+
+```
+CoreWeave  ████████████████████████ $2.3B  (Series C)
+Anyscale   ██████                   $320M  (Series C)
+Lambda     █████                    $250M  (Series B)
+Modal      ██                       $65M   (Series B)
+```
+
+---
+
+### 💡 Investment Thesis
+
+> **Compute** (CoreWeave) → **Orchestration** (Anyscale) → **Inference** (Modal)
+>
+> Each layer is becoming a distinct market. The winners will be
+> specialists, not generalists. Watch for M&A as hyperscalers
+> try to buy their way back in.
+
+---
+
+*Sources: Company pages, Crunchbase, TechCrunch · Scraped ${date}*")
+```
+
+The queue table (`scraped=0/1`) tracks progress across turns.
+
+### Pattern C: Multiple Sources → Normalize → Cross-Reference
+
+```
+User: "Compare inventory against supplier catalog"
+
+[Turn 1] Fetch internal inventory
+  http_request(url="https://api.internal/inventory", will_continue_work=true)
+
+[Turn 2] Persist with clean schema
+  -- Hint showed: result_id='<id>', PATH: $.<array>, FIELDS: <key_field>, <num_field>, <text_field>
+  -- Use ACTUAL field names from hint. Schema mirrors what you need for analysis.
+  sqlite_batch(sql="
+    CREATE TABLE inventory (<key_field> TEXT PRIMARY KEY, <num_field> INT DEFAULT 0, <text_field> TEXT);
+    INSERT OR IGNORE INTO inventory
+    SELECT TRIM(json_extract(r.value,'$.<key_field>')),
+           COALESCE(CAST(json_extract(r.value,'$.<num_field>') AS INT), 0),
+           COALESCE(TRIM(json_extract(r.value,'$.<text_field>')), 'UNKNOWN')
+    FROM __tool_results, json_each(result_json,'$.<array_from_hint>') AS r
+    WHERE result_id='<result_id_from_hint>'
+      AND NULLIF(TRIM(json_extract(r.value,'$.<key_field>')), '') IS NOT NULL", will_continue_work=true)
+
+[Turn 3] Fetch supplier catalog
+  http_request(url="https://supplier.com/catalog.csv", will_continue_work=true)
+
+[Turn 4] Parse CSV into normalized table
+  -- Hint showed: result_id='cat-456', CSV in $.content, SCHEMA: sku,name,price,stock
+  sqlite_batch(sql="
+    CREATE TABLE catalog (sku TEXT PRIMARY KEY, name TEXT, price REAL, stock INT);
+    WITH RECURSIVE csv AS (...), lines AS (...), p1 AS (...), p2 AS (...), p3 AS (...)
+    INSERT INTO catalog SELECT c1, c2, CAST(c3 AS REAL), CAST(c4 AS INT) FROM p3",
+    will_continue_work=true)
+
+[Turn 5] Cross-reference + evolve—derive discrepancies with risk scores in one pass
+  sqlite_batch(sql="
+    -- Create derived table via CTE chain (join → classify → score)
+    CREATE TABLE discrepancies AS
+    WITH joined AS (
+      SELECT i.sku, i.qty as our_qty, COALESCE(c.stock, 0) as supplier_qty,
+             i.location, i.velocity, i.last_sold,
+             CASE WHEN c.sku IS NULL THEN 'MISSING'
+                  WHEN i.qty > COALESCE(c.stock, 0) THEN 'EXCEEDS'
+                  ELSE 'OK' END as issue
+      FROM inventory i LEFT JOIN catalog c ON TRIM(i.sku) = TRIM(c.sku)
+      WHERE c.sku IS NULL OR i.qty > COALESCE(c.stock, 0)
+    ),
+    scored AS (  -- map: raw discrepancy → risk assessment
+      SELECT *,
+        CASE WHEN velocity > 30 THEN 'critical'
+             WHEN velocity > 10 THEN 'high'
+             WHEN velocity > 3 THEN 'medium'
+             ELSE 'low' END as risk_level,
+        CAST(our_qty / NULLIF(velocity, 0) AS INT) as weeks_runway,
+        SUBSTR(sku, 1, INSTR(sku, '-')-1) as product_line  -- extract prefix for grouping
+      FROM joined
+    )
+    SELECT * FROM scored;
+
+    -- Create monitoring view for ongoing use
+    CREATE VIEW risk_summary AS
+    SELECT product_line, issue, risk_level, COUNT(*) as n, SUM(our_qty) as total_units
+    FROM discrepancies GROUP BY product_line, issue, risk_level;
+
+    SELECT issue, risk_level, COUNT(*) as n FROM discrepancies GROUP BY issue, risk_level ORDER BY risk_level", will_continue_work=true)
+
+[Turn 6] Set reasoning—precise logic about inventory state
+  sqlite_batch(sql="
+    -- Set difference: what's in our inventory but NOT in supplier catalog?
+    SELECT sku FROM inventory EXCEPT SELECT sku FROM catalog;
+    -- Set intersection: what do we BOTH have? (safe to reorder)
+    SELECT sku FROM inventory INTERSECT SELECT sku FROM catalog;
+    -- Logical implication check: IF high_velocity THEN should have safety_stock
+    SELECT sku FROM inventory WHERE velocity > 20 AND qty < 50;  -- violations
+    -- Dependency reasoning: which product_lines are entirely at risk?
+    SELECT product_line FROM discrepancies GROUP BY product_line
+    HAVING COUNT(*) = (SELECT COUNT(*) FROM inventory i2 WHERE SUBSTR(i2.sku,1,INSTR(i2.sku,'-')-1) = product_line)")
+  send_chat_message(body="## 📦 Inventory Health Check
+
+> **Scope**: Cross-referenced 847 SKUs against supplier catalog
+> **Result**: 97.6% aligned · 20 discrepancies need attention
+
+---
+
+### Summary
+
+```
+Aligned        ████████████████████████████████████████ 827 (97.6%)
+Missing        ████                                      12 (1.4%)
+Overstock      ██                                         8 (0.9%)
+```
+
+---
+
+### 🚨 Critical: Supplier No Longer Carries (12 SKUs)
+
+<details open>
+<summary><b>WDG-45xx Series</b> — Widget line, possibly discontinued</summary>
+
+| SKU | Stock | Location | Velocity | Risk |
+|-----|-------|----------|----------|------|
+| WDG-4521 | 234 | Warehouse B | 47/week | 🔴 **5 weeks runway** — bestseller |
+| WDG-4522 | 189 | Warehouse B | 31/week | 🔴 **6 weeks runway** |
+| WDG-4523 | 156 | Warehouse B | 28/week | 🟡 6 weeks |
+| WDG-4524 | 98 | Warehouse B | 12/week | 🟢 8 weeks |
+
+**Pattern**: Entire WDG-45xx line affected. Likely supplier discontinuation.
+
+**Recommended actions**:
+1. Contact supplier re: discontinuation timeline
+2. Source alternative supplier (see [approved vendors](${vendors_url}))
+3. Consider customer communication if substitutes unavailable
+
+</details>
+
+<details>
+<summary><b>Other Missing</b> — 4 additional SKUs (low risk)</summary>
+
+| SKU | Stock | Velocity | Notes |
+|-----|-------|----------|-------|
+| CMP-0892 | 45 | 2/week | 22 weeks runway, slow mover |
+| ACC-1122 | 23 | 1/week | Accessory, easy to substitute |
+| ... | | | |
+
+No immediate action needed.
+
+</details>
+
+---
+
+### ⚡ Overstock Risk: Our Stock > Supplier Capacity (8 SKUs)
+
+<details>
+<summary><b>MNT-22xx Series</b> — Monitor mounts</summary>
+
+| SKU | We Have | Supplier Has | Gap | Issue |
+|-----|---------|--------------|-----|-------|
+| MNT-2201 | 500 | 120 | -380 | Supplier on allocation |
+| MNT-2202 | 340 | 85 | -255 | Supplier on allocation |
+| MNT-2203 | 220 | 60 | -160 | |
+
+**What happened**: Supplier shifted production, now on allocation.
+
+**Recommended actions**:
+1. Pause reorders until Q2
+2. Monitor competitor pricing (they may face same constraint)
+3. Consider 5% price increase while supply tight
+
+</details>
+
+---
+
+### ✅ Healthy: 827 SKUs (97.6%)
+
+No action needed. Next recommended audit: 30 days.
+
+---
+
+*Generated from inventory sync · ${timestamp}*
+*Data: [Internal Inventory](${inv_url}) × [Supplier Catalog](${catalog_url})*")
+```
+
+`discrepancies` emerged from the JOIN of `inventory` and `catalog`. Neither table alone showed the risk—only their combination did. This is emergence: the whole reveals what the parts couldn't.
+
+### Pattern D: Text Scrape → Pattern Extraction
+
+```
+User: "Find contact emails from their team page"
+
+[Turn 1] Scrape
+  scrape_as_markdown(url="https://acme.io/team", will_continue_work=true)
+
+[Turn 2] Extract patterns with layered context strategies (single query)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field>
+  -- One query tries multiple extraction strategies; UNION ALL + GROUP BY dedupes
+  sqlite_batch(sql="
+    WITH
+    -- Strategy A: tight context (40 chars) with exact pattern
+    tight AS (
+      SELECT regexp_extract(ctx.value, '<pattern>') as match, ctx.value as context, 1 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern>', 40, 25), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context (80 chars) with looser pattern
+    medium AS (
+      SELECT regexp_extract(ctx.value, '<looser_pattern>') as match, ctx.value as context, 2 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<looser_pattern>', 80, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: wide context (120 chars) catching more surrounding text
+    wide AS (
+      SELECT regexp_extract(ctx.value, '<pattern>') as match, ctx.value as context, 3 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern>', 120, 15), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy D: section-based for structured documents
+    sections AS (
+      SELECT regexp_extract(sec.value, '<pattern>') as match, substr(sec.value, 1, 150) as context, 4 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) sec
+      WHERE result_id='<result_id_from_hint>' AND sec.value LIKE '%<keyword>%'
+    ),
+    -- ... add more strategies as needed: different delimiters, substr_range for positional, etc.
+    combined AS (
+      SELECT * FROM tight WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM medium WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM wide WHERE match IS NOT NULL
+      UNION ALL SELECT * FROM sections WHERE match IS NOT NULL
+      -- UNION ALL SELECT * FROM <more_strategies> ...
+    )
+    -- Dedupe: keep best (lowest priority = tightest) context per match
+    deduped AS (
+      SELECT LOWER(TRIM(match)) as match, context, MIN(priority) as strategy
+      FROM combined GROUP BY LOWER(TRIM(match))
+    )
+    SELECT * FROM deduped ORDER BY strategy, match;
+
+    -- Evolve: persist + classify in one pass
+    CREATE TABLE team_contacts AS
+    WITH extracted AS (SELECT * FROM (<previous_extraction_query>) sub),
+    classified AS (  -- map: context → role classification
+      SELECT match as email,
+        regexp_extract(context, '([A-Z][a-z]+ [A-Z][a-z]+)') as name,
+        CASE
+          WHEN context LIKE '%CEO%' OR context LIKE '%CTO%' OR context LIKE '%VP%' THEN 'leadership'
+          WHEN context LIKE '%Engineer%' OR context LIKE '%Developer%' THEN 'engineering'
+          WHEN context LIKE '%Sales%' OR context LIKE '%Account%' THEN 'sales'
+          WHEN context LIKE '%Design%' THEN 'design'
+          ELSE 'other'
+        END as department,
+        context, strategy
+      FROM extracted
+    )
+    SELECT * FROM classified;
+
+    SELECT department, COUNT(*) as n FROM team_contacts GROUP BY department ORDER BY n DESC",
+    will_continue_work=true)
+
+[Turn 3] Deliver—use evolved schema (team_contacts with name, department)
+  send_chat_message(body="## 👥 Acme Team Directory
+
+> Extracted **12 contacts** from [acme.io/team](${source_url})
+> Pattern: `firstname@acme.io` — likely applies to unlisted members too
+
+---
+
+### 🎯 Leadership
+
+<details open>
+<summary>Executive Team (4)</summary>
+
+| | Name | Role | Contact | Background |
+|-|------|------|---------|------------|
+| 👤 | **Jane Chen** | CEO & Co-founder | [jane@acme.io](mailto:jane@acme.io) | Ex-Stripe, Stanford CS |
+| 👤 | **Marcus Webb** | CTO | [marcus@acme.io](mailto:marcus@acme.io) | Ex-Google Brain, PhD MIT |
+| 👤 | **Priya Sharma** | VP Engineering | [priya@acme.io](mailto:priya@acme.io) | Ex-Meta, 15 YoE |
+| 👤 | **David Kim** | VP Sales | [david@acme.io](mailto:david@acme.io) | Ex-Salesforce |
+
+</details>
+
+### 🏢 Department Heads
+
+<details>
+<summary>Engineering & Product (4)</summary>
+
+| Name | Role | Focus Area |
+|------|------|------------|
+| Alex Rivera | Head of Platform | Infrastructure, DevOps |
+| Sam Okonkwo | Head of Design | Product design, UX research |
+| Lin Zhang | Head of ML | Model training, MLOps |
+| Jordan Lee | Head of Frontend | React, mobile |
+
+</details>
+
+<details>
+<summary>Go-to-Market (4)</summary>
+
+| Name | Role | Territory/Focus |
+|------|------|-----------------|
+| Maria Santos | Head of Marketing | Brand, content |
+| Chris Johnson | Enterprise Sales | Fortune 500 |
+| Aisha Patel | Customer Success | Retention, expansion |
+| Tom Wilson | Partnerships | Integrations, channels |
+
+</details>
+
+---
+
+### 📧 Email Pattern
+
+```
+Confirmed: firstname@acme.io
+Examples:  jane@acme.io, marcus@acme.io, priya@acme.io
+
+For unlisted team members, try:
+  → firstname@acme.io (most likely)
+  → firstname.lastname@acme.io (fallback)
+```
+
+---
+
+*Source: [acme.io/team](${source_url}) · Scraped ${date}*")
+```
+
+`grep_context_all` + `regexp_extract` turns messy text into queryable rows.
+
+### Pattern E: Paginated API → Accumulate → Threshold Check
+
+```
+User: "Get all open issues from the repo"
+
+[Turn 1] Fetch first page
+  http_request(url="https://api.github.com/repos/acme/app/issues?per_page=100", will_continue_work=true)
+
+[Turn 2] Store and check if more pages needed (with structure fallbacks)
+  -- Hint showed: result_id='<id>', PATH: $.<array> (N items), FIELDS: <id_field>, <title_field>, <date_field>
+  -- Use ACTUAL path/fields from hint. Cascade through common alternatives as fallback.
+  sqlite_batch(sql="
+    CREATE TABLE IF NOT EXISTS items (<id_field> INT PRIMARY KEY, <title_field> TEXT, <date_field> TEXT);
+    WITH parsed AS (
+      -- Primary path from hint; common alternatives as fallback
+      SELECT r.value as item FROM __tool_results,
+        json_each(COALESCE(
+          json_extract(result_json,'$.<array_from_hint>'),
+          json_extract(result_json,'$.items'),
+          json_extract(result_json,'$.results'),
+          CASE WHEN json_type(result_json)='array' THEN result_json ELSE NULL END,
+          '[]'
+        )) AS r
+      WHERE result_id='<result_id_from_hint>'
+    )
+    INSERT OR REPLACE INTO items
+    SELECT
+      -- ID field from hint; common alternatives
+      COALESCE(
+        CAST(json_extract(item,'$.<id_field>') AS INT),
+        CAST(json_extract(item,'$.id') AS INT),
+        CAST(json_extract(item,'$.number') AS INT)
+      ),
+      -- Title field from hint; common alternatives
+      COALESCE(
+        NULLIF(TRIM(json_extract(item,'$.<title_field>')), ''),
+        NULLIF(TRIM(json_extract(item,'$.title')), ''),
+        NULLIF(TRIM(json_extract(item,'$.name')), ''),
+        '(no title)'
+      ),
+      -- Date field from hint; common alternatives
+      COALESCE(
+        json_extract(item,'$.<date_field>'),
+        json_extract(item,'$.created_at'),
+        json_extract(item,'$.createdAt'),
+        json_extract(item,'$.date'),
+        ''
+      )
+    FROM parsed
+    WHERE json_extract(item,'$.<id_field>') IS NOT NULL
+       OR json_extract(item,'$.id') IS NOT NULL;
+    SELECT COUNT(*) as fetched FROM items", will_continue_work=true)
+  -- Returns: fetched=100 (hit limit, need page 2)
+
+[Turn 3] Fetch page 2
+  http_request(url="...?per_page=100&page=2", will_continue_work=true)
+
+[Turn 4] Accumulate—each page adds to the tape; check if more to fetch
+  -- Hint showed: result_id='gh-2', PATH: $.content (47 items)
+  sqlite_batch(sql="INSERT OR REPLACE INTO issues ...WHERE result_id='gh-2';
+    SELECT COUNT(*) FROM issues", will_continue_work=true)
+  -- Returns: 147 total (page had <100, done fetching)
+  -- The tape now holds all items. Patterns can emerge that weren't visible in any single page.
+
+[Turn 5] Evolve schema—now that we have the full picture, derive what it reveals
+  sqlite_batch(sql="
+    -- Evolve: add computed columns for analysis
+    ALTER TABLE items ADD COLUMN age_days INT;
+    ALTER TABLE items ADD COLUMN priority TEXT;
+    ALTER TABLE items ADD COLUMN category TEXT;
+
+    -- Map: raw fields → derived analytics (functional transformation)
+    UPDATE items SET
+      age_days = CAST((julianday('now') - julianday(<date_field>)) AS INT),
+      priority = CASE
+        WHEN <title_field> LIKE '%critical%' OR <title_field> LIKE '%urgent%' THEN 'critical'
+        WHEN age_days > 30 THEN 'aging'
+        ELSE 'normal'
+      END,
+      category = CASE
+        WHEN <title_field> LIKE '%bug%' OR <title_field> LIKE '%fix%' THEN 'bug'
+        WHEN <title_field> LIKE '%feat%' OR <title_field> LIKE '%add%' THEN 'enhancement'
+        WHEN <title_field> LIKE '%doc%' THEN 'documentation'
+        ELSE 'other'
+      END;
+
+    -- Statistical reasoning: percentiles, outlier detection
+    CREATE VIEW issue_stats AS
+    WITH ranked AS (
+      SELECT *,
+        PERCENT_RANK() OVER (ORDER BY age_days) as age_percentile,
+        (SELECT AVG(age_days) FROM items) as mean_age,
+        (SELECT AVG(age_days * age_days) - AVG(age_days) * AVG(age_days) FROM items) as variance
+      FROM items
+    )
+    SELECT *,
+      CASE WHEN age_days > mean_age + 2 * SQRT(variance) THEN 'outlier' ELSE 'normal' END as age_status,
+      CASE WHEN age_percentile > 0.9 THEN 'top_decile' ELSE NULL END as attention
+    FROM ranked;
+
+    -- Derive: category health + find statistical outliers
+    SELECT category, COUNT(*) as n, ROUND(AVG(age_days),1) as avg_age,
+           SUM(CASE WHEN age_status='outlier' THEN 1 ELSE 0 END) as outliers
+    FROM issue_stats GROUP BY category ORDER BY outliers DESC",
+    will_continue_work=true)
+
+[Turn 6] Analyze—use statistical view for precise reasoning
+  sqlite_batch(sql="
+    -- What categories have outlier issues? (ages > 2 std dev from mean)
+    SELECT category, <id_field>, age_days, age_percentile FROM issue_stats
+    WHERE age_status='outlier' ORDER BY age_days DESC;
+    -- Are all critical issues being addressed? (logic: critical → assigned)
+    SELECT * FROM items WHERE priority='critical' AND assignee IS NULL")
+  send_chat_message(body="## 🎫 acme/app Issue Tracker
+
+> **147 open issues** fetched via GitHub API
+> **Health**: ⚠️ Bug backlog growing — needs attention
+
+---
+
+### 📊 Distribution
+
+```
+bug           ██████████████████████████████████ 34  (23%)
+enhancement   ████████████████████████████       28  (19%)
+documentation ███████████████████                19  (13%)
+tech-debt     ███████████████                    15  (10%)
+help-wanted   ████████████                       12  (8%)
+other         ███████████████████████████████████████  39  (27%)
+              ─────────────────────────────────────────
+              Total: 147 open issues
+```
+
+---
+
+### 🔥 Hotspots
+
+<details open>
+<summary><b>Bugs</b> — 34 open, ▲8 this week</summary>
+
+#### Critical (3)
+| # | Title | Age | Assignee |
+|---|-------|-----|----------|
+| [#142](${repo_url}/issues/142) | Auth token refresh race condition | 2d | @marcus |
+| [#139](${repo_url}/issues/139) | Memory leak in WebSocket handler | 5d | — |
+| [#134](${repo_url}/issues/134) | Data corruption on concurrent writes | 8d | @priya |
+
+#### Aging (needs triage)
+| # | Title | Age | Last Activity |
+|---|-------|-----|---------------|
+| [#89](${repo_url}/issues/89) | Async race condition in queue processor | **47d** | 21d ago |
+| [#76](${repo_url}/issues/76) | Intermittent 500s on /api/export | **52d** | 30d ago |
+
+> ⚠️ Issues over 30 days old without activity should be triaged or closed.
+
+</details>
+
+<details>
+<summary><b>Tech Debt</b> — 15 open, ▲5 this week</summary>
+
+| # | Title | Blocked By |
+|---|-------|------------|
+| [#138](${repo_url}/issues/138) | Migrate to new auth library | — |
+| [#131](${repo_url}/issues/131) | Remove deprecated API endpoints | [#138](${repo_url}/issues/138) |
+| [#127](${repo_url}/issues/127) | Upgrade React to v19 | — |
+
+**Pattern**: Auth migration blocking 3 downstream issues. Prioritize [#138](${repo_url}/issues/138).
+
+</details>
+
+<details>
+<summary><b>Community</b> — 12 help-wanted</summary>
+
+Good first issues for contributors:
+
+| # | Title | Difficulty |
+|---|-------|------------|
+| [#136](${repo_url}/issues/136) | Add dark mode toggle | 🟢 Easy |
+| [#125](${repo_url}/issues/125) | Improve error messages | 🟢 Easy |
+| [#118](${repo_url}/issues/118) | Add CSV export option | 🟡 Medium |
+
+</details>
+
+---
+
+### 💡 Recommendations
+
+1. **Triage aging bugs** — 5 issues over 30 days, 2 over 50 days
+2. **Unblock auth migration** — [#138](${repo_url}/issues/138) is blocking 3 issues
+3. **Clear help-wanted** — 12 good-first-issues ready for contributors
+
+---
+
+*Source: [GitHub API](${repo_url}) · [View all issues](${repo_url}/issues) · Fetched ${timestamp}*")
+```
+
+Row count vs page size determines if more fetching is needed.
+
+### Hint → Query Quick Reference
+
+| Hint Shows | Your Query Uses |
+|------------|-----------------|
+| `result_id='<actual_id>'` | `WHERE result_id='<actual_id>'` — copy exactly |
+| `→ PATH: $.<path> (N items)` | `json_each(result_json,'$.<path>')` — use the actual path |
+| `→ FIELDS: <f1>, <f2>, <f3>` | `json_extract(r.value,'$.<f1>')` — use actual field names |
+| `→ QUERY: SELECT...` | Start with this suggested query, add defensive wrappers |
+| `SKELETON: $.<path>[0].{a,b,c}` | `json_extract(r.value,'$.a')` — these are the real short names |
+| `excerpt in $.excerpt` | `json_extract(result_json,'$.excerpt')` |
+
+**Key point**: `<angle_bracket>` values in examples are placeholders. Replace with ACTUAL values from hint metadata, existing tables, or schema you created.
+
+**Defensive patterns**:
+| Problem | Solution |
+|---------|----------|
+| Field might be null | `COALESCE(json_extract(...), 'default')` |
+| String has whitespace | `TRIM(json_extract(...))` |
+| Empty string should be null | `NULLIF(TRIM(x), '')` |
+| Need integer from string | `CAST(json_extract(...) AS INT)` |
+| `grep_context_all` returns null | `COALESCE(grep_context_all(...), '[]')` |
+| Skip rows with null key | `WHERE <field> IS NOT NULL OR <alt_field> IS NOT NULL` |
+| Structure varies | `json_each(COALESCE($.<primary>, $.items, $.results, '[]'))` |
+| Field name varies | `COALESCE(NULLIF($.<primary>,''), NULLIF($.title,''), ...)` |
+
+**Schema evolution** (map one shape → another):
+| Goal | Pattern |
+|------|---------|
+| Persist + derive | `CREATE TABLE t AS WITH raw AS (...), mapped AS (...), classified AS (...) SELECT * FROM classified` |
+| Add column later | `ALTER TABLE t ADD COLUMN <col> <type>; UPDATE t SET <col> = <expr>` |
+| Batch transform | `WITH src AS (SELECT ...) UPDATE t SET x=(SELECT expr FROM src WHERE src.id=t.id)` |
+| Classify via CASE | `CASE WHEN x LIKE '%pat%' THEN 'a' WHEN y > 100 THEN 'b' ELSE 'c' END` |
+| Create view | `CREATE VIEW v AS SELECT <agg>, <group> FROM t GROUP BY <group>` |
+| Normalize text→struct | `regexp_extract(col, '<pattern>') as field` in CTE, then UPDATE from CTE |
+
+CTEs are function composition. Chain them (FROM name must match WITH exactly): `WITH raw AS (...), mapped AS (SELECT ... FROM raw), filtered AS (SELECT ... FROM mapped WHERE ...), reduced AS (SELECT ..., COUNT(*) FROM filtered GROUP BY ...) SELECT * FROM reduced`
+
+**Emergence patterns** (let the data guide you):
+| Moment | What to do |
+|--------|------------|
+| Initial extraction reveals clusters | Add a classification column, GROUP BY it |
+| One category dominates | Drill into it: `WHERE category = (SELECT ... ORDER BY COUNT(*) DESC LIMIT 1)` |
+| Unexpected field appears in many rows | ALTER TABLE to capture it, UPDATE to extract it |
+| Two tables share a key | JOIN them—the combination reveals what neither showed alone |
+| Pattern repeats across sources | CREATE VIEW to make it queryable everywhere |
+
+The best insights weren't planned—they emerged from traces left by earlier queries. Each turn's output is the next turn's input. The tape evolves; so does your understanding.
+
+**Logic & reasoning** (let SQL do the hard thinking):
+| Goal | Pattern |
+|------|---------|
+| Set difference (A not in B) | `SELECT * FROM a WHERE id NOT IN (SELECT id FROM b)` or `EXCEPT` |
+| Set intersection | `SELECT * FROM a INTERSECT SELECT * FROM b` |
+| Find contradictions | `SELECT * FROM claims c1 JOIN claims c2 ON c1.subject=c2.subject WHERE c1.value != c2.value` |
+| If X implies Y | `SELECT * FROM facts WHERE condition_x AND NOT condition_y` (violations) |
+| Percentile/rank | `SELECT *, PERCENT_RANK() OVER (ORDER BY metric) as pct FROM t` |
+| Statistical outliers | `WHERE ABS(val - (SELECT AVG(val) FROM t)) > 2 * SQRT((SELECT AVG(val*val)-AVG(val)*AVG(val) FROM t))` |
+| All X have property Y? | `SELECT NOT EXISTS (SELECT 1 FROM x WHERE NOT has_property_y)` |
+
+**Recursive patterns** (WITH RECURSIVE for graph/tree logic, NOT for parsing messy text):
+| Goal | Pattern |
+|------|---------|
+| Transitive closure | `WITH RECURSIVE tc(x,y) AS (SELECT a,b FROM edges UNION SELECT tc.x,e.b FROM tc JOIN edges e ON tc.y=e.a) SELECT * FROM tc` |
+| All descendants | `WITH RECURSIVE down AS (SELECT * FROM t WHERE id=:root UNION ALL SELECT t.* FROM t JOIN down d ON t.parent=d.id) SELECT * FROM down` |
+| All ancestors | `WITH RECURSIVE up AS (SELECT * FROM t WHERE id=:start UNION ALL SELECT t.* FROM t JOIN up ON t.id=up.parent) SELECT * FROM up` |
+| Generate date/number range | `WITH RECURSIVE rng(d) AS (SELECT :start UNION ALL SELECT d+1 FROM rng WHERE d<:end) SELECT * FROM rng` |
+| Hierarchical sum (rollup) | `WITH RECURSIVE roll AS (SELECT id,parent,val FROM t UNION ALL SELECT r.id,t.parent,r.val FROM roll r JOIN t ON r.parent=t.id) SELECT id,SUM(val) FROM roll GROUP BY id` |
+| Find all paths A→B | `WITH RECURSIVE paths(node,path) AS (SELECT :start,:start UNION ALL SELECT e.dst,path\\|\\|'→'\\|\\|e.dst FROM paths JOIN edges e ON node=e.src WHERE path NOT LIKE '%'\\|\\|e.dst\\|\\|'%') SELECT path FROM paths WHERE node=:end` |
+| Detect cycles | `WITH RECURSIVE walk(node,path,cycle) AS (...WHERE path LIKE '%'||node||'%'...) SELECT * FROM walk WHERE cycle=1` |
+
+---
+
+**Advanced SQLite mini-programs** (verified examples—study these):
+
+1. **All paths with costs (cycle-safe)**
+   ```
+   routes: (A→B,5), (B→C,3), (C→D,2), (A→C,10), (B→D,8)
+
+   WITH RECURSIVE paths(node, path, total) AS (
+       SELECT 'A', 'A', 0
+       UNION ALL
+       SELECT r.dst, path||'→'||r.dst, total+r.cost
+       FROM paths p JOIN routes r ON p.node=r.src
+       WHERE path NOT LIKE '%'||r.dst||'%'
+   )
+   SELECT path, total FROM paths WHERE node='D' ORDER BY total
+
+   → ('A→B→C→D', 10), ('A→C→D', 12), ('A→B→D', 13)
+   ```
+
+2. **Full outer join** (SQLite lacks FULL OUTER—use UNION)
+   ```
+   jan: (Widget,100),(Gadget,80)  |  feb: (Gadget,90),(Gizmo,50)
+
+   SELECT COALESCE(j.product, f.product), j.sales, f.sales
+   FROM jan j LEFT JOIN feb f ON j.product=f.product
+   UNION
+   SELECT COALESCE(j.product, f.product), j.sales, f.sales
+   FROM feb f LEFT JOIN jan j ON f.product=j.product
+
+   → (Gadget,80,90), (Gizmo,NULL,50), (Widget,100,NULL)
+   ```
+
+3. **Gap-fill sparse time series**
+   ```
+   readings: (day=1,10), (day=3,15), (day=6,12)
+
+   WITH RECURSIVE days(d) AS (SELECT 1 UNION ALL SELECT d+1 FROM days WHERE d<7)
+   SELECT d.d, COALESCE(r.val, LAG(r.val) OVER (ORDER BY d.d), 0)
+   FROM days d LEFT JOIN readings r ON d.d=r.day
+
+   → 1:10, 2:10, 3:15, 4:15, 5:0, 6:12, 7:12
+   ```
+
+4. **JSON array → aggregation**
+   ```
+   orders: (1,'["apple","banana"]'), (2,'["apple","cherry"]')
+
+   SELECT j.value, COUNT(*) FROM orders, json_each(orders.items) j GROUP BY j.value
+
+   → (apple,2), (banana,1), (cherry,1)
+   ```
+
+5. **Hierarchical rollup** (each node = own + all descendants)
+   ```
+   org: CEO(100)→CTO(80)→Eng1(50),Eng2(45)  CEO→CFO(70)→Acct1(40)
+
+   WITH RECURSIVE descendants AS (
+       SELECT id as ancestor, id as descendant, budget FROM org
+       UNION ALL
+       SELECT d.ancestor, o.id, o.budget FROM descendants d JOIN org o ON o.parent=d.descendant
+   )
+   SELECT ancestor, SUM(budget) FROM descendants GROUP BY ancestor ORDER BY 2 DESC
+
+   → CEO:385, CTO:175, CFO:110, Eng1:50, Eng2:45, Acct1:40
+   ```
+
+6. **Universal quantification** ("all X have Y")
+   ```
+   students: Alice,Bob,Carol  |  required: Math,English,Science
+   completed: Alice(all 3), Bob(Math,English), Carol(Math only)
+
+   SELECT s.name FROM students s WHERE NOT EXISTS (
+       SELECT 1 FROM required r WHERE NOT EXISTS (
+           SELECT 1 FROM completed c WHERE c.student_id=s.id AND c.course=r.course
+       )
+   )
+
+   → Alice  (only one who completed ALL required)
+   ```
+
+---
+
+### Pattern F: Large Messy Text → Contextual Extraction → Structured Insights
+
+When dealing with big scraped pages (10k+ chars), don't dump everything—extract *context windows* around what matters.
+
+```
+User: "What pricing tiers does this company offer?"
+
+[Turn 1] Scrape
+  scrape_as_markdown(url="https://bigcorp.com/pricing", will_continue_work=true)
+
+[Turn 2] Extract with layered strategies (single query, multiple approaches)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- One query cascades through context sizes and pattern variations
+  sqlite_batch(sql="
+    WITH
+    -- Strategy A: tight context around exact pattern
+    tight AS (
+      SELECT regexp_extract(ctx.value, '<exact_pattern>') as val, ctx.value as context, 1 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<exact_pattern>', 50, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context with pattern variations
+    medium AS (
+      SELECT regexp_extract(ctx.value, '<pattern_variant>') as val, ctx.value as context, 2 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<pattern_variant>', 80, 15), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: wide context for sparse documents
+    wide AS (
+      SELECT regexp_extract(ctx.value, '<exact_pattern>') as val, ctx.value as context, 3 as priority
+      FROM __tool_results, json_each(COALESCE(
+        grep_context_all(json_extract(result_json,'$.<text_field>'), '<exact_pattern>', 120, 10), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy D: line-by-line for tabular/list data
+    lines AS (
+      SELECT regexp_extract(ln.value, '<exact_pattern>') as val, ln.value as context, 4 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n'), '[]')) ln
+      WHERE result_id='<result_id_from_hint>' AND ln.value LIKE '%<keyword>%'
+    ),
+    -- Strategy E: paragraph-level for prose
+    paragraphs AS (
+      SELECT regexp_extract(p.value, '<exact_pattern>') as val, substr(p.value, 1, 200) as context, 5 as priority
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) p
+      WHERE result_id='<result_id_from_hint>' AND p.value LIKE '%<keyword>%'
+    ),
+    -- ... Strategy F, G, H: positional chunks, heading-based, table row extraction, etc.
+    combined AS (
+      SELECT * FROM tight WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM medium WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM wide WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM lines WHERE val IS NOT NULL AND val != ''
+      UNION ALL SELECT * FROM paragraphs WHERE val IS NOT NULL AND val != ''
+      -- UNION ALL ... more strategies as data requires
+    )
+    SELECT val, context, MIN(priority) as best_strategy
+    FROM combined
+    GROUP BY LOWER(TRIM(val))
+    ORDER BY best_strategy", will_continue_work=true)
+
+  -- Returns context windows like:
+  -- "...Starter Plan $49/month Perfect for small teams up to 5 users. Includes..."
+  -- "...Professional $199/month Unlimited users, priority support, API access..."
+
+[Turn 3] Analyze contexts to extract tier names (LLM reads context, infers structure)
+  sqlite_batch(sql="
+    UPDATE pricing_contexts SET tier =
+      CASE WHEN LOWER(context) LIKE '%starter%' OR LOWER(context) LIKE '%basic%' THEN 'Starter'
+           WHEN LOWER(context) LIKE '%professional%' OR LOWER(context) LIKE '%pro %' THEN 'Professional'
+           WHEN LOWER(context) LIKE '%enterprise%' OR LOWER(context) LIKE '%business%' THEN 'Enterprise'
+           ELSE 'Other' END;
+    SELECT tier, price, COALESCE(substr(context, 1, 100), '') as snippet
+    FROM pricing_contexts
+    WHERE price IS NOT NULL AND price != ''
+    ORDER BY COALESCE(CAST(REPLACE(REPLACE(price, '$', ''), ',', '') AS REAL), 0)", will_continue_work=true)
+
+[Turn 4] Deliver structured findings—tiers, prices, features from pricing_contexts
+  send_chat_message(body="## 💰 BigCorp Pricing Analysis
+
+> Extracted from [bigcorp.com/pricing](${source_url})
+> **Model**: Usage-based with tier floors · **Discount**: Annual = 2 months free
+
+---
+
+### Plans at a Glance
+
+```
+                    Starter    Pro        Enterprise
+                    ─────────  ─────────  ───────────
+Monthly price       $49        $199       Custom
+Annual price        $490       $1,990     Negotiated
+                    (save $98) (save $398)
+
+Users               5          Unlimited  Unlimited
+API access          ❌         ✅         ✅
+SSO/SAML            ❌         ❌         ✅
+SLA                 —          99.9%      99.99%
+Support             Email      Priority   Dedicated CSM
+```
+
+---
+
+### 📋 Detailed Breakdown
+
+<details open>
+<summary><b>Starter</b> — $49/month</summary>
+
+**Best for**: Small teams getting started
+
+| Feature | Included |
+|---------|----------|
+| Users | Up to 5 |
+| Projects | 10 |
+| Storage | 10 GB |
+| API access | ❌ |
+| Integrations | Slack, GitHub |
+
+**Limitations**:
+- No API access (deal-breaker for automation)
+- No audit logs
+- Community support only
+
+</details>
+
+<details>
+<summary><b>Professional</b> — $199/month</summary>
+
+**Best for**: Growing teams with technical needs
+
+| Feature | Included |
+|---------|----------|
+| Users | Unlimited |
+| Projects | Unlimited |
+| Storage | 100 GB |
+| API access | ✅ 10k calls/mo |
+| Integrations | All + Webhooks |
+
+**Notable**:
+- API included (10k calls/month, then $0.001/call)
+- Priority support (4hr response SLA)
+- 99.9% uptime SLA
+
+</details>
+
+<details>
+<summary><b>Enterprise</b> — Custom pricing</summary>
+
+**Best for**: Compliance-heavy orgs, 100+ users
+
+| Feature | Included |
+|---------|----------|
+| Everything in Pro | ✅ |
+| SSO/SAML | ✅ |
+| Audit logs | ✅ (1 year retention) |
+| Custom contracts | ✅ |
+| Dedicated CSM | ✅ |
+
+**Typical pricing**: $15-25/user/month (volume discounts)
+
+</details>
+
+---
+
+### 💡 Recommendation
+
+> **For most teams**: Start with **Pro** ($199/mo)
+> - API access unlocks automation
+> - Unlimited users future-proofs growth
+> - Annual billing saves $398/year
+
+---
+
+*Scraped from [bigcorp.com/pricing](${source_url}) · ${date}*")
+```
+
+The key: `grep_context_all` gives you 80-char windows around each `$` sign—enough context for pattern matching and human understanding, without overwhelming.
+
+### Pattern G: Deep Page Analysis → Multi-Pass Extraction
+
+For complex pages, extract different patterns in passes, building up structured data.
+
+```
+User: "Extract all the key facts from this company's about page"
+
+[Turn 1] Scrape the page
+  scrape_as_markdown(url="https://bigstartup.io/about", will_continue_work=true)
+
+[Turn 2] Extract structure + content in single pass (adaptive sectioning)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- One query: try multiple section delimiters, extract patterns from each
+  sqlite_batch(sql="
+    WITH
+    -- Try markdown heading delimiter first
+    by_headings AS (
+      SELECT regexp_extract(s.value, '^#+\\s*(.+)', 1) as heading,
+             s.value as content, 1 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n## '), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND TRIM(s.value) != ''
+    ),
+    -- Fallback: double-newline paragraphs
+    by_paragraphs AS (
+      SELECT regexp_extract(s.value, '^[A-Z][^.!?]*') as heading,
+             s.value as content, 2 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND TRIM(s.value) != ''
+        AND NOT EXISTS (SELECT 1 FROM by_headings)
+    ),
+    -- Fallback: single-newline for dense text
+    by_lines AS (
+      SELECT NULL as heading, s.value as content, 3 as section_strategy
+      FROM __tool_results, json_each(COALESCE(
+        split_sections(json_extract(result_json,'$.<text_field>'), '\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>' AND LENGTH(TRIM(s.value)) > 20
+        AND NOT EXISTS (SELECT 1 FROM by_headings)
+        AND NOT EXISTS (SELECT 1 FROM by_paragraphs WHERE LENGTH(content) > 100)
+    ),
+    -- ... more delimiters: <hr>, <br>, bullet points, numbered lists, etc.
+    all_sections AS (
+      SELECT * FROM by_headings
+      UNION ALL SELECT * FROM by_paragraphs
+      UNION ALL SELECT * FROM by_lines
+    ),
+    -- Now extract patterns from each section with multiple context sizes
+    extractions AS (
+      SELECT
+        COALESCE(heading, '(no heading)') as section,
+        regexp_extract(ctx.value, '<pattern>') as extracted,
+        ctx.value as context,
+        section_strategy,
+        CASE WHEN LENGTH(ctx.value) <= 60 THEN 1
+             WHEN LENGTH(ctx.value) <= 100 THEN 2
+             ELSE 3 END as context_quality
+      FROM all_sections, json_each(COALESCE(
+        grep_context_all(content, '<pattern>', 80, 10), '[]')) ctx
+      WHERE content LIKE '%<keyword>%'
+    )
+    SELECT section, extracted, context, MIN(section_strategy + context_quality) as quality
+    FROM extractions
+    WHERE extracted IS NOT NULL
+    GROUP BY LOWER(TRIM(extracted))
+    ORDER BY quality", will_continue_work=true)
+
+[Turn 3] Synthesize—LLM reads the goldilocks context, extracts the meaning
+  send_chat_message(body="## 🏢 BigStartup Company Profile
+
+> Compiled from [bigstartup.io/about](${source_url})
+> **TL;DR**: Series C startup, 2.3M users, 850 employees, 180% growth
+
+---
+
+### 📈 By the Numbers
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                                                          │
+│   2.3M          40           850          $120M          │
+│   users      countries    employees    Series C          │
+│                                                          │
+│   ████████████████████████████████████████████████████   │
+│   Founded 2019    ━━━━━━━━━━━━━━━━━━━━━━━━━━━>  Today    │
+│                   ↑              ↑            ↑          │
+│               Seed ($4M)    Series A     Series C        │
+│                              ($18M)       ($120M)        │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🚀 Growth Story
+
+<details open>
+<summary><b>The Trajectory</b></summary>
+
+| Year | Milestone | Users | Employees |
+|------|-----------|-------|-----------|
+| 2019 | Founded (YC W19) | — | 3 |
+| 2020 | Seed round ($4M) | 12k | 15 |
+| 2021 | Series A ($18M) | 180k | 85 |
+| 2022 | International expansion | 800k | 320 |
+| 2023 | Series C ($120M) | 2.3M | 850 |
+
+**Growth rate**: 180% YoY (user growth)
+**Burn multiple**: 1.2x (efficient for stage)
+
+</details>
+
+---
+
+### 🌍 Presence
+
+<details>
+<summary><b>Global Footprint</b></summary>
+
+| Region | Countries | % Users | Office |
+|--------|-----------|---------|--------|
+| North America | 2 | 45% | SF (HQ), NYC |
+| Europe | 18 | 35% | London, Berlin |
+| APAC | 12 | 15% | Singapore |
+| LATAM | 8 | 5% | São Paulo |
+
+**Languages**: EN, DE, FR, ES, PT, JA, ZH
+
+</details>
+
+---
+
+### 👥 Leadership
+
+<details>
+<summary><b>Executive Team</b></summary>
+
+| Name | Role | Background |
+|------|------|------------|
+| Sarah Chen | CEO | Ex-Stripe, Stanford CS |
+| Mike Patel | CTO | Ex-Google, MIT PhD |
+| Lisa Wang | CFO | Ex-Goldman, Wharton MBA |
+| ... | | |
+
+→ Full team: [bigstartup.io/team](${team_url})
+
+</details>
+
+---
+
+### 💡 What They Actually Do
+
+> *\"We're building the operating system for [industry].\"*
+
+**Product**: SaaS platform for [specific use case]
+**Customers**: Mid-market and enterprise (avg deal: $48k ACV)
+**Moat**: Network effects + proprietary data
+
+---
+
+*Source: [bigstartup.io/about](${source_url}) · Extracted ${date}*")
+```
+
+`split_sections` breaks the page into manageable chunks; `grep_context_all` finds metrics within each.
+
+### Pattern H: Iterative Refinement → Let Findings Guide You
+
+The classic emergence pattern: cast a wide net, see what surfaces, follow the interesting threads. You don't know what you'll find until you look. The first query leaves traces; the second query notices patterns in those traces; the third follows them. This is how insights *bloom*.
+
+```
+User: "Analyze their job postings to understand tech stack"
+
+[Turn 1] Scrape careers page
+  scrape_as_markdown(url="https://company.io/careers", will_continue_work=true)
+
+[Turn 2] First pass: find keyword mentions with context (one big adaptive query)
+  -- Hint showed: result_id='<id>', excerpt in $.<text_field> (N chars)
+  -- Use ACTUAL result_id and text path from hint
+  sqlite_batch(sql="
+    CREATE TABLE mentions (id INTEGER PRIMARY KEY, keyword TEXT, context TEXT, strategy INT);
+
+    WITH
+    -- Strategy A: tight context (60 chars) - precise snippets
+    tight AS (
+      SELECT LOWER(TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|<keyword3>|...)', 1))) as kw,
+             COALESCE(TRIM(ctx.value), '') as ctx, 1 as priority
+      FROM __tool_results,
+           json_each(COALESCE(grep_context_all(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'),
+                      json_extract(result_json,'$.text'), ''),
+             '<keyword1>|<keyword2>|<keyword3>|...', 60, 30), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy B: medium context (100 chars) - more surrounding text
+    medium AS (
+      SELECT LOWER(TRIM(regexp_extract(ctx.value, '(<keyword1>|<keyword2>|...)', 1))) as kw,
+             COALESCE(TRIM(ctx.value), '') as ctx, 2 as priority
+      FROM __tool_results,
+           json_each(COALESCE(grep_context_all(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'), ''),
+             '<keyword1>|<keyword2>|...', 100, 20), '[]')) ctx
+      WHERE result_id='<result_id_from_hint>'
+    ),
+    -- Strategy C: section-based (job listings often have sections)
+    by_section AS (
+      SELECT LOWER(TRIM(regexp_extract(s.value, '(<keyword1>|<keyword2>|...)', 1))) as kw,
+             SUBSTR(COALESCE(TRIM(s.value), ''), 1, 150) as ctx, 3 as priority
+      FROM __tool_results,
+           json_each(COALESCE(split_sections(
+             COALESCE(json_extract(result_json,'$.<text_field>'),
+                      json_extract(result_json,'$.content'), ''), '\n\n'), '[]')) s
+      WHERE result_id='<result_id_from_hint>'
+        AND (s.value LIKE '%<keyword1>%' OR s.value LIKE '%<keyword2>%')
+    ),
+    -- ... add more: by_bullets, by_headings, wider context, case variations ...
+    combined AS (
+      SELECT * FROM tight WHERE kw IS NOT NULL AND kw != ''
+      UNION ALL SELECT * FROM medium WHERE kw IS NOT NULL AND kw != ''
+      UNION ALL SELECT * FROM by_section WHERE kw IS NOT NULL AND kw != ''
+      -- UNION ALL SELECT * FROM <more_strategies> ...
+    )
+    INSERT INTO mentions (keyword, context, strategy)
+    SELECT kw, ctx, MIN(priority) FROM combined GROUP BY kw, ctx ORDER BY priority;
+
+    SELECT keyword, COUNT(*) as n, MIN(strategy) as best_strat
+    FROM mentions WHERE keyword IS NOT NULL GROUP BY keyword ORDER BY n DESC",
+    will_continue_work=true)
+
+  -- Returns: Python|8|1, Kubernetes|6|1, React|5|2, PostgreSQL|4|1...
+
+[Turn 3] Evolve schema—classify keywords into stack layers (functional: keyword → category)
+  sqlite_batch(sql="
+    -- Evolve: add classification columns based on domain knowledge
+    ALTER TABLE mentions ADD COLUMN layer TEXT;
+    ALTER TABLE mentions ADD COLUMN role_signal TEXT;
+
+    -- Map: keyword → layer classification (pattern matching via CASE)
+    UPDATE mentions SET
+      layer = CASE
+        WHEN keyword IN ('react','typescript','vue','angular','next.js','tailwind') THEN 'frontend'
+        WHEN keyword IN ('python','fastapi','go','rust','node','java','spring') THEN 'backend'
+        WHEN keyword IN ('pytorch','tensorflow','ray','mlflow','huggingface') THEN 'ml'
+        WHEN keyword IN ('kubernetes','docker','terraform','aws','gcp','azure') THEN 'infra'
+        WHEN keyword IN ('postgresql','redis','mongodb','elasticsearch','kafka') THEN 'data'
+        ELSE 'other'
+      END,
+      role_signal = CASE
+        WHEN context LIKE '%senior%' OR context LIKE '%lead%' OR context LIKE '%staff%' THEN 'senior'
+        WHEN context LIKE '%intern%' OR context LIKE '%junior%' OR context LIKE '%entry%' THEN 'junior'
+        ELSE 'mid'
+      END
+    WHERE keyword IS NOT NULL;
+
+    -- Aggregate: what pattern emerged? Which layer dominates?
+    SELECT layer, COUNT(DISTINCT keyword) as tech_count, SUM((SELECT COUNT(*) FROM mentions m2 WHERE m2.keyword=mentions.keyword)) as total_mentions
+    FROM mentions WHERE layer != 'other' GROUP BY layer ORDER BY total_mentions DESC",
+    will_continue_work=true)
+
+  -- Emergence: Started with raw keywords. Now we see: "backend-heavy, ML-investing, scaling infra."
+  -- The structure wasn't in the data—it emerged from how we queried it.
+
+  -- Returns: backend|4|32, infra|3|24, frontend|2|17, ml|2|14...
+
+[Turn 4] Dependency reasoning—what tech requires what? (recursive CTE)
+  sqlite_batch(sql="
+    -- Build dependency graph from co-occurrence patterns
+    CREATE TABLE tech_deps AS
+    SELECT DISTINCT m1.keyword as tech, m2.keyword as requires
+    FROM mentions m1 JOIN mentions m2 ON m1.context = m2.context
+    WHERE m1.keyword != m2.keyword AND m1.layer IN ('backend','ml') AND m2.layer = 'infra';
+
+    -- Transitive closure: if A requires B and B requires C, then A requires C
+    WITH RECURSIVE all_deps AS (
+      SELECT tech, requires, 1 as depth FROM tech_deps
+      UNION
+      SELECT ad.tech, td.requires, ad.depth + 1
+      FROM all_deps ad JOIN tech_deps td ON ad.requires = td.tech
+      WHERE ad.depth < 5
+    )
+    SELECT tech, GROUP_CONCAT(DISTINCT requires) as full_dependency_chain
+    FROM all_deps GROUP BY tech;
+
+    -- Logical query: which infra is required by ALL ml tools? (universal quantification)
+    SELECT requires FROM tech_deps WHERE tech IN (SELECT keyword FROM mentions WHERE layer='ml')
+    GROUP BY requires HAVING COUNT(DISTINCT tech) = (SELECT COUNT(DISTINCT keyword) FROM mentions WHERE layer='ml')",
+    will_continue_work=true)
+
+[Turn 5] Drill deeper on top layer with evolved schema
+  sqlite_batch(sql="
+    SELECT keyword, layer, COUNT(*) as n, GROUP_CONCAT(DISTINCT role_signal) as roles
+    FROM mentions WHERE layer=(SELECT layer FROM mentions GROUP BY layer ORDER BY COUNT(*) DESC LIMIT 1)
+    GROUP BY keyword ORDER BY n DESC",
+    will_continue_work=true)
+
+[Turn 6] Synthesize—use evolved schema (mentions with layer + role_signal + dependencies)
+  send_chat_message(body="## 🛠️ TechCorp Engineering Stack
+
+> Analyzed **23 job postings** from [company.io/careers](${source_url})
+> **Signal**: Heavy ML investment, scaling infrastructure team
+
+---
+
+### Stack Overview
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       FRONTEND                               │
+│   React ████████████  TypeScript ██████████  Next.js ████   │
+├─────────────────────────────────────────────────────────────┤
+│                       BACKEND                                │
+│   Python ████████████████  FastAPI ████████  Go ████        │
+├─────────────────────────────────────────────────────────────┤
+│                       DATA/ML                                │
+│   PyTorch ██████████  Ray ██████  Spark ████                │
+├─────────────────────────────────────────────────────────────┤
+│                    INFRASTRUCTURE                            │
+│   Kubernetes ████████████  AWS ██████████  Terraform ████   │
+├─────────────────────────────────────────────────────────────┤
+│                      STORAGE                                 │
+│   PostgreSQL ██████████  Redis ██████  S3 ████              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 🔥 Technology Heatmap
+
+| Technology | Mentions | Roles | Signal |
+|------------|----------|-------|--------|
+| Python | 18 | ML, Backend, Data | Core language |
+| Kubernetes | 14 | Infra, Platform, SRE | Heavy containerization |
+| React | 12 | Frontend, Full-stack | Standard frontend |
+| PostgreSQL | 9 | Backend, Data | Primary datastore |
+| PyTorch | 8 | ML, Research | ML-first culture |
+| Go | 4 | Infra, Performance | High-perf services |
+
+---
+
+### 🎯 Role Analysis
+
+<details open>
+<summary><b>ML Engineering</b> — 6 open roles (26% of postings)</summary>
+
+| Role | Level | Key Tech | Focus |
+|------|-------|----------|-------|
+| Sr. ML Engineer | L5 | PyTorch, Ray | Training infrastructure |
+| ML Platform Engineer | L5 | Kubernetes, MLflow | Model serving |
+| Research Engineer | L4 | PyTorch, JAX | Experimentation |
+| ... | | | |
+
+**Insight**: Building serious ML infra—not just using APIs.
+*\"...own the end-to-end ML lifecycle from training to production...\"*
+
+</details>
+
+<details>
+<summary><b>Infrastructure</b> — 5 open roles (22%)</summary>
+
+| Role | Level | Key Tech |
+|------|-------|----------|
+| Sr. Platform Engineer | L5 | Kubernetes, Terraform |
+| SRE | L4-L5 | AWS, Prometheus |
+| Database Engineer | L5 | PostgreSQL, Redis |
+
+**Insight**: Scaling challenges. Multiple mentions of \"10x growth\".
+
+</details>
+
+<details>
+<summary><b>Backend & Frontend</b> — 12 open roles (52%)</summary>
+
+Mostly Python/FastAPI backend, React/TypeScript frontend.
+Standard modern stack, nothing unusual.
+
+</details>
+
+---
+
+### 💡 Key Takeaways
+
+1. **ML-first**: 26% of roles are ML—not typical for non-AI companies
+2. **Scale mode**: Heavy Kubernetes investment, multiple SRE roles
+3. **Python shop**: Backend is Python/FastAPI, not Go/Rust
+4. **Standard frontend**: React/TypeScript, no exotic choices
+
+> **Culture signal**: They're building ML infrastructure in-house,
+> not just wrapping APIs. Expect hard distributed systems problems.
+
+---
+
+*Extracted from [company.io/careers](${source_url}) · ${date}*
+*See also: [Engineering blog](${blog_url})*")
+```
+
+First pass finds what's mentioned; second pass extracts *why* it matters from context.
+
+### Text Analysis Functions Reference
+
+| Function | Usage | Returns |
+|----------|-------|---------|
+| `grep_context_all(text, pattern, chars, max)` | Find pattern matches with surrounding context | JSON array for `json_each` |
+| `regexp_extract(text, pattern)` | Extract first regex match | String or NULL |
+| `regexp_extract(text, pattern, group)` | Extract capture group | String or NULL |
+| `regexp_find_all(text, pattern)` | Find all matches | `"match1\\|match2\\|..."` |
+| `split_sections(text, delim)` | Split by delimiter (default: `\n\n`) | JSON array for `json_each` |
+| `substr_range(text, start, end)` | Extract substring by position | String |
+| `char_count(text)` / `word_count(text)` | Count chars/words | Integer |
+
+The pattern: use `grep_context_all` to get *windows of context* around patterns, then `json_each` to iterate, then `regexp_extract` to pull specific values from each window.
+
+---
+
 ## The Reasoning Mindset
 
 Before every action, pause and ask: "What do I know, and what tool does that imply?"
@@ -746,6 +2489,8 @@ Example hint you might see:
 Use the QUERY as a starting point. Add or change fields based on what you need from FIELDS.
 The paths ($.content.hits) and fields ($.title, $.points) are specific to this result.
 Different tools return different structures—check the hint for each one.
+
+**Common mistakes**: Guessing `$.hits` when hint shows `$.content.hits`. Using `point` when you defined `points`. Referencing `hit` when your CTE is `hits`. Every name must trace to its source—copy, don't retype.
 ```
 
 **Note**: Documentation examples use placeholder paths like `$.items` or `$.excerpt`. Your actual hint will show the real paths for that result—use those instead.
@@ -867,42 +2612,42 @@ LIMIT 50
 - Built-in aggregates: AVG, SUM, COUNT, MIN, MAX, GROUP_CONCAT, ABS, ROUND, SQRT
 
 **Text analysis functions** (grep-like search for large text):
-- `regexp_find_all(col, 'pattern')` - find ALL matches → "match1|match2|..."
-- `grep_context(col, 'pattern', 60)` - first match + 60 chars of surrounding context
-- `grep_context_all(col, 'pattern', 40, 5)` - up to 5 matches, each with context
-- `regexp_extract(col, 'pattern')` - extract first match only
+- `grep_context_all(col, 'pattern', 80, 10)` - JSON array of context windows → use with `json_each()`
+- `grep_context(col, 'pattern', 60)` - first match + 60 chars context → string
+- `regexp_extract(col, 'pattern')` - extract first match → string
+- `regexp_extract(col, '(group)', 1)` - extract capture group → string
+- `regexp_find_all(col, 'pattern')` - all matches → "match1|match2|..."
+- `split_sections(col, '\n\n')` - split by delimiter → JSON array for `json_each()`
+- `substr_range(col, 0, 3000)` - extract by position → string
+- `word_count(col)` / `char_count(col)` - count words/chars → integer
 - `col REGEXP 'pattern'` - boolean match (1/0)
 
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
--- Find emails on a page
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}')
+-- Find emails with context (who is this email for?)
+SELECT regexp_extract(ctx.value, '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-z]+') as email,
+       ctx.value as context
+FROM __tool_results,
+     json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+       '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+', 60, 10)) AS ctx
+WHERE result_id='...'
+-- → jane@acme.io | "...CEO Jane Smith - jane@acme.io - leads the..."
+
+-- Find prices with context (what is each price for?)
+SELECT regexp_extract(ctx.value, '\\$[\\d,]+') as price, ctx.value as context
+FROM __tool_results,
+     json_each(grep_context_all(json_extract(result_json,'$.excerpt'),
+       '\\$[\\d,]+', 80, 10)) AS ctx
+WHERE result_id='...'
+-- → $299 | "...Pro Plan: $299/month - unlimited users, priority..."
+
+-- Quick list of all emails (no context needed)
+SELECT regexp_find_all(json_extract(result_json,'$.excerpt'),
+  '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-z]+')
 -- → "john@acme.com|sales@acme.com|support@acme.com"
-
--- Find phone numbers
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\(?\\d{3}\\)?[-.\\s]?\\d{3}[-.\\s]?\\d{4}')
--- → "555-123-4567|555.987.6543|(555) 111-2222"
-
--- Find prices with context (to understand what each price is for)
-SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\$[\\d,]+', 50, 5)
--- → "...Product A: $299.99 - Free shipping..."
--- → "...Was $499, now $349 (30% off)..."
-
--- Find all URLs
-SELECT regexp_find_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  'https?://[^\\s<>\"]+')
 ```
 
-**Always get context**: Use context-aware matches so each price has meaning.
-```sql
-SELECT grep_context_all(COALESCE(result_text, json_extract(result_json,'$.excerpt')),
-  '\\$\\d+', 40, 5)
--- → "...Basic plan: $99/month, Pro plan: $199/month..."
--- → "...shipping fee: $49 for orders under..."
-```
+**The key insight**: `grep_context_all` returns a JSON array you iterate with `json_each`. Each row is a context window—enough text for the LLM (or pattern matching) to understand *what* was found, not just *that* it was found.
 
 **UNION/UNION ALL alignment**: Keep column counts consistent; pad when needed.
 `SELECT 'header' as c1, '' as c2 UNION ALL SELECT col1, col2 FROM t`
@@ -1455,7 +3200,7 @@ def build_prompt_context(
     
     # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
-    
+
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
@@ -1468,7 +3213,18 @@ def build_prompt_context(
         proactive_context=proactive_context,
         implied_send_active=implied_send_active,
     )
-    
+
+    # ── Static ICL (first in prompt for caching, never shrinks) ─────────────
+    # This must be the FIRST group so it forms a stable prefix across requests.
+    # LLM prompt caching requires identical prefixes; dynamic content comes after.
+    static_icl_group = prompt.group("static_icl", weight=1)
+    static_icl_group.section_text(
+        "sqlite_examples",
+        _get_sqlite_examples(),
+        weight=1,
+        non_shrinkable=True,
+    )
+
     # Medium priority sections (weight=6) - important but can be shrunk if needed
     important_group = prompt.group("important", weight=6)
 
@@ -1708,13 +3464,7 @@ def build_prompt_context(
         weight=2,
         non_shrinkable=True,
     )
-    variable_group.section_text(
-        "sqlite_examples",
-        _get_sqlite_examples(),
-        weight=2,
-        non_shrinkable=True
-    )
-    
+
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
 

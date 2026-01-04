@@ -1559,3 +1559,162 @@ class MCPToolIntegrationTests(TestCase):
             PersistentAgentEnabledTool.objects.filter(agent=self.agent).count(),
             config.standard_enabled_tool_limit,
         )
+
+
+@tag("batch_mcp_tools")
+class ToolNameNormalizationTests(TestCase):
+    """Test MCP tool name normalization and fuzzy matching."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        User = get_user_model()
+        self.user = User.objects.create_user(username=f'norm-{uuid.uuid4().hex[:8]}@example.com')
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="test-norm-agent")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name=f"norm-agent-{uuid.uuid4().hex[:6]}",
+            charter="Test normalization",
+            browser_use_agent=browser_agent,
+        )
+        self.server_config = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="brightdata",
+            display_name="Bright Data",
+            description="",
+            command="npx",
+            command_args=[],
+        )
+        self.config_id = str(self.server_config.id)
+
+    def test_normalize_mcp_tool_name_bright_data_variation(self):
+        """Test normalizing mcp_bright_data_* to mcp_brightdata_*."""
+        from api.agent.tools.tool_manager import _normalize_mcp_tool_name, ToolCatalogEntry
+
+        catalog = {
+            "mcp_brightdata_scrape_as_markdown": ToolCatalogEntry(
+                provider="mcp",
+                full_name="mcp_brightdata_scrape_as_markdown",
+                description="Scrape",
+                parameters={},
+                tool_server="brightdata",
+                tool_name="scrape_as_markdown",
+                server_config_id=self.config_id,
+            )
+        }
+
+        # Test the variation with underscore in server name
+        result = _normalize_mcp_tool_name("mcp_bright_data_scrape_as_markdown", catalog)
+        self.assertEqual(result, "mcp_brightdata_scrape_as_markdown")
+
+    def test_normalize_mcp_tool_name_no_match_returns_none(self):
+        """If no matching tool in catalog, normalization returns None."""
+        from api.agent.tools.tool_manager import _normalize_mcp_tool_name, ToolCatalogEntry
+
+        catalog = {
+            "mcp_other_tool": ToolCatalogEntry(
+                provider="mcp",
+                full_name="mcp_other_tool",
+                description="Other",
+                parameters={},
+                tool_server="other",
+                tool_name="tool",
+                server_config_id=self.config_id,
+            )
+        }
+
+        # No matching tool - normalization should return None
+        result = _normalize_mcp_tool_name("mcp_brightdata_scrape", catalog)
+        self.assertIsNone(result)
+
+    def test_normalize_mcp_tool_name_collapsed_match(self):
+        """Test matching when collapsing all underscores."""
+        from api.agent.tools.tool_manager import _normalize_mcp_tool_name, ToolCatalogEntry
+
+        catalog = {
+            "mcp_my_server_tool": ToolCatalogEntry(
+                provider="mcp",
+                full_name="mcp_my_server_tool",
+                description="Tool",
+                parameters={},
+                tool_server="my_server",
+                tool_name="tool",
+                server_config_id=self.config_id,
+            )
+        }
+
+        # Test collapsed match (all underscores removed)
+        result = _normalize_mcp_tool_name("mcp_myserver_tool", catalog)
+        self.assertEqual(result, "mcp_my_server_tool")
+
+    def test_normalize_mcp_tool_name_non_mcp_returns_none(self):
+        """Non-MCP tool names should return None."""
+        from api.agent.tools.tool_manager import _normalize_mcp_tool_name
+
+        result = _normalize_mcp_tool_name("some_other_tool", {})
+        self.assertIsNone(result)
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
+    @patch('api.agent.tools.mcp_manager._mcp_manager._initialized', True)
+    def test_resolve_tool_entry_normalizes_tool_name(self, mock_get_tools):
+        """resolve_tool_entry should find tools even with underscore variations."""
+        from api.agent.tools.tool_manager import resolve_tool_entry
+
+        mock_get_tools.return_value = [
+            MCPToolInfo(
+                self.config_id,
+                "mcp_brightdata_scrape_as_markdown",
+                "brightdata",
+                "scrape_as_markdown",
+                "Scrape pages",
+                {"type": "object", "properties": {}},
+            ),
+        ]
+
+        # Look for the tool with underscore variation
+        entry = resolve_tool_entry(self.agent, "mcp_bright_data_scrape_as_markdown")
+
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.full_name, "mcp_brightdata_scrape_as_markdown")
+
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
+    @patch('api.agent.tools.mcp_manager._mcp_manager._initialized', True)
+    def test_execute_enabled_tool_uses_resolved_name(self, mock_get_tools):
+        """execute_enabled_tool should use resolved (normalized) name for execution."""
+        from api.agent.tools.tool_manager import execute_enabled_tool
+
+        mock_get_tools.return_value = [
+            MCPToolInfo(
+                self.config_id,
+                "mcp_brightdata_scrape_as_markdown",
+                "brightdata",
+                "scrape_as_markdown",
+                "Scrape pages",
+                {"type": "object", "properties": {"url": {"type": "string"}}},
+            ),
+        ]
+
+        # Pre-enable the tool with the correct name
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="mcp_brightdata_scrape_as_markdown",
+            tool_server="brightdata",
+            tool_name="scrape_as_markdown",
+            server_config=self.server_config,
+        )
+
+        # Execute with the wrong (underscore variation) name
+        with patch('api.agent.tools.tool_manager.execute_mcp_tool') as mock_execute:
+            mock_execute.return_value = {"status": "success", "data": "result"}
+
+            result = execute_enabled_tool(
+                self.agent,
+                "mcp_bright_data_scrape_as_markdown",
+                {"url": "https://example.com"}
+            )
+
+            # Should have called execute_mcp_tool with the CORRECT (normalized) name
+            mock_execute.assert_called_once()
+            call_args = mock_execute.call_args
+            self.assertEqual(call_args[0][1], "mcp_brightdata_scrape_as_markdown")
+            self.assertEqual(result["status"], "success")

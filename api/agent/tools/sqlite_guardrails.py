@@ -99,12 +99,13 @@ def _grep_context(string: Optional[str], pattern: str, context_chars: int = 100)
         return None
 
 
-def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 5) -> Optional[str]:
-    r"""Find all pattern matches with surrounding context, newline-separated.
+def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 50, max_matches: int = 10) -> Optional[str]:
+    r"""Find all pattern matches with surrounding context, as JSON array.
 
-    Usage: grep_context_all(column, '\$[\d,]+', 30, 5)
-    Returns multiple context snippets, one per line
+    Usage: SELECT ctx.value FROM json_each(grep_context_all(col, 'pattern', 60, 10)) AS ctx
+    Returns: JSON array of context snippets, usable with json_each()
     """
+    import json as json_module
     if string is None or pattern is None:
         return None
     try:
@@ -118,9 +119,125 @@ def _grep_context_all(string: Optional[str], pattern: str, context_chars: int = 
             prefix = "..." if start > 0 else ""
             suffix = "..." if end < len(string) else ""
             results.append(f"{prefix}{snippet}{suffix}")
-        return "\n".join(results) if results else None
+        return json_module.dumps(results) if results else None
     except re.error:
         return None
+
+
+def _split_sections(string: Optional[str], delimiter: str = "\n\n") -> Optional[str]:
+    r"""Split text into sections by delimiter, as JSON array for json_each.
+
+    Usage: SELECT s.value FROM json_each(split_sections(col, '\n\n')) AS s
+    Great for processing markdown by paragraph or section.
+    """
+    import json as json_module
+    if string is None:
+        return None
+    sections = [s.strip() for s in string.split(delimiter) if s.strip()]
+    return json_module.dumps(sections) if sections else None
+
+
+def _substr_range(string: Optional[str], start: int, end: int) -> Optional[str]:
+    """Extract substring by start and end position (0-indexed, exclusive end).
+
+    Usage: substr_range(col, 0, 3000) for first 3000 chars
+           substr_range(col, 3000, 6000) for next 3000 chars
+    Useful for batched processing of very large text.
+    """
+    if string is None:
+        return None
+    return string[start:end]
+
+
+def _json_length(json_str: Optional[str]) -> Optional[int]:
+    """Return length of JSON array or object (alias for json_array_length).
+
+    Agents often hallucinate 'json_length' instead of 'json_array_length'.
+    This provides a forgiving alias that handles both arrays and objects.
+    """
+    import json as json_module
+    if json_str is None:
+        return None
+    try:
+        data = json_module.loads(json_str)
+        if isinstance(data, (list, dict)):
+            return len(data)
+        return None
+    except (ValueError, TypeError):
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Common LLM hallucinations - aliases for functions from other databases
+# ---------------------------------------------------------------------------
+
+def _now() -> str:
+    """NOW() - MySQL/PostgreSQL style, returns current datetime."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _curdate() -> str:
+    """CURDATE() - MySQL style, returns current date."""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _len(s: Optional[str]) -> Optional[int]:
+    """LEN(s) - SQL Server style alias for LENGTH()."""
+    return len(s) if s is not None else None
+
+
+def _nvl(val: Optional[str], default: str) -> str:
+    """NVL(val, default) - Oracle style alias for IFNULL()."""
+    return val if val is not None else default
+
+
+def _left(s: Optional[str], n: int) -> Optional[str]:
+    """LEFT(s, n) - SQL Server/MySQL style, returns leftmost n chars."""
+    if s is None:
+        return None
+    return s[:n]
+
+
+def _right(s: Optional[str], n: int) -> Optional[str]:
+    """RIGHT(s, n) - SQL Server/MySQL style, returns rightmost n chars."""
+    if s is None:
+        return None
+    return s[-n:] if n > 0 else ""
+
+
+def _reverse(s: Optional[str]) -> Optional[str]:
+    """REVERSE(s) - reverses string."""
+    return s[::-1] if s is not None else None
+
+
+def _lpad(s: Optional[str], length: int, pad: str = " ") -> Optional[str]:
+    """LPAD(s, length, pad) - left-pad string to length."""
+    if s is None:
+        return None
+    if len(pad) == 0:
+        return s
+    return (pad * ((length - len(s)) // len(pad) + 1) + s)[-length:] if len(s) < length else s
+
+
+def _rpad(s: Optional[str], length: int, pad: str = " ") -> Optional[str]:
+    """RPAD(s, length, pad) - right-pad string to length."""
+    if s is None:
+        return None
+    if len(pad) == 0:
+        return s
+    return (s + pad * ((length - len(s)) // len(pad) + 1))[:length] if len(s) < length else s
+
+
+def _split_part(s: Optional[str], delimiter: str, part: int) -> Optional[str]:
+    """SPLIT_PART(s, delimiter, part) - PostgreSQL style, 1-indexed."""
+    if s is None:
+        return None
+    parts = s.split(delimiter)
+    if part < 1 or part > len(parts):
+        return ""
+    return parts[part - 1]
 
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
@@ -278,8 +395,26 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("grep_context_all", 2, _grep_context_all)
     conn.create_function("grep_context_all", 3, _grep_context_all)
     conn.create_function("grep_context_all", 4, _grep_context_all)  # With max_matches
+    conn.create_function("split_sections", 1, _split_sections)
+    conn.create_function("split_sections", 2, _split_sections)  # With delimiter
+    conn.create_function("substr_range", 3, _substr_range)
     conn.create_function("word_count", 1, _word_count)
     conn.create_function("char_count", 1, _char_count)
+    conn.create_function("json_length", 1, _json_length)  # Alias for json_array_length
+    # Common LLM hallucinations from other databases
+    conn.create_function("NOW", 0, _now)  # MySQL/PostgreSQL
+    conn.create_function("CURDATE", 0, _curdate)  # MySQL
+    conn.create_function("GETDATE", 0, _now)  # SQL Server
+    conn.create_function("LEN", 1, _len)  # SQL Server (alias for LENGTH)
+    conn.create_function("NVL", 2, _nvl)  # Oracle (alias for IFNULL)
+    conn.create_function("LEFT", 2, _left)  # SQL Server/MySQL
+    conn.create_function("RIGHT", 2, _right)  # SQL Server/MySQL
+    conn.create_function("REVERSE", 1, _reverse)  # Common across DBs
+    conn.create_function("LPAD", 2, _lpad)  # Oracle/MySQL
+    conn.create_function("LPAD", 3, _lpad)  # With pad char
+    conn.create_function("RPAD", 2, _rpad)  # Oracle/MySQL
+    conn.create_function("RPAD", 3, _rpad)  # With pad char
+    conn.create_function("SPLIT_PART", 3, _split_part)  # PostgreSQL
 
 
 def open_guarded_sqlite_connection(

@@ -268,6 +268,25 @@ def _normalise_reasoning_content(raw: Any) -> Optional[str]:
         return None
 
 
+def _extract_reasoning_from_message_content(content: Any) -> Optional[str]:
+    if not isinstance(content, list):
+        return None
+
+    parts: list[str] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if isinstance(part_type, str) and part_type.lower() in {"reasoning", "thinking"}:
+            text = part.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+
+    if parts:
+        return "\n".join(parts)
+    return None
+
+
 def extract_reasoning_content(response: Any) -> Optional[str]:
     """Return any reasoning/thinking content from a LiteLLM response."""
     try:
@@ -296,6 +315,13 @@ def extract_reasoning_content(response: Any) -> Optional[str]:
                     reasoning_raw = dumped.get("reasoning_content")
             except Exception:
                 logger.debug("Failed to pull reasoning_content from model_dump", exc_info=True)
+
+        if reasoning_raw is None:
+            if isinstance(message, dict):
+                content = message.get("content")
+            else:
+                content = getattr(message, "content", None)
+            reasoning_raw = _extract_reasoning_from_message_content(content)
 
         return _normalise_reasoning_content(reasoning_raw)
     except Exception:

@@ -322,6 +322,9 @@ def _extract_message_content(message: Any) -> str:
                 parts.append(part)
                 continue
             if isinstance(part, dict):
+                part_type = part.get("type")
+                if isinstance(part_type, str) and part_type.lower() in {"reasoning", "thinking"}:
+                    continue
                 text = part.get("text")
                 if isinstance(text, str):
                     parts.append(text)
