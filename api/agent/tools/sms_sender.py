@@ -19,6 +19,7 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ..comms.outbound_delivery import deliver_agent_sms
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars, strip_markdown_for_sms
+from .agent_variables import substitute_variables
 from ..files.attachment_helpers import (
     AttachmentResolutionError,
     build_signed_filespace_download_url,
@@ -90,6 +91,8 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     body = decode_unicode_escapes(params.get("body"))
     body = strip_control_chars(body)
     body = strip_markdown_for_sms(body)
+    # Substitute «var» placeholders with actual values (e.g., «chart_url»)
+    body = substitute_variables(body)
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")

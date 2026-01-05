@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 from api.models import PersistentAgent
 from .sqlite_state import _sqlite_db_path_var
 from .sqlite_guardrails import open_guarded_sqlite_connection, start_query_timer, stop_query_timer, clear_guarded_connection
+from .agent_variables import set_agent_variable
 
 logger = logging.getLogger(__name__)
 
@@ -348,7 +349,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                 "and results become chart data. Column names in your SELECT become the keys for x/y/values/labels. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
                 "For pie/donut: use 'values' and 'labels'. For others: use 'x' and 'y' (y can be a list for multi-series). "
-                "Returns data_uri (for PDFs/chat) and signed_url (for emails). Chart is saved to your filespace."
+                "Sets «chart_url» variable. Embed in chat: ![](«chart_url»). Embed in email: <img src='«chart_url»'>."
             ),
             "parameters": {
                 "type": "object",
@@ -482,12 +483,16 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             node_id=node_id,
         )
 
-        # Return compact result - NO base64 (would flood LLM context)
+        # Set agent variables so LLM can use placeholders instead of copying URLs
+        path = save_result.get("path")
+        set_agent_variable("chart_url", signed_url)
+        set_agent_variable("chart_path", path)
+
+        # Return compact result - NO url (LLM must use «chart_url» variable)
         return {
             "status": "ok",
-            "path": save_result.get("path"),
-            "node_id": node_id,
-            "url": signed_url,
+            "path": path,
+            "embed": "«chart_url»",
             "size_bytes": len(svg_bytes),
         }
 

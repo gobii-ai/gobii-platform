@@ -16,6 +16,7 @@ from ..files.attachment_helpers import (
 )
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
+from .agent_variables import substitute_variables
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -86,6 +87,8 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     raw_body = params.get("body", "")
     # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
     body = normalize_llm_output((raw_body or "").strip())
+    # Substitute «var» placeholders with actual values (e.g., «chart_url»)
+    body = substitute_variables(body)
     if not body:
         return {"status": "error", "message": "Message body is required."}
     will_continue = _should_continue_work(params)

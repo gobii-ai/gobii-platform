@@ -146,10 +146,12 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
-            self.assertEqual(result["url"], "https://example.com/bar.svg")
+            # Returns embed hint, NOT the actual URL (LLM must use variable)
+            self.assertIn("embed", result)
+            self.assertEqual(result["embed"], "«chart_url»")
             self.assertIn("path", result)
-            self.assertIn("node_id", result)
+            # No url exposed - prevents LLM from copying it
+            self.assertNotIn("url", result)
             # No data_uri - we don't flood LLM context with base64
             self.assertNotIn("data_uri", result)
 
@@ -169,7 +171,7 @@ class CreateChartToolTests(TestCase):
                 {"type": "line", "query": "SELECT day, visitors FROM t", "x": "day", "y": "visitors"},
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -193,7 +195,7 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -216,7 +218,7 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -234,7 +236,7 @@ class CreateChartToolTests(TestCase):
                 {"type": "scatter", "query": "SELECT age, income FROM t", "x": "age", "y": "income"},
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -252,7 +254,7 @@ class CreateChartToolTests(TestCase):
                 {"type": "area", "query": "SELECT quarter, sales FROM t", "x": "quarter", "y": "sales"},
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -270,7 +272,7 @@ class CreateChartToolTests(TestCase):
                 {"type": "horizontal_bar", "query": "SELECT product, sales FROM t", "x": "product", "y": "sales"},
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -294,7 +296,7 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -318,7 +320,7 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -342,7 +344,7 @@ class CreateChartToolTests(TestCase):
                 },
             )
             self.assertEqual(result["status"], "ok")
-            self.assertIn("url", result)
+            self.assertIn("embed", result)
 
     @patch("api.agent.files.filespace_service.write_bytes_to_dir")
     @patch("api.agent.files.attachment_helpers.build_signed_filespace_download_url")
@@ -411,11 +413,11 @@ class CreateChartToolTests(TestCase):
             )
 
             self.assertEqual(result["status"], "ok")
-            # No data_uri - we return url instead (doesn't flood LLM context)
+            # No data_uri or url - we return embed hint (LLM must use «chart_url» variable)
             self.assertNotIn("data_uri", result)
-            self.assertIn("url", result)
-            self.assertEqual(result["url"], "https://example.com/signed/bar.svg")
+            self.assertNotIn("url", result)
+            self.assertIn("embed", result)
+            self.assertEqual(result["embed"], "«chart_url»")
             self.assertIn("path", result)
-            self.assertIn("node_id", result)
             mock_write.assert_called_once()
             mock_signed_url.assert_called_once()

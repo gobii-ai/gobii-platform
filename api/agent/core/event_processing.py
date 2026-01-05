@@ -110,6 +110,7 @@ from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_too
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
+from ..tools.agent_variables import clear_variables, substitute_variables
 from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -378,6 +379,21 @@ def _get_tool_call_name(call: Any) -> Optional[str]:
     if isinstance(call, dict):
         return call.get("function", {}).get("name")
     return None
+
+
+def _substitute_variables_in_params(params: Any) -> Any:
+    """Recursively substitute «var» placeholders in tool parameters.
+
+    Handles nested dicts, lists, and string values. Non-string values
+    are returned unchanged.
+    """
+    if isinstance(params, str):
+        return substitute_variables(params)
+    if isinstance(params, dict):
+        return {k: _substitute_variables_in_params(v) for k, v in params.items()}
+    if isinstance(params, list):
+        return [_substitute_variables_in_params(item) for item in params]
+    return params
 
 
 def _get_latest_active_web_session(agent: PersistentAgent):
@@ -2065,6 +2081,8 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
+    # Clear agent variables from any previous processing cycle
+    clear_variables()
     span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
     max_runtime_seconds = int(getattr(settings, "AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS", 0))
     run_started_at = time.monotonic()
@@ -2653,9 +2671,10 @@ def _run_agent_loop(
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
-                    exec_params = tool_params
+                    # Substitute «var» placeholders in tool parameters
+                    exec_params = _substitute_variables_in_params(tool_params)
                     if tool_name == "sqlite_batch":
-                        exec_params = dict(tool_params)
+                        exec_params = dict(exec_params)  # copy already-substituted params
                         exec_params["_has_user_facing_message"] = has_user_facing_message
 
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
