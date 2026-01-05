@@ -3270,6 +3270,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 def _build_agent_settings_section(agent: PersistentAgent) -> str:
     """Return a bullet-style list of configurable settings for the agent."""
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
+    contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
     settings_lines: list[str] = [
         "Agent name.",
         "Agent secrets: usernames and passwords the agent can use to authenticate to services.",
@@ -3279,6 +3280,7 @@ def _build_agent_settings_section(agent: PersistentAgent) -> str:
         "Dedicated IP assignment.",
         "Custom email settings.",
         "Contact endpoints/allowlist. Add or remove contacts that the agent can reach out to.",
+        f"Contact requests: review pending requests at {contact_requests_url}.",
         "MCP servers to connect the agent to external services.",
         "Peer links to communicate with other agents.",
         "Outbound webhooks to send data to external services.",
