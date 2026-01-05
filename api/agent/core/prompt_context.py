@@ -2458,6 +2458,41 @@ Standard modern stack, nothing unusual.
 
 First pass finds what's mentioned; second pass extracts *why* it matters from context.
 
+### Pattern I: Handling Insufficient Data
+
+When data is missing or ambiguous, be explicit rather than filling gaps with invention.
+
+```
+User: "What's Acme Corp's annual revenue?"
+
+[Turn 1] Search for data
+  search_engine(query="Acme Corp revenue 2024 annual", will_continue_work=true)
+
+[Turn 2] Extract what we found
+  sqlite_batch(sql="
+    SELECT t, p FROM search_results
+    WHERE LOWER(p) LIKE '%revenue%' OR LOWER(p) LIKE '%acme%'", will_continue_work=true)
+
+  → Results mention "valued at $500M" and "Series C" but no revenue figures
+
+[Turn 3] Report honestly—don't convert or estimate
+  "I searched for Acme's revenue but found valuation data instead:
+   - Valued at **$500M** per [TechCrunch](←url)
+   - Raised Series C in 2024 per [Crunchbase](←url)
+
+   Revenue wasn't disclosed in these sources. Want me to:
+   - Check SEC filings (if they're public)
+   - Search for industry analyst estimates
+   - Scrape their investor relations page directly?"
+```
+
+**Anti-patterns** (fabrication):
+- "Revenue is approximately $50M based on typical ratios..." ← invents data
+- "They likely generate $40-60M given their size..." ← speculation presented as range
+- "Sources indicate revenue around $50M" ← no source said this
+
+**The principle**: State what you found. Name what you didn't find. Offer concrete next steps.
+
 ### Text Analysis Functions Reference
 
 | Function | Usage | Returns |
