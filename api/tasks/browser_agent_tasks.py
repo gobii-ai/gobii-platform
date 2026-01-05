@@ -1011,6 +1011,8 @@ async def _run_agent(
             profile = BrowserProfile(
                 stealth=True,
                 headless=headless_mode,
+                viewport={"width": 1280, "height": 800},
+                window_size={"width": 1280, "height": 800},
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
@@ -1784,10 +1786,13 @@ def _process_browser_use_task_core(
             # Register custom actions
             try:
                 from ..agent.browser_actions import (
-                    register_web_search_action
+                    register_captcha_actions,
+                    register_web_search_action,
                 )
                 actions = ['mcp_brightdata_search_engine']
                 register_web_search_action(controller)
+                register_captcha_actions(controller)
+                actions.append('solve_captcha')
                 if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
                     from ..agent.browser_actions import register_upload_actions
                     register_upload_actions(controller, persistent_agent_id)
