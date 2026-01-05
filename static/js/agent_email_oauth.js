@@ -62,6 +62,8 @@ if (panel && panel.dataset.accountId) {
   const connectionModeSelect = document.getElementById("email-connection-mode");
   const customOnlyFields = document.querySelectorAll(".email-custom-only");
   const serverSettingsFields = document.querySelectorAll(".email-server-settings");
+  const protocolSections = document.querySelectorAll(".email-protocol-section");
+  const protocolActions = document.querySelectorAll(".email-protocol-action");
   const smtpAuthSelect = document.querySelector('select[name="smtp_auth"]');
   const imapAuthSelect = document.querySelector('select[name="imap_auth"]');
   const scopeInput = document.getElementById("email-oauth-scope");
@@ -126,6 +128,7 @@ if (panel && panel.dataset.accountId) {
     const provider = providerSelect ? providerSelect.value : "gmail";
     const mode = connectionModeSelect ? connectionModeSelect.value : "custom";
     const oauthMode = mode === "oauth2";
+    const showProtocols = !oauthMode || provider === "generic";
     toggleRow(panel, oauthMode);
     customOnlyFields.forEach((field) => {
       toggleRow(field, !oauthMode);
@@ -136,6 +139,12 @@ if (panel && panel.dataset.accountId) {
       } else {
         toggleRow(field, provider === "generic");
       }
+    });
+    protocolSections.forEach((section) => {
+      toggleRow(section, showProtocols);
+    });
+    protocolActions.forEach((action) => {
+      toggleRow(action, showProtocols);
     });
     if (oauthMode) {
       if (smtpAuthSelect) {

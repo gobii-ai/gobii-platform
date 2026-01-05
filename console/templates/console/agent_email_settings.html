@@ -125,7 +125,7 @@
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- SMTP -->
-        <div class="space-y-4">
+        <div class="space-y-4 email-protocol-section">
           <h2 class="text-lg font-semibold text-gray-800">SMTP (Outbound)</h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="email-server-settings">
@@ -171,7 +171,7 @@
         </div>
 
         <!-- IMAP -->
-        <div class="space-y-4">
+        <div class="space-y-4 email-protocol-section">
           <h2 class="text-lg font-semibold text-gray-800">IMAP (Inbound)</h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div class="email-server-settings">
@@ -235,13 +235,13 @@
         <button type="submit" name="action" value="save" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
           Save
         </button>
-        <button type="submit" name="action" value="test_smtp" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="test_smtp" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Test SMTP
         </button>
-        <button type="submit" name="action" value="test_imap" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="test_imap" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Test IMAP
         </button>
-        <button type="submit" name="action" value="poll_now" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="poll_now" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Poll Now
         </button>
       </div>
