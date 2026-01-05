@@ -4,7 +4,6 @@ from typing import Any
 from django.conf import settings
 from django.db import migrations
 
-from config.plans import PLAN_CONFIG
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 
 
@@ -59,6 +58,49 @@ ENTITLEMENT_DEFINITIONS: dict[str, dict[str, Any]] = {
     },
 }
 
+PLAN_CONFIG_SNAPSHOT: dict[str, dict[str, Any]] = {
+    PlanNames.FREE: {
+        "name": "Free",
+        "description": "Free plan with basic features and limited support.",
+        "monthly_task_credits": 100,
+        "api_rate_limit": 60,
+        "agent_limit": 5,
+        "max_contacts_per_agent": 3,
+        "credits_per_seat": 0,
+        "org": False,
+    },
+    PlanNames.STARTUP: {
+        "name": "Pro",
+        "description": "Pro plan with enhanced features and support.",
+        "monthly_task_credits": 500,
+        "api_rate_limit": 600,
+        "agent_limit": -2147483648,
+        "max_contacts_per_agent": 20,
+        "credits_per_seat": 0,
+        "org": False,
+    },
+    PlanNames.SCALE: {
+        "name": "Scale",
+        "description": "Scale plan with enhanced limits and support.",
+        "monthly_task_credits": 10000,
+        "api_rate_limit": 1500,
+        "agent_limit": -2147483648,
+        "max_contacts_per_agent": 50,
+        "credits_per_seat": 0,
+        "org": False,
+    },
+    PlanNames.ORG_TEAM: {
+        "name": "Team",
+        "description": "Team plan with collaboration features and priority support.",
+        "monthly_task_credits": 2000,
+        "api_rate_limit": 2000,
+        "agent_limit": -2147483648,
+        "max_contacts_per_agent": 50,
+        "credits_per_seat": 500,
+        "org": True,
+    },
+}
+
 
 def _parse_list_value(raw: str | None) -> list[str]:
     if not raw:
@@ -77,12 +119,42 @@ def _entry_value(entries_by_name: dict[str, Any], name: str) -> str:
     if not entry:
         return ""
     if getattr(entry, "is_secret", False):
-        return ""
+        encrypted = getattr(entry, "value_encrypted", None)
+        if not encrypted:
+            return ""
+        if isinstance(encrypted, memoryview):
+            encrypted = encrypted.tobytes()
+        try:
+            from api.encryption import SecretsEncryption
+        except Exception:
+            return ""
+        try:
+            return SecretsEncryption.decrypt_value(encrypted)
+        except Exception:
+            return ""
     return getattr(entry, "value_text", "") or ""
 
 
 def _entry_list(entries_by_name: dict[str, Any], name: str) -> list[str]:
     return _parse_list_value(_entry_value(entries_by_name, name))
+
+
+def _plan_prefix(legacy_code: str) -> str:
+    return PLAN_SLUG_BY_LEGACY_CODE.get(legacy_code, legacy_code)
+
+
+def _plan_entry(entries_by_name: dict[str, Any], legacy_code: str, suffix: str) -> str:
+    prefix = _plan_prefix(legacy_code)
+    if prefix == "free":
+        return ""
+    return _entry_value(entries_by_name, f"{prefix}_{suffix}")
+
+
+def _plan_entry_list(entries_by_name: dict[str, Any], legacy_code: str, suffix: str) -> list[str]:
+    prefix = _plan_prefix(legacy_code)
+    if prefix == "free":
+        return []
+    return _entry_list(entries_by_name, f"{prefix}_{suffix}")
 
 
 def _get_entries_by_name(apps) -> dict[str, Any]:
@@ -169,7 +241,7 @@ def seed_plans(apps, schema_editor) -> None:
             plan.save(update_fields=updates)
         return plan
 
-    for legacy_code, config in PLAN_CONFIG.items():
+    for legacy_code, config in PLAN_CONFIG_SNAPSHOT.items():
         plan = _get_or_create_plan(legacy_code, config)
         version, created = PlanVersion.objects.get_or_create(
             plan=plan,
@@ -200,21 +272,27 @@ def seed_plans(apps, schema_editor) -> None:
         if updates:
             version.save(update_fields=updates)
 
-        additional_task_price_id = ""
-        if legacy_code == PlanNames.STARTUP:
-            additional_task_price_id = _entry_value(entries_by_name, "startup_additional_task_price_id")
-        elif legacy_code == PlanNames.SCALE:
-            additional_task_price_id = _entry_value(entries_by_name, "scale_additional_task_price_id")
-        elif legacy_code == PlanNames.ORG_TEAM:
-            additional_task_price_id = _entry_value(entries_by_name, "org_team_additional_task_price_id")
+        additional_task_price_id = _plan_entry(
+            entries_by_name,
+            legacy_code,
+            "additional_task_price_id",
+        )
+        additional_task_product_id = _plan_entry(
+            entries_by_name,
+            legacy_code,
+            "additional_task_product_id",
+        )
 
-        dedicated_ip_price_id = ""
-        if legacy_code == PlanNames.STARTUP:
-            dedicated_ip_price_id = _entry_value(entries_by_name, "startup_dedicated_ip_price_id")
-        elif legacy_code == PlanNames.SCALE:
-            dedicated_ip_price_id = _entry_value(entries_by_name, "scale_dedicated_ip_price_id")
-        elif legacy_code == PlanNames.ORG_TEAM:
-            dedicated_ip_price_id = _entry_value(entries_by_name, "org_team_dedicated_ip_price_id")
+        dedicated_ip_price_id = _plan_entry(
+            entries_by_name,
+            legacy_code,
+            "dedicated_ip_price_id",
+        )
+        dedicated_product_id = _plan_entry(
+            entries_by_name,
+            legacy_code,
+            "dedicated_ip_product_id",
+        )
 
         entitlements = {
             "max_contacts_per_agent": int(config.get("max_contacts_per_agent") or 0),
@@ -254,17 +332,8 @@ def seed_plans(apps, schema_editor) -> None:
                 defaults=defaults,
             )
 
-        base_price_id = ""
-        product_id = ""
-        if legacy_code == PlanNames.STARTUP:
-            base_price_id = _entry_value(entries_by_name, "startup_price_id")
-            product_id = _entry_value(entries_by_name, "startup_product_id")
-        elif legacy_code == PlanNames.SCALE:
-            base_price_id = _entry_value(entries_by_name, "scale_price_id")
-            product_id = _entry_value(entries_by_name, "scale_product_id")
-        elif legacy_code == PlanNames.ORG_TEAM:
-            base_price_id = _entry_value(entries_by_name, "org_team_price_id")
-            product_id = _entry_value(entries_by_name, "org_team_product_id")
+        base_price_id = _plan_entry(entries_by_name, legacy_code, "price_id")
+        product_id = _plan_entry(entries_by_name, legacy_code, "product_id")
 
         if base_price_id:
             PlanVersionPrice.objects.get_or_create(
@@ -284,21 +353,11 @@ def seed_plans(apps, schema_editor) -> None:
                     "plan_version": version,
                     "kind": "overage",
                     "billing_interval": None,
-                    "product_id": _entry_value(entries_by_name, "org_team_additional_task_product_id")
-                    if legacy_code == PlanNames.ORG_TEAM
-                    else "",
+                    "product_id": additional_task_product_id,
                 },
             )
 
         if dedicated_ip_price_id:
-            dedicated_product_id = ""
-            if legacy_code == PlanNames.STARTUP:
-                dedicated_product_id = _entry_value(entries_by_name, "startup_dedicated_ip_product_id")
-            elif legacy_code == PlanNames.SCALE:
-                dedicated_product_id = _entry_value(entries_by_name, "scale_dedicated_ip_product_id")
-            elif legacy_code == PlanNames.ORG_TEAM:
-                dedicated_product_id = _entry_value(entries_by_name, "org_team_dedicated_ip_product_id")
-
             PlanVersionPrice.objects.get_or_create(
                 price_id=dedicated_ip_price_id,
                 defaults={
@@ -309,34 +368,12 @@ def seed_plans(apps, schema_editor) -> None:
                 },
             )
 
-        if legacy_code == PlanNames.STARTUP:
-            task_pack_ids = _entry_list(entries_by_name, "startup_task_pack_price_ids")
-            contact_pack_ids = _entry_list(entries_by_name, "startup_contact_cap_price_ids")
-            browser_pack_ids = _entry_list(entries_by_name, "startup_browser_task_limit_price_ids")
-            task_product_id = _entry_value(entries_by_name, "startup_task_pack_product_id")
-            contact_product_id = _entry_value(entries_by_name, "startup_contact_cap_product_id")
-            browser_product_id = _entry_value(entries_by_name, "startup_browser_task_limit_product_id")
-        elif legacy_code == PlanNames.SCALE:
-            task_pack_ids = _entry_list(entries_by_name, "scale_task_pack_price_ids")
-            contact_pack_ids = _entry_list(entries_by_name, "scale_contact_cap_price_ids")
-            browser_pack_ids = _entry_list(entries_by_name, "scale_browser_task_limit_price_ids")
-            task_product_id = _entry_value(entries_by_name, "scale_task_pack_product_id")
-            contact_product_id = _entry_value(entries_by_name, "scale_contact_cap_product_id")
-            browser_product_id = _entry_value(entries_by_name, "scale_browser_task_limit_product_id")
-        elif legacy_code == PlanNames.ORG_TEAM:
-            task_pack_ids = _entry_list(entries_by_name, "org_team_task_pack_price_ids")
-            contact_pack_ids = _entry_list(entries_by_name, "org_team_contact_cap_price_ids")
-            browser_pack_ids = _entry_list(entries_by_name, "org_team_browser_task_limit_price_ids")
-            task_product_id = _entry_value(entries_by_name, "org_team_task_pack_product_id")
-            contact_product_id = _entry_value(entries_by_name, "org_team_contact_cap_product_id")
-            browser_product_id = _entry_value(entries_by_name, "org_team_browser_task_limit_product_id")
-        else:
-            task_pack_ids = []
-            contact_pack_ids = []
-            browser_pack_ids = []
-            task_product_id = ""
-            contact_product_id = ""
-            browser_product_id = ""
+        task_pack_ids = _plan_entry_list(entries_by_name, legacy_code, "task_pack_price_ids")
+        contact_pack_ids = _plan_entry_list(entries_by_name, legacy_code, "contact_cap_price_ids")
+        browser_pack_ids = _plan_entry_list(entries_by_name, legacy_code, "browser_task_limit_price_ids")
+        task_product_id = _plan_entry(entries_by_name, legacy_code, "task_pack_product_id")
+        contact_product_id = _plan_entry(entries_by_name, legacy_code, "contact_cap_product_id")
+        browser_product_id = _plan_entry(entries_by_name, legacy_code, "browser_task_limit_product_id")
 
         for price_id in task_pack_ids:
             if not price_id:

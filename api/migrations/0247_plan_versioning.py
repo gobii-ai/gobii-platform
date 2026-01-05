@@ -3,12 +3,35 @@ import django.db.models.deletion
 import uuid
 
 
+def _drop_toolratelimit_plan_fk(apps, schema_editor) -> None:
+    ToolRateLimit = apps.get_model("api", "ToolRateLimit")
+    table = ToolRateLimit._meta.db_table
+    with schema_editor.connection.cursor() as cursor:
+        constraints = schema_editor.connection.introspection.get_constraints(cursor, table)
+    for name, constraint in constraints.items():
+        if not constraint.get("foreign_key"):
+            continue
+        fk_table, _fk_column = constraint["foreign_key"]
+        if fk_table != "api_toolconfig":
+            continue
+        if "plan_id" not in (constraint.get("columns") or []):
+            continue
+        schema_editor.execute(
+            "ALTER TABLE %s DROP CONSTRAINT %s"
+            % (
+                schema_editor.quote_name(table),
+                schema_editor.quote_name(name),
+            )
+        )
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("api", "0246_add_google_docs_to_pipedream_prefetch"),
     ]
 
     operations = [
+        migrations.RunPython(_drop_toolratelimit_plan_fk, migrations.RunPython.noop),
         migrations.CreateModel(
             name="Plan",
             fields=[

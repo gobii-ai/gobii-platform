@@ -558,7 +558,14 @@ class AddonEntitlementService:
             ent = active_now.filter(price_id=price_id).first()
             starts_at = period_start or now
             ent_expires_at = period_end
-            product_id = cfg.product_id or str((price_obj.get("product") or "")) if isinstance(price_obj, Mapping) else ""
+            product_id = ""
+            if isinstance(price_obj, Mapping):
+                product = price_obj.get("product") or ""
+                if isinstance(product, Mapping):
+                    product_id = product.get("id") or ""
+                else:
+                    product_id = str(product or "")
+            product_id = cfg.product_id or product_id
 
             if ent:
                 updates: list[str] = []

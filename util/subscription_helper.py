@@ -637,9 +637,6 @@ def get_user_plan(user) -> dict[str, int | str]:
     return get_owner_plan(user)
 
 
-def get_organization_plan(organization) -> dict[str, int | str]:
-    return get_owner_plan(organization)
-
 def get_user_task_credit_limit(user) -> int:
     """
     Gets the monthly task credit limit for a user's plan.

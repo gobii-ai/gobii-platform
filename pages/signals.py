@@ -11,6 +11,7 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.db import transaction
+from django.apps import apps
 
 from allauth.account.signals import user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
@@ -203,6 +204,21 @@ def _resolve_plan_version_by_product_id(product_id: str | None):
         if plan_version:
             return plan_version
     return None
+
+
+def _plan_version_primary_ids() -> tuple[set[str], set[str]]:
+    try:
+        PlanVersionPrice = apps.get_model("api", "PlanVersionPrice")
+    except Exception:
+        return set(), set()
+    rows = (
+        PlanVersionPrice.objects
+        .filter(kind__in=_PLAN_VERSION_PRIMARY_KINDS)
+        .values_list("price_id", "product_id")
+    )
+    price_ids = {str(price_id) for price_id, _ in rows if price_id}
+    product_ids = {str(product_id) for _, product_id in rows if product_id}
+    return price_ids, product_ids
 
 
 def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -1489,7 +1505,9 @@ def handle_subscription_event(event, **kwargs):
                 or ""
             )
 
+        plan_price_ids, plan_product_ids = _plan_version_primary_ids()
         plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+        plan_products |= plan_product_ids
 
         licensed_item = None
         fallback_item = None
@@ -1497,11 +1515,16 @@ def handle_subscription_event(event, **kwargs):
             for item in source_data.get("items", {}).get("data", []) or []:
                 usage_type = _item_usage_type(item).lower()
                 price = item.get("price") or {}
+                price_id = price.get("id") or price.get("price")
                 product = price.get("product")
                 if isinstance(product, Mapping):
                     product = product.get("id")
 
-                if product and product in plan_products:
+                if price_id and str(price_id) in plan_price_ids:
+                    licensed_item = item
+                    break
+
+                if product and str(product) in plan_products:
                     licensed_item = item
                     break
 

@@ -76,8 +76,6 @@ _PREMIUM_PLAN_IDS = {
     PlanSlugs.SCALE,
     PlanSlugs.STARTUP,
     PlanSlugs.ORG_TEAM,
-    "startup",
-    "org_team",
 }
 _PREMIUM_PLAN_NAMES = {
     "pro",
