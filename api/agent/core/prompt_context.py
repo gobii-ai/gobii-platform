@@ -2671,16 +2671,16 @@ User: "Find Acme Corp's top product and create a sentiment report"
 [Turn 6] Visualize—create_chart queries my sentiment table directly:
          → create_chart(type="bar", query="SELECT rating, n FROM sentiment ORDER BY rating", x="rating", y="n", title="Review Distribution")
 
-         Result: {status: "ok", path: "/charts/bar.svg", embed: "«chart_url»"}
+         Result: {status: "ok", path: "/charts/bar.svg", inline: "![](«/charts/bar.svg»)", attach: "/charts/bar.svg"}
 
-[Turn 7] Deliver—use «chart_url» variable (substituted automatically when sent):
+[Turn 7] Deliver—paste the `inline` value into your message:
          -- For chat (markdown):
-         send_chat_message(body="## ProWidget Sentiment\n\n![](«chart_url»)\n\n4.8★ average...")
+         send_chat_message(body="## ProWidget Sentiment\n\n![](«/charts/bar.svg»)\n\n4.8★ average...")
 
          -- For email (HTML):
-         send_email(html="<h2>ProWidget Sentiment</h2><img src='«chart_url»'><p>4.8★ average...</p>")
+         send_email(html="<h2>ProWidget Sentiment</h2><img src='«/charts/bar.svg»'><p>4.8★ average...</p>")
 
-         The «chart_url» variable becomes the real URL when sent. Never copy URLs—use the variable.
+         The «path» variable is substituted with the actual URL when sent.
 ```
 
 The pattern: **tables you build → queries that aggregate → charts that visualize → outputs that deliver**. Each step reads from the previous. The chart's `query` parameter pulls directly from your SQLite tables—same syntax, same data.
@@ -2729,31 +2729,32 @@ LIMIT 50
 
 **Charts from queries** — `create_chart` runs a SELECT and renders the result:
 ```
-create_chart(type="bar", query="SELECT <x_col>, <y_col> FROM <your_table>", x="<x_col>", y="<y_col>")
+create_chart(type="bar", query="SELECT <x_col>, <y_col> FROM <your_table>", x="<x_col>", y="<y_col>", title="My Chart")
 create_chart(type="pie", query="SELECT <label_col>, <value_col> FROM ...", labels="<label_col>", values="<value_col>")
 create_chart(type="line", query="...", x="...", y=["<series1>", "<series2>"])  -- multi-series
 ```
-Sets `«chart_url»` variable. **Embed using the variable—never copy URLs:**
-  • Chat (markdown): `![](«chart_url»)`
-  • Email (HTML): `<img src='«chart_url»'>`
-The variable is substituted with the actual URL when you send.
+Returns `{path, inline, attach}`. Paste `inline` into your message to embed the chart.
 Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter.
 
 ## Embedding Files & Charts
 
-Tools that create files set variables you reference by name. The «» syntax is intentional—you never see raw URLs.
+File-creating tools (`create_chart`, `create_pdf`, `create_csv`) return ready-to-use references:
+- `inline`: paste into message body to embed (e.g., `![](«/charts/q4.svg»)`)
+- `attach`: paste into attachments array (e.g., `attachments=["/charts/q4.svg"]`)
 
-**The pattern:**
-1. `create_chart(...)` → result shows `embed: "«chart_url»"`
-2. Your message uses `![](«chart_url»)` or `<img src='«chart_url»'>`
-3. System substitutes the real URL when sending
+Variable names are file paths—unique and human-readable. The «» syntax triggers URL substitution when sent.
 
-**Why this matters:** URLs are long, signed, and time-limited. Copying them from results corrupts tokens or embeds stale links. Using variables guarantees correct, fresh URLs.
+**Example:**
+```
+create_chart(...) → {path: "/charts/q4.svg", inline: "![](«/charts/q4.svg»)", attach: "/charts/q4.svg"}
+Your message: "## Q4 Results\n\n![](«/charts/q4.svg»)\n\nStrong 27% growth."
+```
 
-**To attach files** (not inline): Use the `attachments` parameter on send tools:
-  `send_email(..., attachments=["/charts/bar.svg", "/exports/report.pdf"])`
+**Charts are visual—embed them, don't describe them:**
+✗ BAD: "Here's the breakdown: Q1: $145K, Q2: $204K, Q3: $261K, Q4: $330K"
+✓ GOOD: "![](«/charts/quarterly.svg»)\n\n127% growth from Q1 to Q4."
 
-**Anti-pattern:** Never write `![](https://...)` or `<img src='https://...'>` with a URL from tool results. Always use `«variable_name»`.
+**Anti-pattern:** Never copy raw URLs from tool results. Always use the `«path»` variable syntax.
 
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
@@ -4417,7 +4418,7 @@ def _get_formatting_guidance(
             "Make your output visually satisfying—not just informative:\n"
             "• ## Headers to frame sections—give structure to your response\n"
             "• **Tables for any structured data**—3+ items with attributes? Use a table.\n"
-            "• **Charts for trends/distributions**—create_chart → embed with ![](«chart_url»)\n"
+            "• **Charts for trends/distributions**—create_chart → paste `inline` from result\n"
             "• **Bold** key metrics, names, and takeaways\n"
             "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
             "• Short insight after data (1-2 sentences)\n"
@@ -4447,7 +4448,7 @@ def _get_formatting_guidance(
             "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
             "• Headers: <h2>, <h3> to create clear sections\n"
             "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
-            "• Charts: <img src='«chart_url»'> for visual data (trends, distributions, comparisons)\n"
+            "• Charts: <img src='«/charts/your-chart.svg»'> for visual data (trends, distributions, comparisons)\n"
             "• Lists: <ul>/<ol> for scannable items\n"
             "• Emphasis: <strong> for key info, <em> for nuance\n"
             "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
@@ -4455,7 +4456,7 @@ def _get_formatting_guidance(
             "• No markdown—pure HTML\n\n"
             "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
-            "  <img src='«chart_url»'>\n"
+            "  <img src='«/charts/your-chart.svg»'>\n"
             "  <p>Here's how your watchlist performed today:</p>\n"
             "  <table style='border-collapse: collapse; width: 100%;'>\n"
             "    <tr style='background: #f5f5f5;'>\n"
@@ -4468,16 +4469,16 @@ def _get_formatting_guidance(
             "  </table>\n"
             "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
             '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
-            "Charts: embed with <img src='«chart_url»'>—variables are substituted automatically."
+            "Charts: embed with <img src='«/charts/your-chart.svg»'>—variables are substituted automatically."
         )
     else:
         # Multiple channels or unknown—give compact reference for all
         return (
             "Formatting by channel:\n"
-            "• Web chat: Rich markdown (**bold**, headers, tables, ![](«chart_url») for charts)\n"
-            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='«chart_url»'> for charts)—no markdown\n"
+            "• Web chat: Rich markdown (**bold**, headers, tables, ![](«/path/chart.svg») for charts)\n"
+            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='«/charts/your-chart.svg»'> for charts)—no markdown\n"
             "• SMS: Plain text only, ≤160 chars ideal\n"
-            "Charts: embed with «chart_url»—variables are substituted automatically."
+            "Charts: paste `inline` from result—«path» variables are substituted automatically."
         )
 
 
@@ -4919,7 +4920,7 @@ def _get_system_instruction(
 
         "Example—status update with structure: "
         "'## 📊 Weekly Portfolio Summary\\n\\n"
-        "![](«chart_url»)\\n\\n"
+        "![](«/charts/portfolio.svg»)\\n\\n"
         "| Asset | Value | Change | Allocation |\\n"
         "|-------|-------|--------|------------|\\n"
         "| BTC | $12,400 | +8.2% 📈 | 45% |\\n"

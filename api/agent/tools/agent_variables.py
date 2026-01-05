@@ -1,9 +1,13 @@
 """
 Agent variable system for placeholder substitution.
 
-Allows tools to set variables (e.g., chart URLs, file URLs) that the LLM
-can reference using «var_name» placeholders in messages. Placeholders
-are substituted with actual values before sending.
+Allows tools to set variables (e.g., file URLs) that the LLM can reference
+using «var_name» placeholders in messages. Placeholders are substituted with
+actual values before sending.
+
+Variable names are file paths (e.g., "/charts/sales_q4.svg"). This ensures
+uniqueness—creating multiple files won't cause collisions. The path is
+human-readable and matches what the agent sees in tool results.
 
 The «» syntax is intentional—it's visually distinctive and won't conflict
 with template languages (Handlebars, Jinja, Mustache all use {{}}). The LLM
@@ -11,11 +15,11 @@ never sees actual URLs, forcing it to use variables and preventing corruption
 of signed URLs or hallucinated paths.
 
 Usage:
-    # In a tool:
-    set_agent_variable("chart_url", signed_url)
+    # In a tool (using path as variable name):
+    set_agent_variable("/charts/sales_q4.svg", signed_url)
 
     # In LLM output:
-    "Here's the chart: ![](«chart_url»)"
+    "Here's the chart: ![](«/charts/sales_q4.svg»)"
 
     # Before sending:
     body = substitute_variables(body)
@@ -32,16 +36,15 @@ logger = logging.getLogger(__name__)
 _agent_variables: ContextVar[Dict[str, str]] = ContextVar("agent_variables", default={})
 
 # Pattern for «var_name» placeholders (guillemet quotes - visually distinct, won't conflict with code)
-_PLACEHOLDER_PATTERN = re.compile(r'«(\w+)»')
+# Matches paths like /charts/sales.svg as well as simple names
+_PLACEHOLDER_PATTERN = re.compile(r'«([^»]+)»')
 
 
 def set_agent_variable(name: str, value: str) -> None:
     """Set a variable that can be referenced in messages as «name».
 
-    Common variables set by tools:
-    - chart_url: URL of the most recently created chart
-    - chart_path: Filespace path of the most recently created chart
-    - file_url: URL of the most recently saved file
+    Convention: Use file paths as variable names (e.g., "/charts/sales.svg").
+    This ensures uniqueness when multiple files are created.
     """
     current = _agent_variables.get({}).copy()
     current[name] = value

@@ -9,7 +9,9 @@ from django.conf import settings
 
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.agent_variables import set_agent_variable
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +284,8 @@ def get_create_pdf_tool() -> Dict[str, Any]:
                 "Recommended path: /exports/your-file.pdf. The HTML must be self-contained; "
                 "external or local asset references are not allowed. "
                 "Page breaks are handled automatically. Use class='page-break' to force a page break, "
-                "or class='no-break' to keep content together."
+                "or class='no-break' to keep content together. "
+                "Returns `inline` for download links and `attach` for email attachments."
             ),
             "parameters": {
                 "type": "object",
@@ -352,7 +355,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not pdf_bytes:
         return {"status": "error", "message": "PDF generation returned empty output."}
 
-    return write_bytes_to_dir(
+    result = write_bytes_to_dir(
         agent=agent,
         content_bytes=pdf_bytes,
         extension=EXTENSION,
@@ -360,3 +363,21 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         path=path,
         overwrite=overwrite,
     )
+    if result.get("status") != "ok":
+        return result
+
+    # Set variable using path as name (unique, human-readable)
+    file_path = result.get("path")
+    node_id = result.get("node_id")
+    signed_url = build_signed_filespace_download_url(
+        agent_id=str(agent.id),
+        node_id=node_id,
+    )
+    set_agent_variable(file_path, signed_url)
+
+    return {
+        "status": "ok",
+        "path": file_path,
+        "inline": f"[Download](«{file_path}»)",
+        "attach": file_path,
+    }

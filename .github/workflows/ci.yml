@@ -204,6 +204,8 @@ jobs:
             tag: batch_agent_colors
           - batch: agent_tags
             tag: batch_agent_tags
+          - batch: agent_tools
+            tag: batch_agent_tools
           - batch: user_flags
             tag: batch_user_flags
           - batch: llm_tier_preferences

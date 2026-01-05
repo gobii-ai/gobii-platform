@@ -349,7 +349,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                 "and results become chart data. Column names in your SELECT become the keys for x/y/values/labels. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
                 "For pie/donut: use 'values' and 'labels'. For others: use 'x' and 'y' (y can be a list for multi-series). "
-                "Sets «chart_url» variable. Embed in chat: ![](«chart_url»). Embed in email: <img src='«chart_url»'>."
+                "Returns `inline` ready to paste into your message—charts are visual, don't describe the data in text."
             ),
             "parameters": {
                 "type": "object",
@@ -384,7 +384,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                     },
                     "title": {
                         "type": "string",
-                        "description": "Chart title."
+                        "description": "Chart title (recommended—charts without titles look unfinished)."
                     },
                     "xlabel": {
                         "type": "string",
@@ -483,17 +483,16 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             node_id=node_id,
         )
 
-        # Set agent variables so LLM can use placeholders instead of copying URLs
+        # Set variable using path as name (unique, human-readable)
         path = save_result.get("path")
-        set_agent_variable("chart_url", signed_url)
-        set_agent_variable("chart_path", path)
+        set_agent_variable(path, signed_url)
 
-        # Return compact result - NO url (LLM must use «chart_url» variable)
+        # Return with ready-to-use references
         return {
             "status": "ok",
             "path": path,
-            "embed": "«chart_url»",
-            "size_bytes": len(svg_bytes),
+            "inline": f"![](«{path}»)",
+            "attach": path,
         }
 
     except Exception as e:
