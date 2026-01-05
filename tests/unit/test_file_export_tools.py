@@ -175,8 +175,8 @@ class FileExportToolTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        node = AgentFsNode.objects.get(id=result["node_id"])
-        self.assertEqual(node.path, "/exports/hello.pdf")
+        self.assertEqual(result["path"], "/exports/hello.pdf")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/hello.pdf")
         self.assertEqual(node.mime_type, "application/pdf")
         with node.content.open("rb") as handle:
             self.assertTrue(handle.read().startswith(b"%PDF-1.4"))
@@ -194,8 +194,12 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertNotEqual(first["node_id"], second["node_id"])
+        self.assertEqual(first["path"], "/exports/report.pdf")
         self.assertEqual(second["path"], "/exports/report (2).pdf")
+        # Verify two distinct nodes were created
+        first_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.pdf")
+        second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).pdf")
+        self.assertNotEqual(first_node.id, second_node.id)
 
     @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
     def test_create_pdf_overwrites_exports_path(self):
@@ -210,6 +214,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["node_id"], second["node_id"])
-        node = AgentFsNode.objects.get(id=first["node_id"])
-        self.assertEqual(node.path, "/exports/report.pdf")
+        self.assertEqual(first["path"], "/exports/report.pdf")
+        self.assertEqual(second["path"], "/exports/report.pdf")
+        # Verify only one node exists (overwritten)
+        nodes = AgentFsNode.objects.filter(created_by_agent=self.agent, path="/exports/report.pdf")
+        self.assertEqual(nodes.count(), 1)

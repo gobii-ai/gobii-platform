@@ -65,7 +65,7 @@ class RunCompletionReasoningTests(SimpleTestCase):
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_retries_on_retryable_error(self, mock_completion):
         response = Mock()
-        mock_completion.side_effect = [litellm.Timeout("timeout"), response]
+        mock_completion.side_effect = [litellm.Timeout("timeout", model="mock-model", llm_provider="mock"), response]
 
         result = run_completion(
             model="mock-model",
