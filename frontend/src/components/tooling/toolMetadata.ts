@@ -403,7 +403,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-indigo-100',
     iconColorClass: 'text-indigo-600',
     detailKind: 'chart',
-    derive(entry, parameters) {
+    derive(_entry, parameters) {
       const chartType = coerceString(parameters?.type)
       const title = coerceString(parameters?.title)
       const caption = title || (chartType ? `${chartType} chart` : 'Chart')
