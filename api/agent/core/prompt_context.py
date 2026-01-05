@@ -1441,6 +1441,7 @@ def build_prompt_context(
     _build_mcp_servers_block(agent, important_group, span)
 
     # Implied send status and formatting guidance
+    implied_send_status = None
     if implied_send_context:
         channel = implied_send_context["channel"]
         display_name = implied_send_context["display_name"]
@@ -1448,30 +1449,19 @@ def build_prompt_context(
 
         if channel == "web":
             # Active web session - simplest case
-            important_group.section_text(
-                "implied_send_status",
-                (
-                    f"## Implied Send → {display_name}\n\n"
-                    f"Your text auto-sends to the active web chat user.\n"
-                    f"Text-only = immediate stop. Include a tool call if you have more work.\n\n"
-                    "**To reach someone else**, use explicit tools:\n"
-                    f"- `{tool_example}` ← what implied send does for you\n"
-                    "- Other contacts: `send_email()`, `send_sms()`\n"
-                    "- Peer agents: `send_agent_message()`\n\n"
-                    "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly."
-                ),
-                weight=3,
-                non_shrinkable=True,
+            implied_send_status = (
+                f"## Implied Send → {display_name}\n\n"
+                f"Your text auto-sends to the active web chat user.\n"
+                f"Text-only = immediate stop. Include a tool call if you have more work.\n\n"
+                "**To reach someone else**, use explicit tools:\n"
+                f"- `{tool_example}` ← what implied send does for you\n"
+                "- Other contacts: `send_email()`, `send_sms()`\n"
+                "- Peer agents: `send_agent_message()`\n\n"
+                "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly."
             )
 
     # Dynamic formatting guidance based on current medium context
     formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
-    important_group.section_text(
-        "formatting_guidance",
-        formatting_guidance,
-        weight=3,
-        non_shrinkable=True,
-    )
 
     if implied_send_active:
         response_patterns = (
@@ -1513,13 +1503,6 @@ def build_prompt_context(
             "Note: Without an active web chat session, text-only output is never delivered."
         )
 
-    # Response patterns - explicit guidance on how output maps to behavior
-    important_group.section_text(
-        "response_patterns",
-        response_patterns,
-        weight=4,
-        non_shrinkable=True,
-    )
 
     # Secrets block
     secrets_block = _get_secrets_block(agent)
@@ -1557,12 +1540,30 @@ def build_prompt_context(
     unified_history_group = prompt.group("unified_history", weight=3)
     _get_unified_history_prompt(agent, unified_history_group)
 
+    runtime_group = prompt.group("runtime_context", weight=6)
+    if implied_send_status:
+        runtime_group.section_text(
+            "implied_send_status",
+            implied_send_status,
+            weight=3,
+            non_shrinkable=True,
+        )
+    runtime_group.section_text(
+        "formatting_guidance",
+        formatting_guidance,
+        weight=3,
+        non_shrinkable=True,
+    )
+    runtime_group.section_text(
+        "response_patterns",
+        response_patterns,
+        weight=4,
+        non_shrinkable=True,
+    )
+
     # Variable priority sections (weight=4) - can be heavily shrunk with smart truncation
     variable_group = prompt.group("variable", weight=4)
-    
-    # Browser tasks - each task gets its own section for better token management
-    _build_browser_tasks_sections(agent, variable_group)
-    
+
     # SQLite schema - always available
     sqlite_schema_block = get_sqlite_schema_prompt()
     variable_group.section_text(
@@ -1622,6 +1623,9 @@ def build_prompt_context(
         weight=2,
         non_shrinkable=True,
     )
+
+    # Browser tasks - each task gets its own section for better token management
+    _build_browser_tasks_sections(agent, variable_group)
 
     # High priority sections (weight=10) - critical information that shouldn't shrink much
     critical_group = prompt.group("critical", weight=10)
@@ -2705,12 +2709,29 @@ def _get_system_instruction(
             "**The rule:** Did you complete what they asked? Charter/schedule updates are bookkeeping—do them eagerly, but the task might just be starting.\n"
         )
 
+    delivery_instructions = (
+        f"{send_guidance}"
+        f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
+        "The will_continue_work flag: "
+        "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
+        "Set false (or omit) when you're done. "
+        "Fetching data is just step one—reporting it to the user completes the task. "
+        f"{message_only_note}"
+        "How responses work: "
+        f"{response_delivery_note}"
+        "Tool calls are actions you take. "
+        f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
+        "Text-only OR empty response = IMMEDIATE STOP. When in doubt, include a tool call with will_continue_work=true."
+        f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
+        f"{stop_continue_examples}"
+        "Processing cycles cost money. Once you've fully handled the request, stop.\n"
+        f"{web_chat_delivery_note}"
+    )
+
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to act on the user's request, then stop. "
-
-        f"{send_guidance}"
-        f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
+        "\n\n"
         "Language policy:\n"
         "- Default to English.\n"
         "- Switch to another language only if the user requests it or starts speaking in that language.\n"
@@ -2785,13 +2806,6 @@ def _get_system_instruction(
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
         "**Golden rule**: If the user's words imply your job/purpose/timing has changed, update your charter and/or schedule *in that same response*. Don't wait.\n\n"
-
-        "The will_continue_work flag: "
-        "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
-        "Set false (or omit) when you're done. "
-        "Fetching data is just step one—reporting it to the user completes the task. "
-        f"{message_only_note}"
-
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
@@ -3048,14 +3062,7 @@ def _get_system_instruction(
 
         "`search_tools` unlocks integrations—call it to enable tools for Instagram, LinkedIn, Reddit, and more. "
 
-        "How responses work: "
-        f"{response_delivery_note}"
-        "Tool calls are actions you take. "
-        f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Text-only OR empty response = IMMEDIATE STOP. When in doubt, include a tool call with will_continue_work=true."
-
-        f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
-        f"{stop_continue_examples}"
+        f"{delivery_instructions}"
 
         "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "Fetching is not the finish line—reporting is. Always complete the loop.\n\n"
@@ -3066,11 +3073,6 @@ def _get_system_instruction(
         "- You need another tool call to complete the request\n\n"
 
         "will_continue_work=false (or omit) means 'I'm done with this request'.\n\n"
-
-        "Processing cycles cost money. Once you've fully handled the request, stop.\n"
-
-        f"{web_chat_delivery_note}"
-
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
 
         "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
