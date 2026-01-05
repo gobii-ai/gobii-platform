@@ -44,6 +44,7 @@ class StreamAccumulator:
     tool_calls: dict[int, dict] = field(default_factory=dict)
     usage: Any = None
     finish_reason: Optional[str] = None
+    response_headers: Optional[dict] = None
 
     def ingest_chunk(self, chunk: Any) -> tuple[Optional[str], Optional[str]]:
         choices = _read_attr(chunk, "choices") or []
@@ -83,6 +84,13 @@ class StreamAccumulator:
             usage = _read_attr(model_extra, "usage")
         if usage is not None:
             self.usage = usage
+        if self.response_headers is None:
+            headers = _read_attr(chunk, "response_headers")
+            if headers is None:
+                model_extra = _read_attr(chunk, "model_extra")
+                headers = _read_attr(model_extra, "response_headers") or _read_attr(model_extra, "headers")
+            if isinstance(headers, dict):
+                self.response_headers = headers
 
     def build_response(self, *, model: Optional[str], provider: Optional[str]) -> Any:
         message = SimpleNamespace(
@@ -96,12 +104,15 @@ class StreamAccumulator:
             finish_reason=self.finish_reason,
             index=0,
         )
+        model_extra = {"usage": self.usage} if self.usage is not None else {}
+        if self.response_headers:
+            model_extra["response_headers"] = self.response_headers
         response = SimpleNamespace(
             choices=[choice],
             usage=self.usage,
             model=model,
             provider=provider,
-            model_extra={"usage": self.usage} if self.usage is not None else None,
+            model_extra=model_extra or None,
         )
         return response
 
