@@ -6,11 +6,12 @@ Simplified multi-query executor aligned with sqlite_query.
 
 import json
 import logging
-import multiprocessing
 import os
-import queue
 import re
 import sqlite3
+import subprocess
+import sys
+import tempfile
 from collections import deque
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -48,7 +49,6 @@ except ImportError:  # pragma: no cover - not available on all platforms
 DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS = 30.0
 DEFAULT_SQLITE_BATCH_CPU_SECONDS = 30
 DEFAULT_SQLITE_BATCH_MEMORY_MB = 256
-DEFAULT_SQLITE_BATCH_START_METHOD = "spawn"
 DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS = 1.0
 DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
 
@@ -134,16 +134,6 @@ def _resolve_sqlite_batch_limits() -> _SqliteBatchLimits:
         memory_mb=memory_mb,
         query_timeout_seconds=min(query_timeout, wall_timeout) if wall_timeout > 0 else query_timeout,
     )
-
-
-def _resolve_sqlite_batch_start_method() -> str:
-    method = _coerce_str(
-        _get_setting_value("SQLITE_BATCH_PROCESS_START_METHOD"),
-        DEFAULT_SQLITE_BATCH_START_METHOD,
-    )
-    if method not in {"spawn", "fork", "forkserver"}:
-        return DEFAULT_SQLITE_BATCH_START_METHOD
-    return method
 
 
 def _apply_resource_limits(limits: _SqliteBatchLimits) -> None:
@@ -1406,41 +1396,6 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     return queries if queries else None
 
 
-def _sqlite_batch_worker(payload: Dict[str, Any], result_queue: multiprocessing.Queue) -> None:
-    limits: _SqliteBatchLimits = payload["limits"]
-    _apply_resource_limits(limits)
-
-    try:
-        result = _execute_sqlite_batch_inner(
-            agent_id=payload.get("agent_id", "unknown"),
-            params=payload["params"],
-            db_path=payload["db_path"],
-            query_timeout_seconds=limits.query_timeout_seconds,
-        )
-    except Exception as exc:
-        logger.exception("SQLite batch worker failed")
-        result = {"status": "error", "message": f"SQLite batch failed: {exc}"}
-
-    try:
-        result_queue.put(result)
-    except Exception:
-        logger.exception("Failed to return sqlite_batch result")
-
-
-def _read_sqlite_batch_result(
-    result_queue: multiprocessing.Queue,
-    exit_code: Optional[int],
-) -> Dict[str, Any]:
-    try:
-        return result_queue.get_nowait()
-    except (queue.Empty, EOFError, OSError):
-        if exit_code is None:
-            return {"status": "error", "message": "SQLite batch failed: worker did not return a result."}
-        if exit_code < 0:
-            return {"status": "error", "message": f"SQLite batch terminated by signal {-exit_code}."}
-        return {"status": "error", "message": f"SQLite batch failed: worker exited with code {exit_code}."}
-
-
 def _run_sqlite_batch_in_subprocess(
     *,
     agent_id: str,
@@ -1448,39 +1403,78 @@ def _run_sqlite_batch_in_subprocess(
     db_path: str,
     limits: _SqliteBatchLimits,
 ) -> Dict[str, Any]:
-    start_method = _resolve_sqlite_batch_start_method()
-    try:
-        ctx = multiprocessing.get_context(start_method)
-    except ValueError:
-        logger.warning("Invalid sqlite_batch start method %s; falling back to spawn", start_method)
-        ctx = multiprocessing.get_context(DEFAULT_SQLITE_BATCH_START_METHOD)
+    """Run SQLite batch in a subprocess using subprocess.Popen.
 
-    result_queue = ctx.Queue(maxsize=1)
+    This approach avoids the "daemonic processes are not allowed to have children"
+    error that occurs with multiprocessing when running under gunicorn/uvicorn workers.
+    """
     payload = {
         "agent_id": agent_id,
         "params": params,
         "db_path": db_path,
-        "limits": limits,
+        "limits": {
+            "wall_timeout_seconds": limits.wall_timeout_seconds,
+            "cpu_seconds": limits.cpu_seconds,
+            "memory_mb": limits.memory_mb,
+            "query_timeout_seconds": limits.query_timeout_seconds,
+        },
     }
-    process = ctx.Process(target=_sqlite_batch_worker, args=(payload, result_queue), daemon=True)
+
+    # Write payload to temp file (safer than piping large payloads)
     try:
-        process.start()
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(payload, f)
+            payload_file = f.name
     except Exception as exc:
-        logger.exception("Failed to start sqlite_batch worker")
+        logger.exception("Failed to create sqlite_batch payload file")
         return {"status": "error", "message": f"SQLite batch failed to start: {exc}"}
 
-    process.join(limits.wall_timeout_seconds)
-    if process.is_alive():
-        timeout_label = f"{limits.wall_timeout_seconds:g}"
-        logger.warning("SQLite batch timed out for agent %s after %s seconds", agent_id, timeout_label)
-        process.terminate()
-        process.join(DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS)
-        if process.is_alive():
-            process.kill()
-            process.join(DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS)
-        return {"status": "error", "message": f"SQLite batch timed out after {timeout_label} seconds."}
+    try:
+        # Run the worker as a subprocess using this module's __main__ block
+        process = subprocess.Popen(
+            [sys.executable, "-m", "api.agent.tools.sqlite_batch", payload_file],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
 
-    return _read_sqlite_batch_result(result_queue, process.exitcode)
+        try:
+            stdout, stderr = process.communicate(timeout=limits.wall_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timeout_label = f"{limits.wall_timeout_seconds:g}"
+            logger.warning("SQLite batch timed out for agent %s after %s seconds", agent_id, timeout_label)
+            process.terminate()
+            try:
+                process.wait(timeout=DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS)
+            return {"status": "error", "message": f"SQLite batch timed out after {timeout_label} seconds."}
+
+        if process.returncode != 0:
+            error_detail = stderr.strip() if stderr else f"exit code {process.returncode}"
+            if process.returncode < 0:
+                return {"status": "error", "message": f"SQLite batch terminated by signal {-process.returncode}."}
+            return {"status": "error", "message": f"SQLite batch failed: {error_detail}"}
+
+        if not stdout.strip():
+            return {"status": "error", "message": "SQLite batch failed: worker did not return a result."}
+
+        try:
+            return json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            logger.error("Failed to parse sqlite_batch result: %s", exc)
+            return {"status": "error", "message": f"SQLite batch failed: invalid result format"}
+
+    except Exception as exc:
+        logger.exception("Failed to run sqlite_batch worker")
+        return {"status": "error", "message": f"SQLite batch failed to start: {exc}"}
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(payload_file)
+        except Exception:
+            pass
 
 
 def _execute_sqlite_batch_inner(
@@ -1669,3 +1663,53 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             },
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Subprocess worker entry point
+# ---------------------------------------------------------------------------
+
+def _subprocess_worker_main() -> None:
+    """Entry point when this module is run as a subprocess worker."""
+    if len(sys.argv) < 2:
+        result = {"status": "error", "message": "SQLite batch worker: missing payload file argument"}
+        print(json.dumps(result))
+        sys.exit(1)
+
+    payload_file = sys.argv[1]
+    try:
+        with open(payload_file, 'r') as f:
+            payload = json.load(f)
+    except Exception as exc:
+        result = {"status": "error", "message": f"SQLite batch worker: failed to load payload: {exc}"}
+        print(json.dumps(result))
+        sys.exit(1)
+
+    # Reconstruct limits dataclass from dict
+    limits_dict = payload.get("limits", {})
+    limits = _SqliteBatchLimits(
+        wall_timeout_seconds=limits_dict.get("wall_timeout_seconds", DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS),
+        cpu_seconds=limits_dict.get("cpu_seconds", DEFAULT_SQLITE_BATCH_CPU_SECONDS),
+        memory_mb=limits_dict.get("memory_mb", DEFAULT_SQLITE_BATCH_MEMORY_MB),
+        query_timeout_seconds=limits_dict.get("query_timeout_seconds", DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS),
+    )
+
+    # Apply resource limits (CPU time, memory)
+    _apply_resource_limits(limits)
+
+    try:
+        result = _execute_sqlite_batch_inner(
+            agent_id=payload.get("agent_id", "unknown"),
+            params=payload.get("params", {}),
+            db_path=payload.get("db_path", ""),
+            query_timeout_seconds=limits.query_timeout_seconds,
+        )
+    except Exception as exc:
+        result = {"status": "error", "message": f"SQLite batch failed: {exc}"}
+
+    # Output result as JSON to stdout
+    print(json.dumps(result))
+
+
+if __name__ == "__main__":
+    _subprocess_worker_main()

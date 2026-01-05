@@ -2756,6 +2756,53 @@ Your message: "## Q4 Results\n\n![](«/charts/q4.svg»)\n\nStrong 27% growth."
 
 **Anti-pattern:** Never copy raw URLs from tool results. Always use the `«path»` variable syntax.
 
+## Creating Beautiful PDFs
+
+PDFs are *documents*, not web pages. Structure them for print: clear sections, proper hierarchy, graceful page breaks.
+
+**Structure for page breaks** — content flows across pages, so group related items:
+```html
+<section class="section">           <!-- Keeps section together when possible -->
+  <h2>Market Analysis</h2>          <!-- Never orphaned at page bottom -->
+  <p>Overview text...</p>
+  <table>
+    <thead><tr><th>Region</th><th>Revenue</th></tr></thead>  <!-- Repeats on every page -->
+    <tbody>...</tbody>
+  </table>
+</section>
+```
+
+**Utility classes:**
+| Class | Effect |
+|-------|--------|
+| `.section` | Logical section — prefers breaking *before*, not *inside* |
+| `.no-break` | Keep element together (for cards, key-value groups) |
+| `.page-break` | Force page break after |
+| `.cover-page` | Title page (centered, no header/footer) |
+| `<thead>` | Table headers repeat on every page automatically |
+
+**Cover page example:**
+```html
+<div class="cover-page">
+  <h1>Q4 Financial Report</h1>
+  <p class="subtitle">Fiscal Year 2024</p>
+  <p class="meta">Prepared January 2025</p>
+</div>
+```
+
+**What makes a PDF satisfying:**
+- Generous whitespace — don't cram content
+- Clear visual hierarchy — h1 > h2 > h3 with proper spacing
+- Tables with `<thead>` — headers repeat when tables span pages
+- Sections wrapped in `<section class="section">` — prevents awkward mid-section breaks
+- No orphaned headings — a heading at page bottom with content on next page looks broken
+
+**Anti-patterns:**
+- ✗ Walls of text without headings
+- ✗ Tables without `<thead>` (headers don't repeat)
+- ✗ Inline styles for everything (use semantic HTML, the default CSS handles typography)
+- ✗ Cramming too much on one page (let content breathe across pages)
+
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
 -- Find emails with context (who is this email for?)
