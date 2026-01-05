@@ -79,7 +79,7 @@ def _normalize_provider_detail(value: Any) -> Optional[str]:
     candidate = _clean_provider(value)
     if not candidate:
         return None
-    if candidate.lower() == "openrouter":
+    if candidate.lower().startswith("openrouter"):
         return None
     return candidate
 
