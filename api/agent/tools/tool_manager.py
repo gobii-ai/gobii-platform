@@ -84,6 +84,14 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     return agent is not None
 
 
+SKIP_AUTO_SUBSTITUTION_TOOL_NAMES = {
+    "send_email",
+    "send_sms",
+    "send_chat_message",
+    "read_file",
+}
+
+
 def should_skip_auto_substitution(tool_name: str) -> bool:
     """Check if a tool opts out of automatic variable substitution.
 
@@ -91,6 +99,8 @@ def should_skip_auto_substitution(tool_name: str) -> bool:
     typically because they need context-specific resolution (e.g., create_pdf
     converts filespace paths to data URIs instead of signed URLs).
     """
+    if tool_name in SKIP_AUTO_SUBSTITUTION_TOOL_NAMES:
+        return True
     entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
     if entry:
         return entry.get("skip_auto_substitution", False)

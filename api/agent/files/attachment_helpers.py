@@ -204,6 +204,8 @@ def normalize_attachment_paths(raw_paths: object) -> List[str]:
         if not isinstance(item, str):
             raise AttachmentResolutionError("Attachment paths must be strings.")
         value = item.strip()
+        if value.startswith("«") and value.endswith("»"):
+            value = value[1:-1].strip()
         if not value:
             raise AttachmentResolutionError("Attachment path cannot be empty.")
         if not value.startswith("/"):

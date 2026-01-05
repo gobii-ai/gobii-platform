@@ -1266,10 +1266,17 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         self.assertEqual(headers["Real-Key"], "real_value")
         self.assertEqual(headers["Fake-Key"], "<<<fake_secret>>>")  # Unchanged
 
+    @patch('api.agent.tools.http_request.build_signed_filespace_download_url')
     @patch('api.agent.tools.http_request.write_bytes_to_dir')
     @patch('requests.request')
     @patch('api.agent.tools.http_request.select_proxy_for_persistent_agent')
-    def test_http_request_download_saves_to_filespace(self, mock_proxy, mock_request, mock_write):
+    def test_http_request_download_saves_to_filespace(
+        self,
+        mock_proxy,
+        mock_request,
+        mock_write,
+        mock_signed_url,
+    ):
         """Download requests should persist the response body to filespace."""
         mock_proxy.return_value = type('ProxyServer', (), {'proxy_url': 'http://proxy:8080'})()
         mock_response = type('Response', (), {
@@ -1288,6 +1295,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
             "node_id": "node-123",
             "filename": "report.pdf",
         }
+        mock_signed_url.return_value = "https://example.com/downloads/report.pdf"
 
         params = {
             "method": "GET",
@@ -1298,7 +1306,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         result = _execute_http_request(self.agent, params)
 
         self.assertEqual(result["status"], "ok", result)
-        self.assertEqual(result["path"], "/downloads/report.pdf")
+        self.assertEqual(result["file"], "«/downloads/report.pdf»")
         self.assertEqual(result["node_id"], "node-123")
         self.assertEqual(result["filename"], "report.pdf")
         mock_write.assert_called_once()

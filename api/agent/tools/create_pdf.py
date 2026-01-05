@@ -543,7 +543,7 @@ def get_create_pdf_tool() -> Dict[str, Any]:
                 "- .cover-page: title page (no header/footer)\n"
                 "- .doc-title: set running header text\n"
                 "\nTables with <thead> repeat headers across pages. "
-                "Returns `inline` for download links and `attach` for email."
+                "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders."
             ),
             "parameters": {
                 "type": "object",
@@ -589,7 +589,10 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if _contains_blocked_asset_references(html):
         return {
             "status": "error",
-            "message": "HTML contains external or local asset references. Only inline data assets are allowed.",
+            "message": (
+                "HTML contains external or local asset references. "
+                "Use «/path» variables (from create_chart/create_csv/create_pdf) for embeds."
+            ),
         }
 
     path, overwrite, error = resolve_export_target(params)
@@ -636,9 +639,11 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     )
     set_agent_variable(file_path, signed_url)
 
+    var_ref = f"«{file_path}»"
     return {
         "status": "ok",
-        "path": file_path,
-        "inline": f"[Download](«{file_path}»)",
-        "attach": file_path,
+        "file": var_ref,
+        "inline": f"[Download]({var_ref})",
+        "inline_html": f"<a href='{var_ref}'>Download</a>",
+        "attach": var_ref,
     }

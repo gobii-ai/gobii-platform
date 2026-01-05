@@ -91,6 +91,72 @@ def substitute_variables(text: str) -> str:
     return _PLACEHOLDER_PATTERN.sub(replace_match, text)
 
 
+def substitute_variables_with_filespace(text: str, agent) -> str:
+    """Replace «var_name» placeholders with actual values or filespace URLs.
+
+    Falls back to signed filespace URLs when a placeholder looks like a filespace
+    path (e.g., «/charts/q4.svg») but no in-memory variable is present.
+    """
+    if not text or '«' not in text:
+        return text
+
+    variables = _agent_variables.get({})
+    filespace = None
+    if agent is not None:
+        try:
+            from api.agent.files.filespace_service import get_or_create_default_filespace
+
+            filespace = get_or_create_default_filespace(agent)
+        except Exception:
+            logger.warning(
+                "Failed to get filespace for agent %s, variable-only substitution will be used",
+                getattr(agent, "id", None),
+            )
+            filespace = None
+
+    url_cache: Dict[str, str] = {}
+
+    def _resolve_filespace_url(path: str) -> Optional[str]:
+        if not filespace:
+            return None
+        if path in url_cache:
+            return url_cache[path]
+        try:
+            from api.models import AgentFsNode
+            from api.agent.files.attachment_helpers import build_signed_filespace_download_url
+
+            node = AgentFsNode.objects.filter(
+                filespace=filespace,
+                path=path,
+                node_type=AgentFsNode.NodeType.FILE,
+                is_deleted=False,
+            ).only("id").first()
+            if not node:
+                return None
+            url = build_signed_filespace_download_url(
+                agent_id=str(agent.id),
+                node_id=node.id,
+            )
+            url_cache[path] = url
+            return url
+        except Exception:
+            logger.warning("Failed to resolve filespace URL for %s", path)
+            return None
+
+    def replace_match(match: re.Match) -> str:
+        var_name = match.group(1)
+        if var_name in variables:
+            return variables[var_name]
+        if var_name.startswith("/"):
+            resolved = _resolve_filespace_url(var_name)
+            if resolved:
+                return resolved
+        logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+        return match.group(0)
+
+    return _PLACEHOLDER_PATTERN.sub(replace_match, text)
+
+
 def format_variables_for_prompt() -> str:
     """Format current variables for inclusion in agent prompt context.
 
@@ -101,7 +167,9 @@ def format_variables_for_prompt() -> str:
     if not variables:
         return ""
 
-    lines = ["Available variables (use «name» in messages—substituted automatically when sent):"]
+    lines = [
+        "Available file variables (use «name» in messages; for attachments, pass the same «name»):"
+    ]
     for name in variables.keys():
         # Don't show value - just the variable name. This prevents LLM from copying URLs.
         lines.append(f"  «{name}»")
@@ -125,43 +193,48 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
         return text
 
     variables = _agent_variables.get({})
-    if not variables:
-        return text
 
     # Get agent's filespace for file lookups
+    filespace = None
     try:
         filespace = get_or_create_default_filespace(agent)
     except Exception:
         logger.warning("Failed to get filespace for agent %s, falling back to URL substitution", agent.id)
-        return substitute_variables(text)
+        filespace = None
+
+    def _load_data_uri(path: str) -> Optional[str]:
+        if not filespace:
+            return None
+        try:
+            node = AgentFsNode.objects.filter(
+                filespace=filespace,
+                path=path,
+                node_type=AgentFsNode.NodeType.FILE,
+                is_deleted=False,
+            ).first()
+
+            if node and node.content:
+                content_bytes = node.content.read()
+                node.content.seek(0)  # Reset for potential re-reads
+                mime_type = node.mime_type or "application/octet-stream"
+                b64 = base64.b64encode(content_bytes).decode("ascii")
+                return f"data:{mime_type};base64,{b64}"
+        except Exception:
+            logger.warning("Failed to load file %s as data URI", path)
+        return None
 
     def replace_match(match: re.Match) -> str:
         var_name = match.group(1)
 
-        if var_name not in variables:
-            logger.debug("Variable «%s» not found, keeping placeholder", var_name)
-            return match.group(0)
-
-        # Variable names are filespace paths - try to load the file
         if var_name.startswith("/"):
-            try:
-                node = AgentFsNode.objects.filter(
-                    filespace=filespace,
-                    path=var_name,
-                    node_type=AgentFsNode.NodeType.FILE,
-                    is_deleted=False,
-                ).first()
+            data_uri = _load_data_uri(var_name)
+            if data_uri:
+                return data_uri
 
-                if node and node.content:
-                    content_bytes = node.content.read()
-                    node.content.seek(0)  # Reset for potential re-reads
-                    mime_type = node.mime_type or "application/octet-stream"
-                    b64 = base64.b64encode(content_bytes).decode("ascii")
-                    return f"data:{mime_type};base64,{b64}"
-            except Exception:
-                logger.warning("Failed to load file %s as data URI, using signed URL", var_name)
+        if var_name in variables:
+            return variables[var_name]
 
-        # Fall back to signed URL
-        return variables[var_name]
+        logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+        return match.group(0)
 
     return _PLACEHOLDER_PATTERN.sub(replace_match, text)

@@ -209,6 +209,19 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "error")
             self.assertIn("not authorized", out.get("message", "").lower())
 
+    def test_corr_function_is_available(self):
+        with self._with_temp_db():
+            create_sql = "CREATE TABLE t(x REAL, y REAL)"
+            insert_sql = "INSERT INTO t(x, y) VALUES (1, 1), (2, 2), (3, 3), (4, 4)"
+            execute_sqlite_batch(self.agent, {"queries": [create_sql, insert_sql]})
+
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT CORR(x, y) AS corr FROM t"})
+            self.assertEqual(out.get("status"), "ok")
+            results = out.get("results", [])
+            self.assertEqual(len(results), 1)
+            corr_value = results[0]["result"][0]["corr"]
+            self.assertAlmostEqual(corr_value, 1.0, places=6)
+
     def test_large_result_is_truncated(self):
         """Results exceeding MAX_RESULT_ROWS are truncated with warning."""
         with self._with_temp_db():

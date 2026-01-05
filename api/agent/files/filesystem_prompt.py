@@ -6,8 +6,8 @@ access in its default filespace. Output is capped to ~30KB to keep
 prompt size under control, similar to the SQLite schema helper.
 
 Note: URLs are NOT shown to prevent LLM from copying/corrupting them.
-Images can be attached using the `attachments` parameter in send tools.
-Charts created during the session get «chart_url» variable automatically.
+Use «/path» placeholders for embeds and attachments.
+Charts/exports are referenced as file variables like «/charts/...» and «/exports/...».
 """
 import logging
 from typing import List
@@ -75,7 +75,9 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     if not files.exists():
         return "No files available in the agent filesystem. Tool results live in SQLite __tool_results."
 
-    header = "Files in agent filespace (read_file for contents; attachments param to send files):"
+    header = (
+        "Files in agent filespace (use read_file for contents; attachments accept «/path»):"
+    )
     lines: List[str] = [header]
     total_bytes = len(header.encode("utf-8"))
     max_bytes = 30000
@@ -84,7 +86,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
         size = _format_size(node.size_bytes)
         mime = (node.mime_type or "?")
         # Simple listing - no URLs shown (prevents copying/corruption)
-        line = f"- {node.path} ({size}, {mime})"
+        line = f"- «{node.path}» ({size}, {mime})"
 
         line_len = len(line.encode("utf-8"))
         if lines:  # Add 1 for the newline character
