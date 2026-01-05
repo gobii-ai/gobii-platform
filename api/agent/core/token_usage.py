@@ -75,38 +75,39 @@ def _extract_header_value(headers: Any, header_name: str) -> Optional[str]:
     return None
 
 
-def _normalize_provider_detail(value: Any, provider_hint: Optional[str]) -> Optional[str]:
+def _normalize_provider_detail(value: Any) -> Optional[str]:
     candidate = _clean_provider(value)
     if not candidate:
         return None
     if candidate.lower() == "openrouter":
-        return None
-    if provider_hint and candidate.lower() == str(provider_hint).lower():
         return None
     return candidate
 
 
 def _resolve_openrouter_provider_detail(
     response: Any,
-    *,
-    provider_hint: Optional[str],
 ) -> Optional[str]:
     model_extra = getattr(response, "model_extra", None)
-    headers = usage_attribute(model_extra, "response_headers") or usage_attribute(model_extra, "headers")
-    header_provider = _extract_header_value(headers, "x-openrouter-provider")
-    normalized = _normalize_provider_detail(header_provider, provider_hint)
+    header_source_getters = [
+        lambda: usage_attribute(model_extra, "response_headers") or usage_attribute(model_extra, "headers"),
+        lambda: getattr(response, "_response_headers", None),
+        lambda: usage_attribute(response, "response_headers") or usage_attribute(response, "headers"),
+    ]
+
+    for get_headers in header_source_getters:
+        headers = get_headers()
+        header_provider = _extract_header_value(headers, "x-openrouter-provider")
+        normalized = _normalize_provider_detail(header_provider)
+        if normalized:
+            return normalized
+
+    body_provider = usage_attribute(response, "provider")
+    normalized = _normalize_provider_detail(body_provider)
     if normalized:
         return normalized
 
-    headers = getattr(response, "_response_headers", None)
-    header_provider = _extract_header_value(headers, "x-openrouter-provider")
-    normalized = _normalize_provider_detail(header_provider, provider_hint)
-    if normalized:
-        return normalized
-
-    headers = usage_attribute(response, "response_headers") or usage_attribute(response, "headers")
-    header_provider = _extract_header_value(headers, "x-openrouter-provider")
-    return _normalize_provider_detail(header_provider, provider_hint)
+    body_provider = usage_attribute(model_extra, "provider")
+    return _normalize_provider_detail(body_provider)
 
 
 def coerce_int(value: Any) -> int:
@@ -249,6 +250,11 @@ def extract_token_usage(
     if resolved_provider is None and usage is not None:
         resolved_provider = usage_attribute(usage, "provider")
 
+    if _is_openrouter_provider(resolved_model):
+        provider_detail = _resolve_openrouter_provider_detail(response)
+        if provider_detail:
+            resolved_provider = provider_detail
+
     token_usage: dict[str, Any] = {"model": resolved_model, "provider": resolved_provider}
     if not usage:
         return token_usage, None
@@ -275,14 +281,6 @@ def extract_token_usage(
     if cost_fields:
         token_usage.update(cost_fields)
 
-    if _is_openrouter_provider(resolved_provider):
-        provider_detail = _resolve_openrouter_provider_detail(
-            response,
-            provider_hint=resolved_provider,
-        )
-        if provider_detail:
-            token_usage["provider_detail"] = provider_detail
-
     return token_usage, usage
 
 
@@ -298,7 +296,6 @@ def completion_kwargs_from_usage(token_usage: Optional[dict], *, completion_type
         "cached_tokens": token_usage.get("cached_tokens"),
         "llm_model": token_usage.get("model"),
         "llm_provider": token_usage.get("provider"),
-        "llm_provider_detail": token_usage.get("provider_detail"),
         "input_cost_total": token_usage.get("input_cost_total"),
         "input_cost_uncached": token_usage.get("input_cost_uncached"),
         "input_cost_cached": token_usage.get("input_cost_cached"),

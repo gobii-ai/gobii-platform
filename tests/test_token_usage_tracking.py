@@ -463,7 +463,7 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.llm_provider, "provider")
         self.assertEqual(completion.thinking_content, "Reasoned path")
 
-    def test_log_agent_completion_records_openrouter_provider_detail(self):
+    def test_log_agent_completion_records_openrouter_provider(self):
         response = make_completion_response(
             prompt_tokens=5,
             completion_tokens=2,
@@ -484,8 +484,49 @@ class TokenUsageTrackingTest(TestCase):
             agent=self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.OTHER,
         ).latest("created_at")
-        self.assertEqual(completion.llm_provider, "openrouter_glm")
-        self.assertEqual(completion.llm_provider_detail, "together")
+        self.assertEqual(completion.llm_provider, "together")
+
+    def test_log_agent_completion_records_openrouter_provider_without_usage(self):
+        response = MagicMock()
+        response.choices = []
+        response.model = "openrouter/z-ai/glm-4.5"
+        response.provider = "openrouter"
+        response.model_extra = {"response_headers": {"X-OpenRouter-Provider": "together"}}
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            response=response,
+            provider="openrouter_glm",
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_provider, "together")
+
+    def test_log_agent_completion_records_openrouter_provider_from_body(self):
+        response = make_completion_response(
+            prompt_tokens=5,
+            completion_tokens=2,
+            cached_tokens=0,
+            model="openrouter/z-ai/glm-4.5",
+            provider="together",
+        )
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            response=response,
+            provider="openrouter_glm",
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+        ).latest("created_at")
+        self.assertEqual(completion.llm_provider, "together")
 
     @patch("api.models.PersistentAgentCompletion.objects.create", side_effect=RuntimeError("db down"))
     def test_log_agent_completion_warns_on_failure(self, mock_create):
