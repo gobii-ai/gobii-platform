@@ -2449,8 +2449,7 @@ def _run_agent_loop(
                         _attach_prompt_archive(step)
                     except Exception:
                         logger.debug("Failed to persist implied-send correction step", exc_info=True)
-                    reasoning_only_streak = 0
-                    continue
+                    # Don't continue here - still execute any other tool calls that were returned
 
             reasoning_source = thinking_content
             if not reasoning_source and not implied_send:

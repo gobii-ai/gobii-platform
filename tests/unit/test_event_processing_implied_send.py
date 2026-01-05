@@ -428,3 +428,74 @@ class ImpliedSendTests(TestCase):
             description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNone(correction_step)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_failure_still_executes_other_tool_calls(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        """When implied send fails due to no web session, other tool calls should still execute."""
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        # Set up a preferred endpoint that is NOT a web session (so implied send will fail)
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            owner_agent=None,
+        )
+        self.agent.preferred_contact_endpoint = endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
+
+        # Create a mock response with BOTH message content AND a tool call
+        msg = MagicMock()
+        msg.content = "Hello, this message should be dropped"
+        msg.reasoning_content = None
+        # Add a sleep tool call (simple tool that doesn't require mocking external services)
+        sleep_tool_call = MagicMock()
+        sleep_tool_call.id = "call_sleep_123"
+        sleep_tool_call.function = MagicMock()
+        sleep_tool_call.function.name = "sleep_until_next_trigger"
+        sleep_tool_call.function.arguments = "{}"
+        msg.tool_calls = [sleep_tool_call]
+
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        # Implied send should NOT have been called (no active web session)
+        self.assertFalse(mock_send_chat.called)
+
+        # The correction step should exist (notifying agent that message was dropped)
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__startswith="Message delivery requires explicit send tools",
+        ).first()
+        self.assertIsNotNone(correction_step)
+
+        # The sleep tool call should still have been executed (creating a step)
+        sleep_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description="Decided to sleep until next trigger.",
+        ).first()
+        self.assertIsNotNone(sleep_step, "Other tool calls should execute even when implied send fails")

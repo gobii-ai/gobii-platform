@@ -397,6 +397,92 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("CREATE TABLE t AS WITH nums", auto_fix["after"])
             self.assertTrue(any("moved WITH clause" in fix for fix in auto_fix["fixes"]))
 
+    def test_autocorrect_with_after_update(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t(id INTEGER)",
+                "INSERT INTO t(id) VALUES (1), (2)",
+                """
+                UPDATE t
+                SET id = id + 10
+                WITH nums AS (SELECT 1 AS id)
+                WHERE id = 1
+                """,
+                "SELECT id FROM t ORDER BY id",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            results = out.get("results", [])
+            self.assertEqual(results[3]["result"], [{"id": 2}, {"id": 11}])
+            auto_fix = results[2].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertTrue(
+                any("moved WITH clause before DML" in fix for fix in auto_fix["fixes"])
+            )
+
+    def test_autocorrect_create_table_missing_as(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t SELECT 1 AS id UNION ALL SELECT 2 AS id",
+                "SELECT id FROM t ORDER BY id",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            results = out.get("results", [])
+            self.assertEqual(results[1]["result"], [{"id": 1}, {"id": 2}])
+            auto_fix = results[0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertTrue(any("added missing AS" in fix for fix in auto_fix["fixes"]))
+
+    def test_autocorrect_missing_column_in_cte_chain(self):
+        with self._with_temp_db():
+            sql = """
+            WITH p1 AS (SELECT 1 AS c1, 2 AS c2),
+                 p2 AS (SELECT c2 FROM p1),
+                 p3 AS (SELECT c2 FROM p2)
+            SELECT c1, c2 FROM p3
+            """
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            results = out.get("results", [])
+            self.assertEqual(results[0]["result"], [{"c1": 1, "c2": 2}])
+            auto_fix = results[0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertTrue(
+                any("propagated 'c1' through CTE chain" in fix for fix in auto_fix["fixes"])
+            )
+
+    def test_autocorrect_delete_star(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t(id INTEGER)",
+                "INSERT INTO t(id) VALUES (1), (2)",
+                "DELETE * FROM t WHERE id = 1",
+                "SELECT id FROM t ORDER BY id",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            results = out.get("results", [])
+            self.assertEqual(results[3]["result"], [{"id": 2}])
+            auto_fix = results[2].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertTrue(any("removed '*'" in fix for fix in auto_fix["fixes"]))
+
+    def test_autocorrect_insert_value_keyword(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t(id INTEGER)",
+                "INSERT INTO t VALUE (1)",
+                "SELECT id FROM t ORDER BY id",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            results = out.get("results", [])
+            self.assertEqual(results[2]["result"], [{"id": 1}])
+            auto_fix = results[1].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertTrue(any("VALUE -> VALUES" in fix for fix in auto_fix["fixes"]))
+
     def test_autocorrect_multi_pass_cte_and_alias(self):
         """Fixes multiple typos across retries (CTE + alias)."""
         with self._with_temp_db() as (db_path, token, tmp):
