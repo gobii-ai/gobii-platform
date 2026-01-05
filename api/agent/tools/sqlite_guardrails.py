@@ -239,6 +239,45 @@ def _split_part(s: Optional[str], delimiter: str, part: int) -> Optional[str]:
         return ""
     return parts[part - 1]
 
+
+class _CorrAggregate:
+    """Aggregate for Pearson correlation (CORR)."""
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.mean_x = 0.0
+        self.mean_y = 0.0
+        self.cov = 0.0
+        self.m2_x = 0.0
+        self.m2_y = 0.0
+
+    def step(self, x: Optional[float], y: Optional[float]) -> None:
+        if x is None or y is None:
+            return
+        try:
+            x_val = float(x)
+            y_val = float(y)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(x_val) or not math.isfinite(y_val):
+            return
+        self.count += 1
+        dx = x_val - self.mean_x
+        self.mean_x += dx / self.count
+        dy = y_val - self.mean_y
+        self.mean_y += dy / self.count
+        self.cov += dx * (y_val - self.mean_y)
+        self.m2_x += dx * (x_val - self.mean_x)
+        self.m2_y += dy * (y_val - self.mean_y)
+
+    def finalize(self) -> Optional[float]:
+        if self.count < 2:
+            return None
+        denom = self.m2_x * self.m2_y
+        if denom <= 0.0:
+            return None
+        return self.cov / math.sqrt(denom)
+
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
     sqlite3.SQLITE_DETACH,
@@ -415,6 +454,7 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("RPAD", 2, _rpad)  # Oracle/MySQL
     conn.create_function("RPAD", 3, _rpad)  # With pad char
     conn.create_function("SPLIT_PART", 3, _split_part)  # PostgreSQL
+    conn.create_aggregate("CORR", 2, _CorrAggregate)  # PostgreSQL
 
 
 def open_guarded_sqlite_connection(
