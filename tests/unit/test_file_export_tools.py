@@ -50,8 +50,8 @@ class FileExportToolTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        node = AgentFsNode.objects.get(id=result["node_id"])
-        self.assertEqual(node.path, "/exports/report.csv")
+        self.assertEqual(result["path"], "/exports/report.csv")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
         self.assertEqual(node.mime_type, "text/csv")
         with node.content.open("rb") as handle:
             self.assertEqual(handle.read(), b"col1,col2\n1,2\n")
@@ -68,10 +68,12 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["node_id"], second["node_id"])
-        node = AgentFsNode.objects.get(id=first["node_id"])
-        self.assertEqual(node.path, "/exports/report.csv")
-        with node.content.open("rb") as handle:
+        self.assertEqual(first["path"], "/exports/report.csv")
+        self.assertEqual(second["path"], "/exports/report.csv")
+        # Verify only one node exists (overwritten)
+        nodes = AgentFsNode.objects.filter(created_by_agent=self.agent, path="/exports/report.csv")
+        self.assertEqual(nodes.count(), 1)
+        with nodes.first().content.open("rb") as handle:
             self.assertEqual(handle.read(), b"col1,col2\n3,4\n")
 
     def test_create_csv_path_dedupes_when_overwrite_false(self):
@@ -86,8 +88,12 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertNotEqual(first["node_id"], second["node_id"])
+        self.assertEqual(first["path"], "/exports/report.csv")
         self.assertEqual(second["path"], "/exports/report (2).csv")
+        # Verify two distinct nodes were created
+        first_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
+        second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).csv")
+        self.assertNotEqual(first_node.id, second_node.id)
 
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(
