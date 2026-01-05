@@ -376,6 +376,27 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("FROM number", auto_fix["before"])
             self.assertIn("FROM numbers", auto_fix["after"])
 
+    def test_autocorrect_with_before_create_table_as(self):
+        with self._with_temp_db():
+            sql = """
+            WITH nums AS (SELECT 1 AS id UNION ALL SELECT 2)
+            CREATE TABLE t AS
+            SELECT * FROM nums
+            """
+            out = execute_sqlite_batch(
+                self.agent,
+                {"queries": [sql, "SELECT id FROM t ORDER BY id"]},
+            )
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            results = out.get("results", [])
+            self.assertEqual(results[1]["result"], [{"id": 1}, {"id": 2}])
+            auto_fix = results[0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("WITH nums", auto_fix["before"])
+            self.assertIn("CREATE TABLE t AS WITH nums", auto_fix["after"])
+            self.assertTrue(any("moved WITH clause" in fix for fix in auto_fix["fixes"]))
+
     def test_autocorrect_multi_pass_cte_and_alias(self):
         """Fixes multiple typos across retries (CTE + alias)."""
         with self._with_temp_db() as (db_path, token, tmp):

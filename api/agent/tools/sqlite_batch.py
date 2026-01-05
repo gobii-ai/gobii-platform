@@ -36,6 +36,7 @@ from .sqlite_guardrails import (
     start_query_timer,
     stop_query_timer,
 )
+from .sqlite_autocorrect import build_sqlglot_candidates
 from .sqlite_helpers import is_write_statement
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
 
@@ -1171,6 +1172,10 @@ def _build_autocorrection_candidates(
     for updated_sql, fix in _autocorrect_missing_column_with_json_paths(sql, error_msg):
         if updated_sql != sql:
             candidates.append((updated_sql, [fix]))
+
+    for updated_sql, fixes in build_sqlglot_candidates(sql, error_msg):
+        if updated_sql != sql:
+            candidates.append((updated_sql, fixes))
 
     return candidates
 
