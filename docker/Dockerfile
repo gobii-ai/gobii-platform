@@ -17,7 +17,8 @@ RUN --mount=type=cache,target=/var/cache/apt \
         git \
         procps \
         xvfb x11-utils xauth libx11-6 libxext6 libxrender1 \
-        libxtst6 libxi6 libxrandr2 libxfont2 wkhtmltopdf curl \
+        libxtst6 libxi6 libxrandr2 libxfont2 curl \
+        libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
         gnupg ca-certificates && \
     curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     mkdir -p /etc/apt/keyrings && \

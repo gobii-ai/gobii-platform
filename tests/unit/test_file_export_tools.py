@@ -1,5 +1,6 @@
 import base64
-from unittest.mock import patch
+import sys
+from unittest.mock import patch, MagicMock
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
@@ -7,6 +8,21 @@ from django.test import TestCase, tag, override_settings
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_pdf import execute_create_pdf
 from api.models import AgentFsNode, BrowserUseAgent, PersistentAgent
+
+
+class _MockWeasyPrintHTML:
+    """Mock WeasyPrint HTML class that returns test PDF bytes."""
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def write_pdf(self):
+        return b"%PDF-1.4 test"
+
+
+# Create a mock weasyprint module for environments without system dependencies
+_mock_weasyprint = MagicMock()
+_mock_weasyprint.HTML = _MockWeasyPrintHTML
+_mock_weasyprint.default_url_fetcher = MagicMock()
 
 
 @tag("batch_agent_filesystem")
@@ -136,8 +152,8 @@ class FileExportToolTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("maximum", result["message"].lower())
 
-    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
-    def test_create_pdf_allows_data_srcset(self, mock_pdf):
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_allows_data_srcset(self):
         result = execute_create_pdf(
             self.agent,
             {
@@ -151,8 +167,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
 
-    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
-    def test_create_pdf_writes_file(self, mock_pdf):
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_writes_file(self):
         result = execute_create_pdf(
             self.agent,
             {"html": "<html><body>Hello</body></html>", "file_path": "/exports/hello.pdf"},
@@ -165,8 +181,8 @@ class FileExportToolTests(TestCase):
         with node.content.open("rb") as handle:
             self.assertTrue(handle.read().startswith(b"%PDF-1.4"))
 
-    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
-    def test_create_pdf_path_dedupes_when_overwrite_false(self, mock_pdf):
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_path_dedupes_when_overwrite_false(self):
         first = execute_create_pdf(
             self.agent,
             {"html": "<html><body>Hello</body></html>", "file_path": "/exports/report.pdf"},
@@ -181,8 +197,8 @@ class FileExportToolTests(TestCase):
         self.assertNotEqual(first["node_id"], second["node_id"])
         self.assertEqual(second["path"], "/exports/report (2).pdf")
 
-    @patch("api.agent.tools.create_pdf.pdfkit.from_string", return_value=b"%PDF-1.4 test")
-    def test_create_pdf_overwrites_exports_path(self, mock_pdf):
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_overwrites_exports_path(self):
         first = execute_create_pdf(
             self.agent,
             {"html": "<html><body>Hello</body></html>", "file_path": "/exports/report.pdf", "overwrite": True},

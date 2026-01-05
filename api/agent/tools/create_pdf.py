@@ -5,8 +5,6 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
-import pdfkit
-
 from django.conf import settings
 
 from api.models import PersistentAgent
@@ -18,12 +16,44 @@ logger = logging.getLogger(__name__)
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
-PDFKIT_OPTIONS = {
-    "disable-local-file-access": "",
-    "disable-javascript": "",
-    "encoding": "utf-8",
-    "quiet": "",
+# Default print CSS for clean page breaks
+DEFAULT_PRINT_CSS = """
+/* Page setup */
+@page {
+    size: Letter;
+    margin: 20mm 15mm;
 }
+
+/* Prevent headings from being orphaned at page bottom */
+h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+    page-break-inside: avoid;
+}
+
+/* Keep tables, images, code blocks together when possible */
+table, figure, img, pre, blockquote {
+    page-break-inside: avoid;
+}
+
+/* Prevent table rows from splitting */
+tr {
+    page-break-inside: avoid;
+}
+
+/* Minimum lines before/after page break (prevents widow/orphan lines) */
+p, li {
+    orphans: 3;
+    widows: 3;
+}
+
+/* Utility classes for explicit page break control */
+.page-break {
+    page-break-after: always;
+}
+.no-break {
+    page-break-inside: avoid;
+}
+"""
 
 CSS_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?P<url>[^)\"'\s]+)", re.IGNORECASE)
 CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\()?['\"]?\s*(?P<url>[^'\"\)\s]+)", re.IGNORECASE)
@@ -31,6 +61,18 @@ META_REFRESH_URL_RE = re.compile(r"url\s*=\s*(?P<url>[^;]+)", re.IGNORECASE)
 DATA_URL_RE = re.compile(r"^data:(?P<meta>[^,]*?),(?P<data>.*)$", re.IGNORECASE | re.DOTALL)
 SVG_URL_ATTR_RE = re.compile(r"(?:href|xlink:href)\s*=\s*['\"](?P<url>[^'\"]+)['\"]", re.IGNORECASE)
 URL_ATTRS = {"src", "href", "data", "poster", "action", "formaction", "xlink:href", "background"}
+
+
+def _secure_url_fetcher(url, timeout=10, ssl_context=None):
+    """
+    Security layer: Only allow data: URIs, block all external/local resources.
+    This is a second layer of defense after the HTML scanner.
+    """
+    if url.startswith('data:'):
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher(url, timeout, ssl_context)
+    # Block everything else - external URLs, file://, etc.
+    raise ValueError(f"External resources not allowed: {url}")
 
 
 def _is_allowed_asset_url(url: str) -> bool:
@@ -210,6 +252,26 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
+def _inject_print_css(html: str) -> str:
+    """Inject default print CSS for clean page breaks."""
+    style_tag = f"<style>{DEFAULT_PRINT_CSS}</style>"
+
+    # Try to inject into <head>
+    head_match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
+    if head_match:
+        insert_pos = head_match.end()
+        return html[:insert_pos] + style_tag + html[insert_pos:]
+
+    # No <head>, try after <html>
+    html_match = re.search(r"<html[^>]*>", html, re.IGNORECASE)
+    if html_match:
+        insert_pos = html_match.end()
+        return html[:insert_pos] + f"<head>{style_tag}</head>" + html[insert_pos:]
+
+    # No structure at all, wrap it
+    return f"<html><head>{style_tag}</head><body>{html}</body></html>"
+
+
 def get_create_pdf_tool() -> Dict[str, Any]:
     return {
         "type": "function",
@@ -218,7 +280,9 @@ def get_create_pdf_tool() -> Dict[str, Any]:
             "description": (
                 "Create a PDF from provided HTML and store it in the agent filespace. "
                 "Recommended path: /exports/your-file.pdf. The HTML must be self-contained; "
-                "external or local asset references are not allowed."
+                "external or local asset references are not allowed. "
+                "Page breaks are handled automatically. Use class='page-break' to force a page break, "
+                "or class='no-break' to keep content together."
             ),
             "parameters": {
                 "type": "object",
@@ -268,13 +332,18 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if error:
         return error
 
+    # Inject default print CSS for clean page breaks
+    html = _inject_print_css(html)
+
     try:
-        pdf_bytes = pdfkit.from_string(html, False, options=PDFKIT_OPTIONS)
-    except OSError as exc:
-        logger.exception("wkhtmltopdf is required to generate PDFs: %s", exc)
+        from weasyprint import HTML
+        pdf_bytes = HTML(string=html, url_fetcher=_secure_url_fetcher).write_pdf()
+    except ValueError as exc:
+        # Raised by _secure_url_fetcher for blocked resources
+        logger.warning("Blocked resource access during PDF generation: %s", exc)
         return {
             "status": "error",
-            "message": "PDF generation requires wkhtmltopdf to be installed on the server.",
+            "message": "HTML references external resources that are not allowed.",
         }
     except Exception:
         logger.exception("Failed to generate PDF for agent %s", agent.id)
