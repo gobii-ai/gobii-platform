@@ -1202,9 +1202,11 @@ def _build_filespace_download_response(node: AgentFsNode) -> FileResponse:
         raise Http404("File not found.")
 
     content_type = node.mime_type or mimetypes.guess_type(node.name or "")[0] or "application/octet-stream"
+    # Images render inline (for markdown/HTML embedding), other files download
+    is_image = content_type.startswith("image/")
     response = FileResponse(
         file_handle,
-        as_attachment=True,
+        as_attachment=not is_image,
         filename=node.name or "download",
         content_type=content_type,
     )

@@ -219,6 +219,12 @@ AUTOTOOL_HEURISTICS: list[dict] = [
             "create_pdf",
         ],
     },
+    {
+        "keywords": ["chart", "graph", "plot", "visualization", "visualize"],
+        "tools": [
+            "create_chart",
+        ],
+    },
 ]
 
 

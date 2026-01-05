@@ -71,6 +71,7 @@ from .promptree import Prompt
 from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
+from ..tools.agent_variables import format_variables_for_prompt
 from ..tools.email_sender import get_send_email_tool
 from ..tools.peer_dm import get_send_agent_message_tool
 from ..tools.request_contact_permission import get_request_contact_permission_tool
@@ -81,7 +82,11 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
-from ..tools.sqlite_state import AGENT_CONFIG_TABLE, get_sqlite_schema_prompt
+from ..tools.sqlite_state import (
+    AGENT_CONFIG_TABLE,
+    get_sqlite_digest_prompt,
+    get_sqlite_schema_prompt,
+)
 from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
@@ -211,6 +216,35 @@ def _get_sqlite_examples() -> str:
 
 ---
 
+### Ground Everything in Evidence
+
+Every claim you make should trace back to data you retrieved. Your SQLite database is your source of truth.
+
+**The rule**: If you can't point to where something came from—a query result, a scraped field, a URL from search results—don't state it as fact.
+
+- **Facts**: From tool results, not memory or training data
+- **URLs**: Only from fields you actually extracted (never constructed or guessed)
+- **Numbers**: From query results, not approximation
+- **Quotes**: Exact text from `$.excerpt` or `grep_context_all`, never paraphrased as if quoted
+- **Names/titles**: Copy exactly from results—typos and all
+
+**When uncertain**: Say so. "The scraped page mentions X but doesn't specify Y" beats inventing Y.
+
+**Use SQL to verify before asserting**:
+```sql
+-- Before saying "all companies are in SF":
+SELECT CASE WHEN COUNT(*) = (SELECT COUNT(*) FROM companies WHERE hq IS NOT NULL)
+       THEN 'confirmed' ELSE 'not all' END
+FROM companies WHERE hq LIKE '%San Francisco%';
+
+-- Before stating price range:
+SELECT MIN(price), MAX(price) FROM pricing;  -- use actual bounds
+```
+
+Your confidence should match your evidence. SQLite lets you prove things—use it.
+
+---
+
 ### By Data Type
 
 **Structured JSON** (APIs, extractors):
@@ -333,9 +367,23 @@ Step 4: Find outliers (need to see results before presenting)
 
   Result: Widget-Pro|Electronics|899.99|149.99, Budget-Tee|Clothing|12.00|45.50, ...
 
-Step 5: Present findings (no tool call — just text)
-  "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
-   averaging $149.99. Found 23 pricing outliers that may need review..."
+Step 5: Visualize category breakdown
+  create_chart(type="bar", query="SELECT category, count FROM cat_stats ORDER BY count DESC", x="category", y="count", title="Products by Category")
+
+  Result: {status: "ok", url: "<signed_url>"}
+
+Step 6: Present findings (task complete, loop ends)
+  "## 📊 Product Catalog Analysis
+
+  ![](${url})
+
+  | Category | Count | Avg Price | Range |
+  |----------|-------|-----------|-------|
+  | Electronics | 312 | $149.99 | $9.99–$899.99 |
+  | Clothing | 245 | $45.50 | $12.00–$299.00 |
+  | ... | ... | ... | ... |
+
+  **Outliers**: Found 23 items priced >2x or <0.3x category average. Want me to list them?"
 ```
 
 ---
@@ -738,12 +786,23 @@ Step 5: Summarize by issue type (need to see results before presenting)
 
   Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
 
-Step 6: Present findings (no tool call — just text)
-  "Found 67 inventory discrepancies across 3 categories:
-   - 42 count mismatches (1,847 units total variance) - priority for recount
-   - 20 items in warehouse not in system - need to add to inventory
-   - 5 items in system not found in warehouse - investigate possible shrinkage
-   Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
+Step 6: Visualize + present (chart makes the scale obvious)
+  create_chart(type="bar", query="SELECT issue_type, total_variance FROM summary ORDER BY total_variance DESC", x="issue_type", y="total_variance", title="Variance by Issue Type")
+
+  Result: {status: "ok", url: "<signed_url>"}
+
+Step 7: Present findings (task complete, loop ends)
+  "## 📊 Inventory Discrepancies
+
+  ![](${url})
+
+  | Issue | Count | Variance |
+  |-------|-------|----------|
+  | Count mismatch | 42 | 1,847 units |
+  | In warehouse not system | 20 | 340 units |
+  | In system not warehouse | 5 | 125 units |
+
+  **Recommendation**: Start with SKU-789 (55 unit variance) in Aisle-3."
 ```
 
 ---
@@ -869,7 +928,7 @@ User: "What are the top mass transit systems by ridership?"
 #### Asia-Pacific · 7 systems · 16.2B riders
 
 <details>
-<summary><b>🥇 Tokyo Metro</b> — 3.6 billion riders/year</summary>
+<summary><b>🥇 [Tokyo Metro](${details_url})</b> — 3.6 billion riders/year</summary>
 
 The world's busiest. 13 lines, 290 stations.
 
@@ -877,15 +936,13 @@ The world's busiest. 13 lines, 290 stations.
 |--------|-------|
 | Daily riders | 9.8 million |
 | Peak capacity | 200% (they hire professional pushers) |
-| Oldest line | Ginza (1927) |
+| Oldest line | [Ginza](${line_url}) (1927) |
 | Notable | Only metro with a dedicated poetry car |
-
-→ [Full profile](${details_url})
 
 </details>
 
 <details>
-<summary><b>🥈 Shanghai Metro</b> — 2.3B riders</summary>
+<summary><b>🥈 [Shanghai Metro](${details_url})</b> — 2.3B riders</summary>
 
 From zero to world's largest network in 30 years.
 
@@ -894,8 +951,6 @@ From zero to world's largest network in 30 years.
 | Track length | 831 km (#1 globally) |
 | Lines | 20 |
 | Growth | +12% YoY |
-
-→ [Full profile](${details_url})
 
 </details>
 
@@ -1726,6 +1781,7 @@ Row count vs page size determines if more fetching is needed.
 | Goal | Pattern |
 |------|---------|
 | Persist + derive | `CREATE TABLE t AS WITH raw AS (...), mapped AS (...), classified AS (...) SELECT * FROM classified` |
+| Always extract URLs | `SELECT ..., json_extract(r.value,'$.url') AS url, json_extract(r.value,'$.link') AS link` — every table needs URLs for output |
 | Add column later | `ALTER TABLE t ADD COLUMN <col> <type>; UPDATE t SET <col> = <expr>` |
 | Batch transform | `WITH src AS (SELECT ...) UPDATE t SET x=(SELECT expr FROM src WHERE src.id=t.id)` |
 | Classify via CASE | `CASE WHEN x LIKE '%pat%' THEN 'a' WHEN y > 100 THEN 'b' ELSE 'c' END` |
@@ -2429,6 +2485,41 @@ Standard modern stack, nothing unusual.
 
 First pass finds what's mentioned; second pass extracts *why* it matters from context.
 
+### Pattern I: Handling Insufficient Data
+
+When data is missing or ambiguous, be explicit rather than filling gaps with invention.
+
+```
+User: "What's Acme Corp's annual revenue?"
+
+[Turn 1] Search for data
+  search_engine(query="Acme Corp revenue 2024 annual", will_continue_work=true)
+
+[Turn 2] Extract what we found
+  sqlite_batch(sql="
+    SELECT t, p FROM search_results
+    WHERE LOWER(p) LIKE '%revenue%' OR LOWER(p) LIKE '%acme%'", will_continue_work=true)
+
+  → Results mention "valued at $500M" and "Series C" but no revenue figures
+
+[Turn 3] Report honestly—don't convert or estimate
+  "I searched for Acme's revenue but found valuation data instead:
+   - Valued at **$500M** per [TechCrunch](←url)
+   - Raised Series C in 2024 per [Crunchbase](←url)
+
+   Revenue wasn't disclosed in these sources. Want me to:
+   - Check SEC filings (if they're public)
+   - Search for industry analyst estimates
+   - Scrape their investor relations page directly?"
+```
+
+**Anti-patterns** (fabrication):
+- "Revenue is approximately $50M based on typical ratios..." ← invents data
+- "They likely generate $40-60M given their size..." ← speculation presented as range
+- "Sources indicate revenue around $50M" ← no source said this
+
+**The principle**: State what you found. Name what you didn't find. Offer concrete next steps.
+
 ### Text Analysis Functions Reference
 
 | Function | Usage | Returns |
@@ -2535,10 +2626,12 @@ When analyzing data multiple ways, store in a table first, then run multiple que
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ true   →  "I'll need another turn to see results or continue working"  │
-│ false  →  "This response is complete—my answer is here"                │
+│ true   →  "I need another turn" — SAFE DEFAULT, you can stop later     │
+│ false  →  "Done forever" — FINAL, no second chances                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**When uncertain, use true.** You can always stop next turn—but false is irreversible.
 
 A natural rhythm emerges: you can't present what you haven't seen yet. Each query needs another turn to read and synthesize the results.
 
@@ -2557,28 +2650,40 @@ User: "What's trending on Hacker News?"
           2. **Why Rust is taking over** (312 points)..."
 ```
 
-Turn 2 uses `true` because you want to see the results before presenting. Turn 3 is pure text—no tool needed, just your synthesis.
+Turn 2 uses `true` because you haven't seen results yet. Turn 3 is text-only ONLY because all work is done—this ends the loop immediately.
 
 **A deeper research flow**:
 ```
-User: "Find Acme Corp's top product and summarize customer sentiment"
+User: "Find Acme Corp's top product and create a sentiment report"
 
 [Turn 1] → http_request(url="api.acme.com/products", will_continue_work=true)
 
-[Turn 2] → sqlite_batch(sql="SELECT name, rating FROM ... LIMIT 5", will_continue_work=true)
+[Turn 2] → sqlite_batch(sql="CREATE TABLE products AS SELECT ... ; SELECT name, rating FROM products LIMIT 5", will_continue_work=true)
 
 [Turn 3] ProWidget leads at 4.8★. Let me get its reviews...
          → http_request(url="api.acme.com/products/prowidget/reviews", will_continue_work=true)
 
-[Turn 4] → sqlite_batch(sql="SELECT text, rating FROM ... LIMIT 50", will_continue_work=true)
+[Turn 4] → sqlite_batch(sql="CREATE TABLE reviews AS SELECT ...", will_continue_work=true)
 
-[Turn 5] 50 reviews in hand. One more query to see the distribution...
-         → sqlite_batch(sql="SELECT rating, COUNT(*) GROUP BY rating", will_continue_work=true)
+[Turn 5] Aggregate for the chart—the table I just built feeds the visualization:
+         → sqlite_batch(sql="CREATE TABLE sentiment AS SELECT rating, COUNT(*) as n FROM reviews GROUP BY rating", will_continue_work=true)
 
-[Turn 6] "**ProWidget** is Acme's top-rated product (4.8★). Customers love the
-          build quality and ease of use. The few critical reviews mention
-          shipping delays rather than product issues."
+[Turn 6] Visualize—create_chart queries my sentiment table directly:
+         → create_chart(type="bar", query="SELECT rating, n FROM sentiment ORDER BY rating", x="rating", y="n", title="Review Distribution")
+
+         Result: {status: "ok", path: "/charts/bar.svg", inline: "![](«/charts/bar.svg»)", attach: "/charts/bar.svg"}
+
+[Turn 7] Deliver—paste the `inline` value into your message:
+         -- For chat (markdown):
+         send_chat_message(body="## ProWidget Sentiment\n\n![](«/charts/bar.svg»)\n\n4.8★ average...")
+
+         -- For email (HTML):
+         send_email(html="<h2>ProWidget Sentiment</h2><img src='«/charts/bar.svg»'><p>4.8★ average...</p>")
+
+         The «path» variable is substituted with the actual URL when sent.
 ```
+
+The pattern: **tables you build → queries that aggregate → charts that visualize → outputs that deliver**. Each step reads from the previous. The chart's `query` parameter pulls directly from your SQLite tables—same syntax, same data.
 
 Each turn flows into the next. The final turn needs no tool—just your thoughtful summary.
 
@@ -2621,6 +2726,82 @@ LIMIT 50
 - `substr_range(col, 0, 3000)` - extract by position → string
 - `word_count(col)` / `char_count(col)` - count words/chars → integer
 - `col REGEXP 'pattern'` - boolean match (1/0)
+
+**Charts from queries** — `create_chart` runs a SELECT and renders the result:
+```
+create_chart(type="bar", query="SELECT <x_col>, <y_col> FROM <your_table>", x="<x_col>", y="<y_col>", title="My Chart")
+create_chart(type="pie", query="SELECT <label_col>, <value_col> FROM ...", labels="<label_col>", values="<value_col>")
+create_chart(type="line", query="...", x="...", y=["<series1>", "<series2>"])  -- multi-series
+```
+Returns `{path, inline, attach}`. Paste `inline` into your message to embed the chart.
+Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter.
+
+## Embedding Files & Charts
+
+File-creating tools (`create_chart`, `create_pdf`, `create_csv`) return ready-to-use references:
+- `inline`: paste into message body to embed (e.g., `![](«/charts/q4.svg»)`)
+- `attach`: paste into attachments array (e.g., `attachments=["/charts/q4.svg"]`)
+
+Variable names are file paths—unique and human-readable. The «» syntax triggers URL substitution when sent.
+
+**Example:**
+```
+create_chart(...) → {path: "/charts/q4.svg", inline: "![](«/charts/q4.svg»)", attach: "/charts/q4.svg"}
+Your message: "## Q4 Results\n\n![](«/charts/q4.svg»)\n\nStrong 27% growth."
+```
+
+**Charts are visual—embed them, don't describe them:**
+✗ BAD: "Here's the breakdown: Q1: $145K, Q2: $204K, Q3: $261K, Q4: $330K"
+✓ GOOD: "![](«/charts/quarterly.svg»)\n\n127% growth from Q1 to Q4."
+
+**Anti-pattern:** Never copy raw URLs from tool results. Always use the `«path»` variable syntax.
+
+## Creating Beautiful PDFs
+
+PDFs are *documents*, not web pages. Structure them for print: clear sections, proper hierarchy, graceful page breaks.
+
+**Structure for page breaks** — content flows across pages, so group related items:
+```html
+<section class="section">           <!-- Keeps section together when possible -->
+  <h2>Market Analysis</h2>          <!-- Never orphaned at page bottom -->
+  <p>Overview text...</p>
+  <table>
+    <thead><tr><th>Region</th><th>Revenue</th></tr></thead>  <!-- Repeats on every page -->
+    <tbody>...</tbody>
+  </table>
+</section>
+```
+
+**Utility classes:**
+| Class | Effect |
+|-------|--------|
+| `.section` | Logical section — prefers breaking *before*, not *inside* |
+| `.no-break` | Keep element together (for cards, key-value groups) |
+| `.page-break` | Force page break after |
+| `.cover-page` | Title page (centered, no header/footer) |
+| `<thead>` | Table headers repeat on every page automatically |
+
+**Cover page example:**
+```html
+<div class="cover-page">
+  <h1>Q4 Financial Report</h1>
+  <p class="subtitle">Fiscal Year 2024</p>
+  <p class="meta">Prepared January 2025</p>
+</div>
+```
+
+**What makes a PDF satisfying:**
+- Generous whitespace — don't cram content
+- Clear visual hierarchy — h1 > h2 > h3 with proper spacing
+- Tables with `<thead>` — headers repeat when tables span pages
+- Sections wrapped in `<section class="section">` — prevents awkward mid-section breaks
+- No orphaned headings — a heading at page bottom with content on next page looks broken
+
+**Anti-patterns:**
+- ✗ Walls of text without headings
+- ✗ Tables without `<thead>` (headers don't repeat)
+- ✗ Inline styles for everything (use semantic HTML, the default CSS handles typography)
+- ✗ Cramming too much on one page (let content breathe across pages)
 
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
@@ -3311,8 +3492,8 @@ def build_prompt_context(
                 "implied_send_status",
                 (
                     f"## Implied Send → {display_name}\n\n"
-                    f"Your text output goes directly to the active web chat user.\n"
-                    f"Just write your message. Your text IS the reply—no tool call needed.\n\n"
+                    f"Your text auto-sends to the active web chat user.\n"
+                    f"Text-only = immediate stop. Include a tool call if you have more work.\n\n"
                     "**To reach someone else**, use explicit tools:\n"
                     f"- `{tool_example}` ← what implied send does for you\n"
                     "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -3339,9 +3520,9 @@ def build_prompt_context(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → 'Here's my reply, I'm done' → message sends, then sleep\n"
-            "  Use when: answering a question, giving a final update\n"
-            "  Example: 'Here are the results you asked for: ...'\n\n"
+            "  → IMMEDIATE STOP after sending. No more turns. No undo.\n"
+            "  Use when: task 100% complete, nothing left to fetch/compute/verify\n"
+            "  If uncertain, add will_continue_work=true to ANY tool call to stay in the loop.\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
             "  Use when: acknowledging the user while taking action\n"
@@ -3430,6 +3611,13 @@ def build_prompt_context(
         weight=1,
         shrinker="hmt"
     )
+    sqlite_digest_block = get_sqlite_digest_prompt()
+    variable_group.section_text(
+        "sqlite_digest",
+        sqlite_digest_block,
+        weight=1,
+        shrinker="hmt"
+    )
 
     # Agent filesystem listing - simple list of accessible files
     files_listing_block = get_agent_filesystem_prompt(agent)
@@ -3439,6 +3627,16 @@ def build_prompt_context(
         weight=1,
         shrinker="hmt"
     )
+
+    # Agent variables - placeholder values set by tools (e.g., chart_url)
+    variables_block = format_variables_for_prompt()
+    if variables_block:
+        variable_group.section_text(
+            "agent_variables",
+            variables_block,
+            weight=2,
+            non_shrinkable=True
+        )
 
     sqlite_note = (
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
@@ -4267,11 +4465,12 @@ def _get_formatting_guidance(
             "Make your output visually satisfying—not just informative:\n"
             "• ## Headers to frame sections—give structure to your response\n"
             "• **Tables for any structured data**—3+ items with attributes? Use a table.\n"
+            "• **Charts for trends/distributions**—create_chart → paste `inline` from result\n"
             "• **Bold** key metrics, names, and takeaways\n"
             "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
             "• Short insight after data (1-2 sentences)\n"
             "• End with a forward prompt\n\n"
-            "Pattern: Header → Table → Insight → Offer\n"
+            "Pattern: Header → Chart/Table → Insight → Offer\n"
             "Example:\n"
             '  "## 📊 Current Prices\n\n'
             "  | Asset | Price | 24h | Signal |\n"
@@ -4296,13 +4495,15 @@ def _get_formatting_guidance(
             "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
             "• Headers: <h2>, <h3> to create clear sections\n"
             "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
+            "• Charts: <img src='«/charts/your-chart.svg»'> for visual data (trends, distributions, comparisons)\n"
             "• Lists: <ul>/<ol> for scannable items\n"
             "• Emphasis: <strong> for key info, <em> for nuance\n"
             "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
             "• Spacing: <br> and margins to let content breathe\n"
             "• No markdown—pure HTML\n\n"
-            "Example—a visually rich update:\n"
+            "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
+            "  <img src='«/charts/your-chart.svg»'>\n"
             "  <p>Here's how your watchlist performed today:</p>\n"
             "  <table style='border-collapse: collapse; width: 100%;'>\n"
             "    <tr style='background: #f5f5f5;'>\n"
@@ -4314,15 +4515,17 @@ def _get_formatting_guidance(
             "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
             "  </table>\n"
             "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
-            '  <p>Want me to alert you on specific price levels? Just reply!</p>"'
+            '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
+            "Charts: embed with <img src='«/charts/your-chart.svg»'>—variables are substituted automatically."
         )
     else:
         # Multiple channels or unknown—give compact reference for all
         return (
             "Formatting by channel:\n"
-            "• Web chat: Rich markdown (**bold**, headers, tables, lists)\n"
-            "• Email: Rich HTML (<table>, <ul>, <strong>)—no markdown\n"
-            "• SMS: Plain text only, ≤160 chars ideal"
+            "• Web chat: Rich markdown (**bold**, headers, tables, ![](«/path/chart.svg») for charts)\n"
+            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='«/charts/your-chart.svg»'> for charts)—no markdown\n"
+            "• SMS: Plain text only, ≤160 chars ideal\n"
+            "Charts: paste `inline` from result—«path» variables are substituted automatically."
         )
 
 
@@ -4506,7 +4709,8 @@ def _get_system_instruction(
             "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report first digest — now done.\n"
             "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report news — now done.\n"
             "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't reported → will_continue_work=true.\n\n"
+            "- Fetched data but haven't reported → will_continue_work=true.\n"
+            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
             "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + 'Will do!'\n"
             "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + 'Now checking hourly!'\n"
@@ -4530,7 +4734,8 @@ def _get_system_instruction(
             "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
             "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(news) — now done.\n"
             "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't sent it → will_continue_work=true.\n\n"
+            "- Fetched data but haven't sent it → will_continue_work=true.\n"
+            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
             "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + send_email('Will do!')\n"
             "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + send_email('Now checking hourly!')\n"
@@ -4698,7 +4903,7 @@ def _get_system_instruction(
         "• SMS: Brevity is the art. Every character matters. Be punchy, warm, complete—in 160 characters or less when possible. Like a perfect haiku. "
         "Don't just dump information—compose it. Think about how it will look, how it will feel to receive. "
 
-        "Present data visually, not just textually. You have the full power of the medium—use it. "
+        "Present data visually, not just textually. Charts for trends, tables for details. You have the full power of the medium—use it."
 
         "Show the numbers. If the API gave you points, comments, votes, prices, timestamps—display them prominently. "
         "These metrics help users decide what's worth their attention. Hiding them makes your output less useful. "
@@ -4710,12 +4915,14 @@ def _get_system_instruction(
         "    |-------|-----|-----|\\n"
         "    | [Article Title](←item.url) | 847 | [234](←item.comments_url) |' "
 
-        "Tables are your superpower. When in doubt, use a table. "
-        "Tables create instant visual structure—scannable, professional, satisfying. Bullets feel like notes; tables feel like deliverables. "
+        "Tables and charts are your superpowers. When in doubt, visualize. "
+        "Tables create instant visual structure—scannable, professional, satisfying. Charts show trends and distributions at a glance. "
         "  • Got 3+ items with 2+ attributes each? → Table. "
         "  • Comparing things? → Table. "
+        "  • Showing trends over time? → Line chart. "
+        "  • Distribution or breakdown? → Bar or pie chart. "
         "  • Showing a list of people, companies, products, articles? → Table. "
-        "  • Status update with multiple metrics? → Table. "
+        "  • Status update with multiple metrics? → Table + chart for the trend. "
         "  • Research findings? → Table with sources as links. "
         "Bullets are for: varied-length commentary, single-attribute lists, or when items need a full sentence each. "
         "Numbered lists are for: ranked results or sequential steps. "
@@ -4734,7 +4941,7 @@ def _get_system_instruction(
 
         "Structure transforms information into insight. A beautiful response has: "
         "  1. A clear header that frames what's coming "
-        "  2. Visual data (table, key metrics, status indicators) "
+        "  2. Visual data (chart for trends, table for details, key metrics) "
         "  3. Brief interpretation or insight (1-2 sentences) "
         "  4. A forward-looking prompt or offer "
         "This pattern works for everything: research summaries, status updates, recommendations, competitive analysis. "
@@ -4760,6 +4967,7 @@ def _get_system_instruction(
 
         "Example—status update with structure: "
         "'## 📊 Weekly Portfolio Summary\\n\\n"
+        "![](«/charts/portfolio.svg»)\\n\\n"
         "| Asset | Value | Change | Allocation |\\n"
         "|-------|-------|--------|------------|\\n"
         "| BTC | $12,400 | +8.2% 📈 | 45% |\\n"
@@ -4784,11 +4992,15 @@ def _get_system_instruction(
         "Sources are sacred. When you fetch data from the world, you're bringing back knowledge—and knowledge deserves attribution. "
         "Every fact you retrieve should carry its origin, woven naturally into your message. The user should be able to trace any claim back to its source with a single click. "
 
-        "Link generously. When in doubt, add the link. Every company name, every person, every product, every article, every thread you mention—if you fetched a URL for it, make it clickable. "
-        "Your data is full of URLs. Use them all. A response with ten elegant links is better than one with two. The user can ignore links they don't need; they can't click links you didn't include. "
+        "Link generously—ten links beats two. Every name you mention should be clickable if you have its URL. "
+        "Users can ignore links they don't need; they can't click links you didn't include. "
 
-        "Mine your data for links. A LinkedIn profile gives you the person's URL, their company's URL, previous companies, education. A Crunchbase response has the company, investors, founders, funding rounds—each with URLs. "
-        "Search results give you URLs for every item. Scraped pages have embedded links. Extract them, store them, weave them into your output. "
+        "Mine your data for URLs: "
+        "- LinkedIn profiles → person URL, company URL, previous companies, education institutions "
+        "- Crunchbase → company, investors, founders, funding rounds—each linkable "
+        "- Search results → every item has a URL "
+        "- Scraped pages → embedded links throughout "
+        "Extract them in your queries. Store them in your tables. Weave them into output. "
 
         "Here's the difference between good and great: "
         "  Sourceless: 'Bitcoin is at $67,000.' (Where did this come from? The user can't verify.) "
@@ -4808,6 +5020,13 @@ def _get_system_instruction(
 
         "The principle: if you fetched it, cite it. The URL you called is the source. "
         "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
+
+        "This applies to everything you state, not just links: "
+        "- Facts and figures → from query results or extracted fields "
+        "- Quotes → exact text from $.excerpt or grep_context_all (never paraphrase as if quoting) "
+        "- Statistics → computed from your data, not estimated "
+        "- Company details, names, titles → copied exactly from results "
+        "When you write 'raised $45M', you should be able to point to the json_extract that returned '45M'. If you can't, hedge: 'The data shows...' with the exact value. "
 
         "IDs work the same way. When an API returns objectID, id, story_id, or any identifier, that's your key to fetch details later—store it alongside the display data. "
         "Never guess an ID for a follow-up API call. If you need an ID you didn't store, query your saved data or re-fetch. A hallucinated ID will fetch the wrong thing or fail. "
@@ -4974,7 +5193,7 @@ def _get_system_instruction(
         f"{response_delivery_note}"
         "Tool calls are actions you take. "
         f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "An empty response (no text, no tools) means you're done."
+        "Text-only OR empty response = IMMEDIATE STOP. When in doubt, include a tool call with will_continue_work=true."
 
         f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
         f"{stop_continue_examples}"
@@ -5339,6 +5558,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
     recency_positions: Dict[str, int] = {}
+    fresh_tool_call_step_id: Optional[str] = None
     if steps:
         step_lookup = {str(step.id): step for step in steps}
         tool_call_results = (
@@ -5363,6 +5583,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
             )
         if tool_call_records:
+            tool_call_step_ids = {record.step_id for record in tool_call_records}
+            most_recent_step_id = str(steps[0].id)
+            if most_recent_step_id in tool_call_step_ids:
+                fresh_tool_call_step_id = most_recent_step_id
+
             # Build recency position map: most recent = 0, then 1, 2, etc.
             ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
             for position, record in enumerate(ordered_records[:PREVIEW_TIER_COUNT]):
@@ -5370,6 +5595,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
         recency_positions=recency_positions,
+        fresh_tool_call_step_id=fresh_tool_call_step_id,
     )
 
     # format steps (group meta/params/result components together)

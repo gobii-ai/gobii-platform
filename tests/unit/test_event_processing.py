@@ -1571,3 +1571,49 @@ class PromptConfigFunctionTests(TestCase):
             self.assertEqual(get_prompt_token_budget(self.agent), config.max_prompt_token_budget)
             self.assertEqual(message_history_limit(self.agent), config.max_message_history_limit)
             self.assertEqual(tool_call_history_limit(self.agent), config.max_tool_call_history_limit)
+
+
+@tag("batch_event_processing")
+class EventProcessingRuntimeGuardTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="runtime_guard@example.com",
+            email="runtime_guard@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="RuntimeBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="RuntimeAgent",
+            charter="Test runtime guard",
+            browser_use_agent=self.browser_agent,
+        )
+
+    @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.get_redis_client")
+    def test_run_agent_loop_aborts_when_runtime_limit_hit(
+        self,
+        mock_get_redis,
+        _mock_tools,
+        mock_build_context,
+        _mock_runtime,
+    ):
+        class _FakeRedis:
+            def get(self, _key):
+                return None
+
+        mock_get_redis.return_value = _FakeRedis()
+
+        with patch(
+            "api.agent.core.event_processing.settings.AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS",
+            1,
+        ):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_build_context.called)
+        self.assertTrue(
+            self.agent.steps.filter(description__icontains="runtime limit").exists()
+        )
+        self.assertEqual(usage.get("total_tokens"), 0)

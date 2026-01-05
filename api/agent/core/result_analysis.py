@@ -21,6 +21,9 @@ import json5
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
+from ..tools.json_digest import JsonDigest, digest as digest_json
+from ..tools.text_digest import TextDigest, digest as digest_text
+
 # Size thresholds for strategy recommendations
 SIZE_SMALL = 4 * 1024        # 4KB - can inline fully
 SIZE_MEDIUM = 50 * 1024      # 50KB - targeted extraction
@@ -44,6 +47,7 @@ MAX_DECODED_BYTES = 2000000
 MAX_HTML_SCAN_BYTES = 500000
 MAX_JSON_LINES_SCAN = 50
 MAX_SSE_SCAN_LINES = 200
+UNSTRUCTURED_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
 
 _JSON_PREFIXES = (
     ")]}',",
@@ -192,6 +196,8 @@ class EmbeddedContent:
     doc_structure: Optional[DocStructure] = None
     xml_info: Optional[XmlInfo] = None
     json_info: Optional["EmbeddedJsonInfo"] = None
+    text_digest: Optional[TextDigest] = None
+    json_digest: Optional[JsonDigest] = None
     line_count: int = 0
     byte_size: int = 0
 
@@ -243,6 +249,7 @@ class JsonAnalysis:
     field_types: List[FieldTypeInfo] = field(default_factory=list)
     pagination: Optional[PaginationInfo] = None
     detected_patterns: Optional[DetectedPatterns] = None
+    json_digest: Optional[JsonDigest] = None
     embedded_content: Optional[EmbeddedContent] = None  # Backward-compatible first hit
     embedded_contents: List[EmbeddedContent] = field(default_factory=list)
 
@@ -258,6 +265,7 @@ class TextAnalysis:
     text_hints: Optional[TextHints] = None
     json_lines_info: Optional[JsonLinesInfo] = None
     sse_info: Optional[SseInfo] = None
+    text_digest: Optional[TextDigest] = None
 
 
 @dataclass
@@ -401,6 +409,30 @@ def _decode_base64_text(text: str) -> Tuple[Optional[str], Optional[DecodeInfo]]
         encoding=encoding,
     )
     return decoded_text, info
+
+
+def _build_text_digest(text: str) -> Optional[TextDigest]:
+    if not text:
+        return None
+    try:
+        return digest_text(text)
+    except Exception:
+        return None
+
+
+def _build_json_digest(data: Any, raw_json: Optional[str] = None) -> Optional[JsonDigest]:
+    try:
+        return digest_json(data, raw_json=raw_json)
+    except Exception:
+        return None
+
+
+def _attach_text_digest(analysis: TextAnalysis, text: str) -> None:
+    if analysis.format not in UNSTRUCTURED_TEXT_FORMATS:
+        return
+    digest = _build_text_digest(text)
+    if digest:
+        analysis.text_digest = digest
 
 
 def _parse_json_any(text: str) -> Tuple[Optional[Any], Optional[str]]:
@@ -1217,6 +1249,7 @@ def _analyze_embedded_text(
             format="json",
             confidence=0.95,
             json_info=_summarize_embedded_json(parsed_json),
+            json_digest=_build_json_digest(parsed_json, raw_json=text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -1250,6 +1283,7 @@ def _analyze_embedded_text(
             format="html",
             confidence=0.85,
             doc_structure=html_structure,
+            text_digest=_build_text_digest(text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -1261,6 +1295,7 @@ def _analyze_embedded_text(
             format="markdown",
             confidence=0.8,
             doc_structure=md_structure,
+            text_digest=_build_text_digest(text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -1822,6 +1857,7 @@ def analyze_text(text: str) -> TextAnalysis:
         analysis.confidence = 0.85
         analysis.doc_structure = html_structure
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     is_md, md_structure = _detect_markdown(text)
@@ -1830,18 +1866,21 @@ def analyze_text(text: str) -> TextAnalysis:
         analysis.confidence = 0.8
         analysis.doc_structure = md_structure
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     if _detect_log_format(text):
         analysis.format = "log"
         analysis.confidence = 0.7
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     # Default to plain text
     analysis.format = "plain"
     analysis.confidence = 0.5
     analysis.text_hints = _extract_text_hints(text)
+    _attach_text_digest(analysis, text)
     return analysis
 
 
@@ -2147,6 +2186,9 @@ def _generate_compact_summary(
                 if arr.nested_arrays:
                     parts.append(f"  NESTED: {', '.join(arr.nested_arrays[:3])}")
 
+            if json_analysis.json_digest:
+                parts.append(f"  JSON_DIGEST: {json_analysis.json_digest.summary_line()}")
+
         elif json_analysis.pattern == "single_object":
             # Single object - simpler query
             if query_patterns and query_patterns.list_all:
@@ -2164,6 +2206,8 @@ def _generate_compact_summary(
             if json_analysis.field_types:
                 field_strs = [ft.name for ft in json_analysis.field_types[:10]]
                 parts.append(f"  FIELDS: {', '.join(field_strs)}")
+            if json_analysis.json_digest:
+                parts.append(f"  JSON_DIGEST: {json_analysis.json_digest.summary_line()}")
 
         # Error warning - important
         if json_analysis.detected_patterns and json_analysis.detected_patterns.error_present:
@@ -2243,6 +2287,8 @@ def _generate_compact_summary(
                                 f"  → QUERY: SELECT {extracts} "
                                 f"FROM __tool_results WHERE result_id='{result_id}'"
                             )
+                    if emb.json_digest:
+                        parts.append(f"  JSON_DIGEST: {emb.json_digest.summary_line()}")
 
                 elif emb.format == "json_lines":
                     parts.append(f"\n  🧩 JSON LINES in {emb.path} (~{emb.line_count} lines)")
@@ -2269,6 +2315,8 @@ def _generate_compact_summary(
                             f"  → QUERY: SELECT substr({extract_expr},1,2000) "
                             f"FROM __tool_results WHERE result_id='{result_id}'"
                         )
+                    if emb.text_digest:
+                        parts.append(f"  DIGEST: {emb.text_digest.summary_line()}")
 
     else:
         # Text data
@@ -2347,6 +2395,8 @@ def _generate_compact_summary(
                         f"FROM __tool_results WHERE result_id='{result_id}'"
                     )
                 parts.append(f"  TYPE: {fmt.upper()} ({section_count} sections)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
             elif fmt == "xml" and text_analysis.xml_info:
                 xml_info = text_analysis.xml_info
@@ -2365,6 +2415,8 @@ def _generate_compact_summary(
                 )
                 hints = text_analysis.text_hints
                 parts.append(f"  TYPE: Log (~{hints.line_count if hints else '?'} lines)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
             else:
                 parts.append(
@@ -2373,6 +2425,8 @@ def _generate_compact_summary(
                 )
                 hints = text_analysis.text_hints
                 parts.append(f"  TYPE: Text (~{hints.line_count if hints else '?'} lines)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
     # Size warning at end
     if parse_info and (parse_info.source != "raw" or parse_info.mode != "json"):
@@ -2427,6 +2481,8 @@ def analyze_result(result_text: str, result_id: str) -> ResultAnalysis:
             json_analysis = analyze_json(parsed, result_id)
         else:
             json_analysis = JsonAnalysis(pattern="scalar")
+        if json_analysis and isinstance(parsed, (dict, list)):
+            json_analysis.json_digest = _build_json_digest(parsed, raw_json=analysis_text)
     else:
         text_analysis = analyze_text(analysis_text)
 
@@ -2490,6 +2546,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             "pattern": ja.pattern,
             "wrapper_path": ja.wrapper_path,
         }
+        if ja.json_digest:
+            result["json"]["digest"] = ja.json_digest.to_dict()
         if ja.primary_array:
             result["json"]["primary_array"] = {
                 "path": ja.primary_array.path,
@@ -2518,6 +2576,10 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
                 "line_count": ec.line_count,
                 "byte_size": ec.byte_size,
             }
+            if ec.text_digest:
+                payload["digest"] = ec.text_digest.to_dict()
+            if ec.json_digest:
+                payload["digest"] = ec.json_digest.to_dict()
             if ec.csv_info:
                 payload["csv"] = {
                     "columns": ec.csv_info.columns[:15],
@@ -2556,6 +2618,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             "format": ta.format,
             "confidence": ta.confidence,
         }
+        if ta.text_digest:
+            result["text"]["digest"] = ta.text_digest.to_dict()
         if ta.csv_info:
             result["text"]["csv"] = {
                 "columns": ta.csv_info.columns[:15],

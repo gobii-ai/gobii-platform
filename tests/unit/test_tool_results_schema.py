@@ -145,6 +145,144 @@ class ToolResultSchemaTests(SimpleTestCase):
         # Should have text analysis hints
         self.assertIn("CSV", prompt_info.meta)
 
+    def test_fresh_text_result_adds_barbell_hint(self):
+        long_text = (
+            "Header: Intro\n"
+            + ("Content line with punctuation, commas, and numbers 123. " * 400)
+            + "\nFooter: End"
+        )
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-4",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=long_text,
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-4",
+        )
+
+        prompt_info = info.get("step-4")
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("FOCUS:", prompt_info.meta)
+        self.assertIn("[...]", prompt_info.meta)
+
+    def test_non_fresh_text_result_skips_barbell_hint(self):
+        long_text = "Header\n" + ("Content " * 1200) + "\nFooter"
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-5",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=long_text,
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+        )
+
+        prompt_info = info.get("step-5")
+        self.assertIsNotNone(prompt_info)
+        self.assertNotIn("FOCUS:", prompt_info.meta)
+
+    def test_fresh_small_text_result_skips_barbell_hint(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-6",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text="Small content",
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-6",
+        )
+
+        prompt_info = info.get("step-6")
+        self.assertIsNotNone(prompt_info)
+        self.assertNotIn("FOCUS:", prompt_info.meta)
+
+    def test_fresh_csv_text_skips_barbell_hint(self):
+        csv_data = """id,name
+1,Alice"""
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-7",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=csv_data,
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-7",
+        )
+
+        prompt_info = info.get("step-7")
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("CSV", prompt_info.meta)
+        self.assertNotIn("FOCUS:", prompt_info.meta)
+
+    def test_fresh_non_eligible_tool_skips_barbell_hint(self):
+        long_text = "Header\n" + ("Content " * 1200) + "\nFooter"
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-8",
+            tool_name="some_internal_tool",
+            created_at=datetime.now(timezone.utc),
+            result_text=long_text,
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-8",
+        )
+
+        prompt_info = info.get("step-8")
+        self.assertIsNotNone(prompt_info)
+        self.assertNotIn("FOCUS:", prompt_info.meta)
+
+    def test_fresh_json_result_skips_barbell_hint(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-9",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"name": "Alice", "title": "Engineer"}),
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-9",
+        )
+
+        prompt_info = info.get("step-9")
+        self.assertIsNotNone(prompt_info)
+        self.assertNotIn("FOCUS:", prompt_info.meta)
+        self.assertNotIn("JSON_FOCUS:", prompt_info.meta)
+
+    def test_fresh_large_json_adds_goldilocks_hint(self):
+        payload = {
+            "data": {
+                "items": [
+                    {"id": i, "name": f"Item {i}", "description": "x" * 200}
+                    for i in range(120)
+                ]
+            }
+        }
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-10",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps(payload),
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-10",
+        )
+
+        prompt_info = info.get("step-10")
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("JSON_FOCUS:", prompt_info.meta)
+
     def test_non_eligible_tool_gets_basic_meta(self):
         """Tools not in SCHEMA_ELIGIBLE_TOOL_PREFIXES get basic meta only."""
         record = tool_results.ToolCallResultRecord(

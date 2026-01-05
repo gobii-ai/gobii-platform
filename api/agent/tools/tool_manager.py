@@ -23,6 +23,7 @@ from .http_request import get_http_request_tool, execute_http_request
 from .read_file import get_read_file_tool, execute_read_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
+from .create_chart import get_create_chart_tool, execute_create_chart
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 
@@ -70,7 +71,8 @@ HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME}
+CREATE_CHART_TOOL_NAME = "create_chart"
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -80,6 +82,19 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     SQLite is a core capability and is enabled for all agents.
     """
     return agent is not None
+
+
+def should_skip_auto_substitution(tool_name: str) -> bool:
+    """Check if a tool opts out of automatic variable substitution.
+
+    Tools that skip auto-substitution handle «var» placeholders themselves,
+    typically because they need context-specific resolution (e.g., create_pdf
+    converts filespace paths to data URIs instead of signed URLs).
+    """
+    entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if entry:
+        return entry.get("skip_auto_substitution", False)
+    return False
 
 
 BUILTIN_TOOL_REGISTRY = {
@@ -102,6 +117,11 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
+        "skip_auto_substitution": True,  # PDF does its own substitution (data URIs for embedded assets)
+    },
+    CREATE_CHART_TOOL_NAME: {
+        "definition": get_create_chart_tool,
+        "executor": execute_create_chart,
     },
 }
 

@@ -24,6 +24,7 @@ from api.models import (
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.web_sessions import start_web_session
+from console.agent_chat.timeline import build_processing_snapshot
 from util.analytics import AnalyticsEvent
 
 CHANNEL_LAYER_SETTINGS = {
@@ -116,6 +117,15 @@ class AgentChatAPITests(TestCase):
         self.assertIn("active", snapshot)
         self.assertIn("webTasks", snapshot)
         self.assertIsInstance(snapshot.get("webTasks"), list)
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.timeline.get_processing_heartbeat")
+    def test_processing_snapshot_uses_heartbeat(self, mock_get_heartbeat):
+        mock_get_heartbeat.return_value = {"last_seen": 123.0}
+
+        snapshot = build_processing_snapshot(self.agent)
+
+        self.assertTrue(snapshot.active)
 
     @tag("batch_agent_chat")
     def test_timeline_includes_thinking_events(self):

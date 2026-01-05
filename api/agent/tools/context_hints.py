@@ -17,6 +17,10 @@ No hint is better than a bad hint.
 import re
 from typing import Any, Optional
 
+from .json_goldilocks import goldilocks_summary
+from .text_focus import barbell_focus
+from .text_digest import digest as digest_text
+
 
 # =============================================================================
 # Configuration: Field Categories & Weights
@@ -83,20 +87,31 @@ MAX_ITEMS = 4
 MAX_URLS = 3
 MAX_FIELD_LEN = 50
 MAX_LINE_LEN = 120
+BARBELL_TARGET_BYTES = 8000
+GOLDILOCKS_MIN_BYTES = 20000
+GOLDILOCKS_MAX_BYTES = 8000
+GOLDILOCKS_HINT_PREFIX = "JSON_FOCUS:"
 
 
 # =============================================================================
 # Core: Adaptive Hint Extraction
 # =============================================================================
 
-def extract_context_hint(tool_name: str, payload: dict) -> Optional[str]:
+def extract_context_hint(
+    tool_name: str,
+    payload: Any,
+    *,
+    allow_barbell: bool = False,
+    allow_goldilocks: bool = False,
+    payload_bytes: Optional[int] = None,
+) -> Optional[str]:
     """
     Main entry point - extract context hint from any tool result.
 
     Routes to specialized extractors for known formats (SERP, scraped pages),
     then falls back to adaptive extraction for arbitrary JSON.
     """
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         return None
 
     # Special cases: SERP and scraped pages have unique formats
@@ -104,13 +119,28 @@ def extract_context_hint(tool_name: str, payload: dict) -> Optional[str]:
         return hint_from_serp(payload)
 
     if 'scrape_as_markdown' in tool_name:
-        return hint_from_scraped_page(payload)
+        if not isinstance(payload, dict):
+            return None
+        return hint_from_scraped_page(payload, allow_barbell=allow_barbell)
 
     # Adaptive extraction for everything else
-    return hint_from_structured_data(payload)
+    structured_hint = hint_from_structured_data(payload)
+    goldilocks_hint = None
+
+    if allow_goldilocks and _should_use_goldilocks(payload_bytes):
+        goldilocks_hint = hint_from_messy_json(payload)
+
+    if structured_hint and goldilocks_hint:
+        combined = f"{structured_hint}\n{goldilocks_hint}"
+        return _enforce_limit_bytes(combined, GOLDILOCKS_MAX_BYTES)
+
+    if structured_hint:
+        return structured_hint
+
+    return goldilocks_hint
 
 
-def hint_from_structured_data(payload: dict) -> Optional[str]:
+def hint_from_structured_data(payload: Any) -> Optional[str]:
     """
     Adaptively extract hints from arbitrary JSON structures.
 
@@ -119,6 +149,14 @@ def hint_from_structured_data(payload: dict) -> Optional[str]:
     2. Extract key fields using heuristics
     3. Format compactly with hard caps
     """
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict):
+            return _hint_from_array(payload)
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
     # Try to find an array of items first (most common pattern)
     array_data = _find_array(payload)
     if array_data and len(array_data) > 0:
@@ -699,14 +737,14 @@ def _is_useful_url(url: str) -> bool:
 # Scraped Page Hints (Special Case)
 # =============================================================================
 
-def hint_from_scraped_page(payload: dict) -> Optional[str]:
+def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Optional[str]:
     """Extract context hint from scraped page."""
     title = payload.get('title', '')
     items = payload.get('items', [])
     excerpt = payload.get('excerpt', '')
+    markdown = payload.get('result', '')
 
     if not title and not items and not excerpt:
-        markdown = payload.get('result', '')
         if not markdown:
             return None
 
@@ -725,6 +763,8 @@ def hint_from_scraped_page(payload: dict) -> Optional[str]:
 
         if title:
             return _enforce_limit(f"📄 {title}")
+        if allow_barbell:
+            return hint_from_unstructured_text(markdown)
         return None
 
     parts = []
@@ -744,7 +784,80 @@ def hint_from_scraped_page(payload: dict) -> Optional[str]:
     if not parts:
         return None
 
+    if allow_barbell and markdown:
+        base = '\n'.join(parts)
+        available = BARBELL_TARGET_BYTES - len(base.encode('utf-8')) - 1
+        if available > 0:
+            focus = _build_unstructured_focus_hint(markdown, max_bytes=available)
+            if focus:
+                combined = f"{base}\n{focus}"
+                return _enforce_limit_bytes(combined, BARBELL_TARGET_BYTES)
+
     return _enforce_limit('\n'.join(parts))
+
+
+def _build_unstructured_focus_hint(
+    text: str,
+    *,
+    max_bytes: int,
+) -> Optional[str]:
+    if not text:
+        return None
+
+    digest = None
+    try:
+        digest = digest_text(text)
+    except Exception:
+        digest = None
+
+    if digest and digest.action == "skip":
+        return None
+
+    header_parts = []
+    if digest:
+        header_parts.append(f"DIGEST: {digest.summary_line()}")
+    header_parts.append("FOCUS:")
+    header = "\n".join(header_parts)
+    header_bytes = len(header.encode("utf-8")) + 1
+    if max_bytes <= header_bytes:
+        return None
+
+    focused = barbell_focus(text, target_bytes=max_bytes - header_bytes)
+    if not focused:
+        return None
+    hint = f"{header}\n{focused}"
+    return _enforce_limit_bytes(hint, max_bytes)
+
+
+def hint_from_unstructured_text(
+    text: str,
+    *,
+    max_bytes: int = BARBELL_TARGET_BYTES,
+) -> Optional[str]:
+    """Generate a focus hint for messy, unstructured text."""
+    return _build_unstructured_focus_hint(text, max_bytes=max_bytes)
+
+
+def hint_from_messy_json(
+    payload: Any,
+    *,
+    max_bytes: int = GOLDILOCKS_MAX_BYTES,
+) -> Optional[str]:
+    """Generate a focused JSON summary for messy, unstructured payloads."""
+    try:
+        summary = goldilocks_summary(payload, max_bytes=max_bytes)
+    except Exception:
+        return None
+    if not summary:
+        return None
+    hint = f"{GOLDILOCKS_HINT_PREFIX}\n{summary}"
+    return _enforce_limit_bytes(hint, max_bytes)
+
+
+def _should_use_goldilocks(payload_bytes: Optional[int]) -> bool:
+    if payload_bytes is None:
+        return False
+    return payload_bytes >= GOLDILOCKS_MIN_BYTES
 
 
 # =============================================================================
@@ -857,3 +970,12 @@ def _enforce_limit(hint: str) -> str:
         result = result[:-10] + "..."
 
     return result
+
+
+def _enforce_limit_bytes(text: str, max_bytes: int) -> str:
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")

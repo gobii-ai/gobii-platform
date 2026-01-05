@@ -18,6 +18,7 @@ from api.agent.tools.autotool_heuristics import (
 )
 from api.agent.tools.tool_manager import (
     auto_enable_heuristic_tools,
+    CREATE_CHART_TOOL_NAME,
     CREATE_CSV_TOOL_NAME,
     CREATE_PDF_TOOL_NAME,
     get_enabled_tool_limit,
@@ -505,7 +506,7 @@ class TestHeuristicsRegistryCompleteness(TestCase):
 
     def test_all_tool_names_follow_convention(self):
         """All tool names should follow mcp_brightdata_ or known local tool names."""
-        local_tools = {CREATE_CSV_TOOL_NAME, CREATE_PDF_TOOL_NAME}
+        local_tools = {CREATE_CSV_TOOL_NAME, CREATE_PDF_TOOL_NAME, CREATE_CHART_TOOL_NAME}
         for entry in AUTOTOOL_HEURISTICS:
             for tool in entry["tools"]:
                 self.assertTrue(

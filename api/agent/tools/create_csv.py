@@ -4,7 +4,9 @@ from django.conf import settings
 
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.agent_variables import set_agent_variable
 
 EXTENSION = ".csv"
 MIME_TYPE = "text/csv"
@@ -17,7 +19,8 @@ def get_create_csv_tool() -> Dict[str, Any]:
             "name": "create_csv",
             "description": (
                 "Create a CSV file from provided CSV text and store it in the agent filespace. "
-                "Recommended path: /exports/your-file.csv. Provide the full CSV content, including headers if needed."
+                "Recommended path: /exports/your-file.csv. Provide the full CSV content, including headers if needed. "
+                "Returns `inline` for download links and `attach` for email attachments."
             ),
             "parameters": {
                 "type": "object",
@@ -59,7 +62,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 f"CSV exceeds maximum allowed size ({len(content_bytes)} bytes > {max_size} bytes)."
             ),
         }
-    return write_bytes_to_dir(
+    result = write_bytes_to_dir(
         agent=agent,
         content_bytes=content_bytes,
         extension=EXTENSION,
@@ -67,3 +70,21 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         path=path,
         overwrite=overwrite,
     )
+    if result.get("status") != "ok":
+        return result
+
+    # Set variable using path as name (unique, human-readable)
+    file_path = result.get("path")
+    node_id = result.get("node_id")
+    signed_url = build_signed_filespace_download_url(
+        agent_id=str(agent.id),
+        node_id=node_id,
+    )
+    set_agent_variable(file_path, signed_url)
+
+    return {
+        "status": "ok",
+        "path": file_path,
+        "inline": f"[Download](«{file_path}»)",
+        "attach": file_path,
+    }

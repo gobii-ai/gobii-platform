@@ -23,7 +23,7 @@ from django.core.files import File
 from django.core.files.storage import default_storage
 
 from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
-from . import sqlite_analysis
+from . import sqlite_analysis, sqlite_digest
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +147,28 @@ def get_sqlite_schema_prompt() -> str:
         return "\n".join(lines)
     except Exception as e:  # noqa: BLE001
         return f"Failed to inspect SQLite DB: {e}"
+    finally:
+        if conn is not None:
+            try:
+                clear_guarded_connection(conn)
+                conn.close()
+            except Exception:
+                pass
+
+
+def get_sqlite_digest_prompt() -> str:
+    """Return a compact SQLite digest for the agent's database."""
+    db_path = _sqlite_db_path_var.get(None)
+    if not db_path or not os.path.exists(db_path):
+        return "SQLite digest unavailable - no database present."
+
+    conn = None
+    try:
+        conn = open_guarded_sqlite_connection(db_path)
+        digest = sqlite_digest.digest_connection(conn)
+        return digest.to_prompt()
+    except Exception as e:  # noqa: BLE001
+        return f"Failed to digest SQLite DB: {e}"
     finally:
         if conn is not None:
             try:

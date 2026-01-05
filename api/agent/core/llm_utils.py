@@ -1,6 +1,8 @@
 """Shared helpers for constructing LiteLLM completion calls."""
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Iterable
 
 from django.conf import settings
@@ -14,6 +16,15 @@ _HINT_KEYS = (
     "supports_reasoning",
     "reasoning_effort",
     "low_latency",
+)
+
+logger = logging.getLogger(__name__)
+
+_RETRYABLE_ERRORS = (
+    litellm.Timeout,
+    litellm.APIConnectionError,
+    litellm.ServiceUnavailableError,
+    litellm.RateLimitError,
 )
 
 
@@ -87,9 +98,25 @@ def run_completion(
         kwargs.pop("parallel_tool_calls", None)
 
     if kwargs.get("timeout") is None:
-        kwargs["timeout"] = getattr(settings, "LITELLM_TIMEOUT_SECONDS", 600)
+        kwargs["timeout"] = getattr(settings, "LITELLM_TIMEOUT_SECONDS", 300)
 
-    return litellm.completion(**kwargs)
+    max_attempts = max(1, int(getattr(settings, "LITELLM_MAX_RETRIES", 2)))
+    backoff_seconds = float(getattr(settings, "LITELLM_RETRY_BACKOFF_SECONDS", 1.0))
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return litellm.completion(**kwargs)
+        except _RETRYABLE_ERRORS as exc:
+            if attempt >= max_attempts:
+                raise
+            logger.warning(
+                "LiteLLM request failed with %s; retrying (%d/%d)",
+                type(exc).__name__,
+                attempt,
+                max_attempts,
+            )
+            if backoff_seconds > 0:
+                time.sleep(backoff_seconds * (2 ** (attempt - 1)))
 
 
 __all__ = ["run_completion"]

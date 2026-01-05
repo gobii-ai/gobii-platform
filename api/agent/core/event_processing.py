@@ -49,10 +49,12 @@ from .burn_control import (
 )
 from .processing_flags import (
     claim_pending_drain_slot,
+    clear_processing_heartbeat,
     clear_processing_queued_flag,
     enqueue_pending_agent,
     get_pending_drain_settings,
     is_agent_pending,
+    set_processing_heartbeat,
 )
 from .llm_utils import run_completion
 from .llm_streaming import StreamAccumulator
@@ -104,10 +106,11 @@ from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
 from ..tools.search_tools import execute_search_tools
-from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools
+from ..tools.tool_manager import execute_enabled_tool, auto_enable_heuristic_tools, should_skip_auto_substitution
 from ..tools.web_chat_sender import execute_send_chat_message
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
+from ..tools.agent_variables import clear_variables, substitute_variables
 from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -162,6 +165,7 @@ class _EventProcessingLockSettings:
     lock_extend_interval_seconds: int
     lock_acquire_timeout_seconds: float
     lock_max_extensions: int
+    heartbeat_ttl_seconds: int
     pending_set_ttl_seconds: int
     pending_drain_delay_seconds: int
     pending_drain_schedule_ttl_seconds: int
@@ -188,16 +192,49 @@ def _get_event_processing_lock_settings() -> _EventProcessingLockSettings:
         getattr(settings, "AGENT_EVENT_PROCESSING_LOCK_MAX_EXTENSIONS", 200)
     )
     lock_max_extensions = max(1, lock_max_extensions)
+    heartbeat_ttl_seconds = int(
+        getattr(settings, "AGENT_EVENT_PROCESSING_HEARTBEAT_TTL_SECONDS", lock_timeout_seconds)
+    )
+    heartbeat_ttl_seconds = max(0, heartbeat_ttl_seconds)
     pending_settings = get_pending_drain_settings(settings)
     return _EventProcessingLockSettings(
         lock_timeout_seconds=lock_timeout_seconds,
         lock_extend_interval_seconds=lock_extend_interval_seconds,
         lock_acquire_timeout_seconds=lock_acquire_timeout_seconds,
         lock_max_extensions=lock_max_extensions,
+        heartbeat_ttl_seconds=heartbeat_ttl_seconds,
         pending_set_ttl_seconds=pending_settings.pending_set_ttl_seconds,
         pending_drain_delay_seconds=pending_settings.pending_drain_delay_seconds,
         pending_drain_schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
     )
+
+
+@dataclass
+class _ProcessingHeartbeat:
+    agent_id: str
+    ttl_seconds: int
+    started_at: float
+    redis_client: Any | None = None
+    run_id: str | None = None
+
+    def touch(self, stage: str) -> None:
+        if self.ttl_seconds <= 0:
+            return
+        set_processing_heartbeat(
+            self.agent_id,
+            ttl=self.ttl_seconds,
+            run_id=self.run_id,
+            stage=stage,
+            started_at=self.started_at,
+            client=self.redis_client,
+        )
+
+    def update_run_id(self, run_id: str) -> None:
+        self.run_id = run_id
+        self.touch("run_started")
+
+    def clear(self) -> None:
+        clear_processing_heartbeat(self.agent_id, client=self.redis_client)
 
 
 class _LockExtender:
@@ -344,6 +381,21 @@ def _get_tool_call_name(call: Any) -> Optional[str]:
     return None
 
 
+def _substitute_variables_in_params(params: Any) -> Any:
+    """Recursively substitute «var» placeholders in tool parameters.
+
+    Handles nested dicts, lists, and string values. Non-string values
+    are returned unchanged.
+    """
+    if isinstance(params, str):
+        return substitute_variables(params)
+    if isinstance(params, dict):
+        return {k: _substitute_variables_in_params(v) for k, v in params.items()}
+    if isinstance(params, list):
+        return [_substitute_variables_in_params(item) for item in params]
+    return params
+
+
 def _get_latest_active_web_session(agent: PersistentAgent):
     for session in get_active_web_sessions(agent):
         if session.user_id is not None:
@@ -479,6 +531,12 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         )
     except Exception:
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
+
+
+def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
+    if max_runtime_seconds <= 0:
+        return False
+    return (time.monotonic() - started_at) >= max_runtime_seconds
 
 
 def _estimate_message_tokens(messages: List[dict]) -> int:
@@ -1633,6 +1691,7 @@ def process_agent_events(
 
     lock_acquired = False
     processed_agent: Optional[PersistentAgent] = None
+    heartbeat: Optional[_ProcessingHeartbeat] = None
 
     try:
         # Try to acquire the lock with a small timeout. If this instance cannot get the lock,
@@ -1670,6 +1729,14 @@ def process_agent_events(
 
         lock_acquired = True
         clear_processing_queued_flag(persistent_agent_id)
+        if lock_settings.heartbeat_ttl_seconds > 0:
+            heartbeat = _ProcessingHeartbeat(
+                agent_id=str(persistent_agent_id),
+                ttl_seconds=lock_settings.heartbeat_ttl_seconds,
+                started_at=time.time(),
+                redis_client=redis_client,
+            )
+            heartbeat.touch("lock_acquired")
 
         logger.info("Acquired distributed lock for agent %s", persistent_agent_id)
         span.add_event("Distributed lock acquired")
@@ -1685,6 +1752,7 @@ def process_agent_events(
                 persistent_agent_id,
                 span,
                 lock_extender=lock_extender,
+                heartbeat=heartbeat,
             )
 
     except Exception as e:
@@ -1714,6 +1782,8 @@ def process_agent_events(
             except Exception as e:
                 logger.warning("Failed to release lock for agent %s: %s", persistent_agent_id, str(e))
                 span.add_event("Lock release warning")
+        if heartbeat:
+            heartbeat.clear()
 
         # Clear local budget context
         set_budget_context(None)
@@ -1736,6 +1806,7 @@ def _process_agent_events_locked(
     span,
     *,
     lock_extender: Optional[_LockExtender] = None,
+    heartbeat: Optional[_ProcessingHeartbeat] = None,
 ) -> Optional[PersistentAgent]:
     """Core event processing logic, called while holding the distributed lock."""
     try:
@@ -1945,6 +2016,8 @@ def _process_agent_events_locked(
                 step=processing_step,
                 code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             )
+        if heartbeat:
+            heartbeat.update_run_id(str(processing_step.id))
 
         logger.info(
             "Processing agent %s (is_first_run=%s, run_sequence_number=%s)",
@@ -1962,6 +2035,7 @@ def _process_agent_events_locked(
             credit_snapshot=credit_snapshot,
             run_sequence_number=run_sequence_number,
             lock_extender=lock_extender,
+            heartbeat=heartbeat,
         )
 
         sys_step.notes = "simplified"
@@ -1991,6 +2065,7 @@ def _run_agent_loop(
     credit_snapshot: Optional[Dict[str, Any]] = None,
     run_sequence_number: Optional[int] = None,
     lock_extender: Optional[_LockExtender] = None,
+    heartbeat: Optional[_ProcessingHeartbeat] = None,
 ) -> dict:
     """The core tool‑calling loop for a persistent agent.
     
@@ -2006,7 +2081,13 @@ def _run_agent_loop(
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
     logger.info("Starting agent loop for agent %s", agent.id)
+    # Clear agent variables from any previous processing cycle
+    clear_variables()
     span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
+    max_runtime_seconds = int(getattr(settings, "AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS", 0))
+    run_started_at = time.monotonic()
+    if heartbeat:
+        heartbeat.touch("loop_start")
     try:
         redis_client = get_redis_client()
     except Exception:
@@ -2074,8 +2155,36 @@ def _run_agent_loop(
     reasoning_only_streak = 0
 
     for i in range(max_remaining):
+        if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
+            logger.warning(
+                "Agent %s loop aborted after %d seconds (max=%d).",
+                agent.id,
+                int(time.monotonic() - run_started_at),
+                max_runtime_seconds,
+            )
+            span.add_event("Agent loop aborted - runtime limit")
+            if heartbeat:
+                heartbeat.touch("runtime_limit")
+            try:
+                PersistentAgentStep.objects.create(
+                    agent=agent,
+                    description=(
+                        "Processing halted: runtime limit reached. "
+                        "Will resume on the next trigger."
+                    ),
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to persist runtime limit step for agent %s",
+                    agent.id,
+                    exc_info=True,
+                )
+            _attempt_cycle_close_for_sleep(agent, budget_ctx)
+            return cumulative_token_usage
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
             iter_span = trace.get_current_span()
+            if heartbeat:
+                heartbeat.touch("iteration_start")
             if lock_extender:
                 lock_extender.maybe_extend()
             try:
@@ -2211,6 +2320,8 @@ def _run_agent_loop(
                     preferred_config=preferred_config,
                     stream_broadcaster=stream_broadcaster,
                 )
+                if heartbeat:
+                    heartbeat.touch("llm_response")
                 
                 # Accumulate token usage
                 if token_usage:
@@ -2451,6 +2562,8 @@ def _run_agent_loop(
                             logger.debug("Failed to persist correction step for missing tool name", exc_info=True)
                         followup_required = True
                         break
+                    if heartbeat:
+                        heartbeat.touch("tool_call")
                     tool_span.set_attribute("tool.name", tool_name)
                     logger.info("Agent %s executing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
 
@@ -2558,9 +2671,13 @@ def _run_agent_loop(
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
-                    exec_params = tool_params
+                    # Substitute «var» placeholders in tool parameters (unless tool opts out)
+                    if should_skip_auto_substitution(tool_name):
+                        exec_params = tool_params  # Tool handles substitution itself
+                    else:
+                        exec_params = _substitute_variables_in_params(tool_params)
                     if tool_name == "sqlite_batch":
-                        exec_params = dict(tool_params)
+                        exec_params = dict(exec_params)  # copy already-substituted params
                         exec_params["_has_user_facing_message"] = has_user_facing_message
 
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes

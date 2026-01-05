@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone as dt_timezone
+from datetime import datetime, timedelta, timezone as dt_timezone
 import re
 from urllib.parse import urlencode
 import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
+from django.conf import settings
 from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
 from django.utils import timezone
@@ -18,7 +19,7 @@ from bleach.sanitizer import ALLOWED_PROTOCOLS as BLEACH_ALLOWED_PROTOCOLS_BASE
 from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
 
-from api.agent.core.processing_flags import is_processing_queued
+from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -755,13 +756,16 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
     lock_key = f"redlock:agent-event-processing:{agent.id}"
     lock_active = False
     queued_flag = False
+    heartbeat_active = False
     try:
         redis_client = get_redis_client()
         lock_active = bool(redis_client.exists(lock_key))
         queued_flag = is_processing_queued(agent.id, client=redis_client)
+        heartbeat_active = bool(get_processing_heartbeat(agent.id, client=redis_client))
     except Exception:
         lock_active = False
         queued_flag = False
+        heartbeat_active = False
 
     web_tasks: list[dict] = []
     if getattr(agent, "browser_use_agent_id", None):
@@ -772,9 +776,13 @@ def build_processing_snapshot(agent: PersistentAgent) -> ProcessingSnapshot:
             is_deleted=False,
         ).order_by("created_at")
         now = timezone.now()
+        max_age_seconds = int(getattr(settings, "AGENT_WEB_TASK_ACTIVE_MAX_AGE_SECONDS", 0))
+        if max_age_seconds > 0:
+            cutoff = now - timedelta(seconds=max_age_seconds)
+            active_tasks = active_tasks.filter(updated_at__gte=cutoff)
         web_tasks = [_build_web_task_payload(task, now=now) for task in active_tasks]
 
-    active = bool(lock_active or queued_flag or web_tasks)
+    active = bool(heartbeat_active or lock_active or queued_flag or web_tasks)
     return ProcessingSnapshot(active=active, web_tasks=web_tasks)
 
 

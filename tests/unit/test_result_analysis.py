@@ -320,6 +320,28 @@ Visit https://example.com for more info."""
         self.assertEqual(analysis.format, "plain")
         self.assertIsNotNone(analysis.text_hints)
 
+    def test_plain_text_digest_added(self):
+        text = (
+            "This is a straightforward paragraph about data quality. "
+            "However, it should still be classified as prose."
+        )
+        analysis = analyze_text(text)
+
+        self.assertIsNotNone(analysis.text_digest)
+        self.assertEqual(analysis.text_digest.primary_type, "prose")
+
+    def test_html_digest_added(self):
+        text = (
+            "<html><body>"
+            "<h1>Title</h1><p>Content paragraph.</p>"
+            "<ul><li>One</li><li>Two</li></ul>"
+            "</body></html>"
+        )
+        analysis = analyze_text(text)
+
+        self.assertIsNotNone(analysis.text_digest)
+        self.assertEqual(analysis.text_digest.primary_type, "html")
+
 
 @tag("batch_result_analysis")
 class FullAnalysisTests(SimpleTestCase):
@@ -435,6 +457,26 @@ class FullAnalysisTests(SimpleTestCase):
             "columns" in analysis.compact_summary.lower()
         )
 
+    def test_compact_summary_includes_text_digest(self):
+        text = (
+            "This is a longer paragraph meant to look like prose. "
+            "Therefore it should include a digest line in the summary."
+        )
+        analysis = analyze_result(text, "digest-test")
+
+        self.assertIn("DIGEST:", analysis.compact_summary)
+
+    def test_compact_summary_includes_json_digest(self):
+        data = [
+            {"id": 1, "name": "First"},
+            {"id": 2, "name": "Second"},
+        ]
+        result_text = json.dumps(data)
+
+        analysis = analyze_result(result_text, "json-digest-test")
+
+        self.assertIn("JSON_DIGEST:", analysis.compact_summary)
+
 
 @tag("batch_result_analysis")
 class AnalysisSerializationTests(SimpleTestCase):
@@ -457,6 +499,7 @@ class AnalysisSerializationTests(SimpleTestCase):
         self.assertEqual(result["size"]["category"], "small")
         self.assertIn("json", result)
         self.assertIn("pattern", result["json"])
+        self.assertIn("digest", result["json"])
 
     def test_analysis_to_dict_text(self):
         text = """id,name,email
@@ -469,6 +512,15 @@ class AnalysisSerializationTests(SimpleTestCase):
         self.assertIn("text", result)
         self.assertEqual(result["text"]["format"], "csv")
         self.assertIn("csv", result["text"])
+
+    def test_text_digest_serializes(self):
+        text = "This is a short paragraph about analysis and data quality."
+        analysis = analyze_result(text, "test-id")
+
+        result = analysis_to_dict(analysis)
+
+        self.assertIn("digest", result["text"])
+        self.assertIn("verdict", result["text"]["digest"])
 
     def test_serialized_analysis_is_json_safe(self):
         data = [{"id": 1, "unicode": "Hello \u2603 World"}]
@@ -645,6 +697,7 @@ class EdgeCaseTests(SimpleTestCase):
         self.assertEqual(emb.path, "$.result")
         self.assertEqual(emb.format, "json")
         self.assertIsNotNone(emb.json_info)
+        self.assertIsNotNone(emb.json_digest)
         self.assertEqual(emb.json_info.primary_array_path, "$.items")
         self.assertIn("GET JSON", analysis.compact_summary)
 
@@ -662,6 +715,20 @@ class EdgeCaseTests(SimpleTestCase):
         emb = analysis.json_analysis.embedded_content
         self.assertEqual(emb.format, "csv")
         self.assertEqual(emb.path, "$.results[*].payload")
+
+    def test_embedded_html_digest_serializes(self):
+        payload = {
+            "content": "<html><body><h1>Title</h1><p>Paragraph.</p></body></html>"
+        }
+        analysis = analyze_result(json.dumps(payload), "html-embedded")
+
+        self.assertIsNotNone(analysis.json_analysis.embedded_content)
+        emb = analysis.json_analysis.embedded_content
+        self.assertEqual(emb.format, "html")
+        self.assertIsNotNone(emb.text_digest)
+
+        result = analysis_to_dict(analysis)
+        self.assertIn("digest", result["json"]["embedded_content"])
 
     def test_csv_in_json_serialization(self):
         """Verify embedded CSV info is serialized correctly."""

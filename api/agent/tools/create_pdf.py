@@ -5,25 +5,311 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
-import pdfkit
-
 from django.conf import settings
 
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
+from api.agent.tools.agent_variables import set_agent_variable, substitute_variables_as_data_uris
 
 logger = logging.getLogger(__name__)
 
 EXTENSION = ".pdf"
 MIME_TYPE = "application/pdf"
 
-PDFKIT_OPTIONS = {
-    "disable-local-file-access": "",
-    "disable-javascript": "",
-    "encoding": "utf-8",
-    "quiet": "",
+# Comprehensive PDF styling for publication-quality output
+DEFAULT_PRINT_CSS = """
+/* ==========================================================================
+   PAGE SETUP & RUNNING HEADERS/FOOTERS
+   ========================================================================== */
+@page {
+    size: Letter;
+    margin: 25mm 20mm 30mm 20mm;
+
+    @top-center {
+        content: string(doc-title);
+        font-size: 9pt;
+        color: #666;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    @bottom-center {
+        content: counter(page);
+        font-size: 9pt;
+        color: #666;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
 }
+
+/* Named page for cover - no headers/footers */
+@page cover {
+    @top-center { content: none; }
+    @bottom-center { content: none; }
+}
+
+/* First page - no page number */
+@page :first {
+    @bottom-center { content: none; }
+}
+
+/* ==========================================================================
+   STRING SET FOR RUNNING HEADERS
+   ========================================================================== */
+.doc-title, h1:first-of-type {
+    string-set: doc-title content();
+}
+
+/* ==========================================================================
+   BASE TYPOGRAPHY - Modern Minimal
+   ========================================================================== */
+html, body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1a1a1a;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 600;
+    line-height: 1.3;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    color: #111;
+    break-after: avoid;
+    break-inside: avoid;
+}
+
+h1 { font-size: 24pt; margin-top: 0; }
+h2 { font-size: 18pt; }
+h3 { font-size: 14pt; }
+h4 { font-size: 12pt; }
+h5, h6 { font-size: 11pt; }
+
+p { margin: 0 0 1em 0; }
+
+/* ==========================================================================
+   CRITICAL PAGE BREAK HANDLING
+   ========================================================================== */
+
+/* Keep headings with following content */
+h1 + *, h2 + *, h3 + *, h4 + *, h5 + *, h6 + * {
+    break-before: avoid;
+}
+
+/* Orphan/widow control */
+p, li, dd, dt {
+    orphans: 3;
+    widows: 3;
+}
+
+/* Figures, images stay together */
+figure, img {
+    break-inside: avoid;
+}
+
+/* ==========================================================================
+   TABLES - Repeating headers across pages
+   ========================================================================== */
+table {
+    break-inside: auto;
+    border-collapse: collapse;
+    width: 100%;
+    margin: 1em 0;
+    font-size: 10pt;
+}
+
+thead {
+    display: table-header-group;
+}
+
+tfoot {
+    display: table-footer-group;
+}
+
+tbody {
+    display: table-row-group;
+}
+
+tr {
+    break-inside: avoid;
+}
+
+th, td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid #e9ecef;
+}
+
+th {
+    font-weight: 600;
+    background: #f8f9fa;
+    color: #495057;
+    text-transform: uppercase;
+    font-size: 9pt;
+    letter-spacing: 0.5px;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
+}
+
+tbody tr:nth-child(even) {
+    background: #fafbfc;
+}
+
+/* ==========================================================================
+   CODE BLOCKS
+   ========================================================================== */
+pre, code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", monospace;
+    font-size: 9.5pt;
+}
+
+pre {
+    break-inside: avoid;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    background: #f8f9fa;
+    border: 1px solid #e9ecef;
+    border-radius: 4px;
+    padding: 1em;
+    margin: 1em 0;
+}
+
+/* For very long code blocks, allow breaking */
+pre.allow-break {
+    break-inside: auto;
+}
+
+/* ==========================================================================
+   BLOCKQUOTES
+   ========================================================================== */
+blockquote {
+    margin: 1.5em 0;
+    padding: 1em 1.5em;
+    border-left: 4px solid #4C78A8;
+    background: #f8f9fa;
+    color: #495057;
+    font-style: italic;
+    break-inside: avoid;
+}
+
+blockquote p:last-child {
+    margin-bottom: 0;
+}
+
+/* ==========================================================================
+   LISTS
+   ========================================================================== */
+ul, ol {
+    margin: 1em 0;
+    padding-left: 1.5em;
+}
+
+li {
+    margin-bottom: 0.5em;
+}
+
+li > ul, li > ol {
+    margin-top: 0.5em;
+    margin-bottom: 0;
+}
+
+/* ==========================================================================
+   UTILITY CLASSES
+   ========================================================================== */
+
+/* Force page break after element */
+.page-break {
+    break-after: always;
+}
+
+/* Force page break before element */
+.page-break-before {
+    break-before: always;
+}
+
+/* Keep element together (no internal breaks) */
+.no-break {
+    break-inside: avoid;
+}
+
+/* Logical section - prefer breaking before, not inside */
+.section {
+    break-inside: avoid-page;
+    break-before: auto;
+}
+
+.section > h1:first-child,
+.section > h2:first-child,
+.section > h3:first-child,
+.section > h4:first-child {
+    break-after: avoid;
+}
+
+/* ==========================================================================
+   COVER PAGE
+   ========================================================================== */
+.cover-page {
+    page: cover;
+    break-after: always;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    text-align: center;
+}
+
+.cover-page h1 {
+    font-size: 36pt;
+    font-weight: 700;
+    margin-bottom: 0.5em;
+    color: #111;
+}
+
+.cover-page .subtitle {
+    font-size: 16pt;
+    color: #666;
+    margin-bottom: 2em;
+}
+
+.cover-page .meta {
+    font-size: 11pt;
+    color: #888;
+}
+
+/* ==========================================================================
+   LINKS (show URL in print)
+   ========================================================================== */
+a {
+    color: #4C78A8;
+    text-decoration: none;
+}
+
+a[href^="http"]:after {
+    content: " (" attr(href) ")";
+    font-size: 0.8em;
+    color: #888;
+}
+
+a[href^="#"]:after,
+a.no-url:after {
+    content: none;
+}
+
+/* ==========================================================================
+   HORIZONTAL RULES
+   ========================================================================== */
+hr {
+    border: none;
+    border-top: 1px solid #e9ecef;
+    margin: 2em 0;
+}
+"""
 
 CSS_URL_RE = re.compile(r"url\(\s*['\"]?\s*(?P<url>[^)\"'\s]+)", re.IGNORECASE)
 CSS_IMPORT_RE = re.compile(r"@import\s+(?:url\()?['\"]?\s*(?P<url>[^'\"\)\s]+)", re.IGNORECASE)
@@ -31,6 +317,18 @@ META_REFRESH_URL_RE = re.compile(r"url\s*=\s*(?P<url>[^;]+)", re.IGNORECASE)
 DATA_URL_RE = re.compile(r"^data:(?P<meta>[^,]*?),(?P<data>.*)$", re.IGNORECASE | re.DOTALL)
 SVG_URL_ATTR_RE = re.compile(r"(?:href|xlink:href)\s*=\s*['\"](?P<url>[^'\"]+)['\"]", re.IGNORECASE)
 URL_ATTRS = {"src", "href", "data", "poster", "action", "formaction", "xlink:href", "background"}
+
+
+def _secure_url_fetcher(url, timeout=10, ssl_context=None):
+    """
+    Security layer: Only allow data: URIs, block all external/local resources.
+    This is a second layer of defense after the HTML scanner.
+    """
+    if url.startswith('data:'):
+        from weasyprint import default_url_fetcher
+        return default_url_fetcher(url, timeout, ssl_context)
+    # Block everything else - external URLs, file://, etc.
+    raise ValueError(f"External resources not allowed: {url}")
 
 
 def _is_allowed_asset_url(url: str) -> bool:
@@ -210,15 +508,42 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
+def _inject_print_css(html: str) -> str:
+    """Inject default print CSS for clean page breaks."""
+    style_tag = f"<style>{DEFAULT_PRINT_CSS}</style>"
+
+    # Try to inject into <head>
+    head_match = re.search(r"<head[^>]*>", html, re.IGNORECASE)
+    if head_match:
+        insert_pos = head_match.end()
+        return html[:insert_pos] + style_tag + html[insert_pos:]
+
+    # No <head>, try after <html>
+    html_match = re.search(r"<html[^>]*>", html, re.IGNORECASE)
+    if html_match:
+        insert_pos = html_match.end()
+        return html[:insert_pos] + f"<head>{style_tag}</head>" + html[insert_pos:]
+
+    # No structure at all, wrap it
+    return f"<html><head>{style_tag}</head><body>{html}</body></html>"
+
+
 def get_create_pdf_tool() -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
             "name": "create_pdf",
             "description": (
-                "Create a PDF from provided HTML and store it in the agent filespace. "
-                "Recommended path: /exports/your-file.pdf. The HTML must be self-contained; "
-                "external or local asset references are not allowed."
+                "Create a publication-quality PDF from HTML. "
+                "Recommended path: /exports/your-file.pdf. HTML must be self-contained. "
+                "\n\nUtility classes:\n"
+                "- .page-break / .page-break-before: force page breaks\n"
+                "- .no-break: keep element together\n"
+                "- .section: logical section (prefers breaking before, not inside)\n"
+                "- .cover-page: title page (no header/footer)\n"
+                "- .doc-title: set running header text\n"
+                "\nTables with <thead> repeat headers across pages. "
+                "Returns `inline` for download links and `attach` for email."
             ),
             "parameters": {
                 "type": "object",
@@ -247,6 +572,9 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not isinstance(html, str) or not html.strip():
         return {"status": "error", "message": "Missing required parameter: html"}
 
+    # Substitute «path» variables with data URIs (PDF needs embedded content, not URLs)
+    html = substitute_variables_as_data_uris(html, agent)
+
     max_size = getattr(settings, "MAX_FILE_SIZE", None)
     if max_size:
         html_bytes = html.encode("utf-8")
@@ -268,13 +596,18 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if error:
         return error
 
+    # Inject default print CSS for clean page breaks
+    html = _inject_print_css(html)
+
     try:
-        pdf_bytes = pdfkit.from_string(html, False, options=PDFKIT_OPTIONS)
-    except OSError as exc:
-        logger.exception("wkhtmltopdf is required to generate PDFs: %s", exc)
+        from weasyprint import HTML
+        pdf_bytes = HTML(string=html, url_fetcher=_secure_url_fetcher).write_pdf()
+    except ValueError as exc:
+        # Raised by _secure_url_fetcher for blocked resources
+        logger.warning("Blocked resource access during PDF generation: %s", exc)
         return {
             "status": "error",
-            "message": "PDF generation requires wkhtmltopdf to be installed on the server.",
+            "message": "HTML references external resources that are not allowed.",
         }
     except Exception:
         logger.exception("Failed to generate PDF for agent %s", agent.id)
@@ -283,7 +616,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not pdf_bytes:
         return {"status": "error", "message": "PDF generation returned empty output."}
 
-    return write_bytes_to_dir(
+    result = write_bytes_to_dir(
         agent=agent,
         content_bytes=pdf_bytes,
         extension=EXTENSION,
@@ -291,3 +624,21 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         path=path,
         overwrite=overwrite,
     )
+    if result.get("status") != "ok":
+        return result
+
+    # Set variable using path as name (unique, human-readable)
+    file_path = result.get("path")
+    node_id = result.get("node_id")
+    signed_url = build_signed_filespace_download_url(
+        agent_id=str(agent.id),
+        node_id=node_id,
+    )
+    set_agent_variable(file_path, signed_url)
+
+    return {
+        "status": "ok",
+        "path": file_path,
+        "inline": f"[Download](«{file_path}»)",
+        "attach": file_path,
+    }

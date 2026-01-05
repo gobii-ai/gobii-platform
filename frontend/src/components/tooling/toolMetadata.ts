@@ -21,6 +21,7 @@ import {
   KeyRound,
   ScanText,
   BrainCog,
+  BarChart3,
   type LucideIcon,
 } from 'lucide-react'
 import { summarizeSchedule } from '../../util/schedule'
@@ -393,6 +394,20 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     detailKind: 'fileExport',
     derive(entry, parameters) {
       return deriveFileExport(entry, parameters, 'PDF export')
+    },
+  },
+  {
+    name: 'create_chart',
+    label: 'Chart',
+    icon: BarChart3,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-600',
+    detailKind: 'chart',
+    derive(_entry, parameters) {
+      const chartType = coerceString(parameters?.type)
+      const title = coerceString(parameters?.title)
+      const caption = title || (chartType ? `${chartType} chart` : 'Chart')
+      return { caption: truncate(caption, 40) }
     },
   },
   {
