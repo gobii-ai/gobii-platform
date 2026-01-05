@@ -4,6 +4,13 @@ import django.db.models.deletion
 import uuid
 
 
+def backfill_agent_email_connection_mode(apps, schema_editor):
+    agent_email_account = apps.get_model('api', 'AgentEmailAccount')
+    using = schema_editor.connection.alias
+    oauth_filter = models.Q(smtp_auth='oauth2') | models.Q(imap_auth='oauth2')
+    agent_email_account.objects.using(using).exclude(oauth_filter).update(connection_mode='custom')
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -27,6 +34,7 @@ class Migration(migrations.Migration):
             name='connection_mode',
             field=models.CharField(choices=[('custom', 'Custom SMTP/IMAP'), ('oauth2', 'OAuth 2.0')], default='oauth2', max_length=16),
         ),
+        migrations.RunPython(backfill_agent_email_connection_mode, migrations.RunPython.noop),
         migrations.CreateModel(
             name='AgentEmailOAuthCredential',
             fields=[
