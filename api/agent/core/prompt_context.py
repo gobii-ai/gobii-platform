@@ -81,7 +81,11 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
-from ..tools.sqlite_state import AGENT_CONFIG_TABLE, get_sqlite_schema_prompt
+from ..tools.sqlite_state import (
+    AGENT_CONFIG_TABLE,
+    get_sqlite_digest_prompt,
+    get_sqlite_schema_prompt,
+)
 from ..tools.tool_manager import ensure_default_tools_enabled, get_enabled_tool_definitions
 from ..tools.web_chat_sender import get_send_chat_tool
 from ..tools.webhook_sender import get_send_webhook_tool
@@ -3490,6 +3494,13 @@ def build_prompt_context(
     variable_group.section_text(
         "sqlite_schema",
         sqlite_schema_block,
+        weight=1,
+        shrinker="hmt"
+    )
+    sqlite_digest_block = get_sqlite_digest_prompt()
+    variable_group.section_text(
+        "sqlite_digest",
+        sqlite_digest_block,
         weight=1,
         shrinker="hmt"
     )
