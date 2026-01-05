@@ -44,10 +44,10 @@
         <div>
           <label class="block text-sm font-medium text-gray-700">Connection Method</label>
           <select name="connection_mode" id="email-connection-mode" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
-            <option value="oauth2" {% if form.initial.connection_mode == 'oauth2' %}selected{% endif %}>OAuth 2.0 (Gmail/Outlook/O365/Generic)</option>
+            <option value="oauth2" {% if form.initial.connection_mode == 'oauth2' %}selected{% endif %}>OAuth 2.0 (Gmail/Generic)</option>
             <option value="custom" {% if form.initial.connection_mode == 'custom' or not form.initial.connection_mode %}selected{% endif %}>Custom SMTP/IMAP (username/password)</option>
           </select>
-          <p class="text-xs text-gray-500 mt-1">Choose OAuth for Gmail/Outlook/O365 or bring your own SMTP/IMAP.</p>
+          <p class="text-xs text-gray-500 mt-1">Choose OAuth for Gmail or bring your own SMTP/IMAP.</p>
         </div>
       </div>
       <div class="space-y-3 email-oauth-only" id="email-oauth-panel"
@@ -72,8 +72,6 @@
               <label class="block text-sm font-medium text-gray-700">Provider</label>
               <select id="email-oauth-provider" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
                 <option value="gmail">Gmail</option>
-                <option value="outlook">Outlook (Consumer)</option>
-                <option value="o365">Office 365</option>
                 <option value="generic">Generic OAuth 2.0</option>
               </select>
             </div>
@@ -109,7 +107,7 @@
               {% if oauth_expires_at %}
                 <div>Expires: <span class="font-mono text-xs">{{ oauth_expires_at }}</span></div>
               {% endif %}
-              <div class="text-xs text-gray-500 mt-2">Gmail and Microsoft use the Gobii-managed OAuth app. Generic OAuth requires your own client credentials.</div>
+              <div class="text-xs text-gray-500 mt-2">Gmail uses the Gobii-managed OAuth app. Generic OAuth requires your own client credentials.</div>
             </div>
             <div class="md:col-span-2 flex flex-wrap items-center gap-2">
               <button type="button" id="email-oauth-connect" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">

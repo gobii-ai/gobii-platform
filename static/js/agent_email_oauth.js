@@ -79,14 +79,12 @@ if (panel && panel.dataset.accountId) {
 
   const defaultScopes = {
     gmail: "https://mail.google.com/",
-    outlook: "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
-    o365: "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
     generic: "",
   };
 
   let lastDefaultScope = "";
 
-  const managedProviders = new Set(["gmail", "outlook", "o365"]);
+  const managedProviders = new Set(["gmail"]);
 
   function setDefaultScope(scope) {
     if (!scopeInput) {
@@ -114,7 +112,7 @@ if (panel && panel.dataset.accountId) {
     if (providerHidden) {
       providerHidden.value = provider;
     }
-    toggleRow(tenantRow, provider === "o365");
+    toggleRow(tenantRow, false);
     toggleRow(authRow, provider === "generic");
     toggleRow(tokenRow, provider === "generic");
     const useManaged = managedProviders.has(provider);
@@ -207,15 +205,6 @@ if (panel && panel.dataset.accountId) {
       authorizationEndpoint = "https://accounts.google.com/o/oauth2/v2/auth";
       tokenEndpoint = "https://oauth2.googleapis.com/token";
       extraParams = { access_type: "offline", prompt: "consent" };
-    } else if (provider === "outlook") {
-      authorizationEndpoint = "https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize";
-      tokenEndpoint = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
-      extraParams = { prompt: "consent" };
-    } else if (provider === "o365") {
-      const tenant = tenantInput && tenantInput.value.trim() ? tenantInput.value.trim() : "organizations";
-      authorizationEndpoint = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`;
-      tokenEndpoint = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
-      extraParams = { prompt: "consent" };
     } else if (provider === "generic") {
       authorizationEndpoint = authInput ? authInput.value.trim() : "";
       tokenEndpoint = tokenInput ? tokenInput.value.trim() : "";

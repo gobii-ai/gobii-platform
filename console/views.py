@@ -5433,22 +5433,6 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
             "imap_port": 993,
             "imap_security": "ssl",
         },
-        "outlook": {
-            "smtp_host": "smtp-mail.outlook.com",
-            "smtp_port": 587,
-            "smtp_security": "starttls",
-            "imap_host": "imap-mail.outlook.com",
-            "imap_port": 993,
-            "imap_security": "ssl",
-        },
-        "o365": {
-            "smtp_host": "smtp.office365.com",
-            "smtp_port": 587,
-            "smtp_security": "starttls",
-            "imap_host": "outlook.office365.com",
-            "imap_port": 993,
-            "imap_security": "ssl",
-        },
     }
 
     def _validate_smtp_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
