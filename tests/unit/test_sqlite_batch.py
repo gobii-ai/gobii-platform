@@ -350,6 +350,92 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
             self.assertIn("'number'->'numbers'", out.get("message", ""))
 
+    def test_autocorrect_missing_table_with_schema(self):
+        """Auto-corrects missing table using actual schema tables."""
+        with self._with_temp_db():
+            setup = """
+            CREATE TABLE hn_comments (comment_id INTEGER, author TEXT);
+            INSERT INTO hn_comments (comment_id, author) VALUES (1, 'alice');
+            """
+            execute_sqlite_batch(self.agent, {"sql": setup})
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT comment_id FROM hn_comment ORDER BY comment_id"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            self.assertIn("'hn_comment' -> 'hn_comments'", out.get("message", ""))
+            self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+
+    def test_autocorrect_missing_table_ambiguous_skips(self):
+        """Avoids auto-correct when multiple near matches exist."""
+        with self._with_temp_db():
+            setup = """
+            CREATE TABLE metrics (id INTEGER);
+            CREATE TABLE metricx (id INTEGER);
+            """
+            execute_sqlite_batch(self.agent, {"sql": setup})
+
+            out = execute_sqlite_batch(self.agent, {"sql": "SELECT * FROM metric"})
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("no such table: metric", out.get("message", "").lower())
+            self.assertNotIn("AUTO-CORRECTED", out.get("message", ""))
+
+    def test_autocorrect_missing_column_with_schema_unqualified(self):
+        """Auto-corrects unqualified column names using schema."""
+        with self._with_temp_db():
+            setup = """
+            CREATE TABLE hn_comments (comment_id INTEGER, note TEXT);
+            INSERT INTO hn_comments (comment_id, note) VALUES (1, 'ok');
+            """
+            execute_sqlite_batch(self.agent, {"sql": setup})
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT coment_id FROM hn_comments ORDER BY coment_id"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+
+    def test_autocorrect_missing_column_with_schema_qualified(self):
+        """Auto-corrects qualified column names based on table aliases."""
+        with self._with_temp_db():
+            setup = """
+            CREATE TABLE hn_comments (comment_id INTEGER, note TEXT);
+            INSERT INTO hn_comments (comment_id, note) VALUES (1, 'ok');
+            """
+            execute_sqlite_batch(self.agent, {"sql": setup})
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT h.commment_id FROM hn_comments h"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+
+    def test_autocorrect_missing_column_preserves_string_literals(self):
+        """Doesn't change string literals when auto-correcting columns."""
+        with self._with_temp_db():
+            setup = """
+            CREATE TABLE hn_comments (comment_id INTEGER, note TEXT);
+            INSERT INTO hn_comments (comment_id, note) VALUES (1, 'commentd');
+            """
+            execute_sqlite_batch(self.agent, {"sql": setup})
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT commentd FROM hn_comments WHERE note = 'commentd'"},
+            )
+
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+
     # -------------------------------------------------------------------------
     # Table reference extraction tests
     # -------------------------------------------------------------------------

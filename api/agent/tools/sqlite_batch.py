@@ -322,18 +322,15 @@ def _fix_singular_plural_columns(sql: str, error_msg: str) -> tuple[str, str | N
 
     missing = match.group(1)
     aliases = _extract_select_aliases(sql)
+    if not aliases:
+        return sql, None
 
-    # Check for singular/plural variants among aliases
-    variants = []
-    if missing.endswith('s'):
-        variants.append(missing[:-1])
-    variants.append(missing + 's')
-
-    for variant in variants:
-        if variant.lower() in [a.lower() for a in aliases]:
-            pattern = rf'\b{re.escape(missing)}\b'
-            sql = re.sub(pattern, variant, sql, flags=re.IGNORECASE)
-            return sql, f"'{missing}' -> '{variant}'"
+    best_alias = _best_identifier_match(missing, aliases)
+    if best_alias:
+        pattern = rf'\b{re.escape(missing)}\b'
+        sql, count = _replace_outside_literals(sql, pattern, best_alias, flags=re.IGNORECASE)
+        if count:
+            return sql, f"'{missing}' -> '{best_alias}'"
 
     return sql, None
 
@@ -477,6 +474,333 @@ def _extract_table_refs(sql: str) -> list[tuple[str, str]]:
                 alias = match.group(2) or match.group(3) or table_name
                 refs.append((table_name, alias))
     return refs
+
+
+def _split_sql_outside_literals(sql: str) -> list[tuple[str, bool]]:
+    """Split SQL into (segment, is_code) pieces, ignoring string literals/comments."""
+    segments: list[tuple[str, bool]] = []
+    i = 0
+    start = 0
+    length = len(sql)
+
+    while i < length:
+        ch = sql[i]
+
+        if ch == "-" and i + 1 < length and sql[i + 1] == "-":
+            if start < i:
+                segments.append((sql[start:i], True))
+            j = i + 2
+            while j < length and sql[j] != "\n":
+                j += 1
+            segments.append((sql[i:j], False))
+            i = j
+            start = i
+            continue
+
+        if ch == "/" and i + 1 < length and sql[i + 1] == "*":
+            if start < i:
+                segments.append((sql[start:i], True))
+            j = i + 2
+            while j + 1 < length and not (sql[j] == "*" and sql[j + 1] == "/"):
+                j += 1
+            j = j + 2 if j + 1 < length else length
+            segments.append((sql[i:j], False))
+            i = j
+            start = i
+            continue
+
+        if ch == "'":
+            if start < i:
+                segments.append((sql[start:i], True))
+            j = i + 1
+            while j < length:
+                if sql[j] == "'":
+                    if j + 1 < length and sql[j + 1] == "'":
+                        j += 2
+                        continue
+                    j += 1
+                    break
+                j += 1
+            segments.append((sql[i:j], False))
+            i = j
+            start = i
+            continue
+
+        i += 1
+
+    if start < length:
+        segments.append((sql[start:], True))
+
+    return segments
+
+
+def _replace_outside_literals(
+    sql: str,
+    pattern: str,
+    replacement: str,
+    *,
+    flags: int = 0,
+) -> tuple[str, int]:
+    """Replace pattern outside string literals/comments. Returns (sql, count)."""
+    segments = _split_sql_outside_literals(sql)
+    parts: list[str] = []
+    total = 0
+    for segment, is_code in segments:
+        if is_code:
+            updated, count = re.subn(pattern, replacement, segment, flags=flags)
+            parts.append(updated)
+            total += count
+        else:
+            parts.append(segment)
+    return "".join(parts), total
+
+
+def _normalize_identifier(identifier: str) -> str:
+    cleaned = identifier.strip().strip('`"[]')
+    return cleaned.lower()
+
+
+def _levenshtein_distance(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    if len(a) < len(b):
+        a, b = b, a
+
+    previous = list(range(len(b) + 1))
+    for i, ca in enumerate(a, start=1):
+        current = [i]
+        for j, cb in enumerate(b, start=1):
+            insert = current[j - 1] + 1
+            delete = previous[j] + 1
+            replace = previous[j - 1] + (0 if ca == cb else 1)
+            current.append(min(insert, delete, replace))
+        previous = current
+    return previous[-1]
+
+
+def _identifier_similarity(a: str, b: str) -> tuple[float, int]:
+    a_norm = _normalize_identifier(a)
+    b_norm = _normalize_identifier(b)
+    if not a_norm or not b_norm:
+        return 0.0, max(len(a_norm), len(b_norm))
+
+    distance = _levenshtein_distance(a_norm, b_norm)
+    ratio = 1.0 - (distance / max(len(a_norm), len(b_norm)))
+
+    a_compact = a_norm.replace("_", "")
+    b_compact = b_norm.replace("_", "")
+    if a_compact != a_norm or b_compact != b_norm:
+        compact_distance = _levenshtein_distance(a_compact, b_compact)
+        compact_ratio = 1.0 - (compact_distance / max(len(a_compact), len(b_compact)))
+        if compact_ratio > ratio:
+            ratio = compact_ratio
+            distance = min(distance, compact_distance)
+
+    return ratio, distance
+
+
+def _best_identifier_match(target: str, candidates: list[str]) -> str | None:
+    target_norm = _normalize_identifier(target)
+    if not target_norm:
+        return None
+
+    scored: list[tuple[float, int, str]] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        cand_norm = _normalize_identifier(candidate)
+        if not cand_norm or cand_norm == target_norm or cand_norm in seen:
+            continue
+        seen.add(cand_norm)
+        ratio, distance = _identifier_similarity(target_norm, cand_norm)
+        if ratio <= 0:
+            continue
+        scored.append((ratio, distance, candidate))
+
+    if not scored:
+        return None
+
+    scored.sort(key=lambda item: (-item[0], item[1], item[2].lower()))
+    best_ratio, best_distance, best_candidate = scored[0]
+    length = len(target_norm)
+    min_ratio = 0.92 if length <= 4 else 0.88 if length <= 8 else 0.84
+    max_distance = 1 if length <= 6 else 2
+
+    if best_ratio < min_ratio and not (best_distance == 1 and length >= 3):
+        return None
+    if best_distance > max_distance and best_ratio < 0.95:
+        return None
+    if len(scored) > 1:
+        second_ratio, second_distance, _ = scored[1]
+        margin = 0.1 if length <= 4 else 0.06
+        if best_ratio - second_ratio < margin and best_distance >= second_distance:
+            return None
+
+    return best_candidate
+
+
+def _split_qualified_identifier(identifier: str) -> tuple[str | None, str]:
+    parts = [part for part in identifier.split(".") if part]
+    if len(parts) > 1:
+        return ".".join(parts[:-1]), parts[-1]
+    return None, identifier
+
+
+def _get_schema_tables(conn: sqlite3.Connection) -> list[str]:
+    tables: list[str] = []
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_master WHERE type IN ('table','view') "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name;"
+        )
+        tables.extend([row[0] for row in cur.fetchall()])
+    except Exception:
+        pass
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT name FROM sqlite_temp_master WHERE type IN ('table','view') "
+            "AND name NOT LIKE 'sqlite_%' ORDER BY name;"
+        )
+        tables.extend([row[0] for row in cur.fetchall()])
+    except Exception:
+        pass
+
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for name in tables:
+        if name in seen:
+            continue
+        seen.add(name)
+        deduped.append(name)
+    return deduped
+
+
+def _get_schema_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
+    try:
+        cur = conn.cursor()
+        cur.execute(f'PRAGMA table_info("{table_name}");')
+        return [row[1] for row in cur.fetchall() if row[1]]
+    except Exception:
+        return []
+
+
+def _autocorrect_missing_table_with_schema(
+    sql: str,
+    error_msg: str,
+    conn: sqlite3.Connection,
+) -> tuple[str, str | None]:
+    match = re.search(r'no such table:\s*([^\s]+)', error_msg, re.IGNORECASE)
+    if not match:
+        return sql, None
+
+    missing_raw = match.group(1).strip().strip("'\"")
+    if not missing_raw:
+        return sql, None
+
+    prefix, missing = _split_qualified_identifier(missing_raw)
+    if missing.lower() in ("sqlite_master", "sqlite_schema", "sqlite_temp_master", "sqlite_temp_schema"):
+        return sql, None
+
+    candidates = _get_schema_tables(conn)
+    if not candidates:
+        return sql, None
+
+    best = _best_identifier_match(missing, candidates)
+    if not best:
+        return sql, None
+
+    if prefix:
+        pattern = rf'(\b{re.escape(prefix)}\s*\.\s*){re.escape(missing)}\b'
+        replacement = rf'\1{best}'
+    else:
+        pattern = rf'\b{re.escape(missing)}\b'
+        replacement = best
+
+    sql, count = _replace_outside_literals(sql, pattern, replacement, flags=re.IGNORECASE)
+    if not count:
+        return sql, None
+
+    replacement_name = f"{prefix}.{best}" if prefix else best
+    return sql, f"'{missing_raw}' -> '{replacement_name}'"
+
+
+def _autocorrect_missing_column_with_schema(
+    sql: str,
+    error_msg: str,
+    conn: sqlite3.Connection,
+) -> tuple[str, str | None]:
+    match = re.search(r'no such column:\s*([^\s]+)', error_msg, re.IGNORECASE)
+    if not match:
+        return sql, None
+
+    missing_raw = match.group(1).strip().strip("'\"")
+    if not missing_raw:
+        return sql, None
+
+    qualifier, missing = _split_qualified_identifier(missing_raw)
+    tables = _get_schema_tables(conn)
+    if not tables:
+        return sql, None
+
+    table_lookup = {name.lower(): name for name in tables}
+    alias_map: dict[str, str] = {}
+    for table_name, alias in _extract_table_refs(sql):
+        table_key = table_name.lower()
+        if table_key in table_lookup:
+            alias_map[alias.lower()] = table_lookup[table_key]
+
+    if qualifier:
+        table_name = alias_map.get(qualifier.lower()) or table_lookup.get(qualifier.lower())
+        if not table_name:
+            return sql, None
+        columns = _get_schema_columns(conn, table_name)
+        if not columns:
+            return sql, None
+        best = _best_identifier_match(missing, columns)
+        if not best:
+            return sql, None
+        pattern = rf'(\b{re.escape(qualifier)}\s*\.\s*){re.escape(missing)}\b'
+        replacement = rf'\1{best}'
+        sql, count = _replace_outside_literals(sql, pattern, replacement, flags=re.IGNORECASE)
+        if count:
+            return sql, f"'{missing_raw}' -> '{qualifier}.{best}'"
+        return sql, None
+
+    if not alias_map:
+        return sql, None
+
+    table_candidates = list(dict.fromkeys(alias_map.values()))
+    col_to_tables: dict[str, set[str]] = {}
+    col_display: dict[str, str] = {}
+    for table_name in table_candidates:
+        for col in _get_schema_columns(conn, table_name):
+            col_norm = _normalize_identifier(col)
+            if not col_norm:
+                continue
+            col_display.setdefault(col_norm, col)
+            col_to_tables.setdefault(col_norm, set()).add(table_name)
+
+    if not col_display:
+        return sql, None
+
+    best = _best_identifier_match(missing, list(col_display.values()))
+    if not best:
+        return sql, None
+
+    best_norm = _normalize_identifier(best)
+    if len(col_to_tables.get(best_norm, set())) > 1 and len(table_candidates) > 1:
+        return sql, None
+
+    pattern = rf'(?<!\.)(?<!\w)\b{re.escape(missing)}\b(?!\.)'
+    sql, count = _replace_outside_literals(sql, pattern, best, flags=re.IGNORECASE)
+    if count:
+        return sql, f"'{missing_raw}' -> '{best}'"
+    return sql, None
 
 
 def _autocorrect_ambiguous_column(sql: str, column_name: str) -> tuple[str, str | None]:
@@ -855,6 +1179,13 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 corrected_query, table_fix = _fix_singular_plural_tables(corrected_query, orig_exc_str)
                 if table_fix:
                     query_corrections.append(table_fix)
+                corrected_query, table_schema_fix = _autocorrect_missing_table_with_schema(
+                    corrected_query,
+                    orig_exc_str,
+                    conn,
+                )
+                if table_schema_fix:
+                    query_corrections.append(table_schema_fix)
                 corrected_query, col_fix = _fix_singular_plural_columns(corrected_query, orig_exc_str)
                 if col_fix:
                     query_corrections.append(col_fix)
@@ -863,6 +1194,13 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 corrected_query, json_fix = _fix_json_key_vs_alias(corrected_query, orig_exc_str)
                 if json_fix:
                     query_corrections.append(json_fix)
+                corrected_query, col_schema_fix = _autocorrect_missing_column_with_schema(
+                    corrected_query,
+                    orig_exc_str,
+                    conn,
+                )
+                if col_schema_fix:
+                    query_corrections.append(col_schema_fix)
 
                 # If we made corrections, retry
                 if query_corrections and corrected_query != query:
