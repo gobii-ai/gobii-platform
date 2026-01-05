@@ -5531,7 +5531,6 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 if not address or '@' not in address:
                     messages.error(request, "Please provide a valid email address (e.g., agent@example.com).")
                     return redirect('agent_email_settings', pk=agent.pk)
-                from api.models import PersistentAgentCommsEndpoint, CommsChannel
                 try:
                     ep = PersistentAgentCommsEndpoint.objects.create(
                         owner_agent=agent,
@@ -5569,13 +5568,80 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 created = True
             # Update endpoint address to match user-entered value, if provided
             new_address = (request.POST.get('endpoint_address') or '').strip()
-            if new_address and new_address != endpoint.address:
-                try:
-                    endpoint.address = new_address
-                    endpoint.save(update_fields=['address'])
-                except Exception as e:
-                    messages.error(request, f"Failed to update agent email address: {e}")
-                    return redirect('agent_email_settings', pk=agent.pk)
+            if new_address:
+                normalized_address = PersistentAgentCommsEndpoint.normalize_address(CommsChannel.EMAIL, new_address)
+                if normalized_address and normalized_address != endpoint.address:
+                    existing_endpoint = PersistentAgentCommsEndpoint.objects.filter(
+                        channel=CommsChannel.EMAIL,
+                        address__iexact=normalized_address,
+                    ).first()
+                    if existing_endpoint and existing_endpoint.id != endpoint.id:
+                        if existing_endpoint.owner_agent_id and existing_endpoint.owner_agent_id != agent.id:
+                            messages.error(
+                                request,
+                                "That email address is already assigned to another agent.",
+                            )
+                            return redirect('agent_email_settings', pk=agent.pk)
+                        try:
+                            from api.models import AgentEmailOAuthCredential
+                            with transaction.atomic():
+                                existing_endpoint.owner_agent = agent
+                                existing_endpoint.is_primary = True
+                                existing_endpoint.save(update_fields=["owner_agent", "is_primary"])
+                                if endpoint.is_primary:
+                                    endpoint.is_primary = False
+                                    endpoint.save(update_fields=["is_primary"])
+                                if account:
+                                    new_account, _ = AgentEmailAccount.objects.get_or_create(endpoint=existing_endpoint)
+                                    if new_account.pk != account.pk:
+                                        for field in (
+                                            "smtp_host",
+                                            "smtp_port",
+                                            "smtp_security",
+                                            "smtp_auth",
+                                            "smtp_username",
+                                            "is_outbound_enabled",
+                                            "imap_host",
+                                            "imap_port",
+                                            "imap_security",
+                                            "imap_username",
+                                            "imap_auth",
+                                            "imap_folder",
+                                            "is_inbound_enabled",
+                                            "imap_idle_enabled",
+                                            "poll_interval_sec",
+                                            "last_polled_at",
+                                            "last_seen_uid",
+                                            "backoff_until",
+                                            "connection_mode",
+                                            "connection_last_ok_at",
+                                            "connection_error",
+                                        ):
+                                            setattr(new_account, field, getattr(account, field))
+                                        new_account.smtp_password_encrypted = account.smtp_password_encrypted
+                                        new_account.imap_password_encrypted = account.imap_password_encrypted
+                                        new_account.save()
+                                        try:
+                                            credential = account.oauth_credential
+                                        except AgentEmailOAuthCredential.DoesNotExist:
+                                            credential = None
+                                        if credential:
+                                            credential.account = new_account
+                                            credential.save(update_fields=["account"])
+                                        if account.pk:
+                                            account.delete()
+                                    account = new_account
+                                endpoint = existing_endpoint
+                        except Exception as e:
+                            messages.error(request, f"Failed to update agent email address: {e}")
+                            return redirect('agent_email_settings', pk=agent.pk)
+                    else:
+                        try:
+                            endpoint.address = normalized_address
+                            endpoint.save(update_fields=['address'])
+                        except Exception as e:
+                            messages.error(request, f"Failed to update agent email address: {e}")
+                            return redirect('agent_email_settings', pk=agent.pk)
             # Assign simple fields
             for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
                       'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_auth', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
