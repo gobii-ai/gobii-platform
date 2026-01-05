@@ -114,6 +114,10 @@ from api.services import mcp_servers as mcp_server_service
 
 logger = logging.getLogger(__name__)
 
+GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
+MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
+MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
+
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
     if not path:
@@ -132,12 +136,12 @@ def _resolve_agent_email_account(request: HttpRequest, account_id: str) -> Agent
 
 def _resolve_managed_email_oauth_client(provider: str) -> tuple[str, str]:
     provider_key = provider.lower()
-    if provider_key in {"gmail", "google"}:
+    if provider_key in GOOGLE_PROVIDER_KEYS:
         return (
             os.getenv("GOOGLE_CLIENT_ID", ""),
             os.getenv("GOOGLE_CLIENT_SECRET", ""),
         )
-    if provider_key in {"outlook", "o365", "office365", "microsoft"}:
+    if provider_key in MICROSOFT_PROVIDER_KEYS:
         return (
             os.getenv("MICROSOFT_CLIENT_ID", ""),
             os.getenv("MICROSOFT_CLIENT_SECRET", ""),
@@ -4180,8 +4184,10 @@ class AgentEmailOAuthStartView(LoginRequiredMixin, View):
 
         manual_client_id = str(body.get("client_id") or "")
         manual_client_secret = str(body.get("client_secret") or "")
-        managed_providers = {"gmail", "google", "outlook", "o365", "office365", "microsoft"}
-        use_gobii_app = bool(body.get("use_gobii_app") or (provider.lower() in managed_providers and not manual_client_id))
+        use_gobii_app = bool(
+            body.get("use_gobii_app")
+            or (provider.lower() in MANAGED_EMAIL_PROVIDER_KEYS and not manual_client_id)
+        )
         client_id = manual_client_id
         client_secret = manual_client_secret
 

@@ -6410,7 +6410,7 @@ class AgentEmailOAuthCredential(models.Model):
             return SecretsEncryption.decrypt_value(payload)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to decrypt email OAuth credential payload")
-            return ""
+            raise
 
     @property
     def client_secret(self) -> str:
@@ -6511,7 +6511,7 @@ class AgentEmailOAuthSession(models.Model):
             return SecretsEncryption.decrypt_value(payload)
         except Exception:  # pragma: no cover - defensive
             logger.exception("Failed to decrypt email OAuth session payload")
-            return ""
+            raise
 
     @property
     def client_secret(self) -> str:

@@ -18,7 +18,7 @@ from django.db import close_old_connections
 from imapclient import IMAPClient
 
 from api.models import AgentEmailAccount
-from api.agent.comms.email_oauth import get_email_oauth_credential, get_oauth_sasl_mechanism, resolve_oauth_identity
+from api.agent.comms.email_oauth import get_oauth_sasl_mechanism, resolve_oauth_identity_and_token
 from api.agent.tasks import poll_imap_inbox
 from config.redis_client import get_redis_client
 
@@ -316,12 +316,9 @@ def _watch_account(
                 client.starttls()
 
             if acct.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
-                credential = get_email_oauth_credential(acct)
-                if not credential or not credential.access_token:
-                    raise RuntimeError("OAuth access token missing for IMAP account")
-                identity = resolve_oauth_identity(acct, "imap")
+                identity, access_token, credential = resolve_oauth_identity_and_token(acct, "imap")
                 mechanism = get_oauth_sasl_mechanism(credential)
-                client.oauth2_login(identity, credential.access_token, mech=mechanism)
+                client.oauth2_login(identity, access_token, mech=mechanism)
             elif acct.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
                 client.login(acct.imap_username or "", acct.get_imap_password() or "")
             folder = acct.imap_folder or "INBOX"

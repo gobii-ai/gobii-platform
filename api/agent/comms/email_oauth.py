@@ -30,6 +30,17 @@ def resolve_oauth_identity(account: AgentEmailAccount, channel: str) -> str:
     return account.endpoint.address
 
 
+def resolve_oauth_identity_and_token(
+    account: AgentEmailAccount,
+    channel: str,
+) -> tuple[str, str, AgentEmailOAuthCredential]:
+    credential = get_email_oauth_credential(account)
+    if not credential or not credential.access_token:
+        raise RuntimeError(f"OAuth access token missing for {channel.upper()} account")
+    identity = resolve_oauth_identity(account, channel)
+    return identity, credential.access_token, credential
+
+
 def get_email_oauth_credential(account: AgentEmailAccount) -> Optional[AgentEmailOAuthCredential]:
     try:
         credential = account.oauth_credential
@@ -86,7 +97,7 @@ def _maybe_refresh_email_oauth_credential(
             timeout=OAUTH_REFRESH_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-    except Exception as exc:
+    except requests.exceptions.RequestException as exc:
         logger.error(
             "Failed to refresh email OAuth token for account %s: %s",
             credential.account_id,

@@ -5448,12 +5448,9 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     client.starttls()
                     client.ehlo()
                 if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
-                    from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
-                    credential = get_email_oauth_credential(account)
-                    if not credential or not credential.access_token:
-                        raise RuntimeError("OAuth access token missing for SMTP account")
-                    identity = resolve_oauth_identity(account, "smtp")
-                    auth_string = build_xoauth2_string(identity, credential.access_token)
+                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
+                    identity, access_token, _credential = resolve_oauth_identity_and_token(account, "smtp")
+                    auth_string = build_xoauth2_string(identity, access_token)
                     client.auth("XOAUTH2", lambda _=None: auth_string)
                 elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                     client.login(account.smtp_username or '', account.get_smtp_password() or '')
@@ -5484,12 +5481,9 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     client.starttls()
             try:
                 if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
-                    from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
-                    credential = get_email_oauth_credential(account)
-                    if not credential or not credential.access_token:
-                        raise RuntimeError("OAuth access token missing for IMAP account")
-                    identity = resolve_oauth_identity(account, "imap")
-                    auth_string = build_xoauth2_string(identity, credential.access_token)
+                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
+                    identity, access_token, _credential = resolve_oauth_identity_and_token(account, "imap")
+                    auth_string = build_xoauth2_string(identity, access_token)
                     client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
                 elif account.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
                     client.login(account.imap_username or '', account.get_imap_password() or '')
