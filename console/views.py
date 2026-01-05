@@ -4841,6 +4841,12 @@ class MCPOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     template_name = "console/mcp_oauth_callback.html"
 
 
+class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
+    """Landing page shown after email OAuth redirects back to Gobii."""
+
+    template_name = "console/agent_email_oauth_callback.html"
+
+
 class PersistentAgentChatShellView(AgentDetailView):
     template_name = "console/persistent_agent_chat_shell.html"
 
@@ -5417,6 +5423,33 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
     """Simple console page to edit an agent-owned email account settings."""
     template_name = "console/agent_email_settings.html"
 
+    OAUTH_PROVIDER_DEFAULTS = {
+        "gmail": {
+            "smtp_host": "smtp.gmail.com",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+            "imap_host": "imap.gmail.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+        "outlook": {
+            "smtp_host": "smtp-mail.outlook.com",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+            "imap_host": "imap-mail.outlook.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+        "o365": {
+            "smtp_host": "smtp.office365.com",
+            "smtp_port": 587,
+            "smtp_security": "starttls",
+            "imap_host": "outlook.office365.com",
+            "imap_port": 993,
+            "imap_security": "ssl",
+        },
+    }
+
     def get_agent(self):
         return get_object_or_404(
             PersistentAgent,
@@ -5435,6 +5468,7 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         agent = self.get_agent()
         endpoint = self._get_email_endpoint(agent)
         account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
+        oauth_credential = getattr(account, "oauth_credential", None) if account else None
         from django.conf import settings as dj_settings
         default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'agents.localhost')
         is_default_endpoint = False
@@ -5443,6 +5477,10 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 is_default_endpoint = endpoint.address.lower().endswith('@' + default_domain.lower())
             except Exception:
                 is_default_endpoint = False
+
+        if endpoint and account is None:
+            from api.models import AgentEmailAccount
+            account, _ = AgentEmailAccount.objects.get_or_create(endpoint=endpoint)
 
         initial = {}
         if account:
@@ -5457,15 +5495,26 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 'imap_port': account.imap_port,
                 'imap_security': account.imap_security,
                 'imap_username': account.imap_username,
+                'imap_auth': account.imap_auth,
                 'imap_folder': account.imap_folder,
                 'is_inbound_enabled': account.is_inbound_enabled,
                 'imap_idle_enabled': account.imap_idle_enabled,
                 'poll_interval_sec': account.poll_interval_sec,
+                'connection_mode': account.connection_mode,
             }
 
         context['agent'] = agent
         context['endpoint'] = endpoint
         context['account'] = account
+        context['oauth_credential'] = oauth_credential
+        context['oauth_connected'] = oauth_credential is not None
+        context['oauth_scope'] = getattr(oauth_credential, "scope", "")
+        context['oauth_expires_at'] = getattr(oauth_credential, "expires_at", None)
+        context['oauth_provider'] = getattr(oauth_credential, "provider", "")
+        try:
+            context['oauth_return_url'] = reverse('agent_email_settings', args=[agent.pk])
+        except Exception:
+            context['oauth_return_url'] = ""
         context['is_default_endpoint'] = is_default_endpoint
         context['default_domain'] = default_domain
         context['form'] = AgentEmailAccountConsoleForm(initial=initial)
@@ -5529,8 +5578,8 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     return redirect('agent_email_settings', pk=agent.pk)
             # Assign simple fields
             for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
-                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
-                      'poll_interval_sec'):
+                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_auth', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
+                      'poll_interval_sec', 'connection_mode'):
                 setattr(account, f, data.get(f))
             # Passwords
             from api.encryption import SecretsEncryption
@@ -5538,6 +5587,24 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                 account.smtp_password_encrypted = SecretsEncryption.encrypt_value(data.get('smtp_password'))
             if data.get('imap_password'):
                 account.imap_password_encrypted = SecretsEncryption.encrypt_value(data.get('imap_password'))
+            if account.connection_mode == AgentEmailAccount.ConnectionMode.OAUTH2:
+                account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+                account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+                if not account.smtp_username:
+                    account.smtp_username = endpoint.address
+                if not account.imap_username:
+                    account.imap_username = endpoint.address
+                provider = ""
+                credential = getattr(account, "oauth_credential", None)
+                if credential:
+                    provider = (credential.provider or "").lower()
+                if not provider:
+                    provider = (request.POST.get("oauth_provider") or "").lower()
+                defaults = self.OAUTH_PROVIDER_DEFAULTS.get(provider)
+                if defaults:
+                    for key, value in defaults.items():
+                        if not getattr(account, key):
+                            setattr(account, key, value)
             try:
                 account.full_clean()
                 account.save()
@@ -5576,7 +5643,15 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
                         client.starttls()
                         client.ehlo()
-                    if account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                    if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
+                        from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
+                        credential = get_email_oauth_credential(account)
+                        if not credential or not credential.access_token:
+                            raise RuntimeError("OAuth access token missing for SMTP account")
+                        identity = resolve_oauth_identity(account, "smtp")
+                        auth_string = build_xoauth2_string(identity, credential.access_token)
+                        client.auth("XOAUTH2", lambda _: auth_string)
+                    elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                         client.login(account.smtp_username or '', account.get_smtp_password() or '')
                     try:
                         client.noop()
@@ -5630,7 +5705,16 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
                         client.starttls()
                 try:
-                    client.login(account.imap_username or '', account.get_imap_password() or '')
+                    if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+                        from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
+                        credential = get_email_oauth_credential(account)
+                        if not credential or not credential.access_token:
+                            raise RuntimeError("OAuth access token missing for IMAP account")
+                        identity = resolve_oauth_identity(account, "imap")
+                        auth_string = build_xoauth2_string(identity, credential.access_token)
+                        client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
+                    elif account.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
+                        client.login(account.imap_username or '', account.get_imap_password() or '')
                     client.select(account.imap_folder or 'INBOX', readonly=True)
                     try:
                         client.noop()

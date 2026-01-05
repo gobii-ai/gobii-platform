@@ -855,11 +855,14 @@ class AgentEmailAccountConsoleForm(forms.Form):
         choices=[('ssl', 'SSL'), ('starttls', 'STARTTLS'), ('none', 'None')], required=False, initial='starttls'
     )
     smtp_auth = forms.ChoiceField(
-        choices=[('none', 'None'), ('plain', 'PLAIN'), ('login', 'LOGIN')], required=False, initial='login'
+        choices=[('none', 'None'), ('plain', 'PLAIN'), ('login', 'LOGIN'), ('oauth2', 'OAuth 2.0')], required=False, initial='login'
     )
     smtp_username = forms.CharField(required=False)
     smtp_password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=False))
     is_outbound_enabled = forms.BooleanField(required=False, initial=False)
+    connection_mode = forms.ChoiceField(
+        choices=[('custom', 'Custom SMTP/IMAP'), ('oauth2', 'OAuth 2.0')], required=False, initial='oauth2'
+    )
 
     # IMAP
     imap_host = forms.CharField(required=False)
@@ -869,6 +872,9 @@ class AgentEmailAccountConsoleForm(forms.Form):
     )
     imap_username = forms.CharField(required=False)
     imap_password = forms.CharField(required=False, widget=forms.PasswordInput(render_value=False))
+    imap_auth = forms.ChoiceField(
+        choices=[('none', 'None'), ('login', 'LOGIN'), ('oauth2', 'OAuth 2.0')], required=False, initial='login'
+    )
     imap_folder = forms.CharField(required=False, initial='INBOX')
     is_inbound_enabled = forms.BooleanField(required=False, initial=False)
     imap_idle_enabled = forms.BooleanField(required=False, initial=False)
@@ -877,6 +883,9 @@ class AgentEmailAccountConsoleForm(forms.Form):
 
     def clean(self):
         cleaned = super().clean()
+        connection_mode = cleaned.get('connection_mode') or 'custom'
+        if connection_mode == 'oauth2':
+            return cleaned
         if cleaned.get('is_outbound_enabled'):
             for f in ('smtp_host', 'smtp_security', 'smtp_auth'):
                 if not cleaned.get(f):

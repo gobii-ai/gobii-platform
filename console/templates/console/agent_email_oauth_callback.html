@@ -1,0 +1,19 @@
+{% extends "console_page.html" %}
+{% load static %}
+
+{% block console_content %}
+<div class="max-w-xl mx-auto px-6 py-8">
+  <div class="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
+    <div class="px-6 py-5">
+      <h1 class="text-lg font-semibold text-slate-900">Finishing Email OAuth Connection</h1>
+      <p id="email-oauth-status" class="text-sm text-slate-700 mt-2">Completing authorization...</p>
+      <pre id="email-oauth-error" class="hidden rounded-lg bg-red-50 border border-red-200 px-3 py-2 mt-3 text-xs text-red-700 whitespace-pre-wrap"></pre>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script type="module" src="{% static 'js/agent_email_oauth_callback.js' %}"></script>
+{% endblock %}

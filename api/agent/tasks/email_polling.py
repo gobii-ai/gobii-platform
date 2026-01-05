@@ -26,6 +26,7 @@ from opentelemetry import trace
 
 from api.models import AgentEmailAccount, CommsChannel, PersistentAgentCommsEndpoint
 from api.agent.comms.imap_adapter import ImapEmailAdapter, ImapParsedContext
+from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
 from api.agent.comms.message_service import ingest_inbound_message
 from config.redis_client import get_redis_client
 from pottery import Redlock
@@ -172,7 +173,15 @@ def _connect_imap(acct: AgentEmailAccount) -> imaplib.IMAP4:
             ctx = ssl.create_default_context()
             client.starttls(ssl_context=ctx)
     # Login
-    client.login(acct.imap_username or "", acct.get_imap_password() or "")
+    if acct.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+        credential = get_email_oauth_credential(acct)
+        if not credential or not credential.access_token:
+            raise RuntimeError("OAuth access token missing for IMAP account")
+        identity = resolve_oauth_identity(acct, "imap")
+        auth_string = build_xoauth2_string(identity, credential.access_token)
+        client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
+    elif acct.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
+        client.login(acct.imap_username or "", acct.get_imap_password() or "")
     # Select folder
     folder = acct.imap_folder or "INBOX"
     # Select folder in read-write mode to allow marking messages as read

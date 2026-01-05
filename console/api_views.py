@@ -46,6 +46,9 @@ from api.models import (
     MCPServerConfig,
     MCPServerOAuthCredential,
     MCPServerOAuthSession,
+    AgentEmailAccount,
+    AgentEmailOAuthCredential,
+    AgentEmailOAuthSession,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentSystemMessage,
@@ -117,6 +120,29 @@ def _path_meta(path: str | None) -> tuple[str | None, str | None]:
         return None, None
     parent = path.rsplit("/", 1)[0] or "/"
     return parent, None
+
+
+def _resolve_agent_email_account(request: HttpRequest, account_id: str) -> AgentEmailAccount:
+    return get_object_or_404(
+        AgentEmailAccount.objects.select_related("endpoint__owner_agent"),
+        pk=account_id,
+        endpoint__owner_agent__user=request.user,
+    )
+
+
+def _resolve_managed_email_oauth_client(provider: str) -> tuple[str, str]:
+    provider_key = provider.lower()
+    if provider_key in {"gmail", "google"}:
+        return (
+            os.getenv("GOOGLE_CLIENT_ID", ""),
+            os.getenv("GOOGLE_CLIENT_SECRET", ""),
+        )
+    if provider_key in {"outlook", "o365", "office365", "microsoft"}:
+        return (
+            os.getenv("MICROSOFT_CLIENT_ID", ""),
+            os.getenv("MICROSOFT_CLIENT_SECRET", ""),
+        )
+    return "", ""
 
 
 def _ext_from_name(name: str | None) -> str | None:
@@ -418,6 +444,18 @@ def _require_active_session(request: HttpRequest, session_id: uuid.UUID) -> MCPS
 
     # Re-check access against server configuration in case ownership changed mid-flow.
     _resolve_mcp_server_config(request, str(session.server_config_id))
+    return session
+
+
+def _require_active_email_oauth_session(request: HttpRequest, session_id: uuid.UUID) -> AgentEmailOAuthSession:
+    """Fetch a pending email OAuth session and enforce ownership + expiry."""
+    session = get_object_or_404(AgentEmailOAuthSession, pk=session_id)
+    if session.initiated_by_id != request.user.id:
+        raise PermissionDenied("You do not have access to this OAuth session.")
+    if session.expires_at <= timezone.now():
+        session.delete()
+        raise PermissionDenied("OAuth session has expired. Restart the flow.")
+    _resolve_agent_email_account(request, str(session.account_id))
     return session
 
 
@@ -4042,6 +4080,12 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
         credential.metadata = metadata
         credential.save()
 
+        if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
+            account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+            account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+            account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+            account.save(update_fields=["connection_mode", "smtp_auth", "imap_auth", "updated_at"])
+
         session.delete()
 
         try:
@@ -4094,6 +4138,343 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
             get_mcp_manager().refresh_server(str(config.id))
         except Exception:
             logger.exception("Failed to refresh MCP manager after OAuth revoke for %s", config.id)
+        return JsonResponse({"revoked": True})
+
+
+class AgentEmailOAuthStartView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        account_id = body.get("account_id")
+        if not account_id:
+            return HttpResponseBadRequest("account_id is required")
+
+        account = _resolve_agent_email_account(request, str(account_id))
+
+        metadata = body.get("metadata") or {}
+        if metadata and not isinstance(metadata, dict):
+            return HttpResponseBadRequest("metadata must be a JSON object")
+        provider = str(body.get("provider") or "").strip()
+        if provider and "provider" not in metadata:
+            metadata["provider"] = provider
+        if body.get("use_gobii_app"):
+            metadata.setdefault("managed_app", True)
+
+        scope_raw = body.get("scope") or ""
+        if isinstance(scope_raw, list):
+            scope = " ".join(str(part) for part in scope_raw if part)
+        else:
+            scope = str(scope_raw)
+
+        expires_at = timezone.now() + timedelta(minutes=10)
+        state = str(body.get("state") or secrets.token_urlsafe(32))
+
+        callback_url = body.get("redirect_uri") or request.build_absolute_uri(
+            reverse("console-email-oauth-callback-view")
+        )
+
+        manual_client_id = str(body.get("client_id") or "")
+        manual_client_secret = str(body.get("client_secret") or "")
+        managed_providers = {"gmail", "google", "outlook", "o365", "office365", "microsoft"}
+        use_gobii_app = bool(body.get("use_gobii_app") or (provider.lower() in managed_providers and not manual_client_id))
+        client_id = manual_client_id
+        client_secret = manual_client_secret
+
+        if use_gobii_app:
+            managed_client_id, managed_client_secret = _resolve_managed_email_oauth_client(provider)
+            if not managed_client_id:
+                return JsonResponse(
+                    {"error": "Gobii OAuth app is not configured for this provider."},
+                    status=400,
+                )
+            client_id = managed_client_id
+            client_secret = managed_client_secret
+        elif provider.lower() == "generic" and not client_id:
+            return JsonResponse(
+                {"error": "OAuth client ID is required for generic providers."},
+                status=400,
+            )
+
+        if not client_id and metadata.get("registration_endpoint"):
+            try:
+                client_id, client_secret = self._register_dynamic_client(
+                    request,
+                    metadata,
+                    callback_url,
+                    account,
+                )
+            except ValueError as exc:
+                return JsonResponse({"error": str(exc)}, status=400)
+            except httpx.HTTPError as exc:
+                return JsonResponse(
+                    {"error": "Client registration failed", "detail": str(exc)},
+                    status=502,
+                )
+
+        session = AgentEmailOAuthSession(
+            account=account,
+            initiated_by=request.user,
+            user=account.endpoint.owner_agent.user,
+            organization=getattr(account.endpoint.owner_agent, "organization", None),
+            state=state,
+            redirect_uri=callback_url,
+            scope=scope,
+            code_challenge=str(body.get("code_challenge") or ""),
+            code_challenge_method=str(body.get("code_challenge_method") or ""),
+            token_endpoint=str(body.get("token_endpoint") or ""),
+            client_id=client_id,
+            metadata=metadata,
+            expires_at=expires_at,
+        )
+
+        code_verifier = body.get("code_verifier")
+        if code_verifier:
+            session.code_verifier = str(code_verifier)
+
+        if client_secret:
+            session.client_secret = str(client_secret)
+
+        session.save()
+
+        try:
+            existing_credential = account.oauth_credential
+        except AgentEmailOAuthCredential.DoesNotExist:
+            existing_credential = None
+
+        payload = {
+            "session_id": str(session.id),
+            "state": state,
+            "expires_at": expires_at.isoformat(),
+            "has_existing_credentials": existing_credential is not None,
+            "client_id": session.client_id or "",
+        }
+        return JsonResponse(payload, status=201)
+
+    def _register_dynamic_client(self, request: HttpRequest, metadata: dict, callback_url: str, account: AgentEmailAccount) -> tuple[str, str]:
+        endpoint = metadata.get("registration_endpoint")
+        if not endpoint:
+            raise ValueError("OAuth server does not advertise a registration endpoint.")
+
+        agent = getattr(account.endpoint, "owner_agent", None)
+        redirect_uri = callback_url
+        payload = {
+            "client_name": f"Gobii Email - {getattr(agent, 'name', 'Agent')}",
+            "redirect_uris": [redirect_uri],
+            "grant_types": ["authorization_code"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "client_secret_basic",
+        }
+        if metadata.get("scope"):
+            payload["scope"] = metadata["scope"]
+        elif metadata.get("scopes_supported"):
+            payload["scope"] = " ".join(metadata["scopes_supported"])
+
+        response = httpx.post(endpoint, json=payload, timeout=10.0)
+        response.raise_for_status()
+        client_info = response.json()
+        client_id = client_info.get("client_id")
+        client_secret = client_info.get("client_secret") or ""
+        if not client_id:
+            raise ValueError("Client registration response missing client_id")
+        return str(client_id), str(client_secret)
+
+
+class AgentEmailOAuthSessionVerifierView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, session_id: uuid.UUID, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        code_verifier = body.get("code_verifier")
+        if not code_verifier:
+            return HttpResponseBadRequest("code_verifier is required")
+
+        session = _require_active_email_oauth_session(request, session_id)
+        session.code_verifier = str(code_verifier)
+
+        if "code_challenge" in body:
+            session.code_challenge = str(body.get("code_challenge") or "")
+        if "code_challenge_method" in body:
+            session.code_challenge_method = str(body.get("code_challenge_method") or "")
+        session.save(update_fields=["code_verifier_encrypted", "code_challenge", "code_challenge_method", "updated_at"])
+        return JsonResponse({"status": "ok"})
+
+
+class AgentEmailOAuthCallbackView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        session_id_raw = body.get("session_id")
+        authorization_code = body.get("authorization_code")
+        if not session_id_raw or not authorization_code:
+            return HttpResponseBadRequest("session_id and authorization_code are required")
+
+        try:
+            session_id = uuid.UUID(str(session_id_raw))
+        except (ValueError, TypeError):
+            return HttpResponseBadRequest("Invalid session_id")
+
+        session = _require_active_email_oauth_session(request, session_id)
+
+        state = body.get("state")
+        if state and state != session.state:
+            return HttpResponseBadRequest("State mismatch for OAuth session.")
+
+        token_endpoint = body.get("token_endpoint") or session.token_endpoint
+        if not token_endpoint:
+            return HttpResponseBadRequest("token_endpoint is required to complete the OAuth flow.")
+
+        client_id = body.get("client_id") or session.client_id or ""
+        client_secret = body.get("client_secret") or session.client_secret or ""
+        redirect_uri = body.get("redirect_uri") or session.redirect_uri or request.build_absolute_uri(
+            reverse("console-email-oauth-callback-view")
+        )
+        headers = body.get("headers") or {}
+        if headers and not isinstance(headers, dict):
+            return HttpResponseBadRequest("headers must be a JSON object")
+
+        data = {
+            "grant_type": "authorization_code",
+            "code": authorization_code,
+        }
+        if redirect_uri:
+            data["redirect_uri"] = redirect_uri
+        if session.code_verifier:
+            data["code_verifier"] = session.code_verifier
+        if client_id:
+            data["client_id"] = client_id
+        if client_secret:
+            data["client_secret"] = client_secret
+
+        try:
+            response = httpx.post(token_endpoint, data=data, headers=headers or None, timeout=15.0)
+        except httpx.HTTPError as exc:
+            return JsonResponse({"error": "Token exchange failed", "detail": str(exc)}, status=502)
+
+        if response.status_code >= 400:
+            return JsonResponse(
+                {
+                    "error": "Token endpoint returned an error",
+                    "status_code": response.status_code,
+                    "body": response.text,
+                },
+                status=response.status_code,
+            )
+
+        try:
+            token_payload = response.json()
+        except ValueError:
+            return JsonResponse(
+                {"error": "Token endpoint returned non-JSON payload", "body": response.text},
+                status=502,
+            )
+
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            return JsonResponse({"error": "Token response missing access_token"}, status=502)
+
+        account = session.account
+        try:
+            credential = account.oauth_credential
+        except AgentEmailOAuthCredential.DoesNotExist:
+            credential = AgentEmailOAuthCredential(account=account, user=account.endpoint.owner_agent.user)
+
+        credential.organization = getattr(account.endpoint.owner_agent, "organization", None)
+        credential.user = account.endpoint.owner_agent.user
+        credential.client_id = client_id
+        if client_secret:
+            credential.client_secret = client_secret
+        credential.access_token = access_token
+        credential.refresh_token = token_payload.get("refresh_token")
+        credential.id_token = token_payload.get("id_token")
+        credential.token_type = token_payload.get("token_type", credential.token_type)
+        credential.scope = token_payload.get("scope") or session.scope
+
+        provider = ""
+        if isinstance(session.metadata, dict):
+            provider = str(session.metadata.get("provider") or "")
+        if provider:
+            credential.provider = provider
+
+        expires_in = token_payload.get("expires_in")
+        if expires_in is not None:
+            try:
+                expires_seconds = int(expires_in)
+                credential.expires_at = timezone.now() + timedelta(seconds=max(expires_seconds, 0))
+            except (TypeError, ValueError):
+                credential.expires_at = None
+
+        metadata = dict(credential.metadata or {})
+        metadata_update = body.get("metadata") or {}
+        if isinstance(metadata_update, dict):
+            metadata.update(metadata_update)
+        metadata["token_endpoint"] = token_endpoint
+        metadata["last_token_response"] = {
+            key: value
+            for key, value in token_payload.items()
+            if key not in {"access_token", "refresh_token", "id_token"}
+        }
+        credential.metadata = metadata
+        credential.save()
+
+        session.delete()
+
+        payload = {
+            "connected": True,
+            "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+            "scope": credential.scope,
+            "token_type": credential.token_type,
+            "provider": credential.provider,
+        }
+        return JsonResponse(payload, status=200)
+
+
+class AgentEmailOAuthStatusView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, account_id: uuid.UUID, *args: Any, **kwargs: Any):
+        account = _resolve_agent_email_account(request, str(account_id))
+        try:
+            credential = account.oauth_credential
+        except AgentEmailOAuthCredential.DoesNotExist:
+            return JsonResponse({"connected": False})
+
+        payload = {
+            "connected": True,
+            "expires_at": credential.expires_at.isoformat() if credential.expires_at else None,
+            "scope": credential.scope,
+            "token_type": credential.token_type,
+            "has_refresh_token": bool(credential.refresh_token),
+            "updated_at": credential.updated_at.isoformat() if credential.updated_at else None,
+            "provider": credential.provider,
+        }
+        return JsonResponse(payload)
+
+
+class AgentEmailOAuthRevokeView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, account_id: uuid.UUID, *args: Any, **kwargs: Any):
+        account = _resolve_agent_email_account(request, str(account_id))
+        try:
+            credential = account.oauth_credential
+        except AgentEmailOAuthCredential.DoesNotExist:
+            return JsonResponse({"revoked": False, "detail": "No stored credentials found."}, status=404)
+
+        credential.delete()
         return JsonResponse({"revoked": True})
 
 

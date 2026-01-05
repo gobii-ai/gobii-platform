@@ -6196,11 +6196,21 @@ class AgentEmailAccount(models.Model):
         NONE = "none", "None"
         PLAIN = "plain", "PLAIN"
         LOGIN = "login", "LOGIN"
+        OAUTH2 = "oauth2", "OAuth 2.0"
 
     class ImapSecurity(models.TextChoices):
         SSL = "ssl", "SSL"
         STARTTLS = "starttls", "STARTTLS"
         NONE = "none", "None"
+
+    class ImapAuthMode(models.TextChoices):
+        NONE = "none", "None"
+        LOGIN = "login", "LOGIN"
+        OAUTH2 = "oauth2", "OAuth 2.0"
+
+    class ConnectionMode(models.TextChoices):
+        CUSTOM = "custom", "Custom SMTP/IMAP"
+        OAUTH2 = "oauth2", "OAuth 2.0"
 
     endpoint = models.OneToOneField(
         PersistentAgentCommsEndpoint,
@@ -6230,6 +6240,9 @@ class AgentEmailAccount(models.Model):
     )
     imap_username = models.CharField(max_length=255, blank=True)
     imap_password_encrypted = models.BinaryField(null=True, blank=True)
+    imap_auth = models.CharField(
+        max_length=16, choices=ImapAuthMode.choices, default=ImapAuthMode.LOGIN
+    )
     imap_folder = models.CharField(max_length=128, default="INBOX")
     is_inbound_enabled = models.BooleanField(default=False)
     # Optional per-account toggle to enable IDLE watchers for lower latency (keeps polling as source of truth)
@@ -6239,6 +6252,9 @@ class AgentEmailAccount(models.Model):
     last_polled_at = models.DateTimeField(null=True, blank=True)
     last_seen_uid = models.CharField(max_length=64, blank=True)
     backoff_until = models.DateTimeField(null=True, blank=True)
+    connection_mode = models.CharField(
+        max_length=16, choices=ConnectionMode.choices, default=ConnectionMode.OAUTH2
+    )
 
     # Health
     connection_last_ok_at = models.DateTimeField(null=True, blank=True)
@@ -6303,7 +6319,10 @@ class AgentEmailAccount(models.Model):
             if self.smtp_auth != self.AuthMode.NONE:
                 if not self.smtp_username:
                     raise ValidationError({"smtp_username": "Username required for authenticated SMTP"})
-                if not self.smtp_password_encrypted:
+                if self.smtp_auth == self.AuthMode.OAUTH2:
+                    if not getattr(self, "oauth_credential", None):
+                        raise ValidationError({"smtp_auth": "Connect OAuth before enabling outbound SMTP"})
+                elif not self.smtp_password_encrypted:
                     raise ValidationError({"smtp_password_encrypted": "Password required for authenticated SMTP"})
 
             # Gate: require a successful connection test before enabling
@@ -6311,6 +6330,204 @@ class AgentEmailAccount(models.Model):
                 raise ValidationError({
                     "is_outbound_enabled": "Run Test SMTP and ensure success before enabling outbound."
                 })
+
+        if self.is_inbound_enabled and self.imap_auth == self.ImapAuthMode.OAUTH2:
+            if not self.imap_username:
+                raise ValidationError({"imap_username": "Username required for authenticated IMAP"})
+            if not getattr(self, "oauth_credential", None):
+                raise ValidationError({"imap_auth": "Connect OAuth before enabling inbound IMAP"})
+
+        if self.connection_mode == self.ConnectionMode.OAUTH2:
+            if self.is_outbound_enabled and self.smtp_auth != self.AuthMode.OAUTH2:
+                raise ValidationError({"smtp_auth": "OAuth mode requires OAuth 2.0 for SMTP"})
+            if self.is_inbound_enabled and self.imap_auth != self.ImapAuthMode.OAUTH2:
+                raise ValidationError({"imap_auth": "OAuth mode requires OAuth 2.0 for IMAP"})
+        elif self.connection_mode == self.ConnectionMode.CUSTOM:
+            if self.smtp_auth == self.AuthMode.OAUTH2:
+                raise ValidationError({"smtp_auth": "Custom mode does not support OAuth 2.0"})
+            if self.imap_auth == self.ImapAuthMode.OAUTH2:
+                raise ValidationError({"imap_auth": "Custom mode does not support OAuth 2.0"})
+
+
+class AgentEmailOAuthCredential(models.Model):
+    """Encrypted OAuth credential store for agent email accounts."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.OneToOneField(
+        AgentEmailAccount,
+        on_delete=models.CASCADE,
+        related_name="oauth_credential",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_email_oauth_credentials",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_email_oauth_credentials",
+    )
+    provider = models.CharField(max_length=64, blank=True)
+    client_id = models.CharField(max_length=256, blank=True)
+    client_secret_encrypted = models.BinaryField(null=True, blank=True)
+    access_token_encrypted = models.BinaryField(null=True, blank=True)
+    refresh_token_encrypted = models.BinaryField(null=True, blank=True)
+    id_token_encrypted = models.BinaryField(null=True, blank=True)
+    token_type = models.CharField(max_length=32, blank=True)
+    scope = models.CharField(max_length=512, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["organization"], name="email_oauth_cred_org_idx"),
+            models.Index(fields=["user"], name="email_oauth_cred_user_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"AgentEmailOAuthCredential<{self.account_id}>"
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt email OAuth credential payload")
+            return ""
+
+    @property
+    def client_secret(self) -> str:
+        return self._decrypt_text(self.client_secret_encrypted)
+
+    @client_secret.setter
+    def client_secret(self, value: Optional[str]) -> None:
+        self.client_secret_encrypted = self._encrypt_text(value)
+
+    @property
+    def access_token(self) -> str:
+        return self._decrypt_text(self.access_token_encrypted)
+
+    @access_token.setter
+    def access_token(self, value: Optional[str]) -> None:
+        self.access_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def refresh_token(self) -> str:
+        return self._decrypt_text(self.refresh_token_encrypted)
+
+    @refresh_token.setter
+    def refresh_token(self, value: Optional[str]) -> None:
+        self.refresh_token_encrypted = self._encrypt_text(value)
+
+    @property
+    def id_token(self) -> str:
+        return self._decrypt_text(self.id_token_encrypted)
+
+    @id_token.setter
+    def id_token(self, value: Optional[str]) -> None:
+        self.id_token_encrypted = self._encrypt_text(value)
+
+
+class AgentEmailOAuthSession(models.Model):
+    """Ephemeral OAuth session state for agent email authentication flows."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(
+        AgentEmailAccount,
+        on_delete=models.CASCADE,
+        related_name="oauth_sessions",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_email_oauth_sessions",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_email_oauth_sessions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_email_oauth_user_sessions",
+    )
+    state = models.CharField(max_length=256, unique=True)
+    redirect_uri = models.CharField(max_length=512, blank=True)
+    scope = models.CharField(max_length=512, blank=True)
+    code_challenge = models.CharField(max_length=256, blank=True)
+    code_challenge_method = models.CharField(max_length=16, blank=True)
+    token_endpoint = models.CharField(max_length=512, blank=True)
+    client_id = models.CharField(max_length=256, blank=True)
+    client_secret_encrypted = models.BinaryField(null=True, blank=True)
+    code_verifier_encrypted = models.BinaryField(null=True, blank=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["expires_at"], name="email_oauth_session_exp_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"AgentEmailOAuthSession<{self.account_id} state={self.state}>"
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt email OAuth session payload")
+            return ""
+
+    @property
+    def client_secret(self) -> str:
+        return self._decrypt_text(self.client_secret_encrypted)
+
+    @client_secret.setter
+    def client_secret(self, value: Optional[str]) -> None:
+        self.client_secret_encrypted = self._encrypt_text(value)
+
+    @property
+    def code_verifier(self) -> str:
+        return self._decrypt_text(self.code_verifier_encrypted)
+
+    @code_verifier.setter
+    def code_verifier(self, value: Optional[str]) -> None:
+        self.code_verifier_encrypted = self._encrypt_text(value)
 
 
 class PersistentAgentSmsEndpoint(models.Model):

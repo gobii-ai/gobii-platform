@@ -39,11 +39,13 @@ class AgentEmailAccountForm(ModelForm):
             "smtp_username",
             # passwords handled via form-only fields
             "is_outbound_enabled",
+            "connection_mode",
             # IMAP (Phase 2 storage only)
             "imap_host",
             "imap_port",
             "imap_security",
             "imap_username",
+            "imap_auth",
             "imap_folder",
             "is_inbound_enabled",
             "imap_idle_enabled",
@@ -69,9 +71,10 @@ class AgentEmailAccountForm(ModelForm):
             if cleaned.get("smtp_auth") and cleaned.get("smtp_auth") != "none":
                 if not cleaned.get("smtp_username"):
                     self.add_error("smtp_username", "Username required for authenticated SMTP")
-                # password can be set previously; require either new input or existing
-                if not cleaned.get("smtp_password") and not getattr(instance, "smtp_password_encrypted", None):
-                    self.add_error("smtp_password", "Password required for authenticated SMTP")
+                if cleaned.get("smtp_auth") != "oauth2" and cleaned.get("connection_mode") != "oauth2":
+                    # password can be set previously; require either new input or existing
+                    if not cleaned.get("smtp_password") and not getattr(instance, "smtp_password_encrypted", None):
+                        self.add_error("smtp_password", "Password required for authenticated SMTP")
         return cleaned
 
     def save(self, commit=True):

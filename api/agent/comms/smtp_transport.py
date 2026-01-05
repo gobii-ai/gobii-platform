@@ -10,6 +10,7 @@ import logging
 from django.conf import settings
 
 from api.models import AgentEmailAccount
+from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
@@ -82,7 +83,14 @@ class SmtpTransport:
                 client.ehlo()
 
             # Auth
-            if account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+            if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
+                credential = get_email_oauth_credential(account)
+                if not credential or not credential.access_token:
+                    raise RuntimeError("OAuth access token missing for SMTP account")
+                identity = resolve_oauth_identity(account, "smtp")
+                auth_string = build_xoauth2_string(identity, credential.access_token)
+                client.auth("XOAUTH2", lambda _: auth_string)
+            elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                 client.login(account.smtp_username or "", account.get_smtp_password() or "")
 
             # Envelope sender should match From/header address typically

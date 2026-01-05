@@ -15,6 +15,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     CommsChannel,
     AgentEmailAccount,
+    AgentEmailOAuthCredential,
     CommsAllowlistEntry,
 )
 
@@ -48,6 +49,10 @@ class _FakeIMAP:
     def login(self, user, pwd):
         self._logged_in = True
         return "OK", [b"Logged in"]
+
+    def authenticate(self, mech, authobject):
+        self._logged_in = True
+        return "OK", [b"Authenticated"]
 
     def select(self, folder, readonly=True):
         self._selected = True
@@ -151,3 +156,21 @@ class ImapPollingTests(TestCase):
         # Skipped but should still advance so we don't loop forever
         self.assertEqual(acct.last_seen_uid, "2")
         self.assertEqual(self.agent.agent_messages.count(), 0)
+
+    @patch('api.agent.tasks.process_agent_events_task.delay')
+    @patch('imaplib.IMAP4_SSL', new=_FakeIMAP)
+    def test_poll_account_oauth2_auth(self, _mock_events_delay):
+        acct = self._setup_endpoint_and_account()
+        acct.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        acct.save(update_fields=["imap_auth"])
+        credential = AgentEmailOAuthCredential.objects.create(
+            account=acct,
+            user=self.user,
+            provider="gmail",
+        )
+        credential.access_token = "oauth-token"
+        credential.save()
+
+        _poll_account_locked(acct)
+        acct.refresh_from_db()
+        self.assertEqual(acct.last_seen_uid, "2")
