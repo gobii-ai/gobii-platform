@@ -84,6 +84,19 @@ def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     return agent is not None
 
 
+def should_skip_auto_substitution(tool_name: str) -> bool:
+    """Check if a tool opts out of automatic variable substitution.
+
+    Tools that skip auto-substitution handle «var» placeholders themselves,
+    typically because they need context-specific resolution (e.g., create_pdf
+    converts filespace paths to data URIs instead of signed URLs).
+    """
+    entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if entry:
+        return entry.get("skip_auto_substitution", False)
+    return False
+
+
 BUILTIN_TOOL_REGISTRY = {
     SQLITE_TOOL_NAME: {
         "definition": get_sqlite_batch_tool,
@@ -104,6 +117,7 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
+        "skip_auto_substitution": True,  # PDF does its own substitution (data URIs for embedded assets)
     },
     CREATE_CHART_TOOL_NAME: {
         "definition": get_create_chart_tool,

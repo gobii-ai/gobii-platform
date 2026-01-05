@@ -225,3 +225,111 @@ class FileExportToolTests(TestCase):
         # Verify only one node exists (overwritten)
         nodes = AgentFsNode.objects.filter(created_by_agent=self.agent, path="/exports/report.pdf")
         self.assertEqual(nodes.count(), 1)
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_with_cover_page_class(self):
+        """Cover page class is accepted and generates PDF."""
+        html = """
+        <html>
+        <body>
+            <div class="cover-page">
+                <h1>Annual Report</h1>
+                <p class="subtitle">Financial Year 2024</p>
+            </div>
+            <div class="section">
+                <h2>Executive Summary</h2>
+                <p>Content here...</p>
+            </div>
+        </body>
+        </html>
+        """
+        result = execute_create_pdf(
+            self.agent,
+            {"html": html, "file_path": "/exports/cover-test.pdf"},
+        )
+        self.assertEqual(result["status"], "ok")
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_with_section_class(self):
+        """Section class works for logical grouping."""
+        html = """
+        <html>
+        <body>
+            <section class="section">
+                <h2>Section One</h2>
+                <p>First section content.</p>
+            </section>
+            <section class="section">
+                <h2>Section Two</h2>
+                <p>Second section content.</p>
+            </section>
+        </body>
+        </html>
+        """
+        result = execute_create_pdf(
+            self.agent,
+            {"html": html, "file_path": "/exports/section-test.pdf"},
+        )
+        self.assertEqual(result["status"], "ok")
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_with_table_headers(self):
+        """Tables with thead are accepted (for repeating headers)."""
+        html = """
+        <html>
+        <body>
+            <table>
+                <thead>
+                    <tr><th>Name</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Item 1</td><td>100</td></tr>
+                    <tr><td>Item 2</td><td>200</td></tr>
+                </tbody>
+            </table>
+        </body>
+        </html>
+        """
+        result = execute_create_pdf(
+            self.agent,
+            {"html": html, "file_path": "/exports/table-test.pdf"},
+        )
+        self.assertEqual(result["status"], "ok")
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_with_doc_title(self):
+        """Doc-title class for running headers."""
+        html = """
+        <html>
+        <body>
+            <h1 class="doc-title">My Document Title</h1>
+            <p>Content here...</p>
+        </body>
+        </html>
+        """
+        result = execute_create_pdf(
+            self.agent,
+            {"html": html, "file_path": "/exports/title-test.pdf"},
+        )
+        self.assertEqual(result["status"], "ok")
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_page_break_classes(self):
+        """All page break utility classes work."""
+        html = """
+        <html>
+        <body>
+            <div class="no-break">
+                <h2>Keep Together</h2>
+                <p>This content should not be split.</p>
+            </div>
+            <div class="page-break">After this, new page.</div>
+            <div class="page-break-before">This starts on a new page.</div>
+        </body>
+        </html>
+        """
+        result = execute_create_pdf(
+            self.agent,
+            {"html": html, "file_path": "/exports/break-test.pdf"},
+        )
+        self.assertEqual(result["status"], "ok")

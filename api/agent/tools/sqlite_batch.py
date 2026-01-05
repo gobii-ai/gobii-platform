@@ -6,10 +6,14 @@ Simplified multi-query executor aligned with sqlite_query.
 
 import json
 import logging
+import multiprocessing
 import os
+import queue
 import re
 import sqlite3
-from typing import Any, Dict, List, Optional
+from collections import deque
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import sqlparse
 
@@ -17,10 +21,13 @@ import sqlparse
 MAX_RESULT_ROWS = 100  # Hard cap on rows returned
 MAX_RESULT_BYTES = 8000  # ~2K tokens worth of result data
 WARN_RESULT_ROWS = 50  # Warn if exceeding this
+MAX_AUTO_CORRECTION_ATTEMPTS = 8
+MAX_AUTO_CORRECTION_CANDIDATES = 20
 from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
 
-from ...models import PersistentAgent
+if TYPE_CHECKING:
+    from ...models import PersistentAgent
 from .sqlite_guardrails import (
     clear_guarded_connection,
     get_blocked_statement_reason,
@@ -32,6 +39,135 @@ from .sqlite_helpers import is_write_statement
 from .sqlite_state import _sqlite_db_path_var  # type: ignore
 
 logger = logging.getLogger(__name__)
+
+try:
+    import resource
+except ImportError:  # pragma: no cover - not available on all platforms
+    resource = None
+
+DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS = 30.0
+DEFAULT_SQLITE_BATCH_CPU_SECONDS = 30
+DEFAULT_SQLITE_BATCH_MEMORY_MB = 256
+DEFAULT_SQLITE_BATCH_START_METHOD = "spawn"
+DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS = 1.0
+DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS = 1.0
+
+
+@dataclass(frozen=True)
+class _SqliteBatchLimits:
+    wall_timeout_seconds: float
+    cpu_seconds: int
+    memory_mb: int
+    query_timeout_seconds: float
+
+
+def _get_setting_value(name: str) -> Any:
+    try:
+        from django.conf import settings
+    except Exception:
+        settings = None
+
+    if settings is not None and hasattr(settings, name):
+        value = getattr(settings, name)
+        if value is not None and value != "":
+            return value
+
+    env_value = os.getenv(name)
+    if env_value is not None and env_value != "":
+        return env_value
+
+    return None
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_str(value: Any, default: str) -> str:
+    if value is None:
+        return default
+    try:
+        return str(value)
+    except Exception:
+        return default
+
+
+def _resolve_sqlite_batch_limits() -> _SqliteBatchLimits:
+    wall_timeout = _coerce_float(
+        _get_setting_value("SQLITE_BATCH_WALL_TIMEOUT_SECONDS"),
+        DEFAULT_SQLITE_BATCH_WALL_TIMEOUT_SECONDS,
+    )
+    wall_timeout = max(0.0, wall_timeout)
+    query_timeout = _coerce_float(
+        _get_setting_value("SQLITE_BATCH_QUERY_TIMEOUT_SECONDS"),
+        wall_timeout,
+    )
+    query_timeout = max(0.0, query_timeout)
+    cpu_seconds = _coerce_int(
+        _get_setting_value("SQLITE_BATCH_CPU_SECONDS"),
+        DEFAULT_SQLITE_BATCH_CPU_SECONDS,
+    )
+    cpu_seconds = max(0, cpu_seconds)
+    memory_mb = _coerce_int(
+        _get_setting_value("SQLITE_BATCH_MEMORY_MB"),
+        DEFAULT_SQLITE_BATCH_MEMORY_MB,
+    )
+    memory_mb = max(0, memory_mb)
+
+    return _SqliteBatchLimits(
+        wall_timeout_seconds=wall_timeout,
+        cpu_seconds=cpu_seconds,
+        memory_mb=memory_mb,
+        query_timeout_seconds=min(query_timeout, wall_timeout) if wall_timeout > 0 else query_timeout,
+    )
+
+
+def _resolve_sqlite_batch_start_method() -> str:
+    method = _coerce_str(
+        _get_setting_value("SQLITE_BATCH_PROCESS_START_METHOD"),
+        DEFAULT_SQLITE_BATCH_START_METHOD,
+    )
+    if method not in {"spawn", "fork", "forkserver"}:
+        return DEFAULT_SQLITE_BATCH_START_METHOD
+    return method
+
+
+def _apply_resource_limits(limits: _SqliteBatchLimits) -> None:
+    if resource is None:
+        return
+
+    if limits.cpu_seconds > 0:
+        try:
+            resource.setrlimit(resource.RLIMIT_CPU, (limits.cpu_seconds, limits.cpu_seconds))
+        except Exception:
+            logger.debug("Failed to set sqlite_batch CPU limit", exc_info=True)
+
+    if limits.memory_mb > 0:
+        memory_bytes = int(limits.memory_mb * 1024 * 1024)
+        for limit_name in ("RLIMIT_AS", "RLIMIT_DATA"):
+            if hasattr(resource, limit_name):
+                try:
+                    resource.setrlimit(getattr(resource, limit_name), (memory_bytes, memory_bytes))
+                except Exception:
+                    logger.debug(
+                        "Failed to set sqlite_batch memory limit for %s",
+                        limit_name,
+                        exc_info=True,
+                    )
 
 
 def _get_db_size_mb(db_path: str) -> float:
@@ -671,6 +807,95 @@ def _split_qualified_identifier(identifier: str) -> tuple[str | None, str]:
     return None, identifier
 
 
+def _extract_result_json_paths(sql: str) -> list[str]:
+    pattern = re.compile(
+        r"\bjson_(?:extract|each)\s*\(\s*([^,]+?)\s*,\s*(['\"])([^'\"]+)\2",
+        re.IGNORECASE,
+    )
+    paths: list[str] = []
+    for match in pattern.finditer(sql):
+        source = match.group(1)
+        if "result_json" not in source.lower():
+            continue
+        path = match.group(3).strip()
+        if path:
+            paths.append(path)
+    return paths
+
+
+def _derive_result_json_bases(paths: list[str], missing: str) -> list[str]:
+    base_counts: dict[str, int] = {}
+    for path in paths:
+        path = path.strip()
+        if not path.startswith("$"):
+            continue
+        if "." not in path:
+            continue
+        segments = path.split(".")
+        base = None
+        if len(segments) >= 3:
+            base = ".".join(segments[:-1]) + "."
+        elif len(segments) == 2:
+            last_segment = segments[1]
+            if last_segment and last_segment.lower() != missing.lower():
+                base = path + "."
+        if not base or base in ("$.", "$"):
+            continue
+        base_counts[base] = base_counts.get(base, 0) + 1
+
+    if not base_counts:
+        return []
+
+    return sorted(base_counts.keys(), key=lambda b: (-base_counts[b], -len(b), b))
+
+
+def _autocorrect_missing_column_with_json_paths(
+    sql: str,
+    error_msg: str,
+) -> list[tuple[str, str]]:
+    match = re.search(r'no such column:\s*([^\s]+)', error_msg, re.IGNORECASE)
+    if not match:
+        return []
+
+    missing_raw = match.group(1).strip().strip("'\"")
+    if not missing_raw:
+        return []
+
+    qualifier, missing = _split_qualified_identifier(missing_raw)
+    if not missing:
+        return []
+
+    table_refs = _extract_table_refs(sql)
+    tool_alias = None
+    for table_name, alias in table_refs:
+        if table_name.lower() == "__tool_results":
+            tool_alias = alias
+            break
+    if not tool_alias:
+        return []
+    if qualifier and qualifier.lower() != tool_alias.lower():
+        return []
+
+    paths = _extract_result_json_paths(sql)
+    bases = _derive_result_json_bases(paths, missing)
+    if not bases:
+        return []
+
+    result_json_ref = f"{tool_alias}.result_json"
+    candidates: list[tuple[str, str]] = []
+    for base in bases:
+        replacement_expr = f"json_extract({result_json_ref}, '{base}{missing}')"
+        if qualifier:
+            pattern = rf'(\b{re.escape(qualifier)}\s*\.\s*){re.escape(missing)}\b'
+        else:
+            pattern = rf'(?<!\.)(?<!\w)\b{re.escape(missing)}\b(?!\.)'
+        updated_sql, count = _replace_outside_literals(sql, pattern, replacement_expr, flags=re.IGNORECASE)
+        if count:
+            candidates.append((updated_sql, f"'{missing_raw}' -> {replacement_expr}"))
+
+    return candidates
+
+
 def _get_schema_tables(conn: sqlite3.Connection) -> list[str]:
     tables: list[str] = []
     try:
@@ -916,6 +1141,105 @@ def _autocorrect_cte_typos(sql: str) -> tuple[str, list[str]]:
     return sql, corrections
 
 
+def _build_autocorrection_candidates(
+    sql: str,
+    error_msg: str,
+    conn: sqlite3.Connection,
+) -> list[tuple[str, list[str]]]:
+    candidates: list[tuple[str, list[str]]] = []
+
+    corrected, fixes = _autocorrect_cte_typos(sql)
+    if fixes and corrected != sql:
+        candidates.append((corrected, fixes))
+
+    ambig_match = re.search(r'ambiguous column name:\s*(\w+)', error_msg, re.IGNORECASE)
+    if ambig_match:
+        corrected, fix = _autocorrect_ambiguous_column(sql, ambig_match.group(1))
+        if fix and corrected != sql:
+            candidates.append((corrected, [fix]))
+
+    corrected, fix = _fix_singular_plural_tables(sql, error_msg)
+    if fix and corrected != sql:
+        candidates.append((corrected, [fix]))
+
+    corrected, fix = _autocorrect_missing_table_with_schema(sql, error_msg, conn)
+    if fix and corrected != sql:
+        candidates.append((corrected, [fix]))
+
+    corrected, fix = _fix_singular_plural_columns(sql, error_msg)
+    if fix and corrected != sql:
+        candidates.append((corrected, [fix]))
+
+    corrected, fix = _fix_json_key_vs_alias(sql, error_msg)
+    if fix and corrected != sql:
+        candidates.append((corrected, [fix]))
+
+    corrected, fix = _autocorrect_missing_column_with_schema(sql, error_msg, conn)
+    if fix and corrected != sql:
+        candidates.append((corrected, [fix]))
+
+    for updated_sql, fix in _autocorrect_missing_column_with_json_paths(sql, error_msg):
+        if updated_sql != sql:
+            candidates.append((updated_sql, [fix]))
+
+    return candidates
+
+
+def _execute_with_autocorrections(
+    conn: sqlite3.Connection,
+    cur: sqlite3.Cursor,
+    query: str,
+    idx: int,
+    base_corrections: list[str],
+) -> tuple[Dict[str, Any] | None, str, list[str], str | None]:
+    seen: set[str] = {query}
+    queue_items: deque[tuple[str, list[str]]] = deque([(query, base_corrections)])
+    attempts = 0
+    last_error_message = None
+    last_error_query = query
+
+    while queue_items and attempts < MAX_AUTO_CORRECTION_ATTEMPTS:
+        current_query, corrections = queue_items.popleft()
+        attempts += 1
+        try:
+            start_query_timer(conn)
+            cur.execute(current_query)
+            if cur.description is not None:
+                columns = [col[0] for col in cur.description]
+                rows = [dict(zip(columns, row)) for row in cur.fetchall()]
+                original_count = len(rows)
+                rows, limit_warning = _enforce_result_limits(rows, current_query)
+                result_entry: Dict[str, Any] = {
+                    "result": rows,
+                    "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
+                }
+            else:
+                affected = cur.rowcount if cur.rowcount is not None else 0
+                msg = f"Query {idx} affected {max(0, affected)} rows."
+                query_upper = current_query.upper()
+                if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
+                    msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
+                result_entry = {"message": msg}
+            return result_entry, current_query, corrections, None
+        except Exception as orig_exc:
+            last_error_message = str(orig_exc)
+            last_error_query = current_query
+            conn.rollback()
+            for updated_sql, fixes in _build_autocorrection_candidates(current_query, last_error_message, conn):
+                if updated_sql in seen:
+                    continue
+                if len(seen) >= MAX_AUTO_CORRECTION_CANDIDATES:
+                    break
+                seen.add(updated_sql)
+                queue_items.append((updated_sql, corrections + fixes))
+        finally:
+            stop_query_timer(conn)
+
+    if last_error_message is None:
+        last_error_message = "Query failed without error details."
+    return None, last_error_query, base_corrections, last_error_message
+
+
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
@@ -1082,7 +1406,90 @@ def _normalize_queries(params: Dict[str, Any]) -> Optional[List[str]]:
     return queries if queries else None
 
 
-def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+def _sqlite_batch_worker(payload: Dict[str, Any], result_queue: multiprocessing.Queue) -> None:
+    limits: _SqliteBatchLimits = payload["limits"]
+    _apply_resource_limits(limits)
+
+    try:
+        result = _execute_sqlite_batch_inner(
+            agent_id=payload.get("agent_id", "unknown"),
+            params=payload["params"],
+            db_path=payload["db_path"],
+            query_timeout_seconds=limits.query_timeout_seconds,
+        )
+    except Exception as exc:
+        logger.exception("SQLite batch worker failed")
+        result = {"status": "error", "message": f"SQLite batch failed: {exc}"}
+
+    try:
+        result_queue.put(result)
+    except Exception:
+        logger.exception("Failed to return sqlite_batch result")
+
+
+def _read_sqlite_batch_result(
+    result_queue: multiprocessing.Queue,
+    exit_code: Optional[int],
+) -> Dict[str, Any]:
+    try:
+        return result_queue.get_nowait()
+    except (queue.Empty, EOFError, OSError):
+        if exit_code is None:
+            return {"status": "error", "message": "SQLite batch failed: worker did not return a result."}
+        if exit_code < 0:
+            return {"status": "error", "message": f"SQLite batch terminated by signal {-exit_code}."}
+        return {"status": "error", "message": f"SQLite batch failed: worker exited with code {exit_code}."}
+
+
+def _run_sqlite_batch_in_subprocess(
+    *,
+    agent_id: str,
+    params: Dict[str, Any],
+    db_path: str,
+    limits: _SqliteBatchLimits,
+) -> Dict[str, Any]:
+    start_method = _resolve_sqlite_batch_start_method()
+    try:
+        ctx = multiprocessing.get_context(start_method)
+    except ValueError:
+        logger.warning("Invalid sqlite_batch start method %s; falling back to spawn", start_method)
+        ctx = multiprocessing.get_context(DEFAULT_SQLITE_BATCH_START_METHOD)
+
+    result_queue = ctx.Queue(maxsize=1)
+    payload = {
+        "agent_id": agent_id,
+        "params": params,
+        "db_path": db_path,
+        "limits": limits,
+    }
+    process = ctx.Process(target=_sqlite_batch_worker, args=(payload, result_queue), daemon=True)
+    try:
+        process.start()
+    except Exception as exc:
+        logger.exception("Failed to start sqlite_batch worker")
+        return {"status": "error", "message": f"SQLite batch failed to start: {exc}"}
+
+    process.join(limits.wall_timeout_seconds)
+    if process.is_alive():
+        timeout_label = f"{limits.wall_timeout_seconds:g}"
+        logger.warning("SQLite batch timed out for agent %s after %s seconds", agent_id, timeout_label)
+        process.terminate()
+        process.join(DEFAULT_SQLITE_BATCH_TERMINATE_GRACE_SECONDS)
+        if process.is_alive():
+            process.kill()
+            process.join(DEFAULT_SQLITE_BATCH_KILL_GRACE_SECONDS)
+        return {"status": "error", "message": f"SQLite batch timed out after {timeout_label} seconds."}
+
+    return _read_sqlite_batch_result(result_queue, process.exitcode)
+
+
+def _execute_sqlite_batch_inner(
+    *,
+    agent_id: str,
+    params: Dict[str, Any],
+    db_path: str,
+    query_timeout_seconds: float,
+) -> Dict[str, Any]:
     """Execute one or more SQL queries against the agent's SQLite DB."""
     queries = _normalize_queries(params)
     if not queries:
@@ -1110,10 +1517,6 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     else:
         has_user_facing_message = bool(user_message_raw)
 
-    db_path = _sqlite_db_path_var.get(None)
-    if not db_path:
-        return {"status": "error", "message": "SQLite DB path unavailable"}
-
     conn: Optional[sqlite3.Connection] = None
     results: List[Dict[str, Any]] = []
     had_error = False
@@ -1122,7 +1525,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     all_corrections: List[str] = []
 
     try:
-        conn = open_guarded_sqlite_connection(db_path)
+        conn = open_guarded_sqlite_connection(db_path, timeout_seconds=query_timeout_seconds)
         cur = conn.cursor()
         try:
             cur.execute("PRAGMA busy_timeout = 2000;")
@@ -1130,7 +1533,7 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             pass
 
         preview = [q.strip()[:160] for q in queries[:5]]
-        logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent.id, len(queries), preview)
+        logger.info("Agent %s executing sqlite_batch: %s queries (preview=%s)", agent_id, len(queries), preview)
 
         for idx, query in enumerate(queries):
             if not isinstance(query, str) or not query.strip():
@@ -1154,127 +1557,36 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
             only_write_queries = only_write_queries and is_write_statement(query)
 
-            try:
-                start_query_timer(conn)
-                cur.execute(query)
-                if cur.description is not None:
-                    columns = [col[0] for col in cur.description]
-                    rows = [dict(zip(columns, row)) for row in cur.fetchall()]
-                    original_count = len(rows)
-                    rows, limit_warning = _enforce_result_limits(rows, query)
-                    result_entry: Dict[str, Any] = {
-                        "result": rows,
-                        "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
-                    }
-                    only_write_queries = False
-                else:
-                    affected = cur.rowcount if cur.rowcount is not None else 0
-                    msg = f"Query {idx} affected {max(0, affected)} rows."
-                    # CTE-based INSERTs often report 0 rows affected even when data is inserted
-                    query_upper = query.upper()
-                    if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
-                        msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
-                    result_entry = {
-                        "message": msg,
-                    }
-                if query_corrections and original_query != query:
-                    result_entry["auto_correction"] = {
-                        "before": original_query,
-                        "after": query,
-                        "fixes": query_corrections,
-                    }
-                    all_corrections.extend(query_corrections)
-                results.append(result_entry)
-                conn.commit()
-            except Exception as orig_exc:
-                orig_exc_str = str(orig_exc)
-                conn.rollback()
-
-                # Attempt error-driven auto-corrections
-                corrected_query = query
-                retry_corrections: list[str] = []
-
-                # 1. CTE typos (e.g., 'comment' -> 'comments')
-                corrected_query, cte_fixes = _autocorrect_cte_typos(corrected_query)
-                retry_corrections.extend(cte_fixes)
-
-                # 2. Ambiguous column names (e.g., 'species' -> 'iris.species')
-                ambig_match = re.search(r'ambiguous column name:\s*(\w+)', orig_exc_str, re.IGNORECASE)
-                if ambig_match:
-                    ambig_col = ambig_match.group(1)
-                    corrected_query, ambig_fix = _autocorrect_ambiguous_column(corrected_query, ambig_col)
-                    if ambig_fix:
-                        retry_corrections.append(ambig_fix)
-
-                # 3. Singular/plural table and column mismatches
-                corrected_query, table_fix = _fix_singular_plural_tables(corrected_query, orig_exc_str)
-                if table_fix:
-                    retry_corrections.append(table_fix)
-                corrected_query, table_schema_fix = _autocorrect_missing_table_with_schema(
-                    corrected_query,
-                    orig_exc_str,
-                    conn,
-                )
-                if table_schema_fix:
-                    retry_corrections.append(table_schema_fix)
-                corrected_query, col_fix = _fix_singular_plural_columns(corrected_query, orig_exc_str)
-                if col_fix:
-                    retry_corrections.append(col_fix)
-
-                # 4. JSON key used instead of SQL alias (e.g., ORDER BY objectID instead of comment_id)
-                corrected_query, json_fix = _fix_json_key_vs_alias(corrected_query, orig_exc_str)
-                if json_fix:
-                    retry_corrections.append(json_fix)
-                corrected_query, col_schema_fix = _autocorrect_missing_column_with_schema(
-                    corrected_query,
-                    orig_exc_str,
-                    conn,
-                )
-                if col_schema_fix:
-                    retry_corrections.append(col_schema_fix)
-
-                # If we made corrections, retry
-                if retry_corrections and corrected_query != query:
-                    try:
-                        start_query_timer(conn)
-                        cur.execute(corrected_query)
-                        applied_corrections = query_corrections + retry_corrections
-                        if cur.description is not None:
-                            columns = [col[0] for col in cur.description]
-                            rows = [dict(zip(columns, row)) for row in cur.fetchall()]
-                            original_count = len(rows)
-                            rows, limit_warning = _enforce_result_limits(rows, corrected_query)
-                            result_entry = {
-                                "result": rows,
-                                "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
-                            }
-                            only_write_queries = False
-                        else:
-                            affected = cur.rowcount if cur.rowcount is not None else 0
-                            result_entry = {"message": f"Query {idx} affected {max(0, affected)} rows."}
-                        if applied_corrections and original_query != corrected_query:
-                            result_entry["auto_correction"] = {
-                                "before": original_query,
-                                "after": corrected_query,
-                                "fixes": applied_corrections,
-                            }
-                            all_corrections.extend(applied_corrections)
-                        results.append(result_entry)
-                        conn.commit()
-                        continue  # Success after retry, move to next query
-                    except Exception:
-                        conn.rollback()
-                        # Retry failed - fall through to report ORIGINAL error
-                    finally:
-                        stop_query_timer(conn)
-
-                # No auto-correction worked, report original error
+            result_entry, final_query, applied_corrections, failure_message = _execute_with_autocorrections(
+                conn,
+                cur,
+                query,
+                idx,
+                query_corrections,
+            )
+            if failure_message:
                 had_error = True
-                hint = _get_error_hint(orig_exc_str, original_query)
-                error_message = f"Query {idx} failed: {orig_exc}{hint}"
+                hint = _get_error_hint(failure_message, final_query)
+                error_message = f"Query {idx} failed: {failure_message}{hint}"
                 break
-            finally:
-                stop_query_timer(conn)
+
+            if result_entry is None:
+                had_error = True
+                error_message = f"Query {idx} failed: no result produced."
+                break
+
+            if result_entry.get("result") is not None:
+                only_write_queries = False
+
+            if applied_corrections and original_query != final_query:
+                result_entry["auto_correction"] = {
+                    "before": original_query,
+                    "after": final_query,
+                    "fixes": applied_corrections,
+                }
+                all_corrections.extend(applied_corrections)
+            results.append(result_entry)
+            conn.commit()
 
         db_size_mb = _get_db_size_mb(db_path)
         size_warning = ""
@@ -1313,6 +1625,21 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 conn.close()
             except Exception:
                 pass
+
+
+def execute_sqlite_batch(agent: "PersistentAgent", params: Dict[str, Any]) -> Dict[str, Any]:
+    """Execute one or more SQL queries against the agent's SQLite DB."""
+    db_path = _sqlite_db_path_var.get(None)
+    if not db_path:
+        return {"status": "error", "message": "SQLite DB path unavailable"}
+
+    limits = _resolve_sqlite_batch_limits()
+    return _run_sqlite_batch_in_subprocess(
+        agent_id=str(agent.id),
+        params=params,
+        db_path=db_path,
+        limits=limits,
+    )
 
 
 def get_sqlite_batch_tool() -> Dict[str, Any]:

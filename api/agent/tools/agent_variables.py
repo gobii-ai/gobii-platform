@@ -107,3 +107,61 @@ def format_variables_for_prompt() -> str:
         lines.append(f"  «{name}»")
 
     return "\n".join(lines)
+
+
+def substitute_variables_as_data_uris(text: str, agent) -> str:
+    """Replace «path» placeholders with base64 data URIs.
+
+    Used by tools like create_pdf that need embedded content instead of URLs.
+    Looks up files in the agent's filespace and converts to data URIs.
+
+    Falls back to regular substitution (signed URLs) if file lookup fails.
+    """
+    import base64
+    from api.models import AgentFsNode
+    from api.agent.files.filespace_service import get_or_create_default_filespace
+
+    if not text or '«' not in text:
+        return text
+
+    variables = _agent_variables.get({})
+    if not variables:
+        return text
+
+    # Get agent's filespace for file lookups
+    try:
+        filespace = get_or_create_default_filespace(agent)
+    except Exception:
+        logger.warning("Failed to get filespace for agent %s, falling back to URL substitution", agent.id)
+        return substitute_variables(text)
+
+    def replace_match(match: re.Match) -> str:
+        var_name = match.group(1)
+
+        if var_name not in variables:
+            logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+            return match.group(0)
+
+        # Variable names are filespace paths - try to load the file
+        if var_name.startswith("/"):
+            try:
+                node = AgentFsNode.objects.filter(
+                    filespace=filespace,
+                    path=var_name,
+                    node_type=AgentFsNode.NodeType.FILE,
+                    is_deleted=False,
+                ).first()
+
+                if node and node.content:
+                    content_bytes = node.content.read()
+                    node.content.seek(0)  # Reset for potential re-reads
+                    mime_type = node.mime_type or "application/octet-stream"
+                    b64 = base64.b64encode(content_bytes).decode("ascii")
+                    return f"data:{mime_type};base64,{b64}"
+            except Exception:
+                logger.warning("Failed to load file %s as data URI, using signed URL", var_name)
+
+        # Fall back to signed URL
+        return variables[var_name]
+
+    return _PLACEHOLDER_PATTERN.sub(replace_match, text)

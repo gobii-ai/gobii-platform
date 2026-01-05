@@ -4,7 +4,7 @@ import sqlite3
 import tempfile
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, tag, override_settings
 from django.utils import timezone
 
 from api.agent.tools.sqlite_batch import (
@@ -246,6 +246,13 @@ class SqliteBatchToolTests(TestCase):
             self.assertNotIn("TRUNCATED", message)
             self.assertNotIn("[!]", message)
 
+    @override_settings(SQLITE_BATCH_WALL_TIMEOUT_SECONDS=0.01, SQLITE_BATCH_PROCESS_START_METHOD="spawn")
+    def test_batch_timeout_is_enforced(self):
+        with self._with_temp_db():
+            out = execute_sqlite_batch(self.agent, {"queries": "SELECT 1"})
+            self.assertEqual(out.get("status"), "error")
+            self.assertIn("timed out", out.get("message", "").lower())
+
     # -------------------------------------------------------------------------
     # Auto-correction tests
     # -------------------------------------------------------------------------
@@ -356,6 +363,61 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("FROM number", auto_fix["before"])
             self.assertIn("FROM numbers", auto_fix["after"])
 
+    def test_autocorrect_multi_pass_cte_and_alias(self):
+        """Fixes multiple typos across retries (CTE + alias)."""
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)"
+                )
+                payload = {
+                    "content": {
+                        "hits": [
+                            {
+                                "title": "Example",
+                                "points": 12,
+                                "num_comment": 3,
+                                "story_id": "s1",
+                                "url": "https://example.com",
+                                "author": "alice",
+                            }
+                        ]
+                    }
+                }
+                cur.execute(
+                    "INSERT INTO __tool_results (result_id, result_json) VALUES (?, ?)",
+                    ("a10c57d6-b8f1-451e-ac21-4600edb86c5a", json.dumps(payload)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            sql = """
+            WITH hits AS (
+              SELECT json_extract(r.value,'$.title') as title,
+                     COALESCE(json_extract(r.value,'$.points'), 0) as points,
+                     COALESCE(json_extract(r.value,'$.num_comment'), 0) as comments,
+                     json_extract(r.value,'$.story_id') as story_id,
+                     COALESCE(json_extract(r.value,'$.url'), '') as url,
+                     json_extract(r.value,'$.author') as author
+              FROM __tool_results, json_each(result_json,'$.content.hits') AS r
+              WHERE result_id='a10c57d6-b8f1-451e-ac21-4600edb86c5a'
+              ORDER BY point DESC
+            )
+            SELECT title, point, comments, story_id, url, author FROM hit
+            """
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            rows = out["results"][0]["result"]
+            self.assertEqual(rows[0]["points"], 12)
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("'hit'->'hits'", auto_fix["fixes"])
+            self.assertTrue(any("point" in fix for fix in auto_fix["fixes"]))
+
     def test_autocorrect_unescaped_single_quote_runs_in_replace(self):
         """Auto-corrects triple-quote literals and runs the query."""
         with self._with_temp_db() as (db_path, token, tmp):
@@ -428,6 +490,45 @@ class SqliteBatchToolTests(TestCase):
             self.assertNotIn("&#x27;", rows[0]["clean_text"])
             self.assertNotIn("</p>", rows[0]["clean_text"])
 
+    def test_autocorrect_missing_column_with_json_path_base(self):
+        """Auto-corrects missing column to json_extract using result_json paths."""
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, created_at TEXT, result_json TEXT)"
+                )
+                payload = {
+                    "content": {
+                        "by": "hn-user",
+                        "text": "Hello world",
+                        "kids": [1, 2],
+                        "url": "https://hacker-news.firebaseio.com/item/123",
+                    }
+                }
+                cur.execute(
+                    "INSERT INTO __tool_results (result_id, created_at, result_json) VALUES (?, ?, ?)",
+                    ("r1", "2025-01-01T00:00:00Z", json.dumps(payload)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            sql = """
+            SELECT result_id, json_extract(result_json,'$.content.by') as author,
+                   substr(json_extract(result_json,'$.content.text'),1,1000) as text_preview,
+                   json_extract(result_json,'$.content.kids') as has_replies
+            FROM __tool_results
+            WHERE url LIKE '%hacker-news.firebaseio.com%item%'
+            ORDER BY created_at DESC
+            """
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("$.content.url", auto_fix["after"])
     def test_autocorrect_missing_table_with_schema(self):
         """Auto-corrects missing table using actual schema tables."""
         with self._with_temp_db():
