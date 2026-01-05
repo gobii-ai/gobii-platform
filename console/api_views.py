@@ -4084,12 +4084,6 @@ class MCPOAuthCallbackView(LoginRequiredMixin, View):
         credential.metadata = metadata
         credential.save()
 
-        if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
-            account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
-            account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
-            account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-            account.save(update_fields=["connection_mode", "smtp_auth", "imap_auth", "updated_at"])
-
         session.delete()
 
         try:
