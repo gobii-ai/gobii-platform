@@ -1,3 +1,4 @@
+import json
 import os
 import sqlite3
 import tempfile
@@ -17,6 +18,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_dialect_functions,
     _fix_dialect_syntax,
     _fix_escaped_quotes,
+    _fix_unescaped_single_quote_runs,
     _fix_json_key_vs_alias,
     _fix_python_operators,
     _fix_singular_plural_columns,
@@ -349,6 +351,82 @@ class SqliteBatchToolTests(TestCase):
             # Message should note the auto-fix
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
             self.assertIn("'number'->'numbers'", out.get("message", ""))
+            auto_fix = results[0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("FROM number", auto_fix["before"])
+            self.assertIn("FROM numbers", auto_fix["after"])
+
+    def test_autocorrect_unescaped_single_quote_runs_in_replace(self):
+        """Auto-corrects triple-quote literals and runs the query."""
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_json TEXT)"
+                )
+                payload = {
+                    "content": {
+                        "id": "c1",
+                        "author": "alice",
+                        "points": 10,
+                        "text": "<p>alice&#x27;s comment</p>",
+                        "children": [
+                            {
+                                "id": "c2",
+                                "author": "bob",
+                                "points": 5,
+                                "text": "<p>bob&#x27;s reply</p>",
+                            }
+                        ],
+                    }
+                }
+                cur.execute(
+                    "INSERT INTO __tool_results (result_id, result_json) VALUES (?, ?)",
+                    ("79b92bdd-ef82-405c-893e-e26989ce6a48", json.dumps(payload)),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            sql = """
+            WITH RECURSIVE comment_tree AS (
+              SELECT
+                json_extract(result_json, '$.content.id') as comment_id,
+                json_extract(result_json, '$.content.author') as author,
+                json_extract(result_json, '$.content.points') as points,
+                json_extract(result_json, '$.content.text') as text,
+                0 as depth,
+                1 as level
+              FROM __tool_results
+              WHERE result_id='79b92bdd-ef82-405c-893e-e26989ce6a48'
+
+              UNION ALL
+
+              SELECT
+                json_extract(c.value, '$.id') as comment_id,
+                json_extract(c.value, '$.author') as author,
+                json_extract(c.value, '$.points') as points,
+                json_extract(c.value, '$.text') as text,
+                1 as depth,
+                2 as level
+              FROM __tool_results, json_each(result_json, '$.content.children') AS c
+              WHERE result_id='79b92bdd-ef82-405c-893e-e26989ce6a48'
+            )
+            SELECT comment_id, author, points,
+                   REPLACE(REPLACE(text, '&#x27;', '''), '</p>', '  ') as clean_text,
+                   level
+            FROM comment_tree
+            WHERE text IS NOT NULL AND text != ''
+            ORDER BY level, points DESC
+            """
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            rows = out.get("results", [])[0]["result"]
+            self.assertEqual(len(rows), 2)
+            self.assertNotIn("&#x27;", rows[0]["clean_text"])
+            self.assertNotIn("</p>", rows[0]["clean_text"])
 
     def test_autocorrect_missing_table_with_schema(self):
         """Auto-corrects missing table using actual schema tables."""
@@ -368,6 +446,10 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
             self.assertIn("'hn_comment' -> 'hn_comments'", out.get("message", ""))
             self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("FROM hn_comment", auto_fix["before"])
+            self.assertIn("FROM hn_comments", auto_fix["after"])
 
     def test_autocorrect_missing_table_ambiguous_skips(self):
         """Avoids auto-correct when multiple near matches exist."""
@@ -400,6 +482,10 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
             self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("coment_id", auto_fix["before"])
+            self.assertIn("comment_id", auto_fix["after"])
 
     def test_autocorrect_missing_column_with_schema_qualified(self):
         """Auto-corrects qualified column names based on table aliases."""
@@ -418,6 +504,10 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
             self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("h.commment_id", auto_fix["before"])
+            self.assertIn("h.comment_id", auto_fix["after"])
 
     def test_autocorrect_missing_column_preserves_string_literals(self):
         """Doesn't change string literals when auto-correcting columns."""
@@ -435,6 +525,11 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertEqual(out["results"][0]["result"], [{"comment_id": 1}])
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("commentd FROM hn_comments", auto_fix["before"])
+            self.assertIn("comment_id FROM hn_comments", auto_fix["after"])
+            self.assertIn("note = 'commentd'", auto_fix["after"])
 
     # -------------------------------------------------------------------------
     # Table reference extraction tests
@@ -619,6 +714,13 @@ class SqliteBatchToolTests(TestCase):
         sql = r'SELECT * FROM t WHERE name = \"John\"'
         fixed, fix = _fix_escaped_quotes(sql)
         self.assertEqual(fixed, "SELECT * FROM t WHERE name = 'John'")
+        self.assertIsNotNone(fix)
+
+    def test_fix_unescaped_single_quote_runs(self):
+        """Balances odd-length runs of single quotes."""
+        sql = "SELECT REPLACE(text, '&#x27;', ''') FROM t"
+        fixed, fix = _fix_unescaped_single_quote_runs(sql)
+        self.assertEqual(fixed, "SELECT REPLACE(text, '&#x27;', '''') FROM t")
         self.assertIsNotNone(fix)
 
     # -------------------------------------------------------------------------
@@ -842,6 +944,10 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("will_continue_work=true", auto_fix["before"])
+            self.assertNotIn("will_continue_work", auto_fix["after"])
 
     def test_integration_python_operators(self):
         """Full integration: Python operators are fixed and query runs."""
@@ -855,6 +961,11 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertEqual(len(out["results"][0]["result"]), 1)
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("x == 1", auto_fix["before"])
+            self.assertIn("x = 1", auto_fix["after"])
+            self.assertIn("AND", auto_fix["after"])
 
     def test_integration_dialect_functions(self):
         """Full integration: dialect functions are fixed and query runs."""
@@ -882,3 +993,7 @@ class SqliteBatchToolTests(TestCase):
 
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertIn("AUTO-CORRECTED", out.get("message", ""))
+            auto_fix = out["results"][0].get("auto_correction")
+            self.assertIsNotNone(auto_fix)
+            self.assertIn("WHERE (x = 1 AND y = 2", auto_fix["before"])
+            self.assertIn("WHERE (x = 1 AND y = 2)", auto_fix["after"])

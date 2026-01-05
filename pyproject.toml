@@ -133,6 +133,8 @@ dependencies = [
   "charset-normalizer>=3.4.3",
   # Deep data analysis for sqlite schema
   "python-dateutil>=2.9.0",
+  # Chart generation for PDFs and messages
+  "matplotlib>=3.8.0",
 ]
 
 [build-system]

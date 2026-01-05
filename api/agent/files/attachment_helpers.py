@@ -372,15 +372,25 @@ def build_filespace_download_url(agent_id, node_id) -> str:
 
 
 def build_signed_filespace_download_url(agent_id, node_id) -> str:
+    """Build a signed URL for downloading a file from agent filespace.
+
+    Returns a full absolute URL using the Django Sites framework.
+    The Site domain must be configured correctly for each environment:
+    - Development: localhost:8000
+    - Production: your-domain.com
+    - Custom deployments: their configured domain
+    """
     token = signing.dumps(
         {"agent_id": str(agent_id), "node_id": str(node_id)},
         salt=SIGNED_FILES_DOWNLOAD_SALT,
         compress=True,
     )
-    current_site = Site.objects.get_current()
-    base = f"https://{current_site.domain}"
     path = reverse("signed_agent_fs_download", kwargs={"token": token})
-    return f"{base}{path}"
+
+    current_site = Site.objects.get_current()
+    domain = current_site.domain
+    protocol = "http" if domain.startswith("localhost") or domain.startswith("127.0.0.1") else "https"
+    return f"{protocol}://{domain}{path}"
 
 
 def load_signed_filespace_download_payload(token: str) -> dict | None:

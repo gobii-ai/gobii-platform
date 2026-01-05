@@ -5,11 +5,11 @@ export function sanitizeHtml(value: string): string {
   if (typeof window === 'undefined') {
     return value
   }
-  // Explicitly add table tags to the allowed list alongside html profile
+  // Explicitly add table and img tags to the allowed list alongside html profile
   return DOMPurify.sanitize(value, {
     USE_PROFILES: { html: true },
-    ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col'],
-    ADD_ATTR: ['colspan', 'rowspan', 'scope', 'headers'],
+    ADD_TAGS: ['table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'caption', 'colgroup', 'col', 'img'],
+    ADD_ATTR: ['colspan', 'rowspan', 'scope', 'headers', 'src', 'alt', 'width', 'height'],
   })
 }
 

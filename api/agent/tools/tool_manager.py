@@ -23,6 +23,7 @@ from .http_request import get_http_request_tool, execute_http_request
 from .read_file import get_read_file_tool, execute_read_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
+from .create_chart import get_create_chart_tool, execute_create_chart
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 
@@ -70,7 +71,8 @@ HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME}
+CREATE_CHART_TOOL_NAME = "create_chart"
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -102,6 +104,10 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
+    },
+    CREATE_CHART_TOOL_NAME: {
+        "definition": get_create_chart_tool,
+        "executor": execute_create_chart,
     },
 }
 

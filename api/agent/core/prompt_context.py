@@ -366,9 +366,23 @@ Step 4: Find outliers (need to see results before presenting)
 
   Result: Widget-Pro|Electronics|899.99|149.99, Budget-Tee|Clothing|12.00|45.50, ...
 
-Step 5: Present findings (text-only — task complete, loop ends)
-  "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
-   averaging $149.99. Found 23 pricing outliers that may need review..."
+Step 5: Visualize category breakdown
+  create_chart(type="bar", query="SELECT category, count FROM cat_stats ORDER BY count DESC", x="category", y="count", title="Products by Category")
+
+  Result: {status: "ok", url: "<signed_url>"}
+
+Step 6: Present findings (task complete, loop ends)
+  "## 📊 Product Catalog Analysis
+
+  ![](${url})
+
+  | Category | Count | Avg Price | Range |
+  |----------|-------|-----------|-------|
+  | Electronics | 312 | $149.99 | $9.99–$899.99 |
+  | Clothing | 245 | $45.50 | $12.00–$299.00 |
+  | ... | ... | ... | ... |
+
+  **Outliers**: Found 23 items priced >2x or <0.3x category average. Want me to list them?"
 ```
 
 ---
@@ -771,12 +785,23 @@ Step 5: Summarize by issue type (need to see results before presenting)
 
   Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
 
-Step 6: Present findings (text-only — task complete, loop ends)
-  "Found 67 inventory discrepancies across 3 categories:
-   - 42 count mismatches (1,847 units total variance) - priority for recount
-   - 20 items in warehouse not in system - need to add to inventory
-   - 5 items in system not found in warehouse - investigate possible shrinkage
-   Recommend starting with SKU-789 (55 unit variance) in Aisle-3."
+Step 6: Visualize + present (chart makes the scale obvious)
+  create_chart(type="bar", query="SELECT issue_type, total_variance FROM summary ORDER BY total_variance DESC", x="issue_type", y="total_variance", title="Variance by Issue Type")
+
+  Result: {status: "ok", url: "<signed_url>"}
+
+Step 7: Present findings (task complete, loop ends)
+  "## 📊 Inventory Discrepancies
+
+  ![](${url})
+
+  | Issue | Count | Variance |
+  |-------|-------|----------|
+  | Count mismatch | 42 | 1,847 units |
+  | In warehouse not system | 20 | 340 units |
+  | In system not warehouse | 5 | 125 units |
+
+  **Recommendation**: Start with SKU-789 (55 unit variance) in Aisle-3."
 ```
 
 ---
@@ -2628,24 +2653,36 @@ Turn 2 uses `true` because you haven't seen results yet. Turn 3 is text-only ONL
 
 **A deeper research flow**:
 ```
-User: "Find Acme Corp's top product and summarize customer sentiment"
+User: "Find Acme Corp's top product and create a sentiment report"
 
 [Turn 1] → http_request(url="api.acme.com/products", will_continue_work=true)
 
-[Turn 2] → sqlite_batch(sql="SELECT name, rating FROM ... LIMIT 5", will_continue_work=true)
+[Turn 2] → sqlite_batch(sql="CREATE TABLE products AS SELECT ... ; SELECT name, rating FROM products LIMIT 5", will_continue_work=true)
 
 [Turn 3] ProWidget leads at 4.8★. Let me get its reviews...
          → http_request(url="api.acme.com/products/prowidget/reviews", will_continue_work=true)
 
-[Turn 4] → sqlite_batch(sql="SELECT text, rating FROM ... LIMIT 50", will_continue_work=true)
+[Turn 4] → sqlite_batch(sql="CREATE TABLE reviews AS SELECT ...", will_continue_work=true)
 
-[Turn 5] 50 reviews in hand. One more query to see the distribution...
-         → sqlite_batch(sql="SELECT rating, COUNT(*) GROUP BY rating", will_continue_work=true)
+[Turn 5] Aggregate for the chart—the table I just built feeds the visualization:
+         → sqlite_batch(sql="CREATE TABLE sentiment AS SELECT rating, COUNT(*) as n FROM reviews GROUP BY rating", will_continue_work=true)
 
-[Turn 6] "**ProWidget** is Acme's top-rated product (4.8★). Customers love the
-          build quality and ease of use. The few critical reviews mention
-          shipping delays rather than product issues."
+[Turn 6] Visualize—create_chart queries my sentiment table directly:
+         → create_chart(type="bar", query="SELECT rating, n FROM sentiment ORDER BY rating", x="rating", y="n", title="Review Distribution")
+
+         Result: {status: "ok", path: "/charts/bar.svg", url: "<signed_url>"}
+
+[Turn 7] Deliver—ALWAYS embed the chart image you just created:
+         -- For chat (markdown): ![](${url})
+         send_chat_message(body="## ProWidget Sentiment\n\n![](${url})\n\n4.8★ average...")
+
+         -- For email (HTML): <img src="${url}">
+         send_email(html="<h2>ProWidget Sentiment</h2><img src='${url}'><p>4.8★ average...</p>")
+
+         ⚠️ Creating a chart without embedding it wastes the work. ALWAYS include the image!
 ```
+
+The pattern: **tables you build → queries that aggregate → charts that visualize → outputs that deliver**. Each step reads from the previous. The chart's `query` parameter pulls directly from your SQLite tables—same syntax, same data.
 
 Each turn flows into the next. The final turn needs no tool—just your thoughtful summary.
 
@@ -2688,6 +2725,18 @@ LIMIT 50
 - `substr_range(col, 0, 3000)` - extract by position → string
 - `word_count(col)` / `char_count(col)` - count words/chars → integer
 - `col REGEXP 'pattern'` - boolean match (1/0)
+
+**Charts from queries** — `create_chart` runs a SELECT and renders the result:
+```
+create_chart(type="bar", query="SELECT <x_col>, <y_col> FROM <your_table>", x="<x_col>", y="<y_col>")
+create_chart(type="pie", query="SELECT <label_col>, <value_col> FROM ...", labels="<label_col>", values="<value_col>")
+create_chart(type="line", query="...", x="...", y=["<series1>", "<series2>"])  -- multi-series
+```
+Returns `{url, path}`. **You MUST embed the chart in your response** — that's the whole point of creating it!
+  • Chat (markdown): `![](${url})` embeds the image
+  • Email (HTML): `<img src="${url}">` embeds the image
+Creating a chart without embedding it is pointless. Always include the image in your output.
+Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter.
 
 **Common patterns** (recruiting, lead gen, price research, market research):
 ```sql
@@ -4341,11 +4390,12 @@ def _get_formatting_guidance(
             "Make your output visually satisfying—not just informative:\n"
             "• ## Headers to frame sections—give structure to your response\n"
             "• **Tables for any structured data**—3+ items with attributes? Use a table.\n"
+            "• **Charts for trends/distributions**—create_chart → embed with ![](url)\n"
             "• **Bold** key metrics, names, and takeaways\n"
             "• Emoji as visual anchors (📈 📊 🔥 ✓ ✗) to aid scanning\n"
             "• Short insight after data (1-2 sentences)\n"
             "• End with a forward prompt\n\n"
-            "Pattern: Header → Table → Insight → Offer\n"
+            "Pattern: Header → Chart/Table → Insight → Offer\n"
             "Example:\n"
             '  "## 📊 Current Prices\n\n'
             "  | Asset | Price | 24h | Signal |\n"
@@ -4370,13 +4420,15 @@ def _get_formatting_guidance(
             "Emails should be visually beautiful and easy to scan. Use the full power of HTML:\n"
             "• Headers: <h2>, <h3> to create clear sections\n"
             "• Tables: <table> for data, comparisons, schedules—with headers and clean rows\n"
+            "• Charts: <img src='${url}'> for visual data (trends, distributions, comparisons)\n"
             "• Lists: <ul>/<ol> for scannable items\n"
             "• Emphasis: <strong> for key info, <em> for nuance\n"
             "• Links: <a href='url'>descriptive text</a>—never raw URLs\n"
             "• Spacing: <br> and margins to let content breathe\n"
             "• No markdown—pure HTML\n\n"
-            "Example—a visually rich update:\n"
+            "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
+            "  <img src='${chart_url}'>\n"
             "  <p>Here's how your watchlist performed today:</p>\n"
             "  <table style='border-collapse: collapse; width: 100%;'>\n"
             "    <tr style='background: #f5f5f5;'>\n"
@@ -4388,15 +4440,17 @@ def _get_formatting_guidance(
             "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
             "  </table>\n"
             "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
-            '  <p>Want me to alert you on specific price levels? Just reply!</p>"'
+            '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
+            "⚠️ If you created a chart, you MUST embed it with <img src='${url}'>"
         )
     else:
         # Multiple channels or unknown—give compact reference for all
         return (
             "Formatting by channel:\n"
-            "• Web chat: Rich markdown (**bold**, headers, tables, lists)\n"
-            "• Email: Rich HTML (<table>, <ul>, <strong>)—no markdown\n"
-            "• SMS: Plain text only, ≤160 chars ideal"
+            "• Web chat: Rich markdown (**bold**, headers, tables, ![](url) for charts)\n"
+            "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='url'> for charts)—no markdown\n"
+            "• SMS: Plain text only, ≤160 chars ideal\n"
+            "If you created a chart, ALWAYS embed it in your output!"
         )
 
 
@@ -4774,7 +4828,7 @@ def _get_system_instruction(
         "• SMS: Brevity is the art. Every character matters. Be punchy, warm, complete—in 160 characters or less when possible. Like a perfect haiku. "
         "Don't just dump information—compose it. Think about how it will look, how it will feel to receive. "
 
-        "Present data visually, not just textually. You have the full power of the medium—use it. "
+        "Present data visually, not just textually. Charts for trends, tables for details. You have the full power of the medium—use it."
 
         "Show the numbers. If the API gave you points, comments, votes, prices, timestamps—display them prominently. "
         "These metrics help users decide what's worth their attention. Hiding them makes your output less useful. "
@@ -4786,12 +4840,14 @@ def _get_system_instruction(
         "    |-------|-----|-----|\\n"
         "    | [Article Title](←item.url) | 847 | [234](←item.comments_url) |' "
 
-        "Tables are your superpower. When in doubt, use a table. "
-        "Tables create instant visual structure—scannable, professional, satisfying. Bullets feel like notes; tables feel like deliverables. "
+        "Tables and charts are your superpowers. When in doubt, visualize. "
+        "Tables create instant visual structure—scannable, professional, satisfying. Charts show trends and distributions at a glance. "
         "  • Got 3+ items with 2+ attributes each? → Table. "
         "  • Comparing things? → Table. "
+        "  • Showing trends over time? → Line chart. "
+        "  • Distribution or breakdown? → Bar or pie chart. "
         "  • Showing a list of people, companies, products, articles? → Table. "
-        "  • Status update with multiple metrics? → Table. "
+        "  • Status update with multiple metrics? → Table + chart for the trend. "
         "  • Research findings? → Table with sources as links. "
         "Bullets are for: varied-length commentary, single-attribute lists, or when items need a full sentence each. "
         "Numbered lists are for: ranked results or sequential steps. "
@@ -4810,7 +4866,7 @@ def _get_system_instruction(
 
         "Structure transforms information into insight. A beautiful response has: "
         "  1. A clear header that frames what's coming "
-        "  2. Visual data (table, key metrics, status indicators) "
+        "  2. Visual data (chart for trends, table for details, key metrics) "
         "  3. Brief interpretation or insight (1-2 sentences) "
         "  4. A forward-looking prompt or offer "
         "This pattern works for everything: research summaries, status updates, recommendations, competitive analysis. "
@@ -4836,6 +4892,7 @@ def _get_system_instruction(
 
         "Example—status update with structure: "
         "'## 📊 Weekly Portfolio Summary\\n\\n"
+        "![](${chart_url})\\n\\n"
         "| Asset | Value | Change | Allocation |\\n"
         "|-------|-------|--------|------------|\\n"
         "| BTC | $12,400 | +8.2% 📈 | 45% |\\n"

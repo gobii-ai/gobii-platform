@@ -108,6 +108,25 @@ def _fix_escaped_quotes(sql: str) -> tuple[str, str | None]:
     return sql, None
 
 
+def _fix_unescaped_single_quote_runs(sql: str) -> tuple[str, str | None]:
+    """Balance odd-length runs of single quotes.
+
+    Example: REPLACE(text, '&#x27;', ''') -> REPLACE(text, '&#x27;', '''')
+    """
+    original = sql
+
+    def _balance(match: re.Match[str]) -> str:
+        run = match.group(0)
+        if len(run) > 1 and len(run) % 2 == 1:
+            return run + "'"
+        return run
+
+    sql = re.sub(r"'+", _balance, sql)
+    if sql != original:
+        return sql, "balanced single-quote run"
+    return sql, None
+
+
 def _fix_python_operators(sql: str) -> tuple[str, str | None]:
     """Fix Python/C operators used instead of SQL operators.
 
@@ -394,6 +413,9 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_escaped_quotes(sql)
+    if fix:
+        corrections.append(fix)
+    sql, fix = _fix_unescaped_single_quote_runs(sql)
     if fix:
         corrections.append(fix)
 
@@ -1117,11 +1139,12 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                 break
 
             original_query = query  # Keep original for error reporting
+            query_corrections: list[str] = []
 
             # Apply pre-execution fixes (LLM artifacts, dialect fixes, etc.)
             query, pre_fixes = _apply_all_sql_fixes(query)
             if pre_fixes:
-                all_corrections.extend(pre_fixes)
+                query_corrections.extend(pre_fixes)
 
             block_reason = get_blocked_statement_reason(query)
             if block_reason:
@@ -1139,10 +1162,10 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     rows = [dict(zip(columns, row)) for row in cur.fetchall()]
                     original_count = len(rows)
                     rows, limit_warning = _enforce_result_limits(rows, query)
-                    results.append({
+                    result_entry: Dict[str, Any] = {
                         "result": rows,
                         "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
-                    })
+                    }
                     only_write_queries = False
                 else:
                     affected = cur.rowcount if cur.rowcount is not None else 0
@@ -1151,9 +1174,17 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     query_upper = query.upper()
                     if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
                         msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
-                    results.append({
+                    result_entry = {
                         "message": msg,
-                    })
+                    }
+                if query_corrections and original_query != query:
+                    result_entry["auto_correction"] = {
+                        "before": original_query,
+                        "after": query,
+                        "fixes": query_corrections,
+                    }
+                    all_corrections.extend(query_corrections)
+                results.append(result_entry)
                 conn.commit()
             except Exception as orig_exc:
                 orig_exc_str = str(orig_exc)
@@ -1161,11 +1192,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
 
                 # Attempt error-driven auto-corrections
                 corrected_query = query
-                query_corrections: list[str] = []
+                retry_corrections: list[str] = []
 
                 # 1. CTE typos (e.g., 'comment' -> 'comments')
                 corrected_query, cte_fixes = _autocorrect_cte_typos(corrected_query)
-                query_corrections.extend(cte_fixes)
+                retry_corrections.extend(cte_fixes)
 
                 # 2. Ambiguous column names (e.g., 'species' -> 'iris.species')
                 ambig_match = re.search(r'ambiguous column name:\s*(\w+)', orig_exc_str, re.IGNORECASE)
@@ -1173,54 +1204,62 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
                     ambig_col = ambig_match.group(1)
                     corrected_query, ambig_fix = _autocorrect_ambiguous_column(corrected_query, ambig_col)
                     if ambig_fix:
-                        query_corrections.append(ambig_fix)
+                        retry_corrections.append(ambig_fix)
 
                 # 3. Singular/plural table and column mismatches
                 corrected_query, table_fix = _fix_singular_plural_tables(corrected_query, orig_exc_str)
                 if table_fix:
-                    query_corrections.append(table_fix)
+                    retry_corrections.append(table_fix)
                 corrected_query, table_schema_fix = _autocorrect_missing_table_with_schema(
                     corrected_query,
                     orig_exc_str,
                     conn,
                 )
                 if table_schema_fix:
-                    query_corrections.append(table_schema_fix)
+                    retry_corrections.append(table_schema_fix)
                 corrected_query, col_fix = _fix_singular_plural_columns(corrected_query, orig_exc_str)
                 if col_fix:
-                    query_corrections.append(col_fix)
+                    retry_corrections.append(col_fix)
 
                 # 4. JSON key used instead of SQL alias (e.g., ORDER BY objectID instead of comment_id)
                 corrected_query, json_fix = _fix_json_key_vs_alias(corrected_query, orig_exc_str)
                 if json_fix:
-                    query_corrections.append(json_fix)
+                    retry_corrections.append(json_fix)
                 corrected_query, col_schema_fix = _autocorrect_missing_column_with_schema(
                     corrected_query,
                     orig_exc_str,
                     conn,
                 )
                 if col_schema_fix:
-                    query_corrections.append(col_schema_fix)
+                    retry_corrections.append(col_schema_fix)
 
                 # If we made corrections, retry
-                if query_corrections and corrected_query != query:
+                if retry_corrections and corrected_query != query:
                     try:
                         start_query_timer(conn)
                         cur.execute(corrected_query)
-                        all_corrections.extend(query_corrections)
+                        applied_corrections = query_corrections + retry_corrections
                         if cur.description is not None:
                             columns = [col[0] for col in cur.description]
                             rows = [dict(zip(columns, row)) for row in cur.fetchall()]
                             original_count = len(rows)
                             rows, limit_warning = _enforce_result_limits(rows, corrected_query)
-                            results.append({
+                            result_entry = {
                                 "result": rows,
                                 "message": f"Query {idx} returned {original_count} rows.{limit_warning}",
-                            })
+                            }
                             only_write_queries = False
                         else:
                             affected = cur.rowcount if cur.rowcount is not None else 0
-                            results.append({"message": f"Query {idx} affected {max(0, affected)} rows."})
+                            result_entry = {"message": f"Query {idx} affected {max(0, affected)} rows."}
+                        if applied_corrections and original_query != corrected_query:
+                            result_entry["auto_correction"] = {
+                                "before": original_query,
+                                "after": corrected_query,
+                                "fixes": applied_corrections,
+                            }
+                            all_corrections.extend(applied_corrections)
+                        results.append(result_entry)
                         conn.commit()
                         continue  # Success after retry, move to next query
                     except Exception:
@@ -1248,7 +1287,11 @@ def execute_sqlite_batch(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         else:
             msg = f"Executed {len(results)} queries. Database size: {db_size_mb:.2f} MB.{size_warning}"
             if all_corrections:
-                msg = f"[!] AUTO-CORRECTED: {', '.join(all_corrections)}. Write correct SQL next time. " + msg
+                msg = (
+                    f"[!] AUTO-CORRECTED: {', '.join(all_corrections)}. "
+                    "Fix your shit: review before/after SQL in results and update your query. "
+                    + msg
+                )
 
         response: Dict[str, Any] = {
             "status": "error" if had_error else "ok",

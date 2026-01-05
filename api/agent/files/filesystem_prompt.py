@@ -4,6 +4,9 @@ Helpers to render the agent filespace listing for prompt context.
 Produces a compact, human-readable list of files that the agent can
 access in its default filespace. Output is capped to ~30KB to keep
 prompt size under control, similar to the SQLite schema helper.
+
+For images, includes signed URLs so the agent can embed them directly
+in chat messages, emails, etc.
 """
 import logging
 from typing import List
@@ -11,6 +14,7 @@ from typing import List
 from django.db.models import QuerySet
 
 from api.models import PersistentAgent, AgentFileSpaceAccess, AgentFsNode
+from .attachment_helpers import build_signed_filespace_download_url
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +57,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
 
     - Lists only non-deleted file nodes from the agent's default filespace
     - Includes size and mime type when available
+    - For images, includes signed URL for direct embedding
     - Caps the returned text to ~30KB with a truncation notice, similar to the sqlite prompt
     """
     fs_id = _get_default_filespace_id(agent)
@@ -63,14 +68,14 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     files: QuerySet[AgentFsNode] = (
         AgentFsNode.objects
         .filter(filespace_id=fs_id, is_deleted=False, node_type=AgentFsNode.NodeType.FILE)
-        .only("path", "size_bytes", "mime_type")
+        .only("id", "path", "size_bytes", "mime_type")
         .order_by("path")
     )
 
     if not files.exists():
         return "No files available in the agent filesystem. Tool results live in SQLite __tool_results."
 
-    header = "Files in agent filespace (use read_file; tool results are in SQLite __tool_results):"
+    header = "Files in agent filespace (use read_file for contents; tool results are in SQLite __tool_results; images have embed URLs):"
     lines: List[str] = [header]
     total_bytes = len(header.encode("utf-8"))
     max_bytes = 30000
@@ -78,7 +83,16 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
     for node in files.iterator():
         size = _format_size(node.size_bytes)
         mime = (node.mime_type or "?")
-        line = f"- {node.path} (size: {size}, type: {mime})"
+
+        # For images, include signed URL for direct embedding
+        if mime.startswith("image/"):
+            try:
+                url = build_signed_filespace_download_url(str(agent.id), str(node.id))
+                line = f"- {node.path} ({size}, {mime})\n  url: {url}"
+            except Exception:
+                line = f"- {node.path} ({size}, {mime})"
+        else:
+            line = f"- {node.path} ({size}, {mime})"
 
         line_len = len(line.encode("utf-8"))
         if lines:  # Add 1 for the newline character
