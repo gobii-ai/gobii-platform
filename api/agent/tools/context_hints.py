@@ -17,6 +17,9 @@ No hint is better than a bad hint.
 import re
 from typing import Any, Optional
 
+from .json_goldilocks import goldilocks_summary
+from .text_focus import barbell_focus
+
 
 # =============================================================================
 # Configuration: Field Categories & Weights
@@ -84,11 +87,9 @@ MAX_URLS = 3
 MAX_FIELD_LEN = 50
 MAX_LINE_LEN = 120
 BARBELL_TARGET_BYTES = 8000
-BARBELL_HEAD_WEIGHT = 0.45
-BARBELL_TAIL_WEIGHT = 0.35
-BARBELL_TRIM_RATIO = 0.15
-BARBELL_MIN_LINE_LEN = 20
-BARBELL_SEPARATOR = "\n\n[...]\n\n"
+GOLDILOCKS_MIN_BYTES = 20000
+GOLDILOCKS_MAX_BYTES = 8000
+GOLDILOCKS_HINT_PREFIX = "JSON_FOCUS:"
 
 
 # =============================================================================
@@ -97,9 +98,11 @@ BARBELL_SEPARATOR = "\n\n[...]\n\n"
 
 def extract_context_hint(
     tool_name: str,
-    payload: dict,
+    payload: Any,
     *,
     allow_barbell: bool = False,
+    allow_goldilocks: bool = False,
+    payload_bytes: Optional[int] = None,
 ) -> Optional[str]:
     """
     Main entry point - extract context hint from any tool result.
@@ -107,7 +110,7 @@ def extract_context_hint(
     Routes to specialized extractors for known formats (SERP, scraped pages),
     then falls back to adaptive extraction for arbitrary JSON.
     """
-    if not isinstance(payload, dict):
+    if not isinstance(payload, (dict, list)):
         return None
 
     # Special cases: SERP and scraped pages have unique formats
@@ -115,13 +118,28 @@ def extract_context_hint(
         return hint_from_serp(payload)
 
     if 'scrape_as_markdown' in tool_name:
+        if not isinstance(payload, dict):
+            return None
         return hint_from_scraped_page(payload, allow_barbell=allow_barbell)
 
     # Adaptive extraction for everything else
-    return hint_from_structured_data(payload)
+    structured_hint = hint_from_structured_data(payload)
+    goldilocks_hint = None
+
+    if allow_goldilocks and _should_use_goldilocks(payload_bytes):
+        goldilocks_hint = hint_from_messy_json(payload)
+
+    if structured_hint and goldilocks_hint:
+        combined = f"{structured_hint}\n{goldilocks_hint}"
+        return _enforce_limit_bytes(combined, GOLDILOCKS_MAX_BYTES)
+
+    if structured_hint:
+        return structured_hint
+
+    return goldilocks_hint
 
 
-def hint_from_structured_data(payload: dict) -> Optional[str]:
+def hint_from_structured_data(payload: Any) -> Optional[str]:
     """
     Adaptively extract hints from arbitrary JSON structures.
 
@@ -130,6 +148,14 @@ def hint_from_structured_data(payload: dict) -> Optional[str]:
     2. Extract key fields using heuristics
     3. Format compactly with hard caps
     """
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict):
+            return _hint_from_array(payload)
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+
     # Try to find an array of items first (most common pattern)
     array_data = _find_array(payload)
     if array_data and len(array_data) > 0:
@@ -791,83 +817,26 @@ def hint_from_unstructured_text(
     return _enforce_limit_bytes(hint, max_bytes)
 
 
-def barbell_focus(
-    text: str,
-    target_bytes: int = BARBELL_TARGET_BYTES,
-    head_weight: float = BARBELL_HEAD_WEIGHT,
-    tail_weight: float = BARBELL_TAIL_WEIGHT,
-    trim_ratio: float = BARBELL_TRIM_RATIO,
+def hint_from_messy_json(
+    payload: Any,
+    *,
+    max_bytes: int = GOLDILOCKS_MAX_BYTES,
 ) -> Optional[str]:
-    """Focus a long document by trimming junk and sampling head/middle/tail."""
-    if not text or target_bytes <= 0:
+    """Generate a focused JSON summary for messy, unstructured payloads."""
+    try:
+        summary = goldilocks_summary(payload, max_bytes=max_bytes)
+    except Exception:
         return None
-    stripped = text.strip()
-    if not stripped:
+    if not summary:
         return None
+    hint = f"{GOLDILOCKS_HINT_PREFIX}\n{summary}"
+    return _enforce_limit_bytes(hint, max_bytes)
 
-    lines = stripped.split('\n')
-    if not lines:
-        return None
 
-    def is_junk(line: str) -> bool:
-        l = line.strip()
-        if not l:
-            return True
-        if len(l) < BARBELL_MIN_LINE_LEN:
-            return True
-        if l.count('|') > 3 or l.count('·') > 2:
-            return True
-        if l.startswith(('©', 'Copyright', 'Privacy', 'Terms')):
-            return True
+def _should_use_goldilocks(payload_bytes: Optional[int]) -> bool:
+    if payload_bytes is None:
         return False
-
-    trim_limit = int(len(lines) * trim_ratio)
-    start = 0
-    while start < trim_limit and is_junk(lines[start]):
-        start += 1
-
-    end = len(lines)
-    while end > len(lines) - trim_limit and is_junk(lines[end - 1]):
-        end -= 1
-
-    content = '\n'.join(lines[start:end]).strip()
-    if not content:
-        content = stripped
-
-    content_bytes = content.encode("utf-8")
-    if len(content_bytes) <= target_bytes:
-        return content
-
-    separator_bytes = BARBELL_SEPARATOR.encode("utf-8")
-    overhead = len(separator_bytes) * 2
-    if target_bytes <= overhead + 10:
-        return _truncate_bytes(content, target_bytes)
-
-    available = target_bytes - overhead
-    if available <= 0:
-        return _truncate_bytes(content, target_bytes)
-
-    head_bytes = int(available * head_weight)
-    tail_bytes = int(available * tail_weight)
-    mid_bytes = max(available - head_bytes - tail_bytes, 0)
-
-    if head_bytes <= 0 or tail_bytes <= 0:
-        return _truncate_bytes(content, target_bytes)
-
-    head = content_bytes[:head_bytes].decode("utf-8", errors="ignore")
-    tail = content_bytes[-tail_bytes:].decode("utf-8", errors="ignore")
-
-    segments = [head]
-    if mid_bytes > 0:
-        mid_start = max((len(content_bytes) // 2) - (mid_bytes // 2), 0)
-        middle = content_bytes[mid_start:mid_start + mid_bytes].decode("utf-8", errors="ignore")
-        if middle:
-            segments.append(middle)
-    if tail:
-        segments.append(tail)
-
-    focused = BARBELL_SEPARATOR.join(segments)
-    return _truncate_bytes(focused, target_bytes)
+    return payload_bytes >= GOLDILOCKS_MIN_BYTES
 
 
 # =============================================================================
@@ -989,7 +958,3 @@ def _enforce_limit_bytes(text: str, max_bytes: int) -> str:
     if len(encoded) <= max_bytes:
         return text
     return encoded[:max_bytes].decode("utf-8", errors="ignore")
-
-
-def _truncate_bytes(text: str, max_bytes: int) -> str:
-    return _enforce_limit_bytes(text, max_bytes)

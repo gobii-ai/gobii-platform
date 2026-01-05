@@ -252,6 +252,32 @@ class ToolResultSchemaTests(SimpleTestCase):
         prompt_info = info.get("step-9")
         self.assertIsNotNone(prompt_info)
         self.assertNotIn("FOCUS:", prompt_info.meta)
+        self.assertNotIn("JSON_FOCUS:", prompt_info.meta)
+
+    def test_fresh_large_json_adds_goldilocks_hint(self):
+        payload = {
+            "data": {
+                "items": [
+                    {"id": i, "name": f"Item {i}", "description": "x" * 200}
+                    for i in range(120)
+                ]
+            }
+        }
+        record = tool_results.ToolCallResultRecord(
+            step_id="step-10",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps(payload),
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_id="step-10",
+        )
+
+        prompt_info = info.get("step-10")
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("JSON_FOCUS:", prompt_info.meta)
 
     def test_non_eligible_tool_gets_basic_meta(self):
         """Tools not in SCHEMA_ELIGIBLE_TOOL_PREFIXES get basic meta only."""

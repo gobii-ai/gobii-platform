@@ -106,16 +106,19 @@ def prepare_tool_results_for_prompt(
         # Extract context hint for lightning-fast agent decisions
         # This is optimistic - if extraction fails, we just skip it
         context_hint = None
-        if is_analysis_eligible and stored_json:
-            try:
-                payload = json.loads(stored_json)
-                context_hint = extract_context_hint(
-                    record.tool_name,
-                    payload,
-                    allow_barbell=is_fresh_tool_call,
-                )
-            except Exception:
-                pass  # Optimistic - no hint is fine
+        if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
+            payload = _load_json_payload(stored_json, analysis)
+            if payload is not None:
+                try:
+                    context_hint = extract_context_hint(
+                        record.tool_name,
+                        payload,
+                        allow_barbell=is_fresh_tool_call,
+                        allow_goldilocks=is_fresh_tool_call,
+                        payload_bytes=meta.get("bytes"),
+                    )
+                except Exception:
+                    pass  # Optimistic - no hint is fine
         elif is_analysis_eligible and is_fresh_tool_call and _should_add_barbell_hint(analysis, meta):
             analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
             context_hint = hint_from_unstructured_text(analysis_text)
@@ -192,6 +195,25 @@ def _should_add_barbell_hint(
     if not text_analysis or text_analysis.format not in BARBELL_TEXT_FORMATS:
         return False
     return meta.get("bytes", 0) > PREVIEW_TIERS_EXTERNAL[0]
+
+
+def _load_json_payload(
+    stored_json: Optional[str],
+    analysis: Optional[ResultAnalysis],
+) -> Optional[object]:
+    if stored_json:
+        try:
+            return json.loads(stored_json)
+        except Exception:
+            return None
+    if analysis and analysis.is_json:
+        raw = analysis.normalized_json or analysis.prepared_text
+        if raw:
+            try:
+                return json.loads(raw)
+            except Exception:
+                return None
+    return None
 
 
 def _store_tool_results(rows: Sequence[Tuple]) -> None:

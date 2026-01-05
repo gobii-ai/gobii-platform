@@ -333,7 +333,7 @@ Step 4: Find outliers (need to see results before presenting)
 
   Result: Widget-Pro|Electronics|899.99|149.99, Budget-Tee|Clothing|12.00|45.50, ...
 
-Step 5: Present findings (no tool call — just text)
+Step 5: Present findings (text-only — task complete, loop ends)
   "Analyzed 847 products across 8 categories. Electronics dominates with 312 items
    averaging $149.99. Found 23 pricing outliers that may need review..."
 ```
@@ -738,7 +738,7 @@ Step 5: Summarize by issue type (need to see results before presenting)
 
   Result: COUNT_MISMATCH|42|1847, IN_WAREHOUSE_NOT_SYSTEM|20|340, IN_SYSTEM_NOT_WAREHOUSE|5|125
 
-Step 6: Present findings (no tool call — just text)
+Step 6: Present findings (text-only — task complete, loop ends)
   "Found 67 inventory discrepancies across 3 categories:
    - 42 count mismatches (1,847 units total variance) - priority for recount
    - 20 items in warehouse not in system - need to add to inventory
@@ -2535,10 +2535,12 @@ When analyzing data multiple ways, store in a table first, then run multiple que
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ true   →  "I'll need another turn to see results or continue working"  │
-│ false  →  "This response is complete—my answer is here"                │
+│ true   →  "I need another turn" — SAFE DEFAULT, you can stop later     │
+│ false  →  "Done forever" — FINAL, no second chances                    │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
+
+**When uncertain, use true.** You can always stop next turn—but false is irreversible.
 
 A natural rhythm emerges: you can't present what you haven't seen yet. Each query needs another turn to read and synthesize the results.
 
@@ -2557,7 +2559,7 @@ User: "What's trending on Hacker News?"
           2. **Why Rust is taking over** (312 points)..."
 ```
 
-Turn 2 uses `true` because you want to see the results before presenting. Turn 3 is pure text—no tool needed, just your synthesis.
+Turn 2 uses `true` because you haven't seen results yet. Turn 3 is text-only ONLY because all work is done—this ends the loop immediately.
 
 **A deeper research flow**:
 ```
@@ -3311,8 +3313,8 @@ def build_prompt_context(
                 "implied_send_status",
                 (
                     f"## Implied Send → {display_name}\n\n"
-                    f"Your text output goes directly to the active web chat user.\n"
-                    f"Just write your message. Your text IS the reply—no tool call needed.\n\n"
+                    f"Your text auto-sends to the active web chat user.\n"
+                    f"Text-only = immediate stop. Include a tool call if you have more work.\n\n"
                     "**To reach someone else**, use explicit tools:\n"
                     f"- `{tool_example}` ← what implied send does for you\n"
                     "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -3339,9 +3341,9 @@ def build_prompt_context(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → 'Here's my reply, I'm done' → message sends, then sleep\n"
-            "  Use when: answering a question, giving a final update\n"
-            "  Example: 'Here are the results you asked for: ...'\n\n"
+            "  → IMMEDIATE STOP after sending. No more turns. No undo.\n"
+            "  Use when: task 100% complete, nothing left to fetch/compute/verify\n"
+            "  If uncertain, add will_continue_work=true to ANY tool call to stay in the loop.\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
             "  Use when: acknowledging the user while taking action\n"
@@ -4506,7 +4508,8 @@ def _get_system_instruction(
             "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report first digest — now done.\n"
             "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report news — now done.\n"
             "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't reported → will_continue_work=true.\n\n"
+            "- Fetched data but haven't reported → will_continue_work=true.\n"
+            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
             "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + 'Will do!'\n"
             "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + 'Now checking hourly!'\n"
@@ -4530,7 +4533,8 @@ def _get_system_instruction(
             "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
             "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(news) — now done.\n"
             "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't sent it → will_continue_work=true.\n\n"
+            "- Fetched data but haven't sent it → will_continue_work=true.\n"
+            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
             "**Mid-conversation updates** — listen for cues and update eagerly:\n"
             "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + send_email('Will do!')\n"
             "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + send_email('Now checking hourly!')\n"
@@ -4974,7 +4978,7 @@ def _get_system_instruction(
         f"{response_delivery_note}"
         "Tool calls are actions you take. "
         f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "An empty response (no text, no tools) means you're done."
+        "Text-only OR empty response = IMMEDIATE STOP. When in doubt, include a tool call with will_continue_work=true."
 
         f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
         f"{stop_continue_examples}"
