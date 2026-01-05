@@ -761,8 +761,8 @@ class PlanVersionPrice(models.Model):
     class Meta:
         ordering = ["plan_version", "kind", "price_id"]
         indexes = [
-            models.Index(fields=["price_id"], name="planversionprice_price_id_idx"),
-            models.Index(fields=["product_id"], name="planversionprice_product_id_idx"),
+            models.Index(fields=["price_id"], name="planverprice_price_idx"),
+            models.Index(fields=["product_id"], name="planverprice_product_idx"),
         ]
         verbose_name = "Plan version price"
         verbose_name_plural = "Plan version prices"
