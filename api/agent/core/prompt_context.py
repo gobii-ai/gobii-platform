@@ -5339,6 +5339,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
     recency_positions: Dict[str, int] = {}
+    fresh_tool_call_step_id: Optional[str] = None
     if steps:
         step_lookup = {str(step.id): step for step in steps}
         tool_call_results = (
@@ -5363,6 +5364,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 )
             )
         if tool_call_records:
+            tool_call_step_ids = {record.step_id for record in tool_call_records}
+            most_recent_step_id = str(steps[0].id)
+            if most_recent_step_id in tool_call_step_ids:
+                fresh_tool_call_step_id = most_recent_step_id
+
             # Build recency position map: most recent = 0, then 1, 2, etc.
             ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
             for position, record in enumerate(ordered_records[:PREVIEW_TIER_COUNT]):
@@ -5370,6 +5376,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
         recency_positions=recency_positions,
+        fresh_tool_call_step_id=fresh_tool_call_step_id,
     )
 
     # format steps (group meta/params/result components together)

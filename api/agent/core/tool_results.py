@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from ..tools.context_hints import extract_context_hint
+from ..tools.context_hints import extract_context_hint, hint_from_unstructured_text
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
@@ -56,6 +56,7 @@ SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
 
 _BASE64_RE = re.compile(r"base64,", re.IGNORECASE)
 _IMAGE_RE = re.compile(r"data:image/|image_base64|image_url", re.IGNORECASE)
+BARBELL_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
 
 
 @dataclass(frozen=True)
@@ -78,6 +79,7 @@ def prepare_tool_results_for_prompt(
     records: Sequence[ToolCallResultRecord],
     *,
     recency_positions: Dict[str, int],
+    fresh_tool_call_step_id: Optional[str] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
@@ -96,15 +98,27 @@ def prepare_tool_results_for_prompt(
         # Only show rich analysis for tools that fetch external data with unknown structure
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
 
+        recency_position = recency_positions.get(record.step_id)
+        is_fresh_tool_call = bool(
+            fresh_tool_call_step_id and record.step_id == fresh_tool_call_step_id
+        )
+
         # Extract context hint for lightning-fast agent decisions
         # This is optimistic - if extraction fails, we just skip it
         context_hint = None
         if is_analysis_eligible and stored_json:
             try:
                 payload = json.loads(stored_json)
-                context_hint = extract_context_hint(record.tool_name, payload)
+                context_hint = extract_context_hint(
+                    record.tool_name,
+                    payload,
+                    allow_barbell=is_fresh_tool_call,
+                )
             except Exception:
                 pass  # Optimistic - no hint is fine
+        elif is_analysis_eligible and is_fresh_tool_call and _should_add_barbell_hint(analysis, meta):
+            analysis_text = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
+            context_hint = hint_from_unstructured_text(analysis_text)
 
         meta_text = _format_meta_text(
             record.step_id,
@@ -113,7 +127,6 @@ def prepare_tool_results_for_prompt(
             stored_in_db=stored_in_db,
             context_hint=context_hint,
         )
-        recency_position = recency_positions.get(record.step_id)
         preview_source = analysis.prepared_text if analysis and analysis.prepared_text is not None else result_text
         preview_text, is_inline = _build_prompt_preview(
             preview_source,
@@ -165,6 +178,20 @@ def prepare_tool_results_for_prompt(
 
     _store_tool_results(rows)
     return prompt_info
+
+
+def _should_add_barbell_hint(
+    analysis: Optional[ResultAnalysis],
+    meta: Dict[str, object],
+) -> bool:
+    if not analysis or analysis.is_json:
+        return False
+    if meta.get("is_binary"):
+        return False
+    text_analysis = analysis.text_analysis
+    if not text_analysis or text_analysis.format not in BARBELL_TEXT_FORMATS:
+        return False
+    return meta.get("bytes", 0) > PREVIEW_TIERS_EXTERNAL[0]
 
 
 def _store_tool_results(rows: Sequence[Tuple]) -> None:

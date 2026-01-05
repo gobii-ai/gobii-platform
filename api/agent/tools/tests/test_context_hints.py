@@ -14,9 +14,12 @@ from ..context_hints import (
     hint_from_serp,
     hint_from_scraped_page,
     hint_from_structured_data,
+    hint_from_unstructured_text,
+    barbell_focus,
     _detect_item_type,
     _format_count,
     _enforce_limit,
+    BARBELL_TARGET_BYTES,
     MAX_HINT_BYTES,
 )
 
@@ -517,6 +520,100 @@ class EdgeCaseTests(SimpleTestCase):
         }
         hint = hint_from_structured_data(payload)
         # max_depth=3 should prevent finding this
+        self.assertIsNone(hint)
+
+
+# =============================================================================
+# Barbell Focus Tests
+# =============================================================================
+
+@tag('context_hints_batch')
+class BarbellFocusTests(SimpleTestCase):
+    """Test barbell focus for unstructured text."""
+
+    def test_barbell_focus_returns_full_for_short_text(self):
+        text = "Short content for focus."
+        focus = barbell_focus(text, target_bytes=2000)
+
+        self.assertEqual(focus, text)
+
+    def test_barbell_focus_trims_junk(self):
+        header = [
+            "Home | About | Contact | Pricing | Login",
+            "Short line",
+        ]
+        body = [
+            f"Main content line {i} " + ("x" * 40) for i in range(20)
+        ]
+        footer = [
+            "Privacy Policy",
+            "Copyright 2024 Example Inc",
+        ]
+        text = "\n".join(header + body + footer)
+        focus = barbell_focus(text, target_bytes=400)
+
+        self.assertIsNotNone(focus)
+        self.assertNotIn("Home | About", focus)
+        self.assertNotIn("Privacy Policy", focus)
+        self.assertIn("[...]", focus)
+
+    def test_barbell_focus_includes_head_and_tail(self):
+        text = "HEADTOKEN\n" + ("x" * 3000) + "\nTAILTOKEN"
+        focus = barbell_focus(text, target_bytes=400)
+
+        self.assertIsNotNone(focus)
+        self.assertIn("HEADTOKEN", focus)
+        self.assertIn("TAILTOKEN", focus)
+
+    def test_barbell_focus_respects_unicode_bytes(self):
+        text = ("日本語" * 200) + " tail"
+        focus = barbell_focus(text, target_bytes=120)
+
+        self.assertIsNotNone(focus)
+        self.assertLessEqual(len(focus.encode("utf-8")), 120)
+
+    def test_hint_from_unstructured_text_caps_bytes(self):
+        text = ("Alpha " * 400) + ("\n" + "Beta " * 400) + ("\n" + "Gamma " * 400)
+        hint = hint_from_unstructured_text(text, max_bytes=200)
+
+        self.assertIsNotNone(hint)
+        self.assertIn("FOCUS:", hint)
+        self.assertLessEqual(len(hint.encode("utf-8")), 200)
+
+    def test_hint_from_unstructured_text_small_cap_returns_none(self):
+        hint = hint_from_unstructured_text("Alpha", max_bytes=4)
+
+        self.assertIsNone(hint)
+
+    def test_scrape_as_markdown_barbell_fallback(self):
+        payload = {
+            "result": "Intro text " * 200 + "middle text " * 200 + "ending text " * 200,
+        }
+        hint = extract_context_hint(
+            "mcp_brightdata_scrape_as_markdown",
+            payload,
+            allow_barbell=True,
+        )
+
+        self.assertIsNotNone(hint)
+        self.assertIn("FOCUS:", hint)
+
+    def test_scrape_as_markdown_combines_title_and_focus(self):
+        payload = {
+            "title": "Example Page",
+            "result": "Intro text " * 300 + "middle text " * 300 + "ending text " * 300,
+        }
+        hint = hint_from_scraped_page(payload, allow_barbell=True)
+
+        self.assertIsNotNone(hint)
+        self.assertIn("📄 Example Page", hint)
+        self.assertIn("FOCUS:", hint)
+        self.assertLessEqual(len(hint.encode("utf-8")), BARBELL_TARGET_BYTES)
+
+    def test_scrape_as_markdown_default_skips_focus(self):
+        payload = {"result": "Plain content " * 200}
+        hint = extract_context_hint("mcp_brightdata_scrape_as_markdown", payload)
+
         self.assertIsNone(hint)
 
 

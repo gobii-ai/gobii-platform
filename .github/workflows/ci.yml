@@ -182,6 +182,8 @@ jobs:
             tag: batch_tool_costs
           - batch: tool_results
             tag: batch_tool_results
+          - batch: context_hints
+            tag: context_hints_batch
           - batch: result_analysis
             tag: batch_result_analysis
           - batch: content_skeleton

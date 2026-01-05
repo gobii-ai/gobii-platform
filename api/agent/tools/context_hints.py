@@ -83,13 +83,24 @@ MAX_ITEMS = 4
 MAX_URLS = 3
 MAX_FIELD_LEN = 50
 MAX_LINE_LEN = 120
+BARBELL_TARGET_BYTES = 8000
+BARBELL_HEAD_WEIGHT = 0.45
+BARBELL_TAIL_WEIGHT = 0.35
+BARBELL_TRIM_RATIO = 0.15
+BARBELL_MIN_LINE_LEN = 20
+BARBELL_SEPARATOR = "\n\n[...]\n\n"
 
 
 # =============================================================================
 # Core: Adaptive Hint Extraction
 # =============================================================================
 
-def extract_context_hint(tool_name: str, payload: dict) -> Optional[str]:
+def extract_context_hint(
+    tool_name: str,
+    payload: dict,
+    *,
+    allow_barbell: bool = False,
+) -> Optional[str]:
     """
     Main entry point - extract context hint from any tool result.
 
@@ -104,7 +115,7 @@ def extract_context_hint(tool_name: str, payload: dict) -> Optional[str]:
         return hint_from_serp(payload)
 
     if 'scrape_as_markdown' in tool_name:
-        return hint_from_scraped_page(payload)
+        return hint_from_scraped_page(payload, allow_barbell=allow_barbell)
 
     # Adaptive extraction for everything else
     return hint_from_structured_data(payload)
@@ -699,14 +710,14 @@ def _is_useful_url(url: str) -> bool:
 # Scraped Page Hints (Special Case)
 # =============================================================================
 
-def hint_from_scraped_page(payload: dict) -> Optional[str]:
+def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Optional[str]:
     """Extract context hint from scraped page."""
     title = payload.get('title', '')
     items = payload.get('items', [])
     excerpt = payload.get('excerpt', '')
+    markdown = payload.get('result', '')
 
     if not title and not items and not excerpt:
-        markdown = payload.get('result', '')
         if not markdown:
             return None
 
@@ -725,6 +736,8 @@ def hint_from_scraped_page(payload: dict) -> Optional[str]:
 
         if title:
             return _enforce_limit(f"📄 {title}")
+        if allow_barbell:
+            return hint_from_unstructured_text(markdown)
         return None
 
     parts = []
@@ -744,7 +757,117 @@ def hint_from_scraped_page(payload: dict) -> Optional[str]:
     if not parts:
         return None
 
+    if allow_barbell and markdown:
+        base = '\n'.join(parts)
+        available = BARBELL_TARGET_BYTES - len(base.encode('utf-8')) - 1
+        if available > 0:
+            focus = barbell_focus(markdown, target_bytes=available)
+            if focus:
+                combined = f"{base}\nFOCUS:\n{focus}"
+                return _enforce_limit_bytes(combined, BARBELL_TARGET_BYTES)
+
     return _enforce_limit('\n'.join(parts))
+
+
+def hint_from_unstructured_text(
+    text: str,
+    *,
+    max_bytes: int = BARBELL_TARGET_BYTES,
+) -> Optional[str]:
+    """Generate a focus hint for messy, unstructured text."""
+    if not text:
+        return None
+    label = "FOCUS:"
+    label_bytes = len(label.encode("utf-8")) + 1
+    if max_bytes <= label_bytes:
+        return None
+    focused = barbell_focus(
+        text,
+        target_bytes=max_bytes - label_bytes,
+    )
+    if not focused:
+        return None
+    hint = f"{label}\n{focused}"
+    return _enforce_limit_bytes(hint, max_bytes)
+
+
+def barbell_focus(
+    text: str,
+    target_bytes: int = BARBELL_TARGET_BYTES,
+    head_weight: float = BARBELL_HEAD_WEIGHT,
+    tail_weight: float = BARBELL_TAIL_WEIGHT,
+    trim_ratio: float = BARBELL_TRIM_RATIO,
+) -> Optional[str]:
+    """Focus a long document by trimming junk and sampling head/middle/tail."""
+    if not text or target_bytes <= 0:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+
+    lines = stripped.split('\n')
+    if not lines:
+        return None
+
+    def is_junk(line: str) -> bool:
+        l = line.strip()
+        if not l:
+            return True
+        if len(l) < BARBELL_MIN_LINE_LEN:
+            return True
+        if l.count('|') > 3 or l.count('·') > 2:
+            return True
+        if l.startswith(('©', 'Copyright', 'Privacy', 'Terms')):
+            return True
+        return False
+
+    trim_limit = int(len(lines) * trim_ratio)
+    start = 0
+    while start < trim_limit and is_junk(lines[start]):
+        start += 1
+
+    end = len(lines)
+    while end > len(lines) - trim_limit and is_junk(lines[end - 1]):
+        end -= 1
+
+    content = '\n'.join(lines[start:end]).strip()
+    if not content:
+        content = stripped
+
+    content_bytes = content.encode("utf-8")
+    if len(content_bytes) <= target_bytes:
+        return content
+
+    separator_bytes = BARBELL_SEPARATOR.encode("utf-8")
+    overhead = len(separator_bytes) * 2
+    if target_bytes <= overhead + 10:
+        return _truncate_bytes(content, target_bytes)
+
+    available = target_bytes - overhead
+    if available <= 0:
+        return _truncate_bytes(content, target_bytes)
+
+    head_bytes = int(available * head_weight)
+    tail_bytes = int(available * tail_weight)
+    mid_bytes = max(available - head_bytes - tail_bytes, 0)
+
+    if head_bytes <= 0 or tail_bytes <= 0:
+        return _truncate_bytes(content, target_bytes)
+
+    head = content_bytes[:head_bytes].decode("utf-8", errors="ignore")
+    tail = content_bytes[-tail_bytes:].decode("utf-8", errors="ignore")
+
+    segments = [head]
+    if mid_bytes > 0:
+        mid_start = max((len(content_bytes) // 2) - (mid_bytes // 2), 0)
+        middle = content_bytes[mid_start:mid_start + mid_bytes].decode("utf-8", errors="ignore")
+        if middle:
+            segments.append(middle)
+    if tail:
+        segments.append(tail)
+
+    focused = BARBELL_SEPARATOR.join(segments)
+    return _truncate_bytes(focused, target_bytes)
 
 
 # =============================================================================
@@ -857,3 +980,16 @@ def _enforce_limit(hint: str) -> str:
         result = result[:-10] + "..."
 
     return result
+
+
+def _enforce_limit_bytes(text: str, max_bytes: int) -> str:
+    if max_bytes <= 0:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _truncate_bytes(text: str, max_bytes: int) -> str:
+    return _enforce_limit_bytes(text, max_bytes)
