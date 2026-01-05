@@ -65,6 +65,7 @@ from api.models import (
     PersistentAgentEmailEndpoint,
     PersistentAgentWebhook,
     PersistentAgentMessage,
+    AgentEmailAccount,
     AgentPeerLink,
     AgentCommPeerState,
     PersistentAgentConversation,
@@ -5450,6 +5451,81 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
         },
     }
 
+    def _validate_smtp_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
+        try:
+            import smtplib
+            if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
+                client = smtplib.SMTP_SSL(account.smtp_host, int(account.smtp_port or 465), timeout=30)
+            else:
+                client = smtplib.SMTP(account.smtp_host, int(account.smtp_port or 587), timeout=30)
+            try:
+                client.ehlo()
+                if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
+                    client.starttls()
+                    client.ehlo()
+                if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
+                    from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
+                    credential = get_email_oauth_credential(account)
+                    if not credential or not credential.access_token:
+                        raise RuntimeError("OAuth access token missing for SMTP account")
+                    identity = resolve_oauth_identity(account, "smtp")
+                    auth_string = build_xoauth2_string(identity, credential.access_token)
+                    client.auth("XOAUTH2", lambda _=None: auth_string)
+                elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                    client.login(account.smtp_username or '', account.get_smtp_password() or '')
+                try:
+                    client.noop()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    client.quit()
+                except Exception:
+                    try:
+                        client.close()
+                    except Exception:
+                        pass
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
+    def _validate_imap_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
+        try:
+            import imaplib
+            if account.imap_security == AgentEmailAccount.ImapSecurity.SSL:
+                client = imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port or 993), timeout=30)
+            else:
+                client = imaplib.IMAP4(account.imap_host, int(account.imap_port or 143), timeout=30)
+                if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
+                    client.starttls()
+            try:
+                if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+                    from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
+                    credential = get_email_oauth_credential(account)
+                    if not credential or not credential.access_token:
+                        raise RuntimeError("OAuth access token missing for IMAP account")
+                    identity = resolve_oauth_identity(account, "imap")
+                    auth_string = build_xoauth2_string(identity, credential.access_token)
+                    client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
+                elif account.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
+                    client.login(account.imap_username or '', account.get_imap_password() or '')
+                client.select(account.imap_folder or 'INBOX', readonly=True)
+                try:
+                    client.noop()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    client.logout()
+                except Exception:
+                    try:
+                        client.shutdown()
+                    except Exception:
+                        pass
+            return True, ""
+        except Exception as exc:
+            return False, str(exc)
+
     def get_agent(self):
         return get_object_or_404(
             PersistentAgent,
@@ -5671,6 +5747,28 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     for key, value in defaults.items():
                         if not getattr(account, key):
                             setattr(account, key, value)
+                if credential:
+                    smtp_ok, smtp_error = self._validate_smtp_connection(account)
+                    imap_ok, imap_error = self._validate_imap_connection(account)
+                    errors = []
+                    if smtp_ok:
+                        account.is_outbound_enabled = True
+                    else:
+                        account.is_outbound_enabled = False
+                        errors.append(f"SMTP validation failed: {smtp_error}")
+                    if imap_ok:
+                        account.is_inbound_enabled = True
+                    else:
+                        account.is_inbound_enabled = False
+                        errors.append(f"IMAP validation failed: {imap_error}")
+                    if smtp_ok or imap_ok:
+                        account.connection_last_ok_at = timezone.now()
+                    if errors:
+                        account.connection_error = "; ".join(errors)
+                        for message_text in errors:
+                            messages.error(request, message_text)
+                    else:
+                        account.connection_error = ""
             try:
                 account.full_clean()
                 account.save()
@@ -5698,40 +5796,8 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
 
         # Test SMTP
         if action == 'test_smtp':
-            try:
-                import smtplib
-                if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
-                    client = smtplib.SMTP_SSL(account.smtp_host, int(account.smtp_port or 465), timeout=30)
-                else:
-                    client = smtplib.SMTP(account.smtp_host, int(account.smtp_port or 587), timeout=30)
-                try:
-                    client.ehlo()
-                    if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
-                        client.starttls()
-                        client.ehlo()
-                    if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
-                        from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
-                        credential = get_email_oauth_credential(account)
-                        if not credential or not credential.access_token:
-                            raise RuntimeError("OAuth access token missing for SMTP account")
-                        identity = resolve_oauth_identity(account, "smtp")
-                        auth_string = build_xoauth2_string(identity, credential.access_token)
-                        client.auth("XOAUTH2", lambda _: auth_string)
-                    elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
-                        client.login(account.smtp_username or '', account.get_smtp_password() or '')
-                    try:
-                        client.noop()
-                    except Exception:
-                        pass
-                finally:
-                    try:
-                        client.quit()
-                    except Exception:
-                        try:
-                            client.close()
-                        except Exception:
-                            pass
-                from django.utils import timezone
+            ok, error = self._validate_smtp_connection(account)
+            if ok:
                 account.connection_last_ok_at = timezone.now()
                 account.connection_error = ""
                 account.save(update_fields=['connection_last_ok_at', 'connection_error'])
@@ -5745,16 +5811,16 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     )
                 except Exception:
                     pass
-            except Exception as e:
-                account.connection_error = str(e)
+            else:
+                account.connection_error = error
                 account.save(update_fields=['connection_error'])
-                messages.error(request, f"SMTP test failed: {e}")
+                messages.error(request, f"SMTP test failed: {error}")
                 try:
                     Analytics.track_event(
                         user_id=request.user.id,
                         event=AnalyticsEvent.SMTP_TEST_FAILED,
                         source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': error[:500]},
                     )
                 except Exception:
                     pass
@@ -5762,39 +5828,8 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
 
         # Test IMAP
         if action == 'test_imap':
-            try:
-                import imaplib
-                if account.imap_security == AgentEmailAccount.ImapSecurity.SSL:
-                    client = imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port or 993), timeout=30)
-                else:
-                    client = imaplib.IMAP4(account.imap_host, int(account.imap_port or 143), timeout=30)
-                    if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
-                        client.starttls()
-                try:
-                    if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
-                        from api.agent.comms.email_oauth import build_xoauth2_string, get_email_oauth_credential, resolve_oauth_identity
-                        credential = get_email_oauth_credential(account)
-                        if not credential or not credential.access_token:
-                            raise RuntimeError("OAuth access token missing for IMAP account")
-                        identity = resolve_oauth_identity(account, "imap")
-                        auth_string = build_xoauth2_string(identity, credential.access_token)
-                        client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
-                    elif account.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
-                        client.login(account.imap_username or '', account.get_imap_password() or '')
-                    client.select(account.imap_folder or 'INBOX', readonly=True)
-                    try:
-                        client.noop()
-                    except Exception:
-                        pass
-                finally:
-                    try:
-                        client.logout()
-                    except Exception:
-                        try:
-                            client.shutdown()
-                        except Exception:
-                            pass
-                from django.utils import timezone
+            ok, error = self._validate_imap_connection(account)
+            if ok:
                 account.connection_last_ok_at = timezone.now()
                 account.connection_error = ""
                 account.save(update_fields=['connection_last_ok_at', 'connection_error'])
@@ -5808,16 +5843,16 @@ class AgentEmailSettingsView(LoginRequiredMixin, TemplateView):
                     )
                 except Exception:
                     pass
-            except Exception as e:
-                account.connection_error = str(e)
+            else:
+                account.connection_error = error
                 account.save(update_fields=['connection_error'])
-                messages.error(request, f"IMAP test failed: {e}")
+                messages.error(request, f"IMAP test failed: {error}")
                 try:
                     Analytics.track_event(
                         user_id=request.user.id,
                         event=AnalyticsEvent.IMAP_TEST_FAILED,
                         source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': str(e)[:500]},
+                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': error[:500]},
                     )
                 except Exception:
                     pass

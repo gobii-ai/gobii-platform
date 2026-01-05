@@ -89,7 +89,7 @@ class SmtpTransport:
                     raise RuntimeError("OAuth access token missing for SMTP account")
                 identity = resolve_oauth_identity(account, "smtp")
                 auth_string = build_xoauth2_string(identity, credential.access_token)
-                client.auth("XOAUTH2", lambda _: auth_string)
+                client.auth("XOAUTH2", lambda _=None: auth_string)
             elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                 client.login(account.smtp_username or "", account.get_smtp_password() or "")
 
