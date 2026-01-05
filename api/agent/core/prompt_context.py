@@ -3,6 +3,7 @@
 import json
 import logging
 import math
+import re
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from functools import partial
@@ -103,6 +104,9 @@ tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
 INTERNAL_REASONING_PREFIX = "Internal reasoning:"
+SIGNED_FILES_URL_RE = re.compile(
+    r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
+)
 __all__ = [
     "tool_call_history_limit",
     "message_history_limit",
@@ -370,12 +374,12 @@ Step 4: Find outliers (need to see results before presenting)
 Step 5: Visualize category breakdown
   create_chart(type="bar", query="SELECT category, count FROM cat_stats ORDER BY count DESC", x="category", y="count", title="Products by Category")
 
-  Result: {status: "ok", url: "<signed_url>"}
+  Result: {status: "ok", file: "«/charts/bar.svg»", inline: "![](«/charts/bar.svg»)", attach: "«/charts/bar.svg»"}
 
 Step 6: Present findings (task complete, loop ends)
   "## 📊 Product Catalog Analysis
 
-  ![](${url})
+  ![](«/charts/bar.svg»)
 
   | Category | Count | Avg Price | Range |
   |----------|-------|-----------|-------|
@@ -789,12 +793,12 @@ Step 5: Summarize by issue type (need to see results before presenting)
 Step 6: Visualize + present (chart makes the scale obvious)
   create_chart(type="bar", query="SELECT issue_type, total_variance FROM summary ORDER BY total_variance DESC", x="issue_type", y="total_variance", title="Variance by Issue Type")
 
-  Result: {status: "ok", url: "<signed_url>"}
+  Result: {status: "ok", file: "«/charts/bar.svg»", inline: "![](«/charts/bar.svg»)", attach: "«/charts/bar.svg»"}
 
 Step 7: Present findings (task complete, loop ends)
   "## 📊 Inventory Discrepancies
 
-  ![](${url})
+  ![](«/charts/bar.svg»)
 
   | Issue | Count | Variance |
   |-------|-------|----------|
@@ -2671,7 +2675,7 @@ User: "Find Acme Corp's top product and create a sentiment report"
 [Turn 6] Visualize—create_chart queries my sentiment table directly:
          → create_chart(type="bar", query="SELECT rating, n FROM sentiment ORDER BY rating", x="rating", y="n", title="Review Distribution")
 
-         Result: {status: "ok", path: "/charts/bar.svg", inline: "![](«/charts/bar.svg»)", attach: "/charts/bar.svg"}
+         Result: {status: "ok", file: "«/charts/bar.svg»", inline: "![](«/charts/bar.svg»)", inline_html: "<img src='«/charts/bar.svg»'>", attach: "«/charts/bar.svg»"}
 
 [Turn 7] Deliver—paste the `inline` value into your message:
          -- For chat (markdown):
@@ -2680,7 +2684,7 @@ User: "Find Acme Corp's top product and create a sentiment report"
          -- For email (HTML):
          send_email(html="<h2>ProWidget Sentiment</h2><img src='«/charts/bar.svg»'><p>4.8★ average...</p>")
 
-         The «path» variable is substituted with the actual URL when sent.
+         The «/path» variable is substituted when sending messages; attachments accept «/path».
 ```
 
 The pattern: **tables you build → queries that aggregate → charts that visualize → outputs that deliver**. Each step reads from the previous. The chart's `query` parameter pulls directly from your SQLite tables—same syntax, same data.
@@ -2733,20 +2737,21 @@ create_chart(type="bar", query="SELECT <x_col>, <y_col> FROM <your_table>", x="<
 create_chart(type="pie", query="SELECT <label_col>, <value_col> FROM ...", labels="<label_col>", values="<value_col>")
 create_chart(type="line", query="...", x="...", y=["<series1>", "<series2>"])  -- multi-series
 ```
-Returns `{path, inline, attach}`. Paste `inline` into your message to embed the chart.
+Returns `{file, inline, inline_html, attach}`. Paste `inline` into your message to embed the chart.
 Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter.
 
 ## Embedding Files & Charts
 
 File-creating tools (`create_chart`, `create_pdf`, `create_csv`) return ready-to-use references:
 - `inline`: paste into message body to embed (e.g., `![](«/charts/q4.svg»)`)
-- `attach`: paste into attachments array (e.g., `attachments=["/charts/q4.svg"]`)
+- `inline_html`: paste into HTML (e.g., `<img src='«/charts/q4.svg»'>`)
+- `attach`: paste into attachments array (e.g., `attachments=["«/charts/q4.svg»"]`)
 
-Variable names are file paths—unique and human-readable. The «» syntax triggers URL substitution when sent.
+Variable names are file paths—unique and human-readable. Use «/path» in messages; attachments accept «/path» too.
 
 **Example:**
 ```
-create_chart(...) → {path: "/charts/q4.svg", inline: "![](«/charts/q4.svg»)", attach: "/charts/q4.svg"}
+create_chart(...) → {file: "«/charts/q4.svg»", inline: "![](«/charts/q4.svg»)", inline_html: "<img src='«/charts/q4.svg»'>", attach: "«/charts/q4.svg»"}
 Your message: "## Q4 Results\n\n![](«/charts/q4.svg»)\n\nStrong 27% growth."
 ```
 
@@ -2754,7 +2759,7 @@ Your message: "## Q4 Results\n\n![](«/charts/q4.svg»)\n\nStrong 27% growth."
 ✗ BAD: "Here's the breakdown: Q1: $145K, Q2: $204K, Q3: $261K, Q4: $330K"
 ✓ GOOD: "![](«/charts/quarterly.svg»)\n\n127% growth from Q1 to Q4."
 
-**Anti-pattern:** Never copy raw URLs from tool results. Always use the `«path»` variable syntax.
+**Anti-pattern:** Never copy raw URLs from tool results. Always use the `«/path»` variable syntax.
 
 ## Creating Beautiful PDFs
 
@@ -3628,7 +3633,7 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Agent variables - placeholder values set by tools (e.g., chart_url)
+    # Agent variables - placeholder values set by tools (e.g., «/charts/...»)
     variables_block = format_variables_for_prompt()
     if variables_block:
         variable_group.section_text(
@@ -4525,7 +4530,7 @@ def _get_formatting_guidance(
             "• Web chat: Rich markdown (**bold**, headers, tables, ![](«/path/chart.svg») for charts)\n"
             "• Email: Rich HTML (<table>, <ul>, <strong>, <img src='«/charts/your-chart.svg»'> for charts)—no markdown\n"
             "• SMS: Plain text only, ≤160 chars ideal\n"
-            "Charts: paste `inline` from result—«path» variables are substituted automatically."
+            "Charts: paste `inline` from result—«/path» variables are substituted automatically."
         )
 
 
@@ -5422,6 +5427,40 @@ def _format_recent_minutes_suffix(timestamp: datetime) -> str:
     return f" {seconds // 3600}h ago,"
 
 
+def _redact_signed_filespace_urls(text: str, agent: PersistentAgent) -> str:
+    """Replace signed filespace download URLs with «/path» placeholders."""
+    if not text:
+        return text
+
+    def replace_match(match: re.Match) -> str:
+        token = match.group("token")
+        try:
+            from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
+            from api.models import AgentFsNode
+
+            payload = load_signed_filespace_download_payload(token)
+            if not payload:
+                return match.group(0)
+            if str(payload.get("agent_id")) != str(agent.id):
+                return match.group(0)
+            node = (
+                AgentFsNode.objects.filter(
+                    id=payload.get("node_id"),
+                    is_deleted=False,
+                )
+                .only("path")
+                .first()
+            )
+            if not node or not node.path:
+                return match.group(0)
+            return f"«{node.path}»"
+        except Exception:
+            logger.debug("Failed to redact signed filespace URL", exc_info=True)
+            return match.group(0)
+
+    return SIGNED_FILES_URL_RE.sub(replace_match, text)
+
+
 def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
     paths: List[str] = []
     seen: set[str] = set()
@@ -5665,7 +5704,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         recent_minutes_suffix = _format_recent_minutes_suffix(m.timestamp)
 
         channel = m.from_endpoint.channel
-        body = m.body or ""
+        body = _redact_signed_filespace_urls(m.body or "", agent)
         event_prefix = f"message_{'outbound' if m.is_outbound else 'inbound'}"
 
         # Determine if this inbound message needs a trust reminder
@@ -5744,7 +5783,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         attachment_paths = _get_message_attachment_paths(m)
         if attachment_paths:
-            components["attachments"] = "\n".join(f"- {path}" for path in attachment_paths)
+            components["attachments"] = "\n".join(f"- «{path}»" for path in attachment_paths)
 
         structured_events.append((m.timestamp, event_type, components))
 

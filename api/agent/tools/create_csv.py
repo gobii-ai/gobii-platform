@@ -20,7 +20,7 @@ def get_create_csv_tool() -> Dict[str, Any]:
             "description": (
                 "Create a CSV file from provided CSV text and store it in the agent filespace. "
                 "Recommended path: /exports/your-file.csv. Provide the full CSV content, including headers if needed. "
-                "Returns `inline` for download links and `attach` for email attachments."
+                "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders."
             ),
             "parameters": {
                 "type": "object",
@@ -82,9 +82,11 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     )
     set_agent_variable(file_path, signed_url)
 
+    var_ref = f"«{file_path}»"
     return {
         "status": "ok",
-        "path": file_path,
-        "inline": f"[Download](«{file_path}»)",
-        "attach": file_path,
+        "file": var_ref,
+        "inline": f"[Download]({var_ref})",
+        "inline_html": f"<a href='{var_ref}'>Download</a>",
+        "attach": var_ref,
     }

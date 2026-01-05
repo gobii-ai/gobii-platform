@@ -149,9 +149,11 @@ class CreateChartToolTests(TestCase):
             # Returns inline/attach hints for embedding
             self.assertIn("inline", result)
             self.assertIn("attach", result)
-            self.assertIn("path", result)
+            self.assertIn("file", result)
             # inline uses path-based variable
             self.assertIn("«/charts/bar.svg»", result["inline"])
+            self.assertEqual(result["attach"], "«/charts/bar.svg»")
+            self.assertEqual(result["file"], "«/charts/bar.svg»")
             # No url exposed - prevents LLM from copying it
             self.assertNotIn("url", result)
             # No data_uri - we don't flood LLM context with base64
@@ -420,8 +422,8 @@ class CreateChartToolTests(TestCase):
             self.assertNotIn("url", result)
             self.assertIn("inline", result)
             self.assertIn("attach", result)
-            self.assertIn("path", result)
-            # Variable name is the path
-            self.assertIn(result["path"], result["inline"])
+            self.assertIn("file", result)
+            # Variable name is the path wrapped in guillemets
+            self.assertIn(result["file"], result["inline"])
             mock_write.assert_called_once()
             mock_signed_url.assert_called_once()

@@ -3,8 +3,8 @@ Chart generation tool for persistent agents.
 
 Creates beautiful, publication-quality charts directly from SQL queries.
 Tightly integrated with SQLite - just pass a SELECT statement and column names
-become chart data keys. Outputs SVG as a data URI for embedding in PDFs and
-chat messages, with optional filespace storage for email embedding via signed URLs.
+become chart data keys. Outputs SVG saved in filespace and returns variable
+placeholders for embedding in chat, email, or PDFs.
 """
 import base64
 import io
@@ -349,7 +349,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                 "and results become chart data. Column names in your SELECT become the keys for x/y/values/labels. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
                 "For pie/donut: use 'values' and 'labels'. For others: use 'x' and 'y' (y can be a list for multi-series). "
-                "Returns `inline` ready to paste into your message—charts are visual, don't describe the data in text."
+                "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders—use them directly."
             ),
             "parameters": {
                 "type": "object",
@@ -488,11 +488,13 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         set_agent_variable(path, signed_url)
 
         # Return with ready-to-use references
+        var_ref = f"«{path}»"
         return {
             "status": "ok",
-            "path": path,
-            "inline": f"![](«{path}»)",
-            "attach": path,
+            "file": var_ref,
+            "inline": f"![]({var_ref})",
+            "inline_html": f"<img src='{var_ref}'>",
+            "attach": var_ref,
         }
 
     except Exception as e:

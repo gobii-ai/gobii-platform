@@ -20,7 +20,9 @@ from django.conf import settings
 
 from ...models import PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
+from ..files.attachment_helpers import build_signed_filespace_download_url
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
+from .agent_variables import set_agent_variable
 
 logger = logging.getLogger(__name__)
 RESPONSE_MAX_BYTES = 5 * 1024 * 1024
@@ -250,7 +252,10 @@ def get_http_request_tool() -> Dict[str, Any]:
                     "range": {"type": "string", "description": "Optional Range header value, e.g. 'bytes=0-1023'."},
                     "download": {
                         "type": "boolean",
-                        "description": "Whether to save the response to the agent filespace (returns path/node_id/filename).",
+                        "description": (
+                            "Whether to save the response to the agent filespace "
+                            "(returns file/inline/inline_html/attach variable placeholders plus node_id/filename)."
+                        ),
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -604,10 +609,21 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         )
         if download_result.get("status") != "ok":
             return download_result
+        file_path = download_result["path"]
+        node_id = download_result["node_id"]
+        signed_url = build_signed_filespace_download_url(
+            agent_id=str(agent.id),
+            node_id=node_id,
+        )
+        set_agent_variable(file_path, signed_url)
+        var_ref = f"«{file_path}»"
         response.update(
             {
-                "path": download_result["path"],
-                "node_id": download_result["node_id"],
+                "file": var_ref,
+                "inline": f"[Download]({var_ref})",
+                "inline_html": f"<a href='{var_ref}'>Download</a>",
+                "attach": var_ref,
+                "node_id": node_id,
                 "filename": download_result["filename"],
             }
         )

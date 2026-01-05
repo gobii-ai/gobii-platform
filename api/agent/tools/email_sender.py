@@ -21,7 +21,7 @@ from ..comms.outbound_delivery import deliver_agent_email
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 from util.integrations import postmark_status
 from util.text_sanitizer import decode_unicode_escapes, strip_control_chars
-from .agent_variables import substitute_variables
+from .agent_variables import substitute_variables_with_filespace
 from ..files.attachment_helpers import (
     AttachmentResolutionError,
     create_message_attachments,
@@ -67,7 +67,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths from the agent's default filespace to attach.",
+                        "description": "Optional list of filespace paths or «/path» variables from the default filespace.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -87,8 +87,8 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     # Decode escape sequences and strip control chars from HTML body
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
-    # Substitute «var» placeholders with actual values (e.g., «chart_url»)
-    mobile_first_html = substitute_variables(mobile_first_html)
+    # Substitute «var» placeholders with actual values (e.g., «/charts/...»).
+    mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     will_continue = _should_continue_work(params)
     attachment_paths = params.get("attachments")
