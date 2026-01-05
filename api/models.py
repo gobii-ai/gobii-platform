@@ -636,14 +636,231 @@ class TaskCreditConfig(models.Model):
         return "Task credit configuration"
 
 
+class Plan(models.Model):
+    """Stable plan identity (e.g., free, startup, scale)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    slug = models.CharField(
+        max_length=64,
+        unique=True,
+        help_text="Stable plan identifier used across versions (e.g., free, startup).",
+    )
+    is_org = models.BooleanField(
+        default=False,
+        help_text="Whether this plan is for organizations.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Whether this plan is available for use.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["slug"]
+        verbose_name = "Plan"
+        verbose_name_plural = "Plans"
+
+    def __str__(self) -> str:
+        return self.slug
+
+
+class PlanVersion(models.Model):
+    """Versioned entitlements + marketing copy for a plan."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan = models.ForeignKey(
+        Plan,
+        on_delete=models.CASCADE,
+        related_name="versions",
+    )
+    version_code = models.CharField(
+        max_length=64,
+        help_text="Version code unique per plan (e.g., v1, 2024-10).",
+    )
+    legacy_plan_code = models.CharField(
+        max_length=64,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Legacy plan identifier (e.g., pln_l_m_v1).",
+    )
+    is_active_for_new_subs = models.BooleanField(
+        default=False,
+        help_text="Whether this version is selectable for new subscriptions.",
+    )
+    display_name = models.CharField(max_length=128)
+    tagline = models.CharField(max_length=255, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    marketing_features = models.JSONField(default=list, blank=True)
+    effective_start_at = models.DateTimeField(null=True, blank=True)
+    effective_end_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan__slug", "-created_at"]
+        constraints = [
+            UniqueConstraint(
+                fields=["plan", "version_code"],
+                name="unique_plan_version_code",
+            ),
+            UniqueConstraint(
+                fields=["plan"],
+                condition=Q(is_active_for_new_subs=True),
+                name="unique_active_plan_version",
+            ),
+        ]
+        verbose_name = "Plan version"
+        verbose_name_plural = "Plan versions"
+
+    def __str__(self) -> str:
+        label = f"{self.plan.slug}:{self.version_code}"
+        if self.legacy_plan_code:
+            return f"{label} ({self.legacy_plan_code})"
+        return label
+
+
+class PlanPriceKindChoices(models.TextChoices):
+    BASE = "base", "Base"
+    SEAT = "seat", "Seat"
+    OVERAGE = "overage", "Overage"
+    TASK_PACK = "task_pack", "Task pack"
+    CONTACT_PACK = "contact_pack", "Contact pack"
+    BROWSER_TASK_LIMIT = "browser_task_limit", "Browser task limit"
+    DEDICATED_IP = "dedicated_ip", "Dedicated IP"
+
+
+class PlanBillingIntervalChoices(models.TextChoices):
+    MONTH = "month", "Monthly"
+    YEAR = "year", "Yearly"
+
+
+class PlanVersionPrice(models.Model):
+    """Stripe price mapping for a plan version."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.CASCADE,
+        related_name="prices",
+    )
+    kind = models.CharField(max_length=32, choices=PlanPriceKindChoices.choices)
+    billing_interval = models.CharField(
+        max_length=8,
+        choices=PlanBillingIntervalChoices.choices,
+        null=True,
+        blank=True,
+        help_text="Billing interval for recurring prices; null for metered/add-ons.",
+    )
+    price_id = models.CharField(max_length=255, unique=True)
+    product_id = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan_version", "kind", "price_id"]
+        indexes = [
+            models.Index(fields=["price_id"]),
+            models.Index(fields=["product_id"]),
+        ]
+        verbose_name = "Plan version price"
+        verbose_name_plural = "Plan version prices"
+
+    def __str__(self) -> str:
+        return f"{self.plan_version_id}:{self.kind}:{self.price_id}"
+
+
+class EntitlementValueTypeChoices(models.TextChoices):
+    INT = "int", "Integer"
+    DECIMAL = "decimal", "Decimal"
+    BOOL = "bool", "Boolean"
+    TEXT = "text", "Text"
+    JSON = "json", "JSON"
+
+
+class EntitlementDefinition(models.Model):
+    """Definition of a plan entitlement key/value."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.CharField(max_length=128, unique=True)
+    display_name = models.CharField(max_length=128)
+    description = models.TextField(blank=True, default="")
+    value_type = models.CharField(max_length=16, choices=EntitlementValueTypeChoices.choices)
+    unit = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+        verbose_name = "Entitlement definition"
+        verbose_name_plural = "Entitlement definitions"
+
+    def __str__(self) -> str:
+        return self.key
+
+
+class PlanVersionEntitlement(models.Model):
+    """Entitlement values scoped to a plan version."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.CASCADE,
+        related_name="entitlements",
+    )
+    entitlement = models.ForeignKey(
+        EntitlementDefinition,
+        on_delete=models.CASCADE,
+        related_name="plan_values",
+    )
+    value_int = models.IntegerField(null=True, blank=True)
+    value_decimal = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+    )
+    value_bool = models.BooleanField(null=True, blank=True)
+    value_text = models.TextField(null=True, blank=True)
+    value_json = models.JSONField(null=True, blank=True)
+    currency = models.CharField(max_length=16, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["plan_version", "entitlement__key"]
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version", "entitlement"],
+                name="unique_plan_version_entitlement",
+            ),
+        ]
+        verbose_name = "Plan version entitlement"
+        verbose_name_plural = "Plan version entitlements"
+
+    def __str__(self) -> str:
+        return f"{self.plan_version_id}:{self.entitlement.key}"
+
+
 class DailyCreditConfig(models.Model):
     """Per-plan configuration controlling soft target UI + pacing."""
 
+    id = models.BigAutoField(primary_key=True)
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.CASCADE,
+        related_name="daily_credit_configs",
+        null=True,
+        blank=True,
+        help_text="Plan version the daily credit pacing settings apply to.",
+    )
     plan_name = models.CharField(
-        primary_key=True,
         max_length=32,
         choices=PlanNamesChoices.choices,
-        help_text="Plan identifier the daily credit pacing settings apply to.",
+        null=True,
+        blank=True,
+        help_text="Legacy plan identifier the daily credit pacing settings apply to.",
     )
     slider_min = models.DecimalField(
         max_digits=12,
@@ -692,6 +909,18 @@ class DailyCreditConfig(models.Model):
         ordering = ["plan_name"]
         verbose_name = "Daily credit pacing configuration"
         verbose_name_plural = "Daily credit pacing configuration"
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version"],
+                condition=Q(plan_version__isnull=False),
+                name="unique_daily_credit_plan_version",
+            ),
+            UniqueConstraint(
+                fields=["plan_name"],
+                condition=Q(plan_name__isnull=False),
+                name="unique_daily_credit_plan_name",
+            ),
+        ]
 
     def clean(self):
         super().clean()
@@ -709,7 +938,8 @@ class DailyCreditConfig(models.Model):
                 raise ValidationError({field_name: "Value must be a whole number."})
 
     def save(self, *args, **kwargs):
-        self.plan_name = (self.plan_name or "").lower()
+        if self.plan_name:
+            self.plan_name = self.plan_name.lower()
         result = super().save(*args, **kwargs)
         from api.services.daily_credit_settings import invalidate_daily_credit_settings_cache
 
@@ -720,7 +950,8 @@ class DailyCreditConfig(models.Model):
         raise ValidationError("DailyCreditConfig cannot be deleted.")
 
     def __str__(self):
-        return f"{self.plan_name} daily credit pacing configuration"
+        label = self.plan_name or str(self.plan_version_id or "unknown")
+        return f"{label} daily credit pacing configuration"
 
 
 class VisionDetailLevelChoices(models.TextChoices):
@@ -732,11 +963,21 @@ class VisionDetailLevelChoices(models.TextChoices):
 class BrowserConfig(models.Model):
     """Per-plan browser agent configuration."""
 
+    id = models.BigAutoField(primary_key=True)
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.CASCADE,
+        related_name="browser_configs",
+        null=True,
+        blank=True,
+        help_text="Plan version the browser limits apply to.",
+    )
     plan_name = models.CharField(
-        primary_key=True,
         max_length=32,
         choices=PlanNamesChoices.choices,
-        help_text="Plan identifier the browser limits apply to.",
+        null=True,
+        blank=True,
+        help_text="Legacy plan identifier the browser limits apply to.",
     )
     max_browser_steps = models.PositiveIntegerField(
         default=DEFAULT_MAX_BROWSER_STEPS,
@@ -763,9 +1004,22 @@ class BrowserConfig(models.Model):
         ordering = ["plan_name"]
         verbose_name = "Browser configuration"
         verbose_name_plural = "Browser configuration"
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version"],
+                condition=Q(plan_version__isnull=False),
+                name="unique_browser_config_plan_version",
+            ),
+            UniqueConstraint(
+                fields=["plan_name"],
+                condition=Q(plan_name__isnull=False),
+                name="unique_browser_config_plan_name",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
-        self.plan_name = (self.plan_name or "").lower()
+        if self.plan_name:
+            self.plan_name = self.plan_name.lower()
         self.vision_detail_level = (self.vision_detail_level or DEFAULT_VISION_DETAIL_LEVEL).lower()
         result = super().save(*args, **kwargs)
         from api.services.browser_settings import invalidate_browser_settings_cache
@@ -777,17 +1031,28 @@ class BrowserConfig(models.Model):
         raise ValidationError("BrowserConfig cannot be deleted.")
 
     def __str__(self):
-        return f"{self.plan_name} browser configuration"
+        label = self.plan_name or str(self.plan_version_id or "unknown")
+        return f"{label} browser configuration"
 
 
 class ToolConfig(models.Model):
     """Per-plan tool configuration."""
 
+    id = models.BigAutoField(primary_key=True)
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.CASCADE,
+        related_name="tool_configs",
+        null=True,
+        blank=True,
+        help_text="Plan version the tool configuration applies to.",
+    )
     plan_name = models.CharField(
-        primary_key=True,
         max_length=32,
         choices=PlanNamesChoices.choices,
-        help_text="Plan identifier the tool configuration applies to.",
+        null=True,
+        blank=True,
+        help_text="Legacy plan identifier the tool configuration applies to.",
     )
     min_cron_schedule_minutes = models.PositiveIntegerField(
         default=DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -817,9 +1082,22 @@ class ToolConfig(models.Model):
         ordering = ["plan_name"]
         verbose_name = "Tool configuration"
         verbose_name_plural = "Tool configuration"
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version"],
+                condition=Q(plan_version__isnull=False),
+                name="unique_tool_config_plan_version",
+            ),
+            UniqueConstraint(
+                fields=["plan_name"],
+                condition=Q(plan_name__isnull=False),
+                name="unique_tool_config_plan_name",
+            ),
+        ]
 
     def save(self, *args, **kwargs):
-        self.plan_name = (self.plan_name or "").lower()
+        if self.plan_name:
+            self.plan_name = self.plan_name.lower()
         result = super().save(*args, **kwargs)
         from api.services.tool_settings import invalidate_tool_settings_cache
 
@@ -830,7 +1108,8 @@ class ToolConfig(models.Model):
         raise ValidationError("ToolConfig cannot be deleted.")
 
     def __str__(self):
-        return f"{self.plan_name} tool configuration"
+        label = self.plan_name or str(self.plan_version_id or "unknown")
+        return f"{label} tool configuration"
 
 
 class ToolRateLimit(models.Model):
@@ -877,7 +1156,8 @@ class ToolRateLimit(models.Model):
         return result
 
     def __str__(self):
-        return f"{self.plan_id}:{self.tool_name} ({self.max_calls_per_hour}/hr)"
+        label = self.plan.plan_name or str(self.plan.plan_version_id or self.plan_id)
+        return f"{label}:{self.tool_name} ({self.max_calls_per_hour}/hr)"
 
 
 class PromptConfig(models.Model):
@@ -2848,6 +3128,14 @@ class UserBilling(models.Model):
         default=PlanNames.FREE,
         help_text="The user's subscription plan"
     )
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.SET_NULL,
+        related_name="user_billings",
+        null=True,
+        blank=True,
+        help_text="Resolved plan version for this billing record.",
+    )
     max_extra_tasks = models.IntegerField(
         default=0,
         help_text="Maximum number of additional tasks allowed beyond plan limits. 0 means no extra tasks, -1 means unlimited.",
@@ -3045,6 +3333,14 @@ class OrganizationBilling(models.Model):
         choices=OrganizationPlanNamesChoices.choices,
         default=PlanNames.FREE,
         help_text="The organization's subscription plan",
+    )
+    plan_version = models.ForeignKey(
+        PlanVersion,
+        on_delete=models.SET_NULL,
+        related_name="organization_billings",
+        null=True,
+        blank=True,
+        help_text="Resolved plan version for this billing record.",
     )
     billing_cycle_anchor = models.IntegerField(
         default=1,

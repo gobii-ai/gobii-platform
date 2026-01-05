@@ -19,13 +19,13 @@ from djstripe.models import Subscription, Customer, Invoice
 from djstripe.event_handlers import djstripe_receiver
 from observability import traced, trace
 
-from config.plans import PLAN_CONFIG, get_plan_by_product_id, get_plan_product_id
+from config.plans import PLAN_CONFIG, get_plan_by_product_id
 from config.stripe_config import get_stripe_settings
 from constants.stripe import (
     ORG_OVERAGE_STATE_META_KEY,
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
-from constants.plans import PlanNames, PlanNamesChoices
+from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -35,6 +35,11 @@ import logging
 import stripe
 
 from billing.addons import AddonEntitlementService
+from billing.plan_resolver import (
+    get_plan_context_for_version,
+    get_plan_version_by_price_id,
+    get_plan_version_by_product_id,
+)
 from api.models import UserBilling, OrganizationBilling, UserAttribution
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
@@ -177,6 +182,29 @@ def _amount_major_units(*candidates: Any) -> float | None:
     return None
 
 
+_PLAN_VERSION_PRIMARY_KINDS = ("base", "seat")
+
+
+def _resolve_plan_version_by_price_id(price_id: str | None):
+    if not price_id:
+        return None
+    for kind in _PLAN_VERSION_PRIMARY_KINDS:
+        plan_version = get_plan_version_by_price_id(str(price_id), kind=kind)
+        if plan_version:
+            return plan_version
+    return None
+
+
+def _resolve_plan_version_by_product_id(product_id: str | None):
+    if not product_id:
+        return None
+    for kind in _PLAN_VERSION_PRIMARY_KINDS:
+        plan_version = get_plan_version_by_product_id(str(product_id), kind=kind)
+        if plan_version:
+            return plan_version
+    return None
+
+
 def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     try:
         return (payload.get("lines") or {}).get("data") or []
@@ -193,10 +221,18 @@ def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
         price_info = line.get("price") or {}
         if not price_info:
             price_info = (line.get("pricing") or {}).get("price_details") or {}
+        price_id = price_info.get("id") or price_info.get("price")
+        if price_id:
+            plan_version = _resolve_plan_version_by_price_id(str(price_id))
+            if plan_version:
+                return plan_version.legacy_plan_code or plan_version.plan.slug
         product = price_info.get("product")
         if isinstance(product, Mapping):
             product = product.get("id")
         if product:
+            plan_version = _resolve_plan_version_by_product_id(str(product))
+            if plan_version:
+                return plan_version.legacy_plan_code or plan_version.plan.slug
             plan = get_plan_by_product_id(product)
             if plan and plan.get("id"):
                 return plan.get("id")
@@ -437,19 +473,26 @@ def _extract_plan_value_from_subscription(source: Mapping[str, Any] | None) -> s
         price_info = item.get("price") or {}
         if not isinstance(price_info, Mapping):
             price_info = {}
+        price_id = price_info.get("id") or price_info.get("price")
+        if price_id:
+            plan_version = _resolve_plan_version_by_price_id(str(price_id))
+            if plan_version:
+                return plan_version.legacy_plan_code or plan_version.plan.slug
         product_id = price_info.get("product")
+        if isinstance(product_id, Mapping):
+            product_id = product_id.get("id")
         if not product_id:
             continue
+        plan_version = _resolve_plan_version_by_product_id(str(product_id))
+        if plan_version:
+            return plan_version.legacy_plan_code or plan_version.plan.slug
         plan_config = get_plan_by_product_id(product_id)
         if not plan_config:
             continue
         plan_id = plan_config.get("id")
         if not plan_id:
             continue
-        try:
-            return PlanNamesChoices(plan_id).value
-        except Exception:
-            return plan_id
+        return plan_id
 
     return None
 
@@ -1476,20 +1519,35 @@ def handle_subscription_event(event, **kwargs):
         # Proceed only when the subscription is active and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
         if sub.status == 'active' and licensed_item is not None:
-            plan_id = (licensed_item.get("price", {}) or {}).get("product")
-            if not plan_id:
-                logger.warning("Webhook: missing product on licensed item for subscription %s", sub.id)
-                return
+            price_info = licensed_item.get("price") or {}
+            if not isinstance(price_info, Mapping):
+                price_info = {}
 
-            plan = get_plan_by_product_id(plan_id)
+            price_id = price_info.get("id") or price_info.get("price")
+            product_id = price_info.get("product")
+            if isinstance(product_id, Mapping):
+                product_id = product_id.get("id")
+
+            plan_kind = "seat" if owner_type == "organization" else "base"
+            plan_version = get_plan_version_by_price_id(str(price_id), kind=plan_kind) if price_id else None
+            if not plan_version and product_id:
+                plan_version = get_plan_version_by_product_id(str(product_id), kind=plan_kind)
+
+            plan = get_plan_context_for_version(plan_version) if plan_version else None
+            if not plan and product_id:
+                plan = get_plan_by_product_id(product_id)
 
             invoice_id = source_data.get("latest_invoice")
 
-            try:
-                plan_choice = PlanNamesChoices(plan["id"]) if plan else PlanNamesChoices.FREE
-                plan_value = plan_choice.value
-            except Exception:
-                plan_value = PlanNamesChoices.FREE.value
+            plan_value = None
+            if plan_version:
+                plan_value = plan_version.legacy_plan_code or plan_version.plan.slug
+            if not plan_value and plan:
+                plan_value = plan.get("id")
+            if not plan_value:
+                plan_value = PlanNames.FREE
+            if not plan:
+                plan = PLAN_CONFIG.get(PlanNames.FREE)
 
             items_data: list[Mapping[str, Any]] = []
             try:
@@ -1502,6 +1560,7 @@ def handle_subscription_event(event, **kwargs):
                     owner=owner,
                     owner_type=owner_type,
                     plan_id=plan_value,
+                    plan_version=plan_version,
                     subscription_items=items_data,
                     period_start=current_period_start_dt or timezone.now(),
                     period_end=current_period_end_dt,
@@ -1516,7 +1575,7 @@ def handle_subscription_event(event, **kwargs):
             stripe_settings = get_stripe_settings()
 
             if owner_type == "user":
-                mark_user_billing_with_plan(owner, plan_value, update_anchor=False)
+                mark_user_billing_with_plan(owner, plan_value, update_anchor=False, plan_version=plan_version)
                 TaskCreditService.grant_subscription_credits(
                     owner,
                     plan=plan,
@@ -1710,7 +1769,12 @@ def handle_subscription_event(event, **kwargs):
                                 exc,
                             )
 
-                billing = mark_owner_billing_with_plan(owner, plan_value, update_anchor=False)
+                billing = mark_owner_billing_with_plan(
+                    owner,
+                    plan_value,
+                    update_anchor=False,
+                    plan_version=plan_version,
+                )
                 if billing:
                     updates: list[str] = []
                     if current_period_start_dt:

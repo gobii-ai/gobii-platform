@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 from constants.plans import PlanNames
-from util.subscription_helper import get_owner_plan
+from api.services.plan_settings import resolve_owner_plan_identifiers, select_plan_settings_payload
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +62,21 @@ def _normalise_vision_detail_level(value: Optional[str]) -> str:
     return normalized
 
 
-def _serialise(configs) -> dict:
-    return {
-        config.plan_name: {
+def _serialise(configs) -> dict[str, dict[str, dict]]:
+    by_plan_version: dict[str, dict] = {}
+    by_plan_name: dict[str, dict] = {}
+    for config in configs:
+        payload = {
             "max_browser_steps": config.max_browser_steps,
             "max_browser_tasks": config.max_browser_tasks,
             "max_active_browser_tasks": config.max_active_browser_tasks,
             "vision_detail_level": getattr(config, "vision_detail_level", DEFAULT_VISION_DETAIL_LEVEL),
         }
-        for config in configs
-    }
+        if getattr(config, "plan_version_id", None):
+            by_plan_version[str(config.plan_version_id)] = payload
+        if config.plan_name:
+            by_plan_name[config.plan_name] = payload
+    return {"by_plan_version": by_plan_version, "by_plan_name": by_plan_name}
 
 
 def _ensure_defaults_exist() -> None:
@@ -79,6 +84,22 @@ def _ensure_defaults_exist() -> None:
     for plan_name in (PlanNames.FREE, PlanNames.STARTUP, PlanNames.SCALE, PlanNames.ORG_TEAM):
         BrowserConfig.objects.get_or_create(
             plan_name=plan_name,
+            defaults={
+                "max_browser_steps": DEFAULT_MAX_BROWSER_STEPS,
+                "max_browser_tasks": DEFAULT_MAX_BROWSER_TASKS,
+                "max_active_browser_tasks": DEFAULT_MAX_ACTIVE_BROWSER_TASKS,
+                "vision_detail_level": DEFAULT_VISION_DETAIL_LEVEL,
+            },
+        )
+    try:
+        from django.apps import apps
+
+        PlanVersion = apps.get_model("api", "PlanVersion")
+    except Exception:
+        return
+    for plan_version in PlanVersion.objects.all():
+        BrowserConfig.objects.get_or_create(
+            plan_version=plan_version,
             defaults={
                 "max_browser_steps": DEFAULT_MAX_BROWSER_STEPS,
                 "max_browser_tasks": DEFAULT_MAX_BROWSER_TASKS,
@@ -101,11 +122,12 @@ def _load_settings() -> dict:
     return payload
 
 
-def get_browser_settings_for_plan(plan_name: Optional[str]) -> BrowserPlanSettings:
+def get_browser_settings_for_plan_version(
+    plan_version_id: Optional[str],
+    plan_name: Optional[str] = None,
+) -> BrowserPlanSettings:
     settings_map = _load_settings()
-    normalized_plan = (plan_name or PlanNames.FREE).lower()
-    config = settings_map.get(normalized_plan) or settings_map.get(PlanNames.FREE)
-
+    config = select_plan_settings_payload(settings_map, plan_version_id, plan_name)
     return BrowserPlanSettings(
         max_browser_steps=_normalise_step_limit(config.get("max_browser_steps") if config else None),
         max_browser_tasks=_normalise_optional_limit(config.get("max_browser_tasks") if config else None),
@@ -116,16 +138,13 @@ def get_browser_settings_for_plan(plan_name: Optional[str]) -> BrowserPlanSettin
     )
 
 
+def get_browser_settings_for_plan(plan_name: Optional[str]) -> BrowserPlanSettings:
+    return get_browser_settings_for_plan_version(None, plan_name)
+
+
 def get_browser_settings_for_owner(owner) -> BrowserPlanSettings:
-    plan_name = None
-    if owner:
-        try:
-            plan = get_owner_plan(owner)
-            plan_name = plan.get("id")
-        except Exception as e:
-            logger.warning("Failed to get owner plan for owner %s: %s", owner, e, exc_info=True)
-            plan_name = None
-    plan_settings = get_browser_settings_for_plan(plan_name)
+    plan_name, plan_version_id = resolve_owner_plan_identifiers(owner, logger=logger)
+    plan_settings = get_browser_settings_for_plan_version(plan_version_id, plan_name)
     max_browser_tasks = _apply_browser_task_daily_uplift(plan_settings.max_browser_tasks, owner)
 
     return BrowserPlanSettings(

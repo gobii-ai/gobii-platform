@@ -26,7 +26,7 @@ from api.openrouter import get_attribution_headers
 from api.llm.utils import normalize_model_name
 from api.services.web_sessions import has_active_web_session
 from util.subscription_helper import get_owner_plan
-from constants.plans import PlanNames
+from constants.plans import PlanNames, PlanSlugs
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +69,22 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
     params["temperature"] = required_temp
 
 
-_PREMIUM_PLAN_IDS = {"pro", "org", PlanNames.SCALE, "startup", "org_team"}
-_PREMIUM_PLAN_NAMES = {"pro", "org", PlanNames.SCALE}
+_PREMIUM_PLAN_IDS = {
+    "pro",
+    "org",
+    PlanNames.SCALE,
+    PlanSlugs.SCALE,
+    PlanSlugs.STARTUP,
+    PlanSlugs.ORG_TEAM,
+    "startup",
+    "org_team",
+}
+_PREMIUM_PLAN_NAMES = {
+    "pro",
+    "org",
+    PlanNames.SCALE,
+    PlanSlugs.SCALE,
+}
 _NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)
 
 
