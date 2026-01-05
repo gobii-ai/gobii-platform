@@ -577,6 +577,7 @@ class BarbellFocusTests(SimpleTestCase):
         hint = hint_from_unstructured_text(text, max_bytes=200)
 
         self.assertIsNotNone(hint)
+        self.assertIn("DIGEST:", hint)
         self.assertIn("FOCUS:", hint)
         self.assertLessEqual(len(hint.encode("utf-8")), 200)
 
@@ -607,6 +608,7 @@ class BarbellFocusTests(SimpleTestCase):
 
         self.assertIsNotNone(hint)
         self.assertIn("📄 Example Page", hint)
+        self.assertIn("DIGEST:", hint)
         self.assertIn("FOCUS:", hint)
         self.assertLessEqual(len(hint.encode("utf-8")), BARBELL_TARGET_BYTES)
 

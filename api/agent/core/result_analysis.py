@@ -21,6 +21,8 @@ import json5
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
+from ..tools.text_digest import TextDigest, digest as digest_text
+
 # Size thresholds for strategy recommendations
 SIZE_SMALL = 4 * 1024        # 4KB - can inline fully
 SIZE_MEDIUM = 50 * 1024      # 50KB - targeted extraction
@@ -44,6 +46,7 @@ MAX_DECODED_BYTES = 2000000
 MAX_HTML_SCAN_BYTES = 500000
 MAX_JSON_LINES_SCAN = 50
 MAX_SSE_SCAN_LINES = 200
+UNSTRUCTURED_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
 
 _JSON_PREFIXES = (
     ")]}',",
@@ -192,6 +195,7 @@ class EmbeddedContent:
     doc_structure: Optional[DocStructure] = None
     xml_info: Optional[XmlInfo] = None
     json_info: Optional["EmbeddedJsonInfo"] = None
+    text_digest: Optional[TextDigest] = None
     line_count: int = 0
     byte_size: int = 0
 
@@ -258,6 +262,7 @@ class TextAnalysis:
     text_hints: Optional[TextHints] = None
     json_lines_info: Optional[JsonLinesInfo] = None
     sse_info: Optional[SseInfo] = None
+    text_digest: Optional[TextDigest] = None
 
 
 @dataclass
@@ -401,6 +406,23 @@ def _decode_base64_text(text: str) -> Tuple[Optional[str], Optional[DecodeInfo]]
         encoding=encoding,
     )
     return decoded_text, info
+
+
+def _build_text_digest(text: str) -> Optional[TextDigest]:
+    if not text:
+        return None
+    try:
+        return digest_text(text)
+    except Exception:
+        return None
+
+
+def _attach_text_digest(analysis: TextAnalysis, text: str) -> None:
+    if analysis.format not in UNSTRUCTURED_TEXT_FORMATS:
+        return
+    digest = _build_text_digest(text)
+    if digest:
+        analysis.text_digest = digest
 
 
 def _parse_json_any(text: str) -> Tuple[Optional[Any], Optional[str]]:
@@ -1250,6 +1272,7 @@ def _analyze_embedded_text(
             format="html",
             confidence=0.85,
             doc_structure=html_structure,
+            text_digest=_build_text_digest(text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -1261,6 +1284,7 @@ def _analyze_embedded_text(
             format="markdown",
             confidence=0.8,
             doc_structure=md_structure,
+            text_digest=_build_text_digest(text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -1822,6 +1846,7 @@ def analyze_text(text: str) -> TextAnalysis:
         analysis.confidence = 0.85
         analysis.doc_structure = html_structure
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     is_md, md_structure = _detect_markdown(text)
@@ -1830,18 +1855,21 @@ def analyze_text(text: str) -> TextAnalysis:
         analysis.confidence = 0.8
         analysis.doc_structure = md_structure
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     if _detect_log_format(text):
         analysis.format = "log"
         analysis.confidence = 0.7
         analysis.text_hints = _extract_text_hints(text)
+        _attach_text_digest(analysis, text)
         return analysis
 
     # Default to plain text
     analysis.format = "plain"
     analysis.confidence = 0.5
     analysis.text_hints = _extract_text_hints(text)
+    _attach_text_digest(analysis, text)
     return analysis
 
 
@@ -2269,6 +2297,8 @@ def _generate_compact_summary(
                             f"  → QUERY: SELECT substr({extract_expr},1,2000) "
                             f"FROM __tool_results WHERE result_id='{result_id}'"
                         )
+                    if emb.text_digest:
+                        parts.append(f"  DIGEST: {emb.text_digest.summary_line()}")
 
     else:
         # Text data
@@ -2347,6 +2377,8 @@ def _generate_compact_summary(
                         f"FROM __tool_results WHERE result_id='{result_id}'"
                     )
                 parts.append(f"  TYPE: {fmt.upper()} ({section_count} sections)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
             elif fmt == "xml" and text_analysis.xml_info:
                 xml_info = text_analysis.xml_info
@@ -2365,6 +2397,8 @@ def _generate_compact_summary(
                 )
                 hints = text_analysis.text_hints
                 parts.append(f"  TYPE: Log (~{hints.line_count if hints else '?'} lines)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
             else:
                 parts.append(
@@ -2373,6 +2407,8 @@ def _generate_compact_summary(
                 )
                 hints = text_analysis.text_hints
                 parts.append(f"  TYPE: Text (~{hints.line_count if hints else '?'} lines)")
+                if text_analysis.text_digest:
+                    parts.append(f"  DIGEST: {text_analysis.text_digest.summary_line()}")
 
     # Size warning at end
     if parse_info and (parse_info.source != "raw" or parse_info.mode != "json"):
@@ -2518,6 +2554,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
                 "line_count": ec.line_count,
                 "byte_size": ec.byte_size,
             }
+            if ec.text_digest:
+                payload["digest"] = ec.text_digest.to_dict()
             if ec.csv_info:
                 payload["csv"] = {
                     "columns": ec.csv_info.columns[:15],
@@ -2556,6 +2594,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             "format": ta.format,
             "confidence": ta.confidence,
         }
+        if ta.text_digest:
+            result["text"]["digest"] = ta.text_digest.to_dict()
         if ta.csv_info:
             result["text"]["csv"] = {
                 "columns": ta.csv_info.columns[:15],

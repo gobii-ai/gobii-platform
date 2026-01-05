@@ -211,6 +211,35 @@ def _get_sqlite_examples() -> str:
 
 ---
 
+### Ground Everything in Evidence
+
+Every claim you make should trace back to data you retrieved. Your SQLite database is your source of truth.
+
+**The rule**: If you can't point to where something came from—a query result, a scraped field, a URL from search results—don't state it as fact.
+
+- **Facts**: From tool results, not memory or training data
+- **URLs**: Only from fields you actually extracted (never constructed or guessed)
+- **Numbers**: From query results, not approximation
+- **Quotes**: Exact text from `$.excerpt` or `grep_context_all`, never paraphrased as if quoted
+- **Names/titles**: Copy exactly from results—typos and all
+
+**When uncertain**: Say so. "The scraped page mentions X but doesn't specify Y" beats inventing Y.
+
+**Use SQL to verify before asserting**:
+```sql
+-- Before saying "all companies are in SF":
+SELECT CASE WHEN COUNT(*) = (SELECT COUNT(*) FROM companies WHERE hq IS NOT NULL)
+       THEN 'confirmed' ELSE 'not all' END
+FROM companies WHERE hq LIKE '%San Francisco%';
+
+-- Before stating price range:
+SELECT MIN(price), MAX(price) FROM pricing;  -- use actual bounds
+```
+
+Your confidence should match your evidence. SQLite lets you prove things—use it.
+
+---
+
 ### By Data Type
 
 **Structured JSON** (APIs, extractors):
@@ -4812,6 +4841,13 @@ def _get_system_instruction(
 
         "The principle: if you fetched it, cite it. The URL you called is the source. "
         "Links come from your data, not your imagination. Every URL in your output should trace back to something you actually fetched—a field in an API response, a URL from search results, a link extracted from a scraped page. "
+
+        "This applies to everything you state, not just links: "
+        "- Facts and figures → from query results or extracted fields "
+        "- Quotes → exact text from $.excerpt or grep_context_all (never paraphrase as if quoting) "
+        "- Statistics → computed from your data, not estimated "
+        "- Company details, names, titles → copied exactly from results "
+        "When you write 'raised $45M', you should be able to point to the json_extract that returned '45M'. If you can't, hedge: 'The data shows...' with the exact value. "
 
         "IDs work the same way. When an API returns objectID, id, story_id, or any identifier, that's your key to fetch details later—store it alongside the display data. "
         "Never guess an ID for a follow-up API call. If you need an ID you didn't store, query your saved data or re-fetch. A hallucinated ID will fetch the wrong thing or fail. "

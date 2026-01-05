@@ -194,6 +194,8 @@ def _should_add_barbell_hint(
     text_analysis = analysis.text_analysis
     if not text_analysis or text_analysis.format not in BARBELL_TEXT_FORMATS:
         return False
+    if text_analysis.text_digest and text_analysis.text_digest.action == "skip":
+        return False
     return meta.get("bytes", 0) > PREVIEW_TIERS_EXTERNAL[0]
 
 

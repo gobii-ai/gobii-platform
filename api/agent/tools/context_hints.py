@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from .json_goldilocks import goldilocks_summary
 from .text_focus import barbell_focus
+from .text_digest import digest as digest_text
 
 
 # =============================================================================
@@ -787,12 +788,45 @@ def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Opt
         base = '\n'.join(parts)
         available = BARBELL_TARGET_BYTES - len(base.encode('utf-8')) - 1
         if available > 0:
-            focus = barbell_focus(markdown, target_bytes=available)
+            focus = _build_unstructured_focus_hint(markdown, max_bytes=available)
             if focus:
-                combined = f"{base}\nFOCUS:\n{focus}"
+                combined = f"{base}\n{focus}"
                 return _enforce_limit_bytes(combined, BARBELL_TARGET_BYTES)
 
     return _enforce_limit('\n'.join(parts))
+
+
+def _build_unstructured_focus_hint(
+    text: str,
+    *,
+    max_bytes: int,
+) -> Optional[str]:
+    if not text:
+        return None
+
+    digest = None
+    try:
+        digest = digest_text(text)
+    except Exception:
+        digest = None
+
+    if digest and digest.action == "skip":
+        return None
+
+    header_parts = []
+    if digest:
+        header_parts.append(f"DIGEST: {digest.summary_line()}")
+    header_parts.append("FOCUS:")
+    header = "\n".join(header_parts)
+    header_bytes = len(header.encode("utf-8")) + 1
+    if max_bytes <= header_bytes:
+        return None
+
+    focused = barbell_focus(text, target_bytes=max_bytes - header_bytes)
+    if not focused:
+        return None
+    hint = f"{header}\n{focused}"
+    return _enforce_limit_bytes(hint, max_bytes)
 
 
 def hint_from_unstructured_text(
@@ -801,20 +835,7 @@ def hint_from_unstructured_text(
     max_bytes: int = BARBELL_TARGET_BYTES,
 ) -> Optional[str]:
     """Generate a focus hint for messy, unstructured text."""
-    if not text:
-        return None
-    label = "FOCUS:"
-    label_bytes = len(label.encode("utf-8")) + 1
-    if max_bytes <= label_bytes:
-        return None
-    focused = barbell_focus(
-        text,
-        target_bytes=max_bytes - label_bytes,
-    )
-    if not focused:
-        return None
-    hint = f"{label}\n{focused}"
-    return _enforce_limit_bytes(hint, max_bytes)
+    return _build_unstructured_focus_hint(text, max_bytes=max_bytes)
 
 
 def hint_from_messy_json(
