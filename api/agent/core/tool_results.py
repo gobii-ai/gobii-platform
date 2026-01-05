@@ -109,6 +109,12 @@ def prepare_tool_results_for_prompt(
         if is_analysis_eligible and (stored_json or (is_fresh_tool_call and meta.get("is_json"))):
             payload = _load_json_payload(stored_json, analysis)
             if payload is not None:
+                json_digest = None
+                if analysis and analysis.json_analysis:
+                    json_digest = analysis.json_analysis.json_digest
+                if json_digest and json_digest.action in {"skip", "inspect_manually"}:
+                    payload = None
+            if payload is not None:
                 try:
                     context_hint = extract_context_hint(
                         record.tool_name,

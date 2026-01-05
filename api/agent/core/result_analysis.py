@@ -21,6 +21,7 @@ import json5
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
+from ..tools.json_digest import JsonDigest, digest as digest_json
 from ..tools.text_digest import TextDigest, digest as digest_text
 
 # Size thresholds for strategy recommendations
@@ -196,6 +197,7 @@ class EmbeddedContent:
     xml_info: Optional[XmlInfo] = None
     json_info: Optional["EmbeddedJsonInfo"] = None
     text_digest: Optional[TextDigest] = None
+    json_digest: Optional[JsonDigest] = None
     line_count: int = 0
     byte_size: int = 0
 
@@ -247,6 +249,7 @@ class JsonAnalysis:
     field_types: List[FieldTypeInfo] = field(default_factory=list)
     pagination: Optional[PaginationInfo] = None
     detected_patterns: Optional[DetectedPatterns] = None
+    json_digest: Optional[JsonDigest] = None
     embedded_content: Optional[EmbeddedContent] = None  # Backward-compatible first hit
     embedded_contents: List[EmbeddedContent] = field(default_factory=list)
 
@@ -413,6 +416,13 @@ def _build_text_digest(text: str) -> Optional[TextDigest]:
         return None
     try:
         return digest_text(text)
+    except Exception:
+        return None
+
+
+def _build_json_digest(data: Any, raw_json: Optional[str] = None) -> Optional[JsonDigest]:
+    try:
+        return digest_json(data, raw_json=raw_json)
     except Exception:
         return None
 
@@ -1239,6 +1249,7 @@ def _analyze_embedded_text(
             format="json",
             confidence=0.95,
             json_info=_summarize_embedded_json(parsed_json),
+            json_digest=_build_json_digest(parsed_json, raw_json=text),
             line_count=line_count,
             byte_size=byte_size,
         )
@@ -2175,6 +2186,9 @@ def _generate_compact_summary(
                 if arr.nested_arrays:
                     parts.append(f"  NESTED: {', '.join(arr.nested_arrays[:3])}")
 
+            if json_analysis.json_digest:
+                parts.append(f"  JSON_DIGEST: {json_analysis.json_digest.summary_line()}")
+
         elif json_analysis.pattern == "single_object":
             # Single object - simpler query
             if query_patterns and query_patterns.list_all:
@@ -2192,6 +2206,8 @@ def _generate_compact_summary(
             if json_analysis.field_types:
                 field_strs = [ft.name for ft in json_analysis.field_types[:10]]
                 parts.append(f"  FIELDS: {', '.join(field_strs)}")
+            if json_analysis.json_digest:
+                parts.append(f"  JSON_DIGEST: {json_analysis.json_digest.summary_line()}")
 
         # Error warning - important
         if json_analysis.detected_patterns and json_analysis.detected_patterns.error_present:
@@ -2271,6 +2287,8 @@ def _generate_compact_summary(
                                 f"  → QUERY: SELECT {extracts} "
                                 f"FROM __tool_results WHERE result_id='{result_id}'"
                             )
+                    if emb.json_digest:
+                        parts.append(f"  JSON_DIGEST: {emb.json_digest.summary_line()}")
 
                 elif emb.format == "json_lines":
                     parts.append(f"\n  🧩 JSON LINES in {emb.path} (~{emb.line_count} lines)")
@@ -2463,6 +2481,8 @@ def analyze_result(result_text: str, result_id: str) -> ResultAnalysis:
             json_analysis = analyze_json(parsed, result_id)
         else:
             json_analysis = JsonAnalysis(pattern="scalar")
+        if json_analysis and isinstance(parsed, (dict, list)):
+            json_analysis.json_digest = _build_json_digest(parsed, raw_json=analysis_text)
     else:
         text_analysis = analyze_text(analysis_text)
 
@@ -2526,6 +2546,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             "pattern": ja.pattern,
             "wrapper_path": ja.wrapper_path,
         }
+        if ja.json_digest:
+            result["json"]["digest"] = ja.json_digest.to_dict()
         if ja.primary_array:
             result["json"]["primary_array"] = {
                 "path": ja.primary_array.path,
@@ -2556,6 +2578,8 @@ def analysis_to_dict(analysis: ResultAnalysis) -> Dict[str, Any]:
             }
             if ec.text_digest:
                 payload["digest"] = ec.text_digest.to_dict()
+            if ec.json_digest:
+                payload["digest"] = ec.json_digest.to_dict()
             if ec.csv_info:
                 payload["csv"] = {
                     "columns": ec.csv_info.columns[:15],

@@ -466,6 +466,17 @@ class FullAnalysisTests(SimpleTestCase):
 
         self.assertIn("DIGEST:", analysis.compact_summary)
 
+    def test_compact_summary_includes_json_digest(self):
+        data = [
+            {"id": 1, "name": "First"},
+            {"id": 2, "name": "Second"},
+        ]
+        result_text = json.dumps(data)
+
+        analysis = analyze_result(result_text, "json-digest-test")
+
+        self.assertIn("JSON_DIGEST:", analysis.compact_summary)
+
 
 @tag("batch_result_analysis")
 class AnalysisSerializationTests(SimpleTestCase):
@@ -488,6 +499,7 @@ class AnalysisSerializationTests(SimpleTestCase):
         self.assertEqual(result["size"]["category"], "small")
         self.assertIn("json", result)
         self.assertIn("pattern", result["json"])
+        self.assertIn("digest", result["json"])
 
     def test_analysis_to_dict_text(self):
         text = """id,name,email
@@ -685,6 +697,7 @@ class EdgeCaseTests(SimpleTestCase):
         self.assertEqual(emb.path, "$.result")
         self.assertEqual(emb.format, "json")
         self.assertIsNotNone(emb.json_info)
+        self.assertIsNotNone(emb.json_digest)
         self.assertEqual(emb.json_info.primary_array_path, "$.items")
         self.assertIn("GET JSON", analysis.compact_summary)
 

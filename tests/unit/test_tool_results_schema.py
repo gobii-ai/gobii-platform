@@ -146,7 +146,11 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertIn("CSV", prompt_info.meta)
 
     def test_fresh_text_result_adds_barbell_hint(self):
-        long_text = "Header\n" + ("Content " * 1200) + "\nFooter"
+        long_text = (
+            "Header: Intro\n"
+            + ("Content line with punctuation, commas, and numbers 123. " * 400)
+            + "\nFooter: End"
+        )
         record = tool_results.ToolCallResultRecord(
             step_id="step-4",
             tool_name="http_request",

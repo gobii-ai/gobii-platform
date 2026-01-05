@@ -898,7 +898,7 @@ User: "What are the top mass transit systems by ridership?"
 #### Asia-Pacific · 7 systems · 16.2B riders
 
 <details>
-<summary><b>🥇 Tokyo Metro</b> — 3.6 billion riders/year</summary>
+<summary><b>🥇 [Tokyo Metro](${details_url})</b> — 3.6 billion riders/year</summary>
 
 The world's busiest. 13 lines, 290 stations.
 
@@ -906,15 +906,13 @@ The world's busiest. 13 lines, 290 stations.
 |--------|-------|
 | Daily riders | 9.8 million |
 | Peak capacity | 200% (they hire professional pushers) |
-| Oldest line | Ginza (1927) |
+| Oldest line | [Ginza](${line_url}) (1927) |
 | Notable | Only metro with a dedicated poetry car |
-
-→ [Full profile](${details_url})
 
 </details>
 
 <details>
-<summary><b>🥈 Shanghai Metro</b> — 2.3B riders</summary>
+<summary><b>🥈 [Shanghai Metro](${details_url})</b> — 2.3B riders</summary>
 
 From zero to world's largest network in 30 years.
 
@@ -923,8 +921,6 @@ From zero to world's largest network in 30 years.
 | Track length | 831 km (#1 globally) |
 | Lines | 20 |
 | Growth | +12% YoY |
-
-→ [Full profile](${details_url})
 
 </details>
 
@@ -1755,6 +1751,7 @@ Row count vs page size determines if more fetching is needed.
 | Goal | Pattern |
 |------|---------|
 | Persist + derive | `CREATE TABLE t AS WITH raw AS (...), mapped AS (...), classified AS (...) SELECT * FROM classified` |
+| Always extract URLs | `SELECT ..., json_extract(r.value,'$.url') AS url, json_extract(r.value,'$.link') AS link` — every table needs URLs for output |
 | Add column later | `ALTER TABLE t ADD COLUMN <col> <type>; UPDATE t SET <col> = <expr>` |
 | Batch transform | `WITH src AS (SELECT ...) UPDATE t SET x=(SELECT expr FROM src WHERE src.id=t.id)` |
 | Classify via CASE | `CASE WHEN x LIKE '%pat%' THEN 'a' WHEN y > 100 THEN 'b' ELSE 'c' END` |
@@ -4852,11 +4849,15 @@ def _get_system_instruction(
         "Sources are sacred. When you fetch data from the world, you're bringing back knowledge—and knowledge deserves attribution. "
         "Every fact you retrieve should carry its origin, woven naturally into your message. The user should be able to trace any claim back to its source with a single click. "
 
-        "Link generously. When in doubt, add the link. Every company name, every person, every product, every article, every thread you mention—if you fetched a URL for it, make it clickable. "
-        "Your data is full of URLs. Use them all. A response with ten elegant links is better than one with two. The user can ignore links they don't need; they can't click links you didn't include. "
+        "Link generously—ten links beats two. Every name you mention should be clickable if you have its URL. "
+        "Users can ignore links they don't need; they can't click links you didn't include. "
 
-        "Mine your data for links. A LinkedIn profile gives you the person's URL, their company's URL, previous companies, education. A Crunchbase response has the company, investors, founders, funding rounds—each with URLs. "
-        "Search results give you URLs for every item. Scraped pages have embedded links. Extract them, store them, weave them into your output. "
+        "Mine your data for URLs: "
+        "- LinkedIn profiles → person URL, company URL, previous companies, education institutions "
+        "- Crunchbase → company, investors, founders, funding rounds—each linkable "
+        "- Search results → every item has a URL "
+        "- Scraped pages → embedded links throughout "
+        "Extract them in your queries. Store them in your tables. Weave them into output. "
 
         "Here's the difference between good and great: "
         "  Sourceless: 'Bitcoin is at $67,000.' (Where did this come from? The user can't verify.) "
