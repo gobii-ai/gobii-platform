@@ -2561,7 +2561,18 @@ def _get_work_completion_prompt(
                 9,  # Highest weight - must stop
             )
         else:
-            # No cards at all - nothing to do
+            # No cards at all
+            if agent.schedule:
+                # Schedule-triggered with empty board - prompt to evaluate and add cards
+                return (
+                    "schedule_triggered_empty",
+                    (
+                        "📅 Schedule triggered with empty kanban board.\n"
+                        "First step: evaluate your charter and add cards for any work needed.\n"
+                        "If nothing to do, respond with an empty message or `sleep_until_next_trigger`."
+                    ),
+                    5,
+                )
             return None
 
     has_schedule = bool(agent.schedule)
@@ -3270,8 +3281,7 @@ def _get_system_instruction(
             "**How stopping works (implied send mode):**\n"
             "- Text-only replies continue by default (up to 2 before auto-stop)\n"
             "- **Kanban all-done = instant stop** — marking the last card done ends your session immediately\n"
-            "- Keep at least one card in 'doing' while working; only mark the last one done when delivering final results\n"
-            "- Include your final message in the same turn as the last card completion\n"
+            "- Keep at least one card in 'doing' while working; close out atomically (mark last card done + final message + `will_continue_work=false`)\n"
             "- To stop early: use `sleep_until_next_trigger`\n"
         )
     else:
@@ -3280,7 +3290,7 @@ def _get_system_instruction(
             "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
             "Set false only after verifying no todo/doing cards remain. "
             "**Kanban all-done = instant stop** — you won't get another turn after marking the last card done. "
-            "Keep at least one card in 'doing' while working.\n"
+            "Keep at least one card in 'doing' while working; close out atomically (mark last card done + final results + `will_continue_work=false`).\n"
         )
 
     delivery_instructions = (
@@ -3389,7 +3399,8 @@ def _get_system_instruction(
         "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. If you mark your last card done, you won't get another turn—even to create new cards. Transition atomically: complete last card + deliver results in the same response.\n\n"
+        "- **Share before marking done.** If work is complete but not yet shared with the user, share it first—then mark cards done. Marking done triggers auto-stop; share your findings in the same response.\n"
+        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. Close out atomically: mark last card done + deliver final results + `will_continue_work=false`, all in one response.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "

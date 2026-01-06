@@ -2662,9 +2662,22 @@ def _run_agent_loop(
                     continue
                 if not message_text and not thinking_content:
                     # Truly empty response (no text, no thinking, no tools) = agent is done
+                    # Log kanban state to help diagnose premature termination
+                    kanban_state = "unknown"
+                    try:
+                        from .prompt_context import get_kanban_snapshot
+                        snap = get_kanban_snapshot(agent)
+                        if snap:
+                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                    except Exception:
+                        pass
                     logger.info(
-                        "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping.",
+                        "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
+                        "Kanban at termination: %s. Raw msg_content type=%s, len=%s",
                         agent.id,
+                        kanban_state,
+                        type(msg_content).__name__,
+                        len(msg_content) if msg_content else 0,
                     )
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
@@ -2679,11 +2692,29 @@ def _run_agent_loop(
                 effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
 
                 if reasoning_only_streak >= effective_limit:
+                    # Log kanban state to help diagnose premature termination
+                    kanban_state = "unknown"
+                    try:
+                        from .prompt_context import get_kanban_snapshot
+                        snap = get_kanban_snapshot(agent)
+                        if snap:
+                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                            if snap.todo_count > 0 or snap.doing_count > 0:
+                                logger.warning(
+                                    "Agent %s: auto-sleeping with unfinished kanban work! %s",
+                                    agent.id,
+                                    kanban_state,
+                                )
+                    except Exception:
+                        pass
                     logger.info(
-                        "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping.",
+                        "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
+                        "Kanban: %s. Last message preview: %.100s",
                         agent.id,
                         reasoning_only_streak,
                         effective_limit,
+                        kanban_state,
+                        message_text or thinking_content or "(none)",
                     )
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
@@ -3046,6 +3077,10 @@ def _run_agent_loop(
                 and kanban_board_snapshot.doing_count == 0
                 and kanban_board_snapshot.done_count > 0
             )
+            kanban_has_work = (
+                kanban_board_snapshot is not None
+                and (kanban_board_snapshot.todo_count > 0 or kanban_board_snapshot.doing_count > 0)
+            )
             if kanban_all_done and followup_required and not all_calls_sleep and not any_explicit_continuation:
                 logger.info(
                     "Agent %s: kanban shows all work complete (done=%d), overriding followup_required to allow auto-sleep.",
@@ -3058,6 +3093,16 @@ def _run_agent_loop(
                     "Agent %s: kanban all done but agent explicitly requested continuation; allowing one more turn.",
                     agent.id,
                 )
+            # Kanban unfinished override: if work remains and no explicit sleep, force continuation
+            # This prevents premature termination when tools return auto_sleep_ok but kanban has tasks
+            elif kanban_has_work and not followup_required and not all_calls_sleep:
+                logger.warning(
+                    "Agent %s: kanban has unfinished work (todo=%d, doing=%d) but tools signaled auto-sleep; forcing continuation.",
+                    agent.id,
+                    kanban_board_snapshot.todo_count,
+                    kanban_board_snapshot.doing_count,
+                )
+                followup_required = True
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
@@ -3065,6 +3110,7 @@ def _run_agent_loop(
                 return cumulative_token_usage
             elif (
                 not followup_required
+                and not any_explicit_continuation
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
             ):
@@ -3074,6 +3120,11 @@ def _run_agent_loop(
                 )
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
+            elif not followup_required and any_explicit_continuation:
+                logger.info(
+                    "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",
+                    agent.id,
+                )
             else:
                 logger.info(
                     "Agent %s: executed %d/%d tool_call(s) this iteration",
