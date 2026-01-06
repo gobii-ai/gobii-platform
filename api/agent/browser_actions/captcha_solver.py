@@ -9,10 +9,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-import requests
-from opentelemetry import trace
 from browser_use import ActionResult
 from browser_use.browser import BrowserSession
+import httpx
+from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict
 
 from config import settings
@@ -25,6 +25,7 @@ CAPSOLVER_GET_TASK_URL = "https://api.capsolver.com/getTaskResult"
 CAPSOLVER_REQUEST_TIMEOUT_SEC = 30
 CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC = 5
 CAPSOLVER_DEFAULT_MAX_WAIT_SEC = 120
+CAPTCHA_DETECTION_ERRORS = (RuntimeError, ConnectionError)
 
 
 @dataclass(frozen=True)
@@ -73,13 +74,13 @@ def _extract_site_key_from_url(src: Optional[str]) -> Optional[str]:
 async def _find_site_key_by_selector(page, selector: str) -> Optional[str]:
     try:
         elements = await page.get_elements_by_css_selector(selector)
-    except Exception:
+    except CAPTCHA_DETECTION_ERRORS:
         logger.debug("Failed querying selector %s for captcha detection", selector, exc_info=True)
         return None
     for element in elements:
         try:
             site_key = await element.get_attribute("data-sitekey")
-        except Exception:
+        except CAPTCHA_DETECTION_ERRORS:
             logger.debug("Failed reading data-sitekey from %s", selector, exc_info=True)
             continue
         if site_key:
@@ -90,13 +91,13 @@ async def _find_site_key_by_selector(page, selector: str) -> Optional[str]:
 async def _find_site_key_by_iframe(page, token: str) -> Optional[str]:
     try:
         elements = await page.get_elements_by_css_selector(f"iframe[src*='{token}']")
-    except Exception:
+    except CAPTCHA_DETECTION_ERRORS:
         logger.debug("Failed querying iframe selector for token %s", token, exc_info=True)
         return None
     for element in elements:
         try:
             src = await element.get_attribute("src")
-        except Exception:
+        except CAPTCHA_DETECTION_ERRORS:
             logger.debug("Failed reading iframe src for token %s", token, exc_info=True)
             continue
         site_key = _extract_site_key_from_url(src)
@@ -124,14 +125,14 @@ async def _detect_captcha(page) -> Optional[_CaptchaDetection]:
 
     try:
         data_key_elements = await page.get_elements_by_css_selector("[data-sitekey]")
-    except Exception:
+    except CAPTCHA_DETECTION_ERRORS:
         logger.debug("Failed querying data-sitekey elements", exc_info=True)
         data_key_elements = []
     for element in data_key_elements:
         try:
             class_name = (await element.get_attribute("class")) or ""
             site_key = await element.get_attribute("data-sitekey")
-        except Exception:
+        except CAPTCHA_DETECTION_ERRORS:
             logger.debug("Failed reading attributes from data-sitekey element", exc_info=True)
             continue
         if not site_key:
@@ -186,8 +187,12 @@ def _capsolver_error_message(payload: Any) -> Optional[str]:
     return "CapSolver returned an error response."
 
 
-def _capsolver_create_task(api_key: str, task_payload: dict[str, Any]) -> dict[str, Any]:
-    response = requests.post(
+async def _capsolver_create_task(
+    client: httpx.AsyncClient,
+    api_key: str,
+    task_payload: dict[str, Any],
+) -> dict[str, Any]:
+    response = await client.post(
         CAPSOLVER_CREATE_TASK_URL,
         json={"clientKey": api_key, "task": task_payload},
         timeout=CAPSOLVER_REQUEST_TIMEOUT_SEC,
@@ -196,7 +201,8 @@ def _capsolver_create_task(api_key: str, task_payload: dict[str, Any]) -> dict[s
     return response.json()
 
 
-def _capsolver_poll_result(
+async def _capsolver_poll_result(
+    client: httpx.AsyncClient,
     api_key: str,
     task_id: str,
     poll_interval_sec: float,
@@ -204,8 +210,8 @@ def _capsolver_poll_result(
 ) -> dict[str, Any]:
     deadline = time.monotonic() + max_wait_sec
     while True:
-        time.sleep(poll_interval_sec)
-        response = requests.post(
+        await asyncio.sleep(poll_interval_sec)
+        response = await client.post(
             CAPSOLVER_GET_TASK_URL,
             json={"clientKey": api_key, "taskId": task_id},
             timeout=CAPSOLVER_REQUEST_TIMEOUT_SEC,
@@ -269,6 +275,85 @@ async def _inject_captcha_token(page, token: str) -> int:
         return 0
 
 
+def _parse_detect_timeout_ms(detect_timeout_ms: Optional[int]) -> tuple[Optional[int], Optional[str]]:
+    if detect_timeout_ms is None:
+        return None, None
+    try:
+        timeout_ms = int(detect_timeout_ms)
+    except (TypeError, ValueError):
+        return None, "Error: detect_timeout_ms must be an integer value in milliseconds."
+    if timeout_ms <= 0:
+        return None, "Error: detect_timeout_ms must be a positive integer value in milliseconds."
+    return timeout_ms, None
+
+
+def _build_options_payload(
+    options: Optional[list[CaptchaOption]],
+) -> tuple[list[dict[str, Any]], Optional[str]]:
+    if not options:
+        return [], None
+    options_payload: list[dict[str, Any]] = []
+    for option in options:
+        if isinstance(option, CaptchaOption):
+            options_payload.append(option.model_dump(exclude_none=True))
+        elif isinstance(option, dict):
+            options_payload.append(dict(option))
+        else:
+            return [], "Error: options must be a list of objects."
+    return options_payload, None
+
+
+def _select_task_payload(options_payload: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    for option in options_payload:
+        if option.get("disabled"):
+            continue
+        return _normalize_task_payload(option)
+    return None
+
+
+async def _detect_captcha_with_timeout(page, detect_timeout_ms: Optional[int]) -> Optional[_CaptchaDetection]:
+    if detect_timeout_ms:
+        deadline = time.monotonic() + (detect_timeout_ms / 1000)
+        while time.monotonic() <= deadline:
+            detection = await _detect_captcha(page)
+            if detection:
+                return detection
+            await asyncio.sleep(0.5)
+        return None
+    return await _detect_captcha(page)
+
+
+def _build_task_payload(
+    detection: Optional[_CaptchaDetection],
+    page_url: str,
+    selected_task_payload: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    if selected_task_payload is None:
+        if not detection:
+            return None, "No supported CAPTCHA detected on the page."
+        task_payload = {
+            "type": detection.task_type,
+            "websiteURL": page_url,
+            "websiteKey": detection.site_key,
+        }
+    else:
+        task_payload = _normalize_task_payload(selected_task_payload)
+
+    task_payload = _normalize_task_payload(task_payload)
+    if "websiteURL" not in task_payload and page_url:
+        task_payload["websiteURL"] = page_url
+    if "websiteKey" not in task_payload and detection:
+        task_payload["websiteKey"] = detection.site_key
+    if "type" not in task_payload and detection:
+        task_payload["type"] = detection.task_type
+
+    missing_fields = [field for field in ("type", "websiteURL", "websiteKey") if not task_payload.get(field)]
+    if missing_fields:
+        return None, "Error: CapSolver task is missing required fields: " + ", ".join(missing_fields)
+
+    return task_payload, None
+
+
 def register_captcha_actions(controller) -> None:
     """Register the CAPTCHA solver action with the given controller."""
 
@@ -287,19 +372,12 @@ def register_captcha_actions(controller) -> None:
                     include_in_memory=False,
                 )
 
-            if detect_timeout_ms is not None:
-                try:
-                    detect_timeout_ms = int(detect_timeout_ms)
-                except (TypeError, ValueError):
-                    return ActionResult(
-                        extracted_content="Error: detect_timeout_ms must be an integer value in milliseconds.",
-                        include_in_memory=False,
-                    )
-                if detect_timeout_ms <= 0:
-                    return ActionResult(
-                        extracted_content="Error: detect_timeout_ms must be a positive integer value in milliseconds.",
-                        include_in_memory=False,
-                    )
+            detect_timeout_ms, error_message = _parse_detect_timeout_ms(detect_timeout_ms)
+            if error_message:
+                return ActionResult(
+                    extracted_content=error_message,
+                    include_in_memory=False,
+                )
 
             span.set_attribute("captcha.detect_timeout_ms", detect_timeout_ms or 0)
             span.set_attribute("captcha.has_options", bool(options))
@@ -312,65 +390,21 @@ def register_captcha_actions(controller) -> None:
                     include_in_memory=False,
                 )
 
-            detection: Optional[_CaptchaDetection] = None
-            if detect_timeout_ms:
-                deadline = time.monotonic() + (detect_timeout_ms / 1000)
-                while time.monotonic() <= deadline:
-                    detection = await _detect_captcha(page)
-                    if detection:
-                        break
-                    await asyncio.sleep(0.5)
-            else:
-                detection = await _detect_captcha(page)
+            detection = await _detect_captcha_with_timeout(page, detect_timeout_ms)
 
-            options_payload: list[dict[str, Any]] = []
-            if options:
-                for option in options:
-                    if isinstance(option, CaptchaOption):
-                        options_payload.append(option.model_dump(exclude_none=True))
-                    elif isinstance(option, dict):
-                        options_payload.append(dict(option))
-                    else:
-                        return ActionResult(
-                            extracted_content="Error: options must be a list of objects.",
-                            include_in_memory=False,
-                        )
-
-            task_payload: Optional[dict[str, Any]] = None
-            for option in options_payload:
-                if option.get("disabled"):
-                    continue
-                task_payload = _normalize_task_payload(option)
-                break
-
-            page_url = await page.get_url()
-            if task_payload is None:
-                if not detection:
-                    return ActionResult(
-                        extracted_content="No supported CAPTCHA detected on the page.",
-                        include_in_memory=False,
-                    )
-                task_payload = {
-                    "type": detection.task_type,
-                    "websiteURL": page_url,
-                    "websiteKey": detection.site_key,
-                }
-
-            task_payload = _normalize_task_payload(task_payload)
-            if "websiteURL" not in task_payload and page_url:
-                task_payload["websiteURL"] = page_url
-            if "websiteKey" not in task_payload and detection:
-                task_payload["websiteKey"] = detection.site_key
-            if "type" not in task_payload and detection:
-                task_payload["type"] = detection.task_type
-
-            missing_fields = [field for field in ("type", "websiteURL", "websiteKey") if not task_payload.get(field)]
-            if missing_fields:
+            options_payload, options_error = _build_options_payload(options)
+            if options_error:
                 return ActionResult(
-                    extracted_content=(
-                        "Error: CapSolver task is missing required fields: "
-                        + ", ".join(missing_fields)
-                    ),
+                    extracted_content=options_error,
+                    include_in_memory=False,
+                )
+
+            selected_task_payload = _select_task_payload(options_payload)
+            page_url = await page.get_url()
+            task_payload, task_error = _build_task_payload(detection, page_url, selected_task_payload)
+            if task_error:
+                return ActionResult(
+                    extracted_content=task_error,
                     include_in_memory=False,
                 )
 
@@ -380,51 +414,52 @@ def register_captcha_actions(controller) -> None:
             if detection:
                 span.set_attribute("captcha.detected_type", detection.captcha_type)
 
-            try:
-                create_payload = await asyncio.to_thread(_capsolver_create_task, api_key, task_payload)
-            except requests.RequestException as exc:
-                logger.exception("CapSolver createTask request failed")
-                return ActionResult(
-                    extracted_content=f"CapSolver createTask failed: {exc}",
-                    include_in_memory=False,
-                )
+            async with httpx.AsyncClient() as client:
+                try:
+                    create_payload = await _capsolver_create_task(client, api_key, task_payload)
+                except httpx.HTTPError as exc:
+                    logger.exception("CapSolver createTask request failed")
+                    return ActionResult(
+                        extracted_content=f"CapSolver createTask failed: {exc}",
+                        include_in_memory=False,
+                    )
 
-            error_message = _capsolver_error_message(create_payload)
-            if error_message:
-                return ActionResult(
-                    extracted_content=f"CapSolver createTask error: {error_message}",
-                    include_in_memory=False,
-                )
+                error_message = _capsolver_error_message(create_payload)
+                if error_message:
+                    return ActionResult(
+                        extracted_content=f"CapSolver createTask error: {error_message}",
+                        include_in_memory=False,
+                    )
 
-            task_id = create_payload.get("taskId") if isinstance(create_payload, dict) else None
-            if not task_id:
-                return ActionResult(
-                    extracted_content="CapSolver did not return a taskId.",
-                    include_in_memory=False,
-                )
-            span.set_attribute("captcha.task_id", str(task_id))
+                task_id = create_payload.get("taskId") if isinstance(create_payload, dict) else None
+                if not task_id:
+                    return ActionResult(
+                        extracted_content="CapSolver did not return a taskId.",
+                        include_in_memory=False,
+                    )
+                span.set_attribute("captcha.task_id", str(task_id))
 
-            try:
-                result_payload = await asyncio.to_thread(
-                    _capsolver_poll_result,
-                    api_key,
-                    str(task_id),
-                    CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC,
-                    CAPSOLVER_DEFAULT_MAX_WAIT_SEC,
-                )
-            except requests.RequestException as exc:
-                logger.exception("CapSolver getTaskResult request failed")
-                return ActionResult(
-                    extracted_content=f"CapSolver getTaskResult failed: {exc}",
-                    include_in_memory=False,
-                )
+                try:
+                    result_payload = await _capsolver_poll_result(
+                        client,
+                        api_key,
+                        str(task_id),
+                        CAPSOLVER_DEFAULT_POLL_INTERVAL_SEC,
+                        CAPSOLVER_DEFAULT_MAX_WAIT_SEC,
+                    )
+                except httpx.HTTPError as exc:
+                    logger.exception("CapSolver getTaskResult request failed")
+                    return ActionResult(
+                        extracted_content=f"CapSolver getTaskResult failed: {exc}",
+                        include_in_memory=False,
+                    )
 
-            error_message = _capsolver_error_message(result_payload)
-            if error_message:
-                return ActionResult(
-                    extracted_content=f"CapSolver getTaskResult error: {error_message}",
-                    include_in_memory=False,
-                )
+                error_message = _capsolver_error_message(result_payload)
+                if error_message:
+                    return ActionResult(
+                        extracted_content=f"CapSolver getTaskResult error: {error_message}",
+                        include_in_memory=False,
+                    )
 
             status = result_payload.get("status") if isinstance(result_payload, dict) else None
             if status != "ready":

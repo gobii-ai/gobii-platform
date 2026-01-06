@@ -40,31 +40,32 @@ class AddonEntitlementService:
     """Helpers for aggregating active add-on entitlements."""
 
     @staticmethod
+    def _normalize_price_list(*values: Any) -> list[str]:
+        ids: list[str] = []
+        for raw in values:
+            if not raw:
+                continue
+            if isinstance(raw, (list, tuple, set)):
+                candidates = raw
+            else:
+                text = str(raw).strip()
+                if not text:
+                    continue
+                candidates = [part.strip() for part in text.split(",")]
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                cid = str(candidate).strip()
+                if cid and cid not in ids:
+                    ids.append(cid)
+        return ids
+
+    @staticmethod
     def _resolve_price_ids(
         owner_type: str,
         plan_id: str | None,
         plan_version=None,
     ) -> dict[str, list[str]]:
-        def _normalize_price_list(*values: Any) -> list[str]:
-            ids: list[str] = []
-            for raw in values:
-                if not raw:
-                    continue
-                if isinstance(raw, (list, tuple, set)):
-                    candidates = raw
-                else:
-                    text = str(raw).strip()
-                    if not text:
-                        continue
-                    candidates = [part.strip() for part in text.split(",")]
-                for candidate in candidates:
-                    if not candidate:
-                        continue
-                    cid = str(candidate).strip()
-                    if cid and cid not in ids:
-                        ids.append(cid)
-            return ids
-
         if plan_version is not None:
             try:
                 PlanVersionPrice = apps.get_model("api", "PlanVersionPrice")
@@ -225,12 +226,8 @@ class AddonEntitlementService:
         )
         advanced_captcha_resolution_delta = 0
 
-        if (
-            not allow_zero_delta
-            and task_delta == 0
-            and contact_delta == 0
-            and browser_task_daily_delta == 0
-            and advanced_captcha_resolution_delta == 0
+        if not allow_zero_delta and not any(
+            (task_delta, contact_delta, browser_task_daily_delta, advanced_captcha_resolution_delta)
         ):
             return None
 
