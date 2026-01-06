@@ -3,6 +3,7 @@ import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { ToolDetailProvider } from './tooling/ToolDetailContext'
 import { ThinkingBubble } from './ThinkingBubble'
+import { KanbanEventCard } from './KanbanEventCard'
 import type { TimelineEvent } from './types'
 
 type TimelineEventListProps = {
@@ -69,6 +70,9 @@ export const TimelineEventList = memo(function TimelineEventList({
               onToggle={() => handleToggleThinking(event.cursor)}
             />
           )
+        }
+        if (event.kind === 'kanban') {
+          return <KanbanEventCard key={event.cursor} event={event} />
         }
         return <ToolClusterCard key={event.cursor} cluster={event} />
       })}

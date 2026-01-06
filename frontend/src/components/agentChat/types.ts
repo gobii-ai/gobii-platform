@@ -6,6 +6,9 @@ import type {
   ToolClusterEvent,
   ToolCallEntry,
   ThinkingEvent,
+  KanbanEvent,
+  KanbanCardChange,
+  KanbanBoardSnapshot,
 } from '../../types/agentChat'
 
 export type AgentTimelineProps = AgentTimelineSnapshot & {
@@ -18,5 +21,8 @@ export type {
   ToolClusterEvent,
   ToolCallEntry,
   ThinkingEvent,
+  KanbanEvent,
+  KanbanCardChange,
+  KanbanBoardSnapshot,
   AgentMessage,
 }

@@ -1,0 +1,308 @@
+/* Kanban Event Card - Clear task visualization */
+
+.kanban-event-card {
+  position: relative;
+  overflow: hidden;
+  padding: 0.75rem 1rem;
+  border-radius: 0.75rem;
+  background: linear-gradient(135deg, #ffffff 0%, #fafbff 100%);
+  border: 1px solid rgba(139, 92, 246, 0.1);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+  animation: kanbanCardEnter 0.3s ease-out forwards;
+  transform-origin: center top;
+}
+
+@keyframes kanbanCardEnter {
+  0% {
+    opacity: 0;
+    transform: scale(0.95) translateY(-4px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* Changes list - the main content */
+.kanban-changes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.kanban-change-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(139, 92, 246, 0.06);
+  opacity: 0;
+  transform: translateX(-8px);
+}
+
+.kanban-change-animate {
+  animation: kanbanSlideIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.kanban-change-item:nth-child(2) { animation-delay: 0.05s; }
+.kanban-change-item:nth-child(3) { animation-delay: 0.1s; }
+.kanban-change-item:nth-child(4) { animation-delay: 0.15s; }
+.kanban-change-item:nth-child(5) { animation-delay: 0.2s; }
+
+@keyframes kanbanSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* Completed items get special treatment */
+.kanban-change-completed {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(255, 255, 255, 0.7) 100%);
+  border-color: rgba(16, 185, 129, 0.15);
+}
+
+/* Action icons */
+.kanban-action-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.kanban-action-icon svg {
+  display: block;
+}
+
+.kanban-action-created {
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #d1d5db;
+  border-radius: 50%;
+}
+
+.kanban-action-started {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  color: #b45309;
+  box-shadow: 0 1px 3px rgba(217, 119, 6, 0.2);
+}
+
+.kanban-action-started svg {
+  animation: kanbanSpin 1.2s linear infinite;
+}
+
+@keyframes kanbanSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.kanban-action-completed {
+  background: linear-gradient(135deg, #d1fae5 0%, #6ee7b7 100%);
+  color: #047857;
+  box-shadow: 0 1px 3px rgba(5, 150, 105, 0.25);
+  animation: kanbanCheckPop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s forwards;
+  transform: scale(0);
+}
+
+@keyframes kanbanCheckPop {
+  0% {
+    transform: scale(0) rotate(-45deg);
+  }
+  60% {
+    transform: scale(1.2) rotate(5deg);
+  }
+  100% {
+    transform: scale(1) rotate(0deg);
+  }
+}
+
+/* Task title */
+.kanban-change-title {
+  flex: 1;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #1f2937;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Status badge */
+.kanban-change-status {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  flex-shrink: 0;
+}
+
+.kanban-status-todo {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.kanban-status-doing {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.kanban-status-done {
+  background: #d1fae5;
+  color: #047857;
+}
+
+/* Board summary section */
+.kanban-board-summary {
+  margin-top: 0.625rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid rgba(139, 92, 246, 0.08);
+}
+
+.kanban-summary-bar {
+  display: flex;
+  height: 0.5rem;
+  border-radius: 0.25rem;
+  overflow: hidden;
+  background: #e5e7eb;
+  gap: 2px;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+.kanban-bar-done {
+  background: linear-gradient(90deg, #10b981, #34d399);
+  transition: flex 0.4s ease-out;
+}
+
+.kanban-bar-doing {
+  background: linear-gradient(90deg, #f59e0b, #fbbf24);
+  transition: flex 0.4s ease-out;
+}
+
+.kanban-bar-todo {
+  background: #d1d5db;
+  transition: flex 0.4s ease-out;
+}
+
+.kanban-summary-counts {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.375rem;
+  justify-content: center;
+}
+
+.kanban-count-item {
+  font-size: 0.6875rem;
+  font-weight: 500;
+}
+
+.kanban-count-sep {
+  color: #d1d5db;
+  font-size: 0.5rem;
+}
+
+/* Completed event card */
+.kanban-event-completed {
+  border-color: rgba(16, 185, 129, 0.25);
+  background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 50%, #fafbff 100%);
+  box-shadow:
+    0 2px 8px rgba(16, 185, 129, 0.1),
+    0 0 0 1px rgba(16, 185, 129, 0.08);
+}
+
+/* Celebration shimmer */
+.kanban-shimmer {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(16, 185, 129, 0.08) 20%,
+    rgba(251, 191, 36, 0.2) 40%,
+    rgba(251, 191, 36, 0.35) 50%,
+    rgba(251, 191, 36, 0.2) 60%,
+    rgba(16, 185, 129, 0.08) 80%,
+    transparent 100%
+  );
+  animation: kanbanShimmer 0.8s ease-out forwards;
+  pointer-events: none;
+  border-radius: inherit;
+}
+
+@keyframes kanbanShimmer {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%) skewX(-15deg);
+    opacity: 0;
+  }
+}
+
+/* Sparkle effect for big wins */
+.kanban-event-completed::after {
+  content: '';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  width: 1rem;
+  height: 1rem;
+  background: radial-gradient(circle, rgba(251, 191, 36, 0.6) 0%, transparent 70%);
+  animation: kanbanSparkle 0.6s ease-out 0.3s forwards;
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes kanbanSparkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2);
+  }
+}
+
+/* Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .kanban-event-card,
+  .kanban-change-item,
+  .kanban-action-completed,
+  .kanban-action-started svg,
+  .kanban-shimmer,
+  .kanban-bar-done {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+
+  .kanban-shimmer,
+  .kanban-event-completed::after {
+    display: none;
+  }
+}
+

@@ -103,6 +103,7 @@ from ..tools.sqlite_agent_config import (
     seed_sqlite_agent_config,
 )
 from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
+from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -2407,6 +2408,18 @@ def _run_agent_loop(
 
             def _apply_kanban_updates() -> bool:
                 kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
+
+                # Broadcast kanban changes to timeline if any
+                if kanban_apply.changes and kanban_apply.snapshot:
+                    try:
+                        broadcast_kanban_changes(agent, kanban_apply.changes, kanban_apply.snapshot)
+                    except Exception:
+                        logger.debug(
+                            "Failed to broadcast kanban changes for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+
                 if not kanban_apply.errors:
                     return False
                 for error in kanban_apply.errors:

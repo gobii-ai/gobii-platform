@@ -29,6 +29,7 @@ from console.agent_audit.serializers import (
 from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
+    serialize_kanban_event,
     serialize_message_event,
     serialize_processing_snapshot,
     serialize_thinking_event,
@@ -227,3 +228,32 @@ def _broadcast_processing(agent):
         )
     except Exception:
         logger.debug("Failed to broadcast processing status to audit channel for agent %s", agent.id, exc_info=True)
+
+
+def broadcast_kanban_changes(agent, changes, snapshot) -> None:
+    """Broadcast kanban card changes to the agent's chat timeline.
+
+    Args:
+        agent: The PersistentAgent that owns the kanban board
+        changes: Sequence of KanbanCardChange objects
+        snapshot: KanbanBoardSnapshot with current board state
+    """
+    if not changes or not snapshot:
+        return
+    if not agent or not agent.id:
+        return
+
+    try:
+        agent_name = getattr(agent, "name", None) or "Agent"
+        # Use first name if available
+        if " " in agent_name:
+            agent_name = agent_name.split()[0]
+
+        payload = serialize_kanban_event(agent_name, changes, snapshot)
+        _send(_group_name(agent.id), "timeline_event", payload)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast kanban changes for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )

@@ -37,10 +37,35 @@ class KanbanSnapshot:
 
 
 @dataclass(frozen=True)
+class KanbanCardChange:
+    """Represents a single card change for timeline visualization."""
+
+    card_id: str
+    title: str
+    action: str  # "created", "started", "completed", "updated"
+    from_status: Optional[str] = None
+    to_status: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class KanbanBoardSnapshot:
+    """Current board state for visualization."""
+
+    todo_count: int
+    doing_count: int
+    done_count: int
+    todo_titles: Sequence[str]  # Top few titles
+    doing_titles: Sequence[str]
+    done_titles: Sequence[str]
+
+
+@dataclass(frozen=True)
 class KanbanApplyResult:
     created_ids: Sequence[str]
     updated_ids: Sequence[str]
     errors: Sequence[str]
+    changes: Sequence[KanbanCardChange] = ()
+    snapshot: Optional[KanbanBoardSnapshot] = None
 
 
 def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
@@ -136,6 +161,7 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
     updated_ids: list[str] = []
     created_ids: list[str] = []
     errors: list[str] = []
+    changes: list[KanbanCardChange] = []
 
     current_cards, read_errors = _read_kanban_cards(agent)
     if read_errors:
@@ -178,6 +204,15 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                     completed_at=completed_at,
                 )
                 created_ids.append(str(card_uuid))
+                # Track the change for timeline
+                changes.append(
+                    KanbanCardChange(
+                        card_id=str(card_uuid),
+                        title=card.title,
+                        action="created",
+                        to_status=card.status,
+                    )
+                )
             except Exception as exc:
                 errors.append(f"Kanban create failed for {card.card_id}: {exc}")
 
@@ -214,6 +249,7 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                 continue
 
             update_fields: list[str] = []
+            old_status = card_obj.status
             if card_obj.title != current_card.title:
                 card_obj.title = current_card.title
                 update_fields.append("title")
@@ -241,8 +277,33 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                 card_obj.save(update_fields=update_fields)
                 updated_ids.append(str(card_uuid))
 
+                # Track meaningful changes for timeline
+                if old_status != current_card.status:
+                    action = _determine_action(old_status, current_card.status)
+                    changes.append(
+                        KanbanCardChange(
+                            card_id=str(card_uuid),
+                            title=current_card.title,
+                            action=action,
+                            from_status=old_status,
+                            to_status=current_card.status,
+                        )
+                    )
+
     _drop_kanban_table()
-    return KanbanApplyResult(created_ids=created_ids, updated_ids=updated_ids, errors=errors)
+
+    # Build board snapshot if there were changes
+    snapshot = None
+    if changes:
+        snapshot = _build_board_snapshot(agent)
+
+    return KanbanApplyResult(
+        created_ids=created_ids,
+        updated_ids=updated_ids,
+        errors=errors,
+        changes=changes,
+        snapshot=snapshot,
+    )
 
 
 def _read_kanban_cards(agent) -> tuple[Optional[dict[str, KanbanCardSnapshot]], list[str]]:
@@ -376,3 +437,42 @@ def _kanban_scope_filter(agent) -> dict:
         "assigned_agent__organization__isnull": True,
         "assigned_agent__user_id": agent.user_id,
     }
+
+
+def _determine_action(old_status: str, new_status: str) -> str:
+    """Determine the action name for a status change."""
+    if new_status == PersistentAgentKanbanCard.Status.DONE:
+        return "completed"
+    if new_status == PersistentAgentKanbanCard.Status.DOING:
+        return "started"
+    # Moving back to todo or other changes
+    return "updated"
+
+
+def _build_board_snapshot(agent) -> KanbanBoardSnapshot:
+    """Build a snapshot of the current board state for visualization."""
+    MAX_TITLES = 5
+
+    card_filter = {"assigned_agent": agent}
+    cards = PersistentAgentKanbanCard.objects.filter(**card_filter).order_by("-priority", "created_at")
+
+    todo_cards = []
+    doing_cards = []
+    done_cards = []
+
+    for card in cards:
+        if card.status == PersistentAgentKanbanCard.Status.TODO:
+            todo_cards.append(card.title)
+        elif card.status == PersistentAgentKanbanCard.Status.DOING:
+            doing_cards.append(card.title)
+        elif card.status == PersistentAgentKanbanCard.Status.DONE:
+            done_cards.append(card.title)
+
+    return KanbanBoardSnapshot(
+        todo_count=len(todo_cards),
+        doing_count=len(doing_cards),
+        done_count=len(done_cards),
+        todo_titles=todo_cards[:MAX_TITLES],
+        doing_titles=doing_cards[:MAX_TITLES],
+        done_titles=done_cards[:MAX_TITLES],
+    )
