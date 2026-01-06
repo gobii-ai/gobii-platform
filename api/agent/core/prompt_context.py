@@ -625,6 +625,8 @@ Example wrap-up (single response with tools):
 - sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');", will_continue_work=false)
 - send_chat_message(body="All done. Sharing results.")
 
+**Final kanban updates = `will_continue_work=false`**: If you've finished the work, presented results to the user, and are only updating kanban to mark cards done, set `will_continue_work=false`. Don't continue just to do housekeeping—wrap it all up in one turn.
+
 WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
 WRONG: send_chat_message(body="Done!") without sqlite_batch UPDATE in same response → card stays open.
 WRONG: `UPDATE ... SET status='done' WHERE status IN ('todo','doing')` → blindly marks incomplete work done.
