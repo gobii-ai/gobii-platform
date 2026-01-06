@@ -386,12 +386,13 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_reasoning_only_content_list_auto_sleeps(
+    def test_reasoning_only_content_list_continues_then_auto_sleeps(
         self,
         mock_completion,
         mock_build_prompt,
         _mock_llm_config,
     ):
+        """Thinking-only responses continue up to MAX_NO_TOOL_STREAK before auto-sleeping."""
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         msg = MagicMock()
@@ -414,10 +415,12 @@ class ImpliedSendTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 3):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 5):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertEqual(mock_completion.call_count, 1)
+        # Should be called MAX_NO_TOOL_STREAK times before auto-sleeping
+        # (thinking content doesn't cause immediate stop; streak limit does)
+        self.assertEqual(mock_completion.call_count, ep.MAX_NO_TOOL_STREAK)
 
         reasoning_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
@@ -502,3 +505,34 @@ class ImpliedSendTests(TestCase):
             description="Decided to sleep until next trigger.",
         ).first()
         self.assertIsNotNone(sleep_step, "Other tool calls should execute even when implied send fails")
+
+
+class ContinuationSignalTests(TestCase):
+    """Tests for the _has_continuation_signal helper function."""
+
+    def test_has_continuation_signal_with_let_me(self):
+        self.assertTrue(ep._has_continuation_signal("Let me check that for you."))
+
+    def test_has_continuation_signal_with_ill(self):
+        self.assertTrue(ep._has_continuation_signal("I'll compile a report now."))
+
+    def test_has_continuation_signal_with_im_going_to(self):
+        self.assertTrue(ep._has_continuation_signal("I'm going to fetch the data."))
+
+    def test_has_continuation_signal_case_insensitive(self):
+        self.assertTrue(ep._has_continuation_signal("LET ME DO THAT"))
+        self.assertTrue(ep._has_continuation_signal("i'll work on it"))
+
+    def test_has_continuation_signal_false_for_done(self):
+        self.assertFalse(ep._has_continuation_signal("All done!"))
+        self.assertFalse(ep._has_continuation_signal("Here are the results."))
+
+    def test_has_continuation_signal_empty(self):
+        self.assertFalse(ep._has_continuation_signal(""))
+        self.assertFalse(ep._has_continuation_signal(None))
+
+    def test_has_continuation_signal_with_working_on(self):
+        self.assertTrue(ep._has_continuation_signal("I'm currently working on the analysis."))
+
+    def test_has_continuation_signal_with_proceeding_to(self):
+        self.assertTrue(ep._has_continuation_signal("Proceeding to extract the data."))

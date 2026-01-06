@@ -1869,7 +1869,8 @@ def build_prompt_context(
             implied_send_status = (
                 f"## Implied Send → {display_name}\n\n"
                 f"Your text auto-sends to the active web chat user.\n"
-                f"Text-only = immediate stop. Include a tool call if you have more work.\n\n"
+                f"You'll continue working after text-only replies (2 max before auto-stop).\n"
+                f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
                 "**To reach someone else**, use explicit tools:\n"
                 f"- `{tool_example}` ← what implied send does for you\n"
                 "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -1887,9 +1888,9 @@ def build_prompt_context(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → IMMEDIATE STOP after sending. No more turns. No undo.\n"
-            "  Use when: task 100% complete, all kanban cards done, nothing left to fetch/compute/verify\n"
-            "  If uncertain, add will_continue_work=true to ANY tool call to stay in the loop.\n\n"
+            "  → Message sends, you get another turn (up to 2 in a row before auto-stop)\n"
+            "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
+            "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
             "  Use when: acknowledging the user while taking action\n"
@@ -1898,8 +1899,7 @@ def build_prompt_context(
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "Note: A message-only response means you're finished. "
-            "If you still have work to do after replying, include a tool call."
+            "To signal completion: `sleep_until_next_trigger` (explicit stop) or 2 consecutive text-only replies (auto-stop)."
         )
     else:
         response_patterns = (
@@ -2510,6 +2510,113 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         shrinker="hmt",
     )
 
+
+def _get_work_completion_prompt(
+    agent: PersistentAgent,
+    daily_credit_state: dict | None,
+) -> tuple[str, str, int] | None:
+    """Return (section_name, text, weight) for work completion guidance, or None.
+
+    Generates tiered prompts based on:
+    - Kanban state (open cards)
+    - Schedule state (has schedule = safety net)
+    - Credit state (low credits = need to preserve progress)
+    """
+    from decimal import Decimal
+
+    try:
+        doing_cards = list(PersistentAgentKanbanCard.objects.filter(
+            assigned_agent=agent,
+            status=PersistentAgentKanbanCard.Status.DOING,
+        ).values_list("title", flat=True)[:3])
+
+        todo_count = PersistentAgentKanbanCard.objects.filter(
+            assigned_agent=agent,
+            status=PersistentAgentKanbanCard.Status.TODO,
+        ).count()
+
+        open_cards = len(doing_cards) + todo_count
+    except Exception:
+        return None
+
+    if open_cards <= 0:
+        return None
+
+    has_schedule = bool(agent.schedule)
+
+    # Determine credit pressure
+    low_credits = False
+    if daily_credit_state:
+        soft_remaining = daily_credit_state.get("soft_target_remaining")
+        hard_remaining = daily_credit_state.get("hard_limit_remaining")
+        # Low if soft target remaining < 5 or hard limit remaining < 10
+        if soft_remaining is not None and soft_remaining < Decimal("5"):
+            low_credits = True
+        elif hard_remaining is not None and hard_remaining < Decimal("10"):
+            low_credits = True
+
+    # Build cards description
+    cards_desc = f"{len(doing_cards)} doing, {todo_count} todo"
+    if doing_cards:
+        preview = ", ".join(doing_cards[:2])
+        if len(doing_cards) > 2:
+            preview += "..."
+        cards_desc += f" (doing: {preview})"
+
+    if not has_schedule and not low_credits:
+        # CRITICAL: No safety net, must complete work or set schedule
+        return (
+            "work_completion_required",
+            (
+                f"🚨 UNFINISHED WORK: {open_cards} card(s) ({cards_desc}).\n"
+                "Before stopping, you MUST either:\n"
+                "• Complete tasks: `UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
+                "• OR set a schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
+                "Do NOT use sleep_until_next_trigger or let auto-stop happen until one of these is done."
+            ),
+            8,  # High weight - critical
+        )
+
+    elif not has_schedule and low_credits:
+        # RESCUE: Low credits, no schedule - must set schedule to continue tomorrow
+        return (
+            "work_rescue_required",
+            (
+                f"⚠️ LOW CREDITS + UNFINISHED WORK: {open_cards} card(s) ({cards_desc}).\n"
+                "Credits running low. Before stopping:\n"
+                "1. Update cards with current progress (what you've learned)\n"
+                "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
+                "This ensures you resume when credits reset."
+            ),
+            8,
+        )
+
+    elif has_schedule and low_credits:
+        # Schedule is set, credits low - just save progress
+        return (
+            "work_handoff",
+            (
+                f"📋 {open_cards} card(s) in progress ({cards_desc}). Credits low, schedule set.\n"
+                "Save current progress to cards. Your schedule will bring you back.\n"
+                "End with \"Continuing...\" if you want one more turn before auto-stop."
+            ),
+            4,
+        )
+
+    else:  # has_schedule and not low_credits
+        # Normal case: Has schedule, has credits - encourage completion
+        return (
+            "work_in_progress",
+            (
+                f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
+                "Continue working. Mark done when complete: "
+                "`UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
+                "End with \"Continuing...\" to signal more work coming."
+            ),
+            4,
+        )
+
+
 def add_budget_awareness_sections(
     critical_group,
     *,
@@ -2542,23 +2649,13 @@ def add_budget_awareness_sections(
         )
     sections.append(("iteration_progress", iteration_text, 3, True))
 
-    # Kanban status reminder - appears in critical section right before agent responds
+    # Work-aware stop protection - tiered prompts based on kanban/schedule/credits
     if agent:
         try:
-            open_cards = PersistentAgentKanbanCard.objects.filter(
-                assigned_agent=agent,
-                status__in=[
-                    PersistentAgentKanbanCard.Status.TODO,
-                    PersistentAgentKanbanCard.Status.DOING,
-                ],
-            ).count()
-            if open_cards > 0:
-                sections.append((
-                    "kanban_status",
-                    f"⚠️ {open_cards} kanban card(s) not done—mark done before will_continue_work=false.",
-                    4,
-                    True,
-                ))
+            work_prompt = _get_work_completion_prompt(agent, daily_credit_state)
+            if work_prompt:
+                name, text, weight = work_prompt
+                sections.append((name, text, weight, True))  # non_shrinkable=True
         except Exception:
             pass
 
@@ -2961,24 +3058,23 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
+    # MAX_NO_TOOL_STREAK=2, so warn that auto-stop is imminent
+    urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
-            "(1) Nothing to say? sleep_until_next_trigger with no text. "
-            "(2) Replying + taking action? Text (delivered to active web chat) + tool calls. "
-            "For SMS/email, use send_email/send_sms explicitly. "
-            "(3) Replying only? Text + sleep_until_next_trigger. "
-            "Avoid empty status updates like 'nothing to report'."
+            "(1) More work? Include a tool call, or end message with \"Continuing...\" "
+            "(2) Replying + taking action? Text + tool calls. "
+            "(3) Done? sleep_until_next_trigger."
         )
     else:
         patterns = (
-            "(1) Nothing to say? sleep_until_next_trigger with no text. "
-            "(2) Need to reply? Use explicit send tools like send_chat_message/send_email/send_sms/send_agent_message. "
-            "(3) Working quietly? tools only. "
-            "Avoid empty status updates like 'nothing to report'."
+            "(1) More work? Include a tool call. "
+            "(2) Need to reply? send_chat_message/send_email/send_sms. "
+            "(3) Done? sleep_until_next_trigger."
         )
     return (
-        f"Your previous {streak_label} had no tool calls—please include at least one this time. "
-        f"Quick patterns: {patterns}"
+        f"{urgency}Your previous {streak_label} had no tool calls. "
+        f"Options: {patterns}"
     )
 
 
@@ -3135,7 +3231,7 @@ def _get_system_instruction(
         "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
         "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
-        "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
+        "- Text-only replies continue (2 max before auto-stop). To stop: `sleep_until_next_trigger`.\n\n"
         "**Mid-conversation updates** — update eagerly when user hints:\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
@@ -3156,7 +3252,7 @@ def _get_system_instruction(
         f"{response_delivery_note}"
         "Tool calls are actions you take. "
         f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Text-only OR empty response = IMMEDIATE STOP. Check kanban before stopping—if cards remain, keep working."
+        "Empty response = auto-stop. Text-only = continue (2 max). To stop explicitly: `sleep_until_next_trigger`."
         f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
         f"{stop_continue_examples}"
         "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n"

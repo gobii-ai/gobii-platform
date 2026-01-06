@@ -141,6 +141,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
+MAX_NO_TOOL_STREAK = 2  # Auto-sleep after this many consecutive responses without tool calls
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -157,8 +158,36 @@ MESSAGE_TOOL_BODY_KEYS = {
     "send_chat_message": "body",
     "send_agent_message": "message",
 }
+# Canonical phrase the agent should use to signal continuation.
+# Prompts tell the agent to include this exact phrase when it has more work.
+CANONICAL_CONTINUATION_PHRASE = "Continuing..."
 
-__all__ = ["process_agent_events"]
+# Flexible detection: canonical phrase + natural language variations.
+# Case-insensitive matching against message text or thinking content.
+CONTINUATION_PHRASES = (
+    "continuing...",  # Canonical - exact match
+    "continuing with",
+    "let me ",
+    "i'll ",
+    "i will ",
+    "i'm going to ",
+    "next i ",
+    "now i ",
+    "working on ",
+    "proceeding to ",
+    "moving on to ",
+)
+
+
+def _has_continuation_signal(text: str) -> bool:
+    """Return True if text contains phrases indicating the agent wants to continue."""
+    if not text:
+        return False
+    lower_text = text.lower()
+    return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
+
+
+__all__ = ["process_agent_events", "CANONICAL_CONTINUATION_PHRASE"]
 
 
 @dataclass(frozen=True)
@@ -2571,6 +2600,7 @@ def _run_agent_loop(
             raw_tool_calls = _normalize_tool_calls(msg)
             raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
             has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
+            has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
             has_other_tool_calls = any(
                 name and name != "sleep_until_next_trigger" for name in raw_tool_names
             )
@@ -2578,10 +2608,13 @@ def _run_agent_loop(
             implied_send = False
             tool_calls = list(raw_tool_calls)
             if message_text and not has_explicit_send:
+                # Invert the default: assume continuation unless agent explicitly sleeps.
+                # Agent must call sleep_until_next_trigger to signal "I'm done".
+                implied_will_continue = not has_explicit_sleep
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,
-                    will_continue_work=has_other_tool_calls,
+                    will_continue_work=implied_will_continue,
                 )
                 if implied_call:
                     implied_send = True
@@ -2625,17 +2658,33 @@ def _run_agent_loop(
                 if config_errors or kanban_errors:
                     reasoning_only_streak = 0
                     continue
-                if not message_text:
-                    # Empty response (no text, no tools) = agent is done, auto-sleep
+                if not message_text and not thinking_content:
+                    # Truly empty response (no text, no thinking, no tools) = agent is done
                     logger.info(
-                        "Agent %s: empty response (no message, no tools), auto-sleeping.",
+                        "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping.",
                         agent.id,
                     )
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
-                # Message but no tools handled by implied send above; if we're here,
-                # implied send wasn't available or failed - increment streak
+                # Message or thinking content but no tools - increment streak.
+                # Thinking-only models (e.g., DeepSeek) put responses in thinking blocks;
+                # don't auto-sleep just because message_text is empty.
                 reasoning_only_streak += 1
+
+                # Check for continuation signals like "let me", "I'll", "I'm going to"
+                # in message or thinking content - gives agent one extra pass.
+                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
+                effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
+
+                if reasoning_only_streak >= effective_limit:
+                    logger.info(
+                        "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping.",
+                        agent.id,
+                        reasoning_only_streak,
+                        effective_limit,
+                    )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
                 continue
 
             reasoning_only_streak = 0
