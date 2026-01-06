@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0249_email_oauth_models"),
+        ("api", "0252_merge_20260106_1306"),
     ]
 
     operations = [
