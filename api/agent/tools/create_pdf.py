@@ -535,7 +535,9 @@ def get_create_pdf_tool() -> Dict[str, Any]:
             "name": "create_pdf",
             "description": (
                 "Create a publication-quality PDF from HTML. "
-                "Recommended path: /exports/your-file.pdf. HTML must be self-contained. "
+                "Recommended path: /exports/your-file.pdf. "
+                "\n\nEmbedding charts: Use <img src='«/charts/...»'> with the «path» from create_chart's inline_html. "
+                "The «path» syntax is required—it gets replaced with embedded data. URLs will fail."
                 "\n\nUtility classes:\n"
                 "- .page-break / .page-break-before: force page breaks\n"
                 "- .no-break: keep element together\n"
@@ -590,8 +592,9 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {
             "status": "error",
             "message": (
-                "HTML contains external or local asset references. "
-                "Use «/path» variables (from create_chart/create_csv/create_pdf) for embeds."
+                "HTML contains external or local asset references (URLs are not allowed). "
+                "To embed charts: use <img src='«/charts/...»'> with the «path» from create_chart's inline_html field. "
+                "The «guillemet» syntax is required—it gets replaced with embedded data."
             ),
         }
 

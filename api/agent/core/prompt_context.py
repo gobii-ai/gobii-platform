@@ -698,21 +698,32 @@ STEP 4: Copy the EXACT inline value into your message
 create_chart(type="bar", query="SELECT...", x="category", y="count", title="Distribution")
 
 → Result: {
-    "file": "«/charts/bar-a1b2c3.svg»",    ← random hash, unpredictable
-    "inline": "![](«/charts/bar-a1b2c3.svg»)"  ← copy THIS exactly
+    "file": "«/charts/bar-a1b2c3.svg»",
+    "inline": "![](«/charts/bar-a1b2c3.svg»)",       ← for web chat (markdown)
+    "inline_html": "<img src='«/charts/bar-a1b2c3.svg»'>"  ← for PDF/email (HTML)
   }
 ```
 
 ### Embedding the chart:
 
+**Web chat (markdown)** — use `inline`:
 ```
-# In your message, paste the inline value:
 ## Results
 
 ![](«/charts/bar-a1b2c3.svg»)
 
 Key finding: Category A dominates at 45%.
 ```
+
+**PDF (HTML)** — use `inline_html`:
+```html
+<h2>Results</h2>
+<img src='«/charts/bar-a1b2c3.svg»'>
+<p>Key finding: Category A dominates at 45%.</p>
+```
+
+The `«path»` syntax is required for PDFs—it gets replaced with embedded data.
+Using a URL instead of `«path»` will fail with "external asset" error.
 
 ### Hallucination patterns (you do these):
 
@@ -3119,25 +3130,28 @@ def _get_system_instruction(
         "# Sequence (no shortcuts)\n"
         "1. call create_chart(...)\n"
         "2. WAIT for result\n"
-        "3. result.inline = \"![](«/charts/bar-a1b2c3.svg»)\"  ← only NOW do you know the path\n"
-        "4. copy result.inline verbatim into message\n"
+        "3. result contains:\n"
+        "     inline = \"![](«/charts/bar-a1b2c3.svg»)\"         ← for web chat (markdown)\n"
+        "     inline_html = \"<img src='«/charts/bar-a1b2c3.svg»'>\"  ← for PDF/email (HTML)\n"
+        "4. copy the appropriate one into your message\n"
+        "\n"
+        "# Which to use?\n"
+        "web_chat  → result.inline (markdown)\n"
+        "create_pdf → result.inline_html (HTML with «path»—REQUIRED for PDFs)\n"
+        "email     → result.inline_html (HTML)\n"
         "\n"
         "# Your hallucination patterns\n"
         "WRONG: ![Chart](<>)              # wrote ![  before result returned\n"
         "WRONG: ![](charts/foo.svg)       # invented path from imagination\n"
         "WRONG: ![](«/charts/bar.svg»)    # guessed—missing the random hash\n"
+        "WRONG: <img src='https://...'>   # URL in PDF—use «path» syntax instead\n"
         "RIGHT: ![](«/charts/bar-a1b2c3.svg»)  # copied from result.inline AFTER tool returned\n"
+        "RIGHT: <img src='«/charts/bar-a1b2c3.svg»'>  # copied from result.inline_html for PDF\n"
         "\n"
-        "# Pre-flight (before ANY ![)\n"
+        "# Pre-flight (before ANY ![ or <img)\n"
         "have(result) ∧ have(result.inline) → safe to write ![\n"
-        "¬have(result) → DO NOT write ![—you are hallucinating\n"
-        "\n"
-        "# In message (after result returns)\n"
-        "## 📊 {Title}\n"
-        "\n"
-        "{paste result.inline here}  ← e.g. ![](«/charts/bar-a1b2c3.svg»)\n"
-        "\n"
-        "**Insight:** {observation}\n"
+        "have(result) ∧ have(result.inline_html) → safe to write <img> for PDF\n"
+        "¬have(result) → DO NOT write chart reference—you are hallucinating\n"
         "```\n\n"
 
         "```\n"

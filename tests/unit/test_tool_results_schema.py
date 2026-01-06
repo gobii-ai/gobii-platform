@@ -565,3 +565,65 @@ class PreviewByteLimitTests(SimpleTestCase):
 
         self.assertTrue(is_inline)
         self.assertEqual(preview, small_text)
+
+    def test_fresh_tool_call_under_threshold_shown_inline(self):
+        """Fresh tool calls under 40KB should be shown fully inline with SQLite wrapper."""
+        from api.agent.core.tool_results import (
+            _build_prompt_preview,
+            FRESH_RESULT_INLINE_THRESHOLD,
+        )
+
+        # 30KB text - under threshold
+        medium_text = "x" * 30000
+        preview, is_inline = _build_prompt_preview(
+            medium_text,
+            len(medium_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            is_fresh_tool_call=True,
+        )
+
+        self.assertTrue(is_inline)
+        # Should be wrapped as sqlite result
+        self.assertIn("[Auto-inspected:", preview)
+        self.assertIn("substr(result_text,1,30000)", preview)
+        self.assertIn("30000 chars", preview)
+        self.assertIn(medium_text, preview)
+
+    def test_fresh_tool_call_over_threshold_truncated(self):
+        """Fresh tool calls over 40KB should still be truncated."""
+        from api.agent.core.tool_results import (
+            _build_prompt_preview,
+            FRESH_RESULT_INLINE_THRESHOLD,
+        )
+
+        # 50KB text - over threshold
+        large_text = "y" * 50000
+        preview, is_inline = _build_prompt_preview(
+            large_text,
+            len(large_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            is_fresh_tool_call=True,
+        )
+
+        self.assertFalse(is_inline)
+        self.assertLess(len(preview), len(large_text))
+
+    def test_non_fresh_tool_call_still_truncated(self):
+        """Non-fresh tool calls should follow normal truncation rules."""
+        from api.agent.core.tool_results import _build_prompt_preview
+
+        # 30KB text - under fresh threshold but not fresh
+        medium_text = "z" * 30000
+        preview, is_inline = _build_prompt_preview(
+            medium_text,
+            len(medium_text),
+            recency_position=0,
+            tool_name="mcp_brightdata_scrape_as_markdown",
+            is_fresh_tool_call=False,
+        )
+
+        # Should be truncated since it's not fresh
+        self.assertFalse(is_inline)
+        self.assertLess(len(preview), len(medium_text))
