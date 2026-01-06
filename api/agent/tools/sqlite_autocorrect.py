@@ -389,8 +389,7 @@ def _is_simple_select(select_expr: exp.Select) -> bool:
         return False
     if select_expr.args.get("qualify") is not None:
         return False
-    if select_expr.args.get("from_") is None:
-        return False
+    # Note: FROM clause is NOT required - a CTE can be SELECT 1 AS c1, 2 AS c2
     return True
 
 
