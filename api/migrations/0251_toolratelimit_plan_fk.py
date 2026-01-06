@@ -6,26 +6,57 @@ def _backfill_toolratelimit_plan_ids(apps, schema_editor) -> None:
     ToolRateLimit = apps.get_model("api", "ToolRateLimit")
     ToolConfig = apps.get_model("api", "ToolConfig")
 
-    plan_map = {
-        plan_name: plan_id
-        for plan_name, plan_id in ToolConfig.objects.exclude(plan_name__isnull=True).values_list("plan_name", "id")
-    }
+    rate_table = schema_editor.quote_name(ToolRateLimit._meta.db_table)
+    config_table = schema_editor.quote_name(ToolConfig._meta.db_table)
 
-    missing: set[str] = set()
-    for rate in ToolRateLimit.objects.all().iterator():
-        plan_name = rate.plan_id
-        new_id = plan_map.get(plan_name)
-        if new_id is None:
-            missing.add(str(plan_name))
-            continue
-        rate.plan_new_id = new_id
-        rate.save(update_fields=["plan_new"])
-
-    if missing:
-        raise ValueError(
-            "Missing ToolConfig rows for ToolRateLimit plan_name values: %s"
-            % ", ".join(sorted(missing))
+    with schema_editor.connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT DISTINCT rate.plan_id
+            FROM {rate_table} AS rate
+            LEFT JOIN {config_table} AS config
+              ON config.plan_name = rate.plan_id
+            WHERE rate.plan_id IS NOT NULL
+              AND config.id IS NULL
+            """.format(
+                rate_table=rate_table,
+                config_table=config_table,
+            )
         )
+        missing = [row[0] for row in cursor.fetchall()]
+        if missing:
+            raise ValueError(
+                "Missing ToolConfig rows for ToolRateLimit plan_name values: %s"
+                % ", ".join(sorted(str(value) for value in missing))
+            )
+
+        if schema_editor.connection.vendor == "postgresql":
+            cursor.execute(
+                """
+                UPDATE {rate_table} AS rate
+                SET plan_new_id = config.id
+                FROM {config_table} AS config
+                WHERE rate.plan_id = config.plan_name
+                """.format(
+                    rate_table=rate_table,
+                    config_table=config_table,
+                )
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE {rate_table}
+                SET plan_new_id = (
+                    SELECT config.id
+                    FROM {config_table} AS config
+                    WHERE config.plan_name = {rate_table}.plan_id
+                )
+                WHERE plan_id IS NOT NULL
+                """.format(
+                    rate_table=rate_table,
+                    config_table=config_table,
+                )
+            )
 
 
 class Migration(migrations.Migration):
