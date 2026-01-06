@@ -141,7 +141,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MAX_NO_TOOL_STREAK = 2  # Auto-sleep after this many consecutive responses without tool calls
+MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation signal present
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -2768,6 +2768,7 @@ def _run_agent_loop(
 
             implied_send = False
             tool_calls = list(raw_tool_calls)
+            implied_stop_after_send = False  # Track if implied send should force stop
             if message_text and not has_explicit_send:
                 # Default: STOP. Agent must explicitly request continuation with "Continuing..."
                 # This is safer—agent won't keep running unexpectedly.
@@ -2780,6 +2781,7 @@ def _run_agent_loop(
                 )
                 if implied_call:
                     implied_send = True
+                    implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
                     tool_calls = [implied_call] + tool_calls
                     logger.info(
                         "Agent %s: treating message content as implied %s send.",
@@ -3237,6 +3239,14 @@ def _run_agent_loop(
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                return cumulative_token_usage
+            # Implied send without continuation phrase = agent is done, force stop
+            elif implied_stop_after_send and message_delivery_ok:
+                logger.info(
+                    "Agent %s: implied send without continuation phrase; auto-sleeping.",
+                    agent.id,
+                )
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             elif (

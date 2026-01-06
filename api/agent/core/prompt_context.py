@@ -3038,7 +3038,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
-    # MAX_NO_TOOL_STREAK=2, so warn that auto-stop is imminent
+    # MAX_NO_TOOL_STREAK=1, so any no-tool response triggers auto-stop warning
     urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
