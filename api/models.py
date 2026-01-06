@@ -728,6 +728,7 @@ class PlanPriceKindChoices(models.TextChoices):
     TASK_PACK = "task_pack", "Task pack"
     CONTACT_PACK = "contact_pack", "Contact pack"
     BROWSER_TASK_LIMIT = "browser_task_limit", "Browser task limit"
+    ADVANCED_CAPTCHA_RESOLUTION = "advanced_captcha_resolution", "Advanced captcha resolution"
     DEDICATED_IP = "dedicated_ip", "Dedicated IP"
 
 
@@ -753,13 +754,19 @@ class PlanVersionPrice(models.Model):
         blank=True,
         help_text="Billing interval for recurring prices; null for metered/add-ons.",
     )
-    price_id = models.CharField(max_length=255, unique=True)
+    price_id = models.CharField(max_length=255)
     product_id = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["plan_version", "kind", "price_id"]
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version", "price_id"],
+                name="unique_plan_version_price_id",
+            ),
+        ]
         indexes = [
             models.Index(fields=["price_id"], name="planverprice_price_idx"),
             models.Index(fields=["product_id"], name="planverprice_product_idx"),
@@ -3194,7 +3201,7 @@ class AddonEntitlementQuerySet(models.QuerySet):
 
 
 class AddonEntitlement(models.Model):
-    """Purchased add-ons that uplift task credits or contact caps."""
+    """Purchased add-ons that uplift usage limits or enable premium features."""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     user = models.ForeignKey(
@@ -3225,6 +3232,10 @@ class AddonEntitlement(models.Model):
     browser_task_daily_delta = models.PositiveIntegerField(
         default=0,
         help_text="Per-unit increase to per-agent daily browser task limit.",
+    )
+    advanced_captcha_resolution_delta = models.PositiveIntegerField(
+        default=0,
+        help_text="Per-unit enablement of advanced CAPTCHA resolution for browser tasks.",
     )
     starts_at = models.DateTimeField(default=timezone.now)
     expires_at = models.DateTimeField(null=True, blank=True)
@@ -3689,6 +3700,32 @@ class StripeConfig(models.Model):
         self._set_list_value("startup_browser_task_limit_price_ids", value)
 
     @property
+    def startup_advanced_captcha_resolution_product_id(self) -> str:
+        return self.get_value("startup_advanced_captcha_resolution_product_id")
+
+    @startup_advanced_captcha_resolution_product_id.setter
+    def startup_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
+        self.set_value("startup_advanced_captcha_resolution_product_id", value)
+
+    @property
+    def startup_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("startup_advanced_captcha_resolution_price_id")
+
+    @startup_advanced_captcha_resolution_price_id.setter
+    def startup_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("startup_advanced_captcha_resolution_price_id", value)
+
+    @property
+    def startup_advanced_captcha_resolution_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("startup_advanced_captcha_resolution_price_ids"))
+
+    @startup_advanced_captcha_resolution_price_ids.setter
+    def startup_advanced_captcha_resolution_price_ids(
+        self, value: list[str] | tuple[str, ...] | str | None
+    ) -> None:
+        self._set_list_value("startup_advanced_captcha_resolution_price_ids", value)
+
+    @property
     def startup_product_id(self) -> str:
         return self.get_value("startup_product_id")
 
@@ -3759,6 +3796,30 @@ class StripeConfig(models.Model):
     @scale_browser_task_limit_price_ids.setter
     def scale_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("scale_browser_task_limit_price_ids", value)
+
+    @property
+    def scale_advanced_captcha_resolution_product_id(self) -> str:
+        return self.get_value("scale_advanced_captcha_resolution_product_id")
+
+    @scale_advanced_captcha_resolution_product_id.setter
+    def scale_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
+        self.set_value("scale_advanced_captcha_resolution_product_id", value)
+
+    @property
+    def scale_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("scale_advanced_captcha_resolution_price_id")
+
+    @scale_advanced_captcha_resolution_price_id.setter
+    def scale_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("scale_advanced_captcha_resolution_price_id", value)
+
+    @property
+    def scale_advanced_captcha_resolution_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("scale_advanced_captcha_resolution_price_ids"))
+
+    @scale_advanced_captcha_resolution_price_ids.setter
+    def scale_advanced_captcha_resolution_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
+        self._set_list_value("scale_advanced_captcha_resolution_price_ids", value)
 
     @property
     def scale_product_id(self) -> str:
@@ -3847,6 +3908,32 @@ class StripeConfig(models.Model):
     @org_team_browser_task_limit_price_ids.setter
     def org_team_browser_task_limit_price_ids(self, value: list[str] | tuple[str, ...] | str | None) -> None:
         self._set_list_value("org_team_browser_task_limit_price_ids", value)
+
+    @property
+    def org_team_advanced_captcha_resolution_product_id(self) -> str:
+        return self.get_value("org_team_advanced_captcha_resolution_product_id")
+
+    @org_team_advanced_captcha_resolution_product_id.setter
+    def org_team_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
+        self.set_value("org_team_advanced_captcha_resolution_product_id", value)
+
+    @property
+    def org_team_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("org_team_advanced_captcha_resolution_price_id")
+
+    @org_team_advanced_captcha_resolution_price_id.setter
+    def org_team_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_advanced_captcha_resolution_price_id", value)
+
+    @property
+    def org_team_advanced_captcha_resolution_price_ids(self) -> list[str]:
+        return self._parse_list_value(self.get_value("org_team_advanced_captcha_resolution_price_ids"))
+
+    @org_team_advanced_captcha_resolution_price_ids.setter
+    def org_team_advanced_captcha_resolution_price_ids(
+        self, value: list[str] | tuple[str, ...] | str | None
+    ) -> None:
+        self._set_list_value("org_team_advanced_captcha_resolution_price_ids", value)
 
     @property
     def startup_dedicated_ip_product_id(self) -> str:

@@ -159,6 +159,8 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "startup_contact_cap_price_ids",
                     "startup_browser_task_limit_product_id",
                     "startup_browser_task_limit_price_ids",
+                    "startup_advanced_captcha_resolution_product_id",
+                    "startup_advanced_captcha_resolution_price_id",
                     "startup_dedicated_ip_price_id",
                     "startup_dedicated_ip_product_id",
                 )
@@ -177,6 +179,8 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "scale_contact_cap_price_ids",
                     "scale_browser_task_limit_product_id",
                     "scale_browser_task_limit_price_ids",
+                    "scale_advanced_captcha_resolution_product_id",
+                    "scale_advanced_captcha_resolution_price_id",
                     "scale_dedicated_ip_product_id",
                     "scale_dedicated_ip_price_id",
                 )
@@ -198,6 +202,8 @@ class StripeConfigAdmin(admin.ModelAdmin):
                     "org_team_contact_cap_price_ids",
                     "org_team_browser_task_limit_product_id",
                     "org_team_browser_task_limit_price_ids",
+                    "org_team_advanced_captcha_resolution_product_id",
+                    "org_team_advanced_captcha_resolution_price_id",
                 )
             },
         ),
@@ -239,6 +245,7 @@ class AddonEntitlementAdmin(admin.ModelAdmin):
         "task_credits_delta",
         "contact_cap_delta",
         "browser_task_daily_delta",
+        "advanced_captcha_resolution_delta",
         "starts_at",
         "expires_at",
         "is_recurring",
@@ -256,6 +263,7 @@ class AddonEntitlementAdmin(admin.ModelAdmin):
         "task_credits_delta",
         "contact_cap_delta",
         "browser_task_daily_delta",
+        "advanced_captcha_resolution_delta",
         "starts_at",
         "expires_at",
         "is_recurring",

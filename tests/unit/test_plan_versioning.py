@@ -82,6 +82,47 @@ class PlanVersionResolverTests(TestCase):
         self.assertIsNotNone(resolved)
         self.assertEqual(resolved.id, self.plan_version.id)
 
+    def test_resolves_shared_price_id_with_context(self):
+        org_plan = Plan.objects.create(slug="org_team", is_org=True, is_active=True)
+        org_version = PlanVersion.objects.create(
+            plan=org_plan,
+            version_code="v1",
+            legacy_plan_code=PlanNames.ORG_TEAM,
+            is_active_for_new_subs=True,
+            display_name="Team",
+            description="Organization tier",
+            marketing_features=[],
+        )
+        shared_price_id = "price_shared_addon"
+        PlanVersionPrice.objects.create(
+            plan_version=self.plan_version,
+            kind="advanced_captcha_resolution",
+            price_id=shared_price_id,
+            product_id="prod_shared",
+            billing_interval=None,
+        )
+        PlanVersionPrice.objects.create(
+            plan_version=org_version,
+            kind="advanced_captcha_resolution",
+            price_id=shared_price_id,
+            product_id="prod_shared",
+            billing_interval=None,
+        )
+
+        resolved = get_plan_version_by_price_id(
+            shared_price_id,
+            kind="advanced_captcha_resolution",
+            plan_id=PlanNames.STARTUP,
+        )
+        self.assertEqual(resolved.id, self.plan_version.id)
+
+        resolved_org = get_plan_version_by_price_id(
+            shared_price_id,
+            kind="advanced_captcha_resolution",
+            owner_type="organization",
+        )
+        self.assertEqual(resolved_org.id, org_version.id)
+
     def test_owner_plan_context_prefers_plan_version(self):
         user = User.objects.create_user(username="plan-user", email="plan@example.com")
         billing, _ = UserBilling.objects.get_or_create(user=user, defaults={"subscription": PlanNames.FREE})

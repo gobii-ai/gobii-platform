@@ -427,6 +427,15 @@ class StripeConfigForm(ModelForm):
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
     )
+    startup_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Startup advanced captcha resolution product ID",
+        required=False,
+    )
+    startup_advanced_captcha_resolution_price_id = forms.CharField(
+        label="Startup advanced captcha resolution price ID",
+        required=False,
+        help_text="Stripe price ID for advanced captcha resolution.",
+    )
     scale_price_id = forms.CharField(
         label="Scale base price ID",
         required=False,
@@ -465,6 +474,15 @@ class StripeConfigForm(ModelForm):
         label="Scale browser task limit price IDs",
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
+    )
+    scale_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Scale advanced captcha resolution product ID",
+        required=False,
+    )
+    scale_advanced_captcha_resolution_price_id = forms.CharField(
+        label="Scale advanced captcha resolution price ID",
+        required=False,
+        help_text="Stripe price ID for advanced captcha resolution.",
     )
     startup_dedicated_ip_product_id = forms.CharField(
         label="Pro dedicated IP product ID",
@@ -525,6 +543,15 @@ class StripeConfigForm(ModelForm):
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
     )
+    org_team_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Org/Team advanced captcha resolution product ID",
+        required=False,
+    )
+    org_team_advanced_captcha_resolution_price_id = forms.CharField(
+        label="Org/Team advanced captcha resolution price ID",
+        required=False,
+        help_text="Stripe price ID for advanced captcha resolution.",
+    )
     org_team_dedicated_ip_product_id = forms.CharField(
         label="Org/Team dedicated IP product ID",
         required=False,
@@ -565,6 +592,13 @@ class StripeConfigForm(ModelForm):
         super().__init__(*args, **kwargs)
         instance: StripeConfig = self.instance
         if instance and instance.pk:
+            def _first_value(values):
+                for value in values or []:
+                    text = str(value).strip()
+                    if text:
+                        return text
+                return ""
+
             self.fields["startup_product_id"].initial = instance.startup_product_id
             self.fields["startup_price_id"].initial = instance.startup_price_id
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
@@ -579,6 +613,13 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_browser_task_limit_price_ids"].initial = ",".join(
                 instance.startup_browser_task_limit_price_ids or []
             )
+            self.fields["startup_advanced_captcha_resolution_product_id"].initial = (
+                instance.startup_advanced_captcha_resolution_product_id
+            )
+            self.fields["startup_advanced_captcha_resolution_price_id"].initial = (
+                instance.startup_advanced_captcha_resolution_price_id
+                or _first_value(instance.startup_advanced_captcha_resolution_price_ids)
+            )
 
             self.fields["scale_price_id"].initial = instance.scale_price_id
             self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
@@ -592,6 +633,13 @@ class StripeConfigForm(ModelForm):
             self.fields["scale_browser_task_limit_product_id"].initial = instance.scale_browser_task_limit_product_id
             self.fields["scale_browser_task_limit_price_ids"].initial = ",".join(
                 instance.scale_browser_task_limit_price_ids or []
+            )
+            self.fields["scale_advanced_captcha_resolution_product_id"].initial = (
+                instance.scale_advanced_captcha_resolution_product_id
+            )
+            self.fields["scale_advanced_captcha_resolution_price_id"].initial = (
+                instance.scale_advanced_captcha_resolution_price_id
+                or _first_value(instance.scale_advanced_captcha_resolution_price_ids)
             )
 
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
@@ -616,6 +664,13 @@ class StripeConfigForm(ModelForm):
             self.fields["org_team_browser_task_limit_price_ids"].initial = ",".join(
                 instance.org_team_browser_task_limit_price_ids or []
             )
+            self.fields["org_team_advanced_captcha_resolution_product_id"].initial = (
+                instance.org_team_advanced_captcha_resolution_product_id
+            )
+            self.fields["org_team_advanced_captcha_resolution_price_id"].initial = (
+                instance.org_team_advanced_captcha_resolution_price_id
+                or _first_value(instance.org_team_advanced_captcha_resolution_price_ids)
+            )
             self.fields["org_team_dedicated_ip_product_id"].initial = instance.org_team_dedicated_ip_product_id
             self.fields["org_team_dedicated_ip_price_id"].initial = instance.org_team_dedicated_ip_price_id
             self.fields["task_meter_id"].initial = instance.task_meter_id
@@ -623,6 +678,21 @@ class StripeConfigForm(ModelForm):
             self.fields["org_task_meter_id"].initial = instance.org_task_meter_id
             self.fields["org_team_task_meter_id"].initial = instance.org_team_task_meter_id
             self.fields["org_team_task_meter_event_name"].initial = instance.org_team_task_meter_event_name
+
+    def _clean_single_price_id(self, field_name: str) -> str:
+        value = (self.cleaned_data.get(field_name) or "").strip()
+        if "," in value:
+            raise forms.ValidationError("Enter a single Stripe price ID (no commas).")
+        return value
+
+    def clean_startup_advanced_captcha_resolution_price_id(self) -> str:
+        return self._clean_single_price_id("startup_advanced_captcha_resolution_price_id")
+
+    def clean_scale_advanced_captcha_resolution_price_id(self) -> str:
+        return self._clean_single_price_id("scale_advanced_captcha_resolution_price_id")
+
+    def clean_org_team_advanced_captcha_resolution_price_id(self) -> str:
+        return self._clean_single_price_id("org_team_advanced_captcha_resolution_price_id")
 
     def clean_release_env(self):
         value = self.cleaned_data.get("release_env", "")
@@ -659,6 +729,8 @@ class StripeConfigForm(ModelForm):
             "startup_contact_cap_price_ids",
             "startup_browser_task_limit_product_id",
             "startup_browser_task_limit_price_ids",
+            "startup_advanced_captcha_resolution_product_id",
+            "startup_advanced_captcha_resolution_price_id",
 
             "scale_product_id",
             "scale_price_id",
@@ -671,6 +743,8 @@ class StripeConfigForm(ModelForm):
             "scale_contact_cap_price_ids",
             "scale_browser_task_limit_product_id",
             "scale_browser_task_limit_price_ids",
+            "scale_advanced_captcha_resolution_product_id",
+            "scale_advanced_captcha_resolution_price_id",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
             "scale_dedicated_ip_product_id",
@@ -686,6 +760,8 @@ class StripeConfigForm(ModelForm):
             "org_team_contact_cap_price_ids",
             "org_team_browser_task_limit_product_id",
             "org_team_browser_task_limit_price_ids",
+            "org_team_advanced_captcha_resolution_product_id",
+            "org_team_advanced_captcha_resolution_price_id",
             "org_team_dedicated_ip_product_id",
             "org_team_dedicated_ip_price_id",
             "task_meter_id",
@@ -703,6 +779,21 @@ class StripeConfigForm(ModelForm):
             else:
                 cleaned_value = str(raw_value)
             instance.set_value(field_name, cleaned_value)
+
+        legacy_captcha_fields = [
+            ("startup_advanced_captcha_resolution_price_id", "startup_advanced_captcha_resolution_price_ids"),
+            ("scale_advanced_captcha_resolution_price_id", "scale_advanced_captcha_resolution_price_ids"),
+            ("org_team_advanced_captcha_resolution_price_id", "org_team_advanced_captcha_resolution_price_ids"),
+        ]
+        for field_name, legacy_field in legacy_captcha_fields:
+            raw_value = self.cleaned_data.get(field_name)
+            if raw_value is None:
+                cleaned_value = None
+            elif isinstance(raw_value, str):
+                cleaned_value = raw_value.strip() or None
+            else:
+                cleaned_value = str(raw_value)
+            instance._set_list_value(legacy_field, cleaned_value)
 
         if commit:
             instance.save()

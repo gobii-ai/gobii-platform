@@ -1,5 +1,5 @@
-{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack browser_task_limit=addon_context.browser_task_limit %}
-{% if task_pack.options or contact_pack.options or browser_task_limit.options %}
+{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack browser_task_limit=addon_context.browser_task_limit advanced_captcha=addon_context.advanced_captcha_resolution %}
+{% if task_pack.options or contact_pack.options or browser_task_limit.options or advanced_captcha.options %}
 <form method="post" action="{% url 'update_addons' %}">
   {% csrf_token %}
   <div class="{{ card_class|default:'gobii-card-base p-6' }}">
@@ -14,6 +14,7 @@
       {% include "console/partials/_addon_pack.html" with addon=task_pack title="Task packs" description="Add additional task credits for this cycle." single_label="Task pack" delta_unit="credits" addon_kind="task" aria_label="task pack" addons_disabled=addons_disabled %}
       {% include "console/partials/_addon_pack.html" with addon=contact_pack title="Contact packs" description="Increase per-agent contacts for this cycle." single_label="Contact pack" delta_unit="contacts" addon_kind="contact" aria_label="contact pack" addons_disabled=addons_disabled %}
       {% include "console/partials/_addon_pack.html" with addon=browser_task_limit title="Browser task packs" description="Increase the per-agent daily browser task limit for this cycle." single_label="Browser task pack" delta_unit="tasks" addon_kind="browser_task" aria_label="browser task pack" addons_disabled=addons_disabled %}
+      {% include "console/partials/_addon_toggle.html" with addon=advanced_captcha title="Advanced Captcha Resolution" description="Enable CapSolver-powered CAPTCHA solving during browser tasks." single_label="Advanced Captcha Resolution" addon_kind="advanced_captcha_resolution" aria_label="advanced captcha resolution" addons_disabled=addons_disabled %}
     </div>
 
     <div class="mt-6 flex flex-col gap-3">
@@ -29,6 +30,16 @@
         <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total browser tasks/day</span>
           <span id="addons-total-browser-tasks" class="font-semibold text-slate-900">{{ addon_context.totals.browser_task_daily|default:"0" }}</span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
+          <span class="text-slate-500">Captcha resolution</span>
+          <span id="addons-total-captcha" class="font-semibold text-slate-900">
+            {% if addon_context.totals.advanced_captcha_resolution %}
+              Enabled
+            {% else %}
+              Disabled
+            {% endif %}
+          </span>
         </span>
         <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total add-on price</span>
@@ -56,10 +67,12 @@
   document.addEventListener("DOMContentLoaded", () => {
     const qtyInputs = document.querySelectorAll("input[data-addon-kind]");
     const adjustButtons = document.querySelectorAll("button[data-qty-target]");
+    const toggleInputs = document.querySelectorAll("input[data-addon-toggle]");
     const totalTasksEl = document.getElementById("addons-total-tasks");
     const totalContactsEl = document.getElementById("addons-total-contacts");
     const totalBrowserTasksEl = document.getElementById("addons-total-browser-tasks");
     const totalPriceEl = document.getElementById("addons-total-price");
+    const totalCaptchaEl = document.getElementById("addons-total-captcha");
 
     const formatMoney = (cents, currency) => {
       if (!cents) return "—";
@@ -83,6 +96,7 @@
       let contactTotal = 0;
       let browserTaskTotal = 0;
       let priceCents = 0;
+      let captchaEnabled = 0;
       let currency = "";
 
       qtyInputs.forEach((input) => {
@@ -102,6 +116,8 @@
           contactTotal += delta * qty;
         } else if (kind === "browser_task") {
           browserTaskTotal += delta * qty;
+        } else if (kind === "advanced_captcha_resolution") {
+          captchaEnabled += qty;
         }
         priceCents += cents * qty;
       });
@@ -110,6 +126,7 @@
       if (totalContactsEl) totalContactsEl.textContent = contactTotal;
       if (totalBrowserTasksEl) totalBrowserTasksEl.textContent = browserTaskTotal;
       if (totalPriceEl) totalPriceEl.textContent = priceCents > 0 ? formatMoney(priceCents, currency || "USD") : "—";
+      if (totalCaptchaEl) totalCaptchaEl.textContent = captchaEnabled > 0 ? "Enabled" : "Disabled";
     };
 
     qtyInputs.forEach((input) => {
@@ -131,6 +148,27 @@
         if (display) display.textContent = next;
         target.dispatchEvent(new Event("input"));
       });
+    });
+
+    const syncToggle = (toggle) => {
+      const targetId = toggle.getAttribute("data-toggle-target");
+      const statusId = toggle.getAttribute("data-toggle-status");
+      const target = targetId ? document.getElementById(targetId) : null;
+      if (!target || target.disabled) return;
+      const nextValue = toggle.checked ? 1 : 0;
+      target.value = nextValue;
+      target.dispatchEvent(new Event("input"));
+      const statusEl = statusId ? document.getElementById(statusId) : null;
+      if (statusEl) {
+        const enabledLabel = statusEl.getAttribute("data-enabled-label") || "Enabled";
+        const disabledLabel = statusEl.getAttribute("data-disabled-label") || "Disabled";
+        statusEl.textContent = toggle.checked ? enabledLabel : disabledLabel;
+      }
+    };
+
+    toggleInputs.forEach((toggle) => {
+      toggle.addEventListener("change", () => syncToggle(toggle));
+      syncToggle(toggle);
     });
 
     recalcTotals();

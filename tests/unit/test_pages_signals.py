@@ -486,6 +486,30 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
+    def test_subscription_update_skips_credit_grant(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason="subscription_update")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=15, subscriber=fresh_user)
+        sub.stripe_data["billing_reason"] = "subscription_update"
+        sub.billing_reason = "subscription_update"
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        mock_grant.assert_not_called()
+        self.mock_capi.assert_not_called()
+
+    @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload()

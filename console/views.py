@@ -8792,13 +8792,14 @@ def _update_addon_quantity(
             else:
                 items_payload = [{"price": price_id, "quantity": desired_qty}]
 
-            updated_subscription = stripe.Subscription.modify(
-                subscription.id,
-                items=items_payload,
-                proration_behavior="always_invoice",
-                payment_behavior="pending_if_incomplete",
-                expand=["items.data.price"],
-            )
+            modify_kwargs = {
+                "items": items_payload,
+                "proration_behavior": "always_invoice",
+                "expand": ["items.data.price"],
+            }
+            if not any(item.get("deleted") for item in items_payload):
+                modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+            updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
                 updated_items = []
@@ -8930,7 +8931,12 @@ def update_addons(request, owner, owner_type):
     task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "task_pack")
     contact_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "contact_pack")
     browser_task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "browser_task_limit")
-    all_options = (task_options or []) + (contact_options or []) + (browser_task_options or [])
+    advanced_captcha_options = AddonEntitlementService.get_price_options(
+        owner_type,
+        plan_id,
+        "advanced_captcha_resolution",
+    )
+    all_options = (task_options or []) + (contact_options or []) + (browser_task_options or []) + (advanced_captcha_options or [])
     if not all_options:
         messages.error(request, "No add-ons are configured for your plan.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -8942,6 +8948,8 @@ def update_addons(request, owner, owner_type):
         price_to_kind[opt.price_id] = "contact_pack"
     for opt in browser_task_options or []:
         price_to_kind[opt.price_id] = "browser_task_limit"
+    for opt in advanced_captcha_options or []:
+        price_to_kind[opt.price_id] = "advanced_captcha_resolution"
 
     desired_quantities: dict[str, int] = {}
     for key, value in request.POST.items():
@@ -9011,13 +9019,14 @@ def update_addons(request, owner, owner_type):
             changes_made = True
 
         if changes_made:
-            updated_subscription = stripe.Subscription.modify(
-                subscription.id,
-                items=items_payload,
-                proration_behavior="always_invoice",
-                payment_behavior="pending_if_incomplete",
-                expand=["items.data.price"],
-            )
+            modify_kwargs = {
+                "items": items_payload,
+                "proration_behavior": "always_invoice",
+                "expand": ["items.data.price"],
+            }
+            if not any(item.get("deleted") for item in items_payload):
+                modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+            updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
                 updated_items = []

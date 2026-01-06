@@ -70,6 +70,23 @@ def _normalize_vision_detail_level(detail_level: Optional[str], supports_vision:
         return None
     return normalized
 
+
+def _has_advanced_captcha_resolution(owner) -> bool:
+    if not owner:
+        return False
+    try:
+        from billing.addons import AddonEntitlementService
+
+        return AddonEntitlementService.has_advanced_captcha_resolution(owner)
+    except Exception as exc:
+        logger.warning(
+            "Failed to check advanced captcha resolution add-on for owner %s: %s",
+            getattr(owner, "id", None) or owner,
+            exc,
+            exc_info=True,
+        )
+        return False
+
 # Providers that should default to vision support when DB metadata is unavailable
 DEFAULT_PROVIDER_VISION_SUPPORT: dict[str, bool] = {
     "openai": True,
@@ -1781,22 +1798,6 @@ def _process_browser_use_task_core(
             else:
                 controller = Controller()
 
-            # Register custom actions
-            try:
-                from ..agent.browser_actions import (
-                    register_web_search_action
-                )
-                actions = ['mcp_brightdata_search_engine']
-                register_web_search_action(controller)
-                if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
-                    from ..agent.browser_actions import register_upload_actions
-                    register_upload_actions(controller, persistent_agent_id)
-                    actions.append('upload_file')
-
-                logger.debug(f"Registered custom action(s) {",".join(actions)} for task %s", task_obj.id)
-            except Exception as exc:
-                logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
-
             with traced("Execute Agent") as agent_span:
                 agent_context = None
                 if persistent_agent_id:
@@ -1821,6 +1822,28 @@ def _process_browser_use_task_core(
                     agent_span.set_attribute("browser_tier.prefer_premium", True)
 
                 owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
+                actions = ['mcp_brightdata_search_engine']
+                try:
+                    from ..agent.browser_actions import (
+                        register_captcha_actions,
+                        register_web_search_action,
+                    )
+
+                    register_web_search_action(controller)
+                    captcha_enabled = _has_advanced_captcha_resolution(owner)
+                    agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
+                    if captcha_enabled:
+                        register_captcha_actions(controller)
+                        actions.append('solve_captcha')
+                    if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
+                        from ..agent.browser_actions import register_upload_actions
+
+                        register_upload_actions(controller, persistent_agent_id)
+                        actions.append('upload_file')
+
+                    logger.debug(f"Registered custom action(s) {",".join(actions)} for task %s", task_obj.id)
+                except Exception as exc:
+                    logger.warning("Failed to register custom actions for task %s: %s", task_obj.id, str(exc))
                 plan_settings = get_browser_settings_for_owner(owner)
                 agent_span.set_attribute("browser_use.max_steps_limit", int(plan_settings.max_browser_steps))
                 requires_vision = bool(getattr(task_obj, "requires_vision", False))

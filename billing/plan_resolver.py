@@ -42,7 +42,14 @@ def get_plan_version_by_legacy_code(legacy_code: str | None):
     )
 
 
-def get_plan_version_by_price_id(price_id: str | None, *, kind: str | None = None):
+def get_plan_version_by_price_id(
+    price_id: str | None,
+    *,
+    kind: str | None = None,
+    plan_version=None,
+    plan_id: str | None = None,
+    owner_type: str | None = None,
+):
     if not price_id:
         return None
     PlanVersionPrice = _get_model("api", "PlanVersionPrice")
@@ -53,6 +60,21 @@ def get_plan_version_by_price_id(price_id: str | None, *, kind: str | None = Non
     )
     if kind:
         qs = qs.filter(kind=kind)
+    if plan_version:
+        plan_version_id = getattr(plan_version, "id", plan_version)
+        qs = qs.filter(plan_version_id=plan_version_id)
+    else:
+        normalized_plan = _normalize_code(plan_id)
+        if normalized_plan:
+            plan_slug = PLAN_SLUG_BY_LEGACY_CODE.get(normalized_plan, normalized_plan)
+            qs = qs.filter(plan_version__plan__slug__iexact=plan_slug)
+        if owner_type:
+            is_org = owner_type == "organization"
+            qs = qs.filter(plan_version__plan__is_org=is_org)
+        qs = qs.order_by(
+            "-plan_version__is_active_for_new_subs",
+            "-plan_version__created_at",
+        )
     match = qs.first()
     return match.plan_version if match else None
 

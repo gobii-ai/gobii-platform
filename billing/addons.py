@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 import logging
 from typing import Any, Iterable, Mapping
@@ -21,6 +21,7 @@ class AddonUplift:
     task_credits: int = 0
     contact_cap: int = 0
     browser_task_daily: int = 0
+    advanced_captcha_resolution: int = 0
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class AddonPriceConfig:
     task_credits_delta: int = 0
     contact_cap_delta: int = 0
     browser_task_daily_delta: int = 0
+    advanced_captcha_resolution_delta: int = 0
     unit_amount: int | None = None
     currency: str = ""
 
@@ -38,31 +40,32 @@ class AddonEntitlementService:
     """Helpers for aggregating active add-on entitlements."""
 
     @staticmethod
+    def _normalize_price_list(*values: Any) -> list[str]:
+        ids: list[str] = []
+        for raw in values:
+            if not raw:
+                continue
+            if isinstance(raw, (list, tuple, set)):
+                candidates = raw
+            else:
+                text = str(raw).strip()
+                if not text:
+                    continue
+                candidates = [part.strip() for part in text.split(",")]
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                cid = str(candidate).strip()
+                if cid and cid not in ids:
+                    ids.append(cid)
+        return ids
+
+    @staticmethod
     def _resolve_price_ids(
         owner_type: str,
         plan_id: str | None,
         plan_version=None,
     ) -> dict[str, list[str]]:
-        def _normalize_price_list(*values: Any) -> list[str]:
-            ids: list[str] = []
-            for raw in values:
-                if not raw:
-                    continue
-                if isinstance(raw, (list, tuple, set)):
-                    candidates = raw
-                else:
-                    text = str(raw).strip()
-                    if not text:
-                        continue
-                    candidates = [part.strip() for part in text.split(",")]
-                for candidate in candidates:
-                    if not candidate:
-                        continue
-                    cid = str(candidate).strip()
-                    if cid and cid not in ids:
-                        ids.append(cid)
-            return ids
-
         if plan_version is not None:
             try:
                 PlanVersionPrice = apps.get_model("api", "PlanVersionPrice")
@@ -71,7 +74,12 @@ class AddonEntitlementService:
                     PlanVersionPrice.objects
                     .filter(
                         plan_version_id=plan_version_id,
-                        kind__in=("task_pack", "contact_pack", "browser_task_limit"),
+                        kind__in=(
+                            "task_pack",
+                            "contact_pack",
+                            "browser_task_limit",
+                            "advanced_captcha_resolution",
+                        ),
                     )
                     .order_by("kind", "price_id")
                 )
@@ -79,6 +87,7 @@ class AddonEntitlementService:
                     "task_pack": [],
                     "contact_pack": [],
                     "browser_task_limit": [],
+                    "advanced_captcha_resolution": [],
                 }
                 for row in rows:
                     if row.price_id and row.price_id not in price_map[row.kind]:
@@ -94,44 +103,67 @@ class AddonEntitlementService:
         stripe_settings = get_stripe_settings()
         if owner_type == "organization":
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
+                ),
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
+                    getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         if plan_id == PlanNames.STARTUP:
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
+                ),
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
+                    getattr(stripe_settings, "startup_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         if plan_id == PlanNames.SCALE:
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
+                ),
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
+                    getattr(stripe_settings, "scale_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         return {}
+
+    @staticmethod
+    def _advanced_captcha_price_ids() -> set[str]:
+        stripe_settings = get_stripe_settings()
+        return set(
+            AddonEntitlementService._normalize_price_list(
+                getattr(stripe_settings, "startup_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "scale_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "startup_advanced_captcha_resolution_price_ids", ()),
+                getattr(stripe_settings, "scale_advanced_captcha_resolution_price_ids", ()),
+                getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_ids", ()),
+            )
+        )
 
     @staticmethod
     def _get_model():
@@ -145,7 +177,11 @@ class AddonEntitlementService:
             return 0
 
     @staticmethod
-    def _extract_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
+    def _extract_price_config(
+        price_id: str,
+        price_data: Mapping[str, Any] | None = None,
+        allow_zero_delta: bool = False,
+    ) -> AddonPriceConfig | None:
         """Return deltas for a Stripe price from embedded or cached metadata."""
         if not price_id:
             return None
@@ -194,8 +230,11 @@ class AddonEntitlementService:
         browser_task_daily_delta = AddonEntitlementService._safe_int(
             metadata.get("browser_task_daily_delta")
         )
+        advanced_captcha_resolution_delta = 0
 
-        if task_delta == 0 and contact_delta == 0 and browser_task_daily_delta == 0:
+        if not allow_zero_delta and not any(
+            (task_delta, contact_delta, browser_task_daily_delta, advanced_captcha_resolution_delta)
+        ):
             return None
 
         return AddonPriceConfig(
@@ -204,6 +243,7 @@ class AddonEntitlementService:
             task_credits_delta=task_delta,
             contact_cap_delta=contact_delta,
             browser_task_daily_delta=browser_task_daily_delta,
+            advanced_captcha_resolution_delta=advanced_captcha_resolution_delta,
             unit_amount=unit_amount,
             currency=currency or "",
         )
@@ -241,12 +281,20 @@ class AddonEntitlementService:
                 ),
                 0,
             ),
+            advanced_captcha_resolution=Coalesce(
+                Sum(
+                    F("advanced_captcha_resolution_delta") * F("quantity"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            ),
         )
 
         return AddonUplift(
             task_credits=int(aggregates.get("task_credits", 0) or 0),
             contact_cap=int(aggregates.get("contact_cap", 0) or 0),
             browser_task_daily=int(aggregates.get("browser_task_daily", 0) or 0),
+            advanced_captcha_resolution=int(aggregates.get("advanced_captcha_resolution", 0) or 0),
         )
 
     @staticmethod
@@ -260,6 +308,21 @@ class AddonEntitlementService:
     @staticmethod
     def get_browser_task_daily_uplift(owner, at_time=None) -> int:
         return AddonEntitlementService.get_uplift(owner, at_time).browser_task_daily
+
+    @staticmethod
+    def has_advanced_captcha_resolution(owner, at_time=None) -> bool:
+        if not owner:
+            return False
+        if AddonEntitlementService.get_uplift(owner, at_time).advanced_captcha_resolution:
+            return True
+        price_ids = AddonEntitlementService._advanced_captcha_price_ids()
+        if not price_ids:
+            return False
+        return (
+            AddonEntitlementService._active_entitlements(owner, at_time)
+            .filter(price_id__in=price_ids, quantity__gt=0)
+            .exists()
+        )
 
     @staticmethod
     def get_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
@@ -324,24 +387,31 @@ class AddonEntitlementService:
         """Return relevant add-on price configs for the owner/plan."""
         price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
         price_ids: list[str] = []
-        for ids in price_lists.values():
+        price_kinds: dict[str, str] = {}
+        for kind, ids in price_lists.items():
             for pid in ids or []:
                 if pid not in price_ids:
                     price_ids.append(pid)
+                price_kinds[pid] = kind
 
         price_map: dict[str, AddonPriceConfig] = {}
         for pid in price_ids:
             if not pid:
                 continue
-            cfg = AddonEntitlementService._extract_price_config(pid) or AddonPriceConfig(
+            kind = price_kinds.get(pid, "")
+            allow_zero_delta = kind == "advanced_captcha_resolution"
+            cfg = AddonEntitlementService._extract_price_config(pid, allow_zero_delta=allow_zero_delta) or AddonPriceConfig(
                 price_id=pid,
                 product_id="",
                 task_credits_delta=0,
                 contact_cap_delta=0,
                 browser_task_daily_delta=0,
+                advanced_captcha_resolution_delta=0,
                 unit_amount=None,
                 currency="",
             )
+            if kind == "advanced_captcha_resolution":
+                cfg = replace(cfg, advanced_captcha_resolution_delta=1)
             price_map[pid] = cfg
         return price_map
 
@@ -363,6 +433,7 @@ class AddonEntitlementService:
         total_task = 0
         total_contact = 0
         total_browser_task_daily = 0
+        total_advanced_captcha_resolution = 0
         total_amount = 0
         currency = ""
 
@@ -381,6 +452,8 @@ class AddonEntitlementService:
                     delta_value = cfg.contact_cap_delta
                 elif kind == "browser_task_limit":
                     delta_value = cfg.browser_task_daily_delta
+                elif kind == "advanced_captcha_resolution":
+                    delta_value = cfg.advanced_captcha_resolution_delta
                 else:
                     delta_value = 0
                 entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
@@ -402,6 +475,8 @@ class AddonEntitlementService:
                     total_contact += cfg.contact_cap_delta * qty
                 if cfg.browser_task_daily_delta:
                     total_browser_task_daily += cfg.browser_task_daily_delta * qty
+                if cfg.advanced_captcha_resolution_delta:
+                    total_advanced_captcha_resolution += cfg.advanced_captcha_resolution_delta * qty
                 if cfg.unit_amount is not None:
                     total_amount += cfg.unit_amount * qty
                 currency = currency or (cfg.currency or "").upper()
@@ -414,6 +489,7 @@ class AddonEntitlementService:
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
                         "browser_task_daily_delta": cfg.browser_task_daily_delta,
+                        "advanced_captcha_resolution_delta": cfg.advanced_captcha_resolution_delta,
                         "expires_at": expires_at,
                         "unit_amount": cfg.unit_amount,
                         "currency": cfg.currency,
@@ -440,6 +516,7 @@ class AddonEntitlementService:
             "task_credits": total_task,
             "contact_cap": total_contact,
             "browser_task_daily": total_browser_task_daily,
+            "advanced_captcha_resolution": total_advanced_captcha_resolution,
             "amount_cents": total_amount,
             "currency": currency,
             "amount_display": amount_display,
@@ -581,6 +658,9 @@ class AddonEntitlementService:
                 if ent.browser_task_daily_delta != cfg.browser_task_daily_delta:
                     ent.browser_task_daily_delta = cfg.browser_task_daily_delta
                     updates.append("browser_task_daily_delta")
+                if ent.advanced_captcha_resolution_delta != cfg.advanced_captcha_resolution_delta:
+                    ent.advanced_captcha_resolution_delta = cfg.advanced_captcha_resolution_delta
+                    updates.append("advanced_captcha_resolution_delta")
                 if ent.starts_at != starts_at:
                     ent.starts_at = starts_at
                     updates.append("starts_at")
@@ -603,6 +683,7 @@ class AddonEntitlementService:
                     task_credits_delta=cfg.task_credits_delta,
                     contact_cap_delta=cfg.contact_cap_delta,
                     browser_task_daily_delta=cfg.browser_task_daily_delta,
+                    advanced_captcha_resolution_delta=cfg.advanced_captcha_resolution_delta,
                     starts_at=starts_at,
                     expires_at=ent_expires_at,
                     is_recurring=True,
