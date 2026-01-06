@@ -115,6 +115,7 @@ from ..tools.webhook_sender import execute_send_webhook_event
 from ..tools.agent_variables import clear_variables, substitute_variables
 from ...models import (
     PersistentAgent,
+    PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentCompletion,
@@ -533,6 +534,96 @@ def _attempt_cycle_close_for_sleep(agent: PersistentAgent, budget_ctx: Optional[
         )
     except Exception:
         logger.debug("Failed to close budget cycle on sleep", exc_info=True)
+
+
+def _has_open_kanban_work(agent: PersistentAgent) -> bool:
+    try:
+        return PersistentAgentKanbanCard.objects.filter(
+            assigned_agent=agent,
+            status__in=(
+                PersistentAgentKanbanCard.Status.TODO,
+                PersistentAgentKanbanCard.Status.DOING,
+            ),
+        ).exists()
+    except Exception:
+        logger.debug("Failed to check kanban status for agent %s", agent.id, exc_info=True)
+        return False
+
+
+def _has_credit_remaining(
+    credit_snapshot: Optional[Dict[str, Any]],
+    daily_state: Optional[dict],
+) -> bool:
+    available = credit_snapshot.get("available") if credit_snapshot else None
+    try:
+        if available is not None and available != TASKS_UNLIMITED and Decimal(available) <= Decimal("0"):
+            return False
+    except Exception:
+        logger.debug("Invalid available credit value; proceeding as if available.")
+
+    hard_remaining = daily_state.get("hard_limit_remaining") if daily_state else None
+    try:
+        if hard_remaining is not None and Decimal(hard_remaining) <= Decimal("0"):
+            return False
+    except Exception:
+        logger.debug("Invalid hard limit remaining value; proceeding as if available.")
+
+    return True
+
+
+def _burn_rate_acceptable(daily_state: Optional[dict]) -> bool:
+    if not daily_state:
+        return True
+    burn_rate = daily_state.get("burn_rate_per_hour")
+    threshold = daily_state.get("burn_rate_threshold_per_hour")
+    if burn_rate is None or threshold is None:
+        return True
+    try:
+        if Decimal(threshold) <= Decimal("0"):
+            return True
+        return Decimal(burn_rate) <= Decimal(threshold)
+    except Exception:
+        logger.debug("Invalid burn rate values; proceeding as acceptable.")
+        return True
+
+
+def _build_kanban_continue_notice(*, has_schedule: bool, credits_ok: bool) -> str:
+    if not has_schedule:
+        base = "Your kanban still has open work and there's no schedule set to return later."
+    else:
+        base = "You were re-invoked because your kanban still has open work."
+
+    if credits_ok:
+        return f"{base} You have credits remaining, so continue the tasks or mark the cards complete."
+    return f"{base} Continue the tasks or mark the cards complete."
+
+
+def _should_auto_continue_for_kanban(
+    agent: PersistentAgent,
+    *,
+    credit_snapshot: Optional[Dict[str, Any]],
+    daily_state: Optional[dict],
+) -> tuple[bool, Optional[str]]:
+    if not _has_open_kanban_work(agent):
+        return False, None
+
+    has_schedule = bool((agent.schedule or "").strip())
+    credits_ok = _has_credit_remaining(credit_snapshot, daily_state)
+    burn_ok = _burn_rate_acceptable(daily_state)
+
+    if not has_schedule:
+        return True, _build_kanban_continue_notice(
+            has_schedule=False,
+            credits_ok=credits_ok,
+        )
+
+    if credits_ok and burn_ok:
+        return True, _build_kanban_continue_notice(
+            has_schedule=True,
+            credits_ok=credits_ok,
+        )
+
+    return False, None
 
 
 def _runtime_exceeded(started_at: float, max_runtime_seconds: int) -> bool:
@@ -2155,6 +2246,7 @@ def _run_agent_loop(
             return cumulative_token_usage
 
     reasoning_only_streak = 0
+    continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
         if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
@@ -2234,6 +2326,8 @@ def _run_agent_loop(
 
             config_snapshot = seed_sqlite_agent_config(agent)
             kanban_snapshot = seed_sqlite_kanban(agent)
+            pending_notice = continuation_notice
+            continuation_notice = None
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
@@ -2241,6 +2335,7 @@ def _run_agent_loop(
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
                 daily_credit_state=daily_state,
+                continuation_notice=pending_notice,
                 routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
@@ -2262,6 +2357,25 @@ def _run_agent_loop(
                         prompt_archive_id,
                         getattr(step, "id", None),
                     )
+
+            def _maybe_override_auto_sleep(reason: str) -> bool:
+                nonlocal continuation_notice
+                should_continue, notice = _should_auto_continue_for_kanban(
+                    agent,
+                    credit_snapshot=credit_snapshot,
+                    daily_state=daily_state,
+                )
+                if not should_continue:
+                    return False
+                if not notice:
+                    notice = "Your kanban still has open work. Continue the tasks or mark the cards complete."
+                continuation_notice = notice
+                logger.info(
+                    "Agent %s: overriding auto-sleep (%s) due to open kanban work.",
+                    agent.id,
+                    reason,
+                )
+                return True
 
             def _token_usage_fields(token_usage: Optional[dict]) -> dict:
                 """Return sanitized token usage values for step creation."""
@@ -2501,6 +2615,9 @@ def _run_agent_loop(
                     continue
                 if not message_text:
                     # Empty response (no text, no tools) = agent is done, auto-sleep
+                    if _maybe_override_auto_sleep("empty_response"):
+                        reasoning_only_streak = 0
+                        continue
                     logger.info(
                         "Agent %s: empty response (no message, no tools), auto-sleeping.",
                         agent.id,
@@ -2864,6 +2981,8 @@ def _run_agent_loop(
                 followup_required = True
 
             if all_calls_sleep:
+                if _maybe_override_auto_sleep("sleep_tool_calls"):
+                    continue
                 logger.info("Agent %s is sleeping.", agent.id)
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
@@ -2872,6 +2991,8 @@ def _run_agent_loop(
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
             ):
+                if _maybe_override_auto_sleep("auto_sleep_ok"):
+                    continue
                 logger.info(
                     "Agent %s: tool batch complete with no follow-up required; auto-sleeping.",
                     agent.id,

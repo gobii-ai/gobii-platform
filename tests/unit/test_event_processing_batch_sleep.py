@@ -12,6 +12,7 @@ from api.models import (
     PersistentAgent,
     BrowserUseAgent,
     PersistentAgentCompletion,
+    PersistentAgentKanbanCard,
     PersistentAgentToolCall,
     PersistentAgentStep,
     UserQuota,
@@ -318,3 +319,65 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         sleep_steps = PersistentAgentStep.objects.filter(description__icontains='sleep until next trigger')
         self.assertFalse(sleep_steps.exists())
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
+    @patch('api.agent.core.event_processing.execute_update_charter', return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing.build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_auto_sleep_overridden_with_open_kanban_work(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        *_mocks,
+    ):
+        notices = []
+
+        def build_prompt_side_effect(*_args, **kwargs):
+            notices.append(kwargs.get("continuation_notice"))
+            return ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
+
+        mock_build_prompt.side_effect = build_prompt_side_effect
+
+        self.agent.schedule = "0 9 * * *"
+        self.agent.save(update_fields=["schedule"])
+
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Finish outstanding work",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+
+        def mk_tc(name, args):
+            tc = MagicMock()
+            tc.function = MagicMock()
+            tc.function.name = name
+            tc.function.arguments = args
+            return tc
+
+        tc_email = mk_tc('send_email', '{"to": "a@example.com", "subject": "hi", "mobile_first_html": "<p>Hi</p>"}')
+        tc_charter = mk_tc('update_charter', '{"new_charter": "Stay focused"}')
+
+        msg = MagicMock()
+        msg.tool_calls = [tc_email, tc_charter]
+        msg.content = None
+
+        choice = MagicMock(); choice.message = msg
+        resp = MagicMock(); resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
+
+        mock_completion.side_effect = [
+            (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
+            (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
+        ]
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(len(notices), 2)
+        self.assertIsNone(notices[0])
+        self.assertIsNotNone(notices[1])
+        self.assertIn("kanban", notices[1].lower())
+        self.assertIn("credits", notices[1].lower())

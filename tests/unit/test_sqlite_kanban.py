@@ -178,3 +178,88 @@ class SqliteKanbanTests(TestCase):
         self.assertEqual(result.changes[0].to_status, PersistentAgentKanbanCard.Status.TODO)
         self.assertIsNotNone(result.snapshot)
         self.assertEqual(result.snapshot.todo_count, 1)
+
+    def test_sqlite_kanban_archives_done_cards(self):
+        """Deleting done cards from SQLite archives them from Postgres."""
+        done_card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Completed task",
+            status=PersistentAgentKanbanCard.Status.DONE,
+            priority=1,
+        )
+        todo_card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Pending task",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=2,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_kanban(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    # Delete the done card
+                    conn.execute(
+                        f'DELETE FROM "{KANBAN_CARDS_TABLE}" WHERE id = ?;',
+                        (str(done_card.id),),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_kanban_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        # Done card should be deleted
+        self.assertFalse(
+            PersistentAgentKanbanCard.objects.filter(id=done_card.id).exists()
+        )
+        # Todo card should remain
+        self.assertTrue(
+            PersistentAgentKanbanCard.objects.filter(id=todo_card.id).exists()
+        )
+        self.assertFalse(result.errors)
+        self.assertEqual(len(result.archived_ids), 1)
+        self.assertEqual(result.archived_ids[0], str(done_card.id))
+        self.assertEqual(len(result.changes), 1)
+        self.assertEqual(result.changes[0].action, "archived")
+
+    def test_sqlite_kanban_rejects_archiving_non_done_cards(self):
+        """Deleting non-done cards from SQLite should be rejected."""
+        todo_card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Pending task",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_kanban(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    # Try to delete a non-done card
+                    conn.execute(
+                        f'DELETE FROM "{KANBAN_CARDS_TABLE}" WHERE id = ?;',
+                        (str(todo_card.id),),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_kanban_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        # Todo card should NOT be deleted
+        self.assertTrue(
+            PersistentAgentKanbanCard.objects.filter(id=todo_card.id).exists()
+        )
+        self.assertTrue(result.errors)
+        self.assertIn("only done cards can be archived", result.errors[0])

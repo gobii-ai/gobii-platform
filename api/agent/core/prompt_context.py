@@ -1445,6 +1445,7 @@ def build_prompt_context(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
@@ -1457,6 +1458,7 @@ def build_prompt_context(
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
+        continuation_notice: Optional system note to inject for follow-up loops.
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
 
     Returns:
@@ -1518,6 +1520,7 @@ def build_prompt_context(
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
         implied_send_active=implied_send_active,
+        continuation_notice=continuation_notice,
     )
 
     # ── Static ICL (first in prompt for caching, never shrinks) ─────────────
@@ -1793,10 +1796,14 @@ def build_prompt_context(
     kanban_note = (
         f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
         "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
-        "Batch updates: fold kanban changes into the same sqlite_batch as other queries. "
+        "Status: todo/doing/done. Priority: higher = more urgent. "
+        "Workflow: (1) Mark a card 'doing' when you start it. (2) Mark it 'done' when truly finished—not when you've made progress, when it's *complete*. "
+        "(3) Keep working until all 'doing' cards are done or you're out of credits. "
+        "Batch updates: fold kanban changes into the same sqlite_batch as your other queries—don't make separate calls just for kanban. "
+        "Archive old work: DELETE done cards when starting fresh work or when a batch is fully complete. Only 'done' cards can be archived. "
         "Example: INSERT INTO __kanban_cards (title, status) VALUES ('Research competitors', 'doing'), ('Write summary', 'todo'); "
+        "Example archive: DELETE FROM __kanban_cards WHERE status = 'done'; "
         "IDs auto-generate—just provide title + status."
-        "Status: todo/doing/done. Priority: higher = more urgent."
     )
     variable_group.section_text(
         "kanban_note",
@@ -2806,6 +2813,7 @@ def _get_system_instruction(
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
     implied_send_active: bool = False,
+    continuation_notice: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
@@ -2843,60 +2851,30 @@ def _get_system_instruction(
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
     # Key: be eager to update charter and schedule whenever user hints at preferences or timing
-    if implied_send_active:
-        stop_continue_examples = (
-            "## When to stop vs continue\n\n"
-            "**Stop** — request fully handled, nothing left to do:\n"
-            "- 'hi' → 'Hey! What can I help with?' — done.\n"
-            "- 'thanks!' → 'Anytime!' — done.\n"
-            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + 'Got it!' — done.\n"
-            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + 'Updated to weekly!' — done.\n"
-            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + 'Paused. Let me know when to resume.' — done.\n"
-            "- Cron fires, nothing new → (empty response) — done.\n\n"
-            "**Continue** — still have work to do:\n"
-            "- 'what's bitcoin?' → http_request(will_continue_work=true) → 'BTC is $67k' — now done.\n"
-            "- 'research our top 5 competitors' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Research competitors' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Analyze pricing', 'todo'), ('Write summary', 'todo');\", will_continue_work=true) + search_tools → ...keep working, update kanban as you go.\n"
-            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report first digest — now done.\n"
-            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report news — now done.\n"
-            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't reported → will_continue_work=true.\n"
-            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
-            "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + 'Will do!'\n"
-            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + 'Now checking hourly!'\n"
-            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
-            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + 'Updated to 9am and 6pm!'\n"
-            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + 'Added to my radar!'\n"
-            "- User: 'oh and can you also research their competitors?' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also research competitors' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Research competitors', 'todo');\", will_continue_work=true) + 'On it!'\n\n"
-            "**The rule:** Did you complete what they asked? New work mid-conversation = update charter + add kanban cards + adjust schedule if needed, all in one batch.\n"
-        )
-    else:
-        stop_continue_examples = (
-            "## When to stop vs continue\n\n"
-            "**Stop** — request fully handled, nothing left to do:\n"
-            "- 'hi' → send_email('Hey! What can I help with?') — done.\n"
-            "- 'thanks!' → send_email('Anytime!') — done.\n"
-            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + send_email('Got it!') — done.\n"
-            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + send_email('Updated to weekly!') — done.\n"
-            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + send_email('Paused.') — done.\n"
-            "- Cron fires, nothing new → (empty response) — done.\n\n"
-            "**Continue** — still have work to do:\n"
-            "- 'what's bitcoin?' → http_request(will_continue_work=true) → send_email('BTC is $67k') — now done.\n"
-            "- 'research our top 5 competitors' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Research competitors' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Analyze pricing', 'todo'), ('Write summary', 'todo');\", will_continue_work=true) + search_tools → ...keep working, update kanban as you go.\n"
-            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
-            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(news) — now done.\n"
-            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't sent it → will_continue_work=true.\n"
-            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
-            "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + send_email('Will do!')\n"
-            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + send_email('Now checking hourly!')\n"
-            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
-            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + send_email('Updated to 9am and 6pm!')\n"
-            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + send_email('Added!')\n"
-            "- User: 'oh and can you also research their competitors?' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also research competitors' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Research competitors', 'todo');\", will_continue_work=true) + send_email('On it!')\n\n"
-            "**The rule:** Did you complete what they asked? New work mid-conversation = update charter + add kanban cards + adjust schedule if needed, all in one batch.\n"
-        )
+    # reply() = implicit send (active web chat) or explicit send_email/send_chat_message (no active chat)
+    reply = "'Message'" if implied_send_active else "send_email('Message')"
+    reply_short = "reply" if implied_send_active else "send_email(reply)"
+    fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
+    stop_continue_examples = (
+        "## When to stop vs continue\n\n"
+        "**Stop** — request fully handled:\n"
+        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} — done.\n"
+        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} — done.\n"
+        f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Got it!')} — done.\n"
+        f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1') + {reply.replace('Message', 'Updated!')} — done.\n"
+        "- Cron fires, nothing new → (empty response) — done.\n\n"
+        "**Continue** — still have work:\n"
+        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → {reply_short} — now done.\n"
+        "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
+        "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
+        f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
+        "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
+        "**Mid-conversation updates** — update eagerly when user hints:\n"
+        f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
+        f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
+        "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
+        "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
+    )
 
     delivery_instructions = (
         f"{send_guidance}"
@@ -3468,6 +3446,9 @@ def _get_system_instruction(
             " Be genuinely warm about reaching out—you noticed something and wanted to help. That's a good thing! 🙂"
         )
 
+    if continuation_notice:
+        base_prompt += f"\n\n{continuation_notice}"
+
     if is_first_run:
         try:
             already_contacted = PersistentAgentMessage.objects.filter(
@@ -3496,6 +3477,7 @@ def _get_system_instruction(
                     "  ('Analyze findings', 'todo'),\n"
                     "  ('Write up results', 'todo');\n"
                     "```\n"
+                    "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
                     "Don't provide IDs—they auto-generate. Just title + status.\n"
                     "Charter without cards leaves you with no memory of what to do. Always include both.\n\n"
 

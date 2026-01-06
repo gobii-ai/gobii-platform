@@ -42,7 +42,7 @@ class KanbanCardChange:
 
     card_id: str
     title: str
-    action: str  # "created", "started", "completed", "updated"
+    action: str  # "created", "started", "completed", "updated", "archived"
     from_status: Optional[str] = None
     to_status: Optional[str] = None
 
@@ -63,7 +63,8 @@ class KanbanBoardSnapshot:
 class KanbanApplyResult:
     created_ids: Sequence[str]
     updated_ids: Sequence[str]
-    errors: Sequence[str]
+    archived_ids: Sequence[str] = ()
+    errors: Sequence[str] = ()
     changes: Sequence[KanbanCardChange] = ()
     snapshot: Optional[KanbanBoardSnapshot] = None
 
@@ -306,6 +307,45 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                         )
                     )
 
+        # Archive (delete) cards that were removed from SQLite table
+        # Only done cards can be archived to prevent accidental loss
+        archived = baseline_ids - current_ids
+        archived_ids: list[str] = []
+        for card_id in sorted(archived):
+            baseline_card = baseline_cards.get(card_id)
+            if not baseline_card:
+                continue
+            if baseline_card.assigned_agent_id != str(agent.id):
+                errors.append(
+                    f"Kanban archive denied for {card_id}: only tasks assigned to this agent may be archived."
+                )
+                continue
+            if baseline_card.status != PersistentAgentKanbanCard.Status.DONE:
+                errors.append(
+                    f"Kanban archive denied for {card_id}: only done cards can be archived. "
+                    f"Current status: {baseline_card.status}"
+                )
+                continue
+
+            card_uuid = _coerce_uuid(card_id)
+            if not card_uuid:
+                errors.append(f"Kanban archive ignored for invalid card id: {card_id}")
+                continue
+
+            deleted_count, _ = PersistentAgentKanbanCard.objects.filter(
+                id=card_uuid, assigned_agent=agent
+            ).delete()
+            if deleted_count:
+                archived_ids.append(str(card_uuid))
+                changes.append(
+                    KanbanCardChange(
+                        card_id=str(card_uuid),
+                        title=baseline_card.title,
+                        action="archived",
+                        from_status=baseline_card.status,
+                    )
+                )
+
     _drop_kanban_table()
 
     # Build board snapshot if there were changes
@@ -316,6 +356,7 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
     return KanbanApplyResult(
         created_ids=created_ids,
         updated_ids=updated_ids,
+        archived_ids=archived_ids,
         errors=errors,
         changes=changes,
         snapshot=snapshot,

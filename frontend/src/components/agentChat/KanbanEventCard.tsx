@@ -251,18 +251,18 @@ export const KanbanEventCard = memo(function KanbanEventCard({
       {/* Mini kanban board */}
       <div className="kanban-board">
         <MiniColumn
-          status="doing"
-          label="In Progress"
-          count={snapshot.doingCount}
-          titles={snapshot.doingTitles}
-          animate={animate}
-          delay={200}
-        />
-        <MiniColumn
           status="todo"
           label="To Do"
           count={snapshot.todoCount}
           titles={snapshot.todoTitles}
+          animate={animate}
+          delay={200}
+        />
+        <MiniColumn
+          status="doing"
+          label="Doing"
+          count={snapshot.doingCount}
+          titles={snapshot.doingTitles}
           animate={animate}
           delay={280}
         />
