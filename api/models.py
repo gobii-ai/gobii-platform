@@ -754,13 +754,19 @@ class PlanVersionPrice(models.Model):
         blank=True,
         help_text="Billing interval for recurring prices; null for metered/add-ons.",
     )
-    price_id = models.CharField(max_length=255, unique=True)
+    price_id = models.CharField(max_length=255)
     product_id = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["plan_version", "kind", "price_id"]
+        constraints = [
+            UniqueConstraint(
+                fields=["plan_version", "price_id"],
+                name="unique_plan_version_price_id",
+            ),
+        ]
         indexes = [
             models.Index(fields=["price_id"], name="planverprice_price_idx"),
             models.Index(fields=["product_id"], name="planverprice_product_idx"),
