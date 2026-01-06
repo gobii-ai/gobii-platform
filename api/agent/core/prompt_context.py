@@ -356,12 +356,10 @@ when:
   - Need external data
 
 do:
-  # Known public API? → http_request directly (skip search_tools)
-  # Otherwise:
-  search_tools(query="<domain keywords>", will_continue_work=true)
+  # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
+  # Otherwise → search_tools("<domain>", will_continue_work=true)
 
 then:
-  if public API → http_request → M5 (store)
   if found extractors → M2
   if nothing → M3 (search)
   if have URL → M4 (scrape)
@@ -3045,7 +3043,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         patterns = (
             "(1) More work? Include a tool call, or end message with \"Continuing...\" "
             "(2) Replying + taking action? Text + tool calls. "
-            "(3) Done? Include \"Work complete.\" in your message, or use sleep_until_next_trigger."
+            "(3) Done? Text-only replies stop by default. No special phrase needed."
         )
     else:
         patterns = (
@@ -3169,10 +3167,9 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your text auto-sends to the active web chat user.\n"
-            "Text-only replies auto-send; end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n"
+            "Text-only replies auto-send and stop by default. End with \"Continuing...\" to request another turn.\n"
             "**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
-            "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
-            "To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
+            "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -3185,10 +3182,9 @@ def _get_system_instruction(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → Message sends\n"
-            "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
-            "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
-            "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
+            "  → Message sends, then stops by default\n"
+            "  To continue working: end message with \"Continuing...\" (requests another turn)\n"
+            "  Default behavior: message sends, then auto-stops\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
             "  Use when: acknowledging the user while taking action\n"
@@ -3196,8 +3192,7 @@ def _get_system_instruction(
             "Tools only (no message)\n"
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "To signal completion: include \"Work complete.\" in your final message, or use `sleep_until_next_trigger`."
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n"
         )
         tool_calls_note = "Tool calls are actions you take. You can combine text + tools in one response. "
         stop_explicit_note = ""
@@ -3236,7 +3231,7 @@ def _get_system_instruction(
     reply_short = "reply" if implied_send_active else "send_email(reply)"
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
     text_only_guidance = (
-        "- Text-only replies: end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n\n"
+        "- Text-only replies stop by default. End with \"Continuing...\" to request another turn.\n\n"
         if implied_send_active
         else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
     )
@@ -3249,9 +3244,9 @@ def _get_system_instruction(
         f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1') + {reply.replace('Message', 'Updated!')} — done.\n"
         "- Cron fires, nothing new → (empty response) — done.\n\n"
         "**Continue** — still have work:\n"
-        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → {reply_short} — now done.\n"
-        "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
-        "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
+        f"- 'what's bitcoin?' → http_request (has API) → {reply_short} — done.\n"
+        "- 'what's on HN?' → http_request (has API) → report — done.\n"
+        "- 'research competitors' → search_tools → keep working.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates** — update eagerly when user hints:\n"
@@ -3268,10 +3263,9 @@ def _get_system_instruction(
     if implied_send_active:
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
-            "- Text-only replies auto-send; end with \"Continuing...\" to request another pass or \"Work complete.\" to stop\n"
+            "- Text-only replies auto-send and stop by default. End with \"Continuing...\" to request another turn\n"
             "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
             "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
-            "- To stop early: use `sleep_until_next_trigger`\n"
         )
     else:
         will_continue_guidance = (
@@ -3982,17 +3976,18 @@ def _get_system_instruction(
 
                     "### R5: Continuation Logic\n"
                     "```\n"
-                    "WHEN task_exists => will_continue_work = true, THEN search_tools('{domain keywords}')\n"
-                    "WHEN no_task     => will_continue_work = false, THEN stop\n"
+                    "WHEN task_exists AND known_api => http_request(api_url), will_continue_work=true\n"
+                    "WHEN task_exists              => search_tools('{domain}'), will_continue_work=true\n"
+                    "WHEN no_task                  => will_continue_work=false, stop\n"
                     "```\n\n"
 
                     "### Execution Template\n"
                     "```\n"
                     "IF has_task:\n"
                     "  send_{channel}(greeting)\n"
-                    "  sqlite_batch(sql=\"UPDATE __agent_config SET charter='{R2}', schedule='{R3}' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('{first_step}', 'doing'), ('{next_step}', 'todo'), ...;\", will_continue_work=true)\n"
-                    "  search_tools('{domain} {data_type} API', will_continue_work=true)\n"
-                    "  # Next cycle: fetch → store → report → update cards\n"
+                    "  sqlite_batch(sql=\"UPDATE ...\", will_continue_work=true)\n"
+                    "  # Public API available? → http_request directly\n"
+                    "  # Otherwise → search_tools('{domain}')\n"
                     "\n"
                     "ELSE:\n"
                     "  send_{channel}('Hey! I'm {name} 👋 What can I help with?')\n"

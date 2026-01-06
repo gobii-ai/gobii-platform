@@ -2769,11 +2769,10 @@ def _run_agent_loop(
             implied_send = False
             tool_calls = list(raw_tool_calls)
             if message_text and not has_explicit_send:
-                # Check for explicit completion signal in message or thinking content.
-                # Agent can signal "I'm done" by including phrases like "Work complete."
-                has_completion = _has_completion_signal(message_text) or _has_completion_signal(thinking_content or "")
-                # Default: assume continuation unless agent explicitly sleeps OR signals completion.
-                implied_will_continue = not has_explicit_sleep and not has_completion
+                # Default: STOP. Agent must explicitly request continuation with "Continuing..."
+                # This is safer—agent won't keep running unexpectedly.
+                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
+                implied_will_continue = has_continuation and not has_explicit_sleep
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,
