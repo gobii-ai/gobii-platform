@@ -611,74 +611,68 @@ Use `false` (or omit the tool call) when:
 
 ## CSV Parsing
 
-```
-# Rule: inspect before parsing
-unknown(structure) → inspect_first → then_parse
-
-# Inspect query (run this first if path unknown)
-SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
-→ reveals actual structure → use in parsing query
-```
-
-For CSV data, use recursive CTE parsing:
+Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines):
 
 ```sql
--- Path MUST come from hint or inspection (never guess)
-CREATE TABLE data (col1 TEXT, col2 REAL, col3 TEXT);
+-- csv_parse(text)        → JSON array of objects (first row = headers)
+-- csv_parse(text, 0)     → JSON array of arrays (no header)
+-- csv_column(text, N)    → JSON array of values from column N (0-indexed)
 
-WITH RECURSIVE
-  csv AS (
-    -- Use exact path from hint: $.content | $.data | $.text | etc.
-    SELECT json_extract(result_json,'$.{path_from_hint}') as txt
-    FROM __tool_results WHERE result_id='{exact_id}'
-  ),
-  lines AS (
-    SELECT
-      substr(txt, 1, instr(txt, char(10))-1) as line,
-      substr(txt, instr(txt, char(10))+1) as rest
-    FROM csv
-    UNION ALL
-    SELECT
-      CASE WHEN instr(rest, char(10))>0
-           THEN substr(rest, 1, instr(rest, char(10))-1)
-           ELSE rest END,
-      CASE WHEN instr(rest, char(10))>0
-           THEN substr(rest, instr(rest, char(10))+1)
-           ELSE '' END
-    FROM lines WHERE length(rest)>0
-  ),
-  p1 AS (
-    SELECT substr(line, 1, instr(line,',')-1) as c1,
-           substr(line, instr(line,',')+1) as rest
-    FROM lines WHERE length(line)>0 AND line NOT LIKE 'col1%'
-  ),
-  p2 AS (
-    SELECT c1,
-           substr(rest, 1, instr(rest,',')-1) as c2,
-           substr(rest, instr(rest,',')+1) as c3
-    FROM p1
-  )
-INSERT INTO data SELECT c1, CAST(c2 AS REAL), c3 FROM p2;
+-- Example: Parse CSV and query it
+SELECT r.value->>'name', r.value->>'price'
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+WHERE t.result_id = '{id}';
+
+-- Example: Create table from CSV
+CREATE TABLE products AS
+SELECT
+  r.value->>'name' as name,
+  CAST(r.value->>'price' AS REAL) as price,
+  r.value->>'category' as category
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+WHERE t.result_id = '{id}';
+
+-- Example: Get all values from column 2 (0-indexed)
+SELECT v.value FROM json_each(csv_column('{csv_text}', 2)) v;
 ```
 
-Pattern: N columns need N-1 parsing CTEs. Each CTE extracts one column and passes the remainder.
+The `csv_parse` function uses Python's csv module internally—it handles edge cases you'd otherwise get wrong.
 
 ---
 
-## Text Analysis Functions
+## Data Cleaning Functions
 
 | Function | Returns | Use |
 |----------|---------|-----|
-| `grep_context_all(text, pattern, chars, max)` | JSON array | Context windows around matches |
-| `regexp_extract(text, pattern)` | String | First match |
-| `regexp_extract(text, pattern, group)` | String | Capture group |
+| `csv_parse(text)` | JSON array | Parse CSV to [{col: val}, ...] |
+| `csv_parse(text, 0)` | JSON array | Parse CSV without header |
+| `parse_number(text)` | Float | "$1,234.56", "€1.234,56", "1.2M" → number |
+| `parse_date(text)` | String | "Jan 5, 2024", "5/1/24" → "2024-01-05" |
+| `html_to_text(html)` | String | Strip tags, decode entities |
+| `clean_text(text)` | String | Normalize whitespace, unicode, quotes |
+| `url_extract(url, part)` | String | Extract 'domain', 'host', 'path', 'query' |
+| `extract_json(text)` | String | Find valid JSON in surrounding text |
+| `extract_emails(text)` | JSON array | Find all emails in text |
+| `extract_urls(text)` | JSON array | Find all URLs in text |
+| `grep_context_all(text, pat, chars, max)` | JSON array | Context around regex matches |
+| `regexp_extract(text, pattern)` | String | First regex match |
 | `split_sections(text, delim)` | JSON array | Split by delimiter |
-| `substr_range(text, start, end)` | String | Positional extraction |
 
-Iterate arrays with `json_each()`:
 ```sql
-SELECT ctx.value
-FROM json_each(grep_context_all(col, 'pattern', 60, 10)) ctx
+-- Parse messy prices: "$1,234.56", "€899,00", "1.2M" all work
+SELECT parse_number(price_text) as price FROM products;
+
+-- Normalize dates from various formats
+SELECT parse_date(date_str) as date FROM events;
+
+-- Clean HTML from scraped content
+SELECT html_to_text(raw_html) as clean FROM pages;
+
+-- Group URLs by domain
+SELECT url_extract(link, 'domain') as domain, COUNT(*) FROM data GROUP BY 1;
+
+-- Iterate JSON arrays
+SELECT v.value FROM json_each(extract_emails(text)) v;
 ```
 
 ---
@@ -964,6 +958,15 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
         weight=1,
         non_shrinkable=True,
     )
+
+    # Hint to mark work done when there are active cards
+    if doing_cards or todo_card:
+        kanban_group.section_text(
+            "kanban_completion_hint",
+            "Cards in doing/todo keep you working (and spending credits). When done, mark them complete—or set a schedule to pick up later.",
+            weight=1,
+            non_shrinkable=True,
+        )
 
 
 def _archive_rendered_prompt(

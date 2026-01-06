@@ -228,8 +228,8 @@ class SqliteKanbanTests(TestCase):
         self.assertEqual(len(result.changes), 1)
         self.assertEqual(result.changes[0].action, "archived")
 
-    def test_sqlite_kanban_rejects_archiving_non_done_cards(self):
-        """Deleting non-done cards from SQLite should be rejected."""
+    def test_sqlite_kanban_deletes_non_done_cards_with_tracking(self):
+        """Deleting non-done cards from SQLite is allowed but tracked as 'deleted'."""
         todo_card = PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Pending task",
@@ -244,7 +244,7 @@ class SqliteKanbanTests(TestCase):
                 snapshot = seed_sqlite_kanban(self.agent)
                 conn = sqlite3.connect(db_path)
                 try:
-                    # Try to delete a non-done card
+                    # Delete a non-done card
                     conn.execute(
                         f'DELETE FROM "{KANBAN_CARDS_TABLE}" WHERE id = ?;',
                         (str(todo_card.id),),
@@ -257,9 +257,15 @@ class SqliteKanbanTests(TestCase):
             finally:
                 reset_sqlite_db_path(token)
 
-        # Todo card should NOT be deleted
-        self.assertTrue(
+        # Todo card should now be deleted (new behavior)
+        self.assertFalse(
             PersistentAgentKanbanCard.objects.filter(id=todo_card.id).exists()
         )
-        self.assertTrue(result.errors)
-        self.assertIn("only done cards can be archived", result.errors[0])
+        # No errors - deletion is allowed
+        self.assertFalse(result.errors)
+        # Tracked as "deleted" (not "archived")
+        self.assertEqual(len(result.deleted_ids), 1)
+        self.assertEqual(result.deleted_ids[0], str(todo_card.id))
+        self.assertEqual(len(result.changes), 1)
+        self.assertEqual(result.changes[0].action, "deleted")
+        self.assertEqual(result.changes[0].from_status, PersistentAgentKanbanCard.Status.TODO)

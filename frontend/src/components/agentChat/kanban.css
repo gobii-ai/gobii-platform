@@ -303,6 +303,28 @@
   color: rgb(var(--kanban-todo));
 }
 
+/* Deleted action */
+.kanban-action--deleted {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.08) 0%, rgba(239, 68, 68, 0.04) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+}
+
+.kanban-action--deleted .kanban-change-icon {
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(239, 68, 68, 0.25) 100%);
+  color: rgb(239, 68, 68);
+}
+
+/* Archived action */
+.kanban-action--archived {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.06) 0%, rgba(100, 116, 139, 0.03) 100%);
+  border: 1px solid rgba(100, 116, 139, 0.12);
+}
+
+.kanban-action--archived .kanban-change-icon {
+  background: linear-gradient(135deg, rgba(100, 116, 139, 0.12) 0%, rgba(100, 116, 139, 0.2) 100%);
+  color: rgb(100, 116, 139);
+}
+
 /* ==========================================================================
    Mini Kanban Board
    ========================================================================== */
@@ -468,6 +490,41 @@
 
 .kanban-card--all-done {
   background: linear-gradient(145deg, #ecfdf5 0%, #d1fae5 30%, #f0fdf4 100%);
+}
+
+/* Deletion state - subtle red tint */
+.kanban-card--deletion {
+  background: linear-gradient(145deg, #fef2f2 0%, #fee2e2 50%, #fafaff 100%);
+  border-color: rgba(239, 68, 68, 0.15);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(239, 68, 68, 0.08);
+}
+
+/* Cleared state - neutral gray */
+.kanban-card--cleared {
+  background: linear-gradient(145deg, #f8fafc 0%, #f1f5f9 50%, #fafaff 100%);
+  border-color: rgba(100, 116, 139, 0.15);
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.04),
+    0 4px 12px rgba(100, 116, 139, 0.06);
+}
+
+/* Empty board placeholder */
+.kanban-empty-board {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  border-radius: 0.625rem;
+  background: linear-gradient(180deg, rgba(100, 116, 139, 0.04) 0%, rgba(100, 116, 139, 0.02) 100%);
+  border: 1px dashed rgba(100, 116, 139, 0.2);
+}
+
+.kanban-empty-board-text {
+  font-size: 0.8125rem;
+  color: #64748b;
+  font-style: italic;
 }
 
 /* Shimmer effect */

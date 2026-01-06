@@ -98,7 +98,7 @@ export type ThinkingEvent = {
 export type KanbanCardChange = {
   cardId: string
   title: string
-  action: 'created' | 'started' | 'completed' | 'updated'
+  action: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
   fromStatus?: string | null
   toStatus?: string | null
 }
@@ -118,7 +118,7 @@ export type KanbanEvent = {
   timestamp?: string | null
   agentName: string
   displayText: string
-  primaryAction: 'created' | 'started' | 'completed' | 'updated'
+  primaryAction: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
   changes: KanbanCardChange[]
   snapshot: KanbanBoardSnapshot
 }

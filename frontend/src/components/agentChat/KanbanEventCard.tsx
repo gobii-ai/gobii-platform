@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, useMemo } from 'react'
-import { CircleCheck, Play, Plus, ArrowRight, Sparkles } from 'lucide-react'
+import { CircleCheck, Play, Plus, ArrowRight, Sparkles, Trash2, Archive } from 'lucide-react'
 import type { KanbanEvent, KanbanCardChange } from './types'
 import './kanban.css'
 
@@ -27,6 +27,16 @@ const ACTION_CONFIG = {
     icon: ArrowRight,
     label: 'Updated',
     className: 'kanban-action--updated',
+  },
+  deleted: {
+    icon: Trash2,
+    label: 'Removed',
+    className: 'kanban-action--deleted',
+  },
+  archived: {
+    icon: Archive,
+    label: 'Archived',
+    className: 'kanban-action--archived',
   },
 } as const
 
@@ -211,17 +221,27 @@ export const KanbanEventCard = memo(function KanbanEventCard({
   const { snapshot, changes, primaryAction } = event
   const total = snapshot.todoCount + snapshot.doingCount + snapshot.doneCount
   const hasCompletion = primaryAction === 'completed'
+  const hasDeletion = primaryAction === 'deleted'
   const allDone = snapshot.doneCount === total && total > 0
+  const boardCleared = total === 0
 
   // Group changes by action type for better visual organization
   const completedChanges = changes.filter((c) => c.action === 'completed')
-  const otherChanges = changes.filter((c) => c.action !== 'completed')
-  const sortedChanges = [...completedChanges, ...otherChanges]
+  const deletedChanges = changes.filter((c) => c.action === 'deleted' || c.action === 'archived')
+  const otherChanges = changes.filter((c) => c.action !== 'completed' && c.action !== 'deleted' && c.action !== 'archived')
+  const sortedChanges = [...completedChanges, ...deletedChanges, ...otherChanges]
+
+  // Determine card variant class
+  const cardClass = [
+    'kanban-card',
+    hasCompletion && 'kanban-card--celebration',
+    hasDeletion && 'kanban-card--deletion',
+    allDone && 'kanban-card--all-done',
+    boardCleared && 'kanban-card--cleared',
+  ].filter(Boolean).join(' ')
 
   return (
-    <div
-      className={`kanban-card ${hasCompletion ? 'kanban-card--celebration' : ''} ${allDone ? 'kanban-card--all-done' : ''}`}
-    >
+    <div className={cardClass}>
       {/* Header with progress ring */}
       <div className="kanban-header">
         <ProgressRing done={snapshot.doneCount} total={total} animate={animate} />
@@ -231,7 +251,7 @@ export const KanbanEventCard = memo(function KanbanEventCard({
             <span>{event.displayText}</span>
           </div>
           <div className="kanban-header-subtitle">
-            {snapshot.doneCount} of {total} tasks complete
+            {boardCleared ? 'Board cleared' : `${snapshot.doneCount} of ${total} tasks complete`}
           </div>
         </div>
       </div>
@@ -248,33 +268,39 @@ export const KanbanEventCard = memo(function KanbanEventCard({
         </div>
       )}
 
-      {/* Mini kanban board */}
-      <div className="kanban-board">
-        <MiniColumn
-          status="todo"
-          label="To Do"
-          count={snapshot.todoCount}
-          titles={snapshot.todoTitles}
-          animate={animate}
-          delay={200}
-        />
-        <MiniColumn
-          status="doing"
-          label="Doing"
-          count={snapshot.doingCount}
-          titles={snapshot.doingTitles}
-          animate={animate}
-          delay={280}
-        />
-        <MiniColumn
-          status="done"
-          label="Done"
-          count={snapshot.doneCount}
-          titles={snapshot.doneTitles}
-          animate={animate}
-          delay={360}
-        />
-      </div>
+      {/* Mini kanban board - show empty state message when board is cleared */}
+      {boardCleared ? (
+        <div className="kanban-empty-board">
+          <span className="kanban-empty-board-text">No tasks on board</span>
+        </div>
+      ) : (
+        <div className="kanban-board">
+          <MiniColumn
+            status="todo"
+            label="To Do"
+            count={snapshot.todoCount}
+            titles={snapshot.todoTitles}
+            animate={animate}
+            delay={200}
+          />
+          <MiniColumn
+            status="doing"
+            label="Doing"
+            count={snapshot.doingCount}
+            titles={snapshot.doingTitles}
+            animate={animate}
+            delay={280}
+          />
+          <MiniColumn
+            status="done"
+            label="Done"
+            count={snapshot.doneCount}
+            titles={snapshot.doneTitles}
+            animate={animate}
+            delay={360}
+          />
+        </div>
+      )}
 
       {/* Celebration effects */}
       <CelebrationParticles active={hasCompletion && animate} />

@@ -42,7 +42,7 @@ class KanbanCardChange:
 
     card_id: str
     title: str
-    action: str  # "created", "started", "completed", "updated", "archived"
+    action: str  # "created", "started", "completed", "updated", "archived", "deleted"
     from_status: Optional[str] = None
     to_status: Optional[str] = None
 
@@ -64,6 +64,7 @@ class KanbanApplyResult:
     created_ids: Sequence[str]
     updated_ids: Sequence[str]
     archived_ids: Sequence[str] = ()
+    deleted_ids: Sequence[str] = ()
     errors: Sequence[str] = ()
     changes: Sequence[KanbanCardChange] = ()
     snapshot: Optional[KanbanBoardSnapshot] = None
@@ -307,44 +308,51 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                         )
                     )
 
-        # Archive (delete) cards that were removed from SQLite table
-        # Only done cards can be archived to prevent accidental loss
-        archived = baseline_ids - current_ids
+        # Handle cards that were removed from SQLite table
+        # Done cards are "archived" (clean removal), non-done cards are "deleted" (forceful removal)
+        removed = baseline_ids - current_ids
         archived_ids: list[str] = []
-        for card_id in sorted(archived):
+        deleted_ids: list[str] = []
+        for card_id in sorted(removed):
             baseline_card = baseline_cards.get(card_id)
             if not baseline_card:
                 continue
             if baseline_card.assigned_agent_id != str(agent.id):
                 errors.append(
-                    f"Kanban archive denied for {card_id}: only tasks assigned to this agent may be archived."
-                )
-                continue
-            if baseline_card.status != PersistentAgentKanbanCard.Status.DONE:
-                errors.append(
-                    f"Kanban archive denied for {card_id}: only done cards can be archived. "
-                    f"Current status: {baseline_card.status}"
+                    f"Kanban removal denied for {card_id}: only tasks assigned to this agent may be removed."
                 )
                 continue
 
             card_uuid = _coerce_uuid(card_id)
             if not card_uuid:
-                errors.append(f"Kanban archive ignored for invalid card id: {card_id}")
+                errors.append(f"Kanban removal ignored for invalid card id: {card_id}")
                 continue
 
             deleted_count, _ = PersistentAgentKanbanCard.objects.filter(
                 id=card_uuid, assigned_agent=agent
             ).delete()
             if deleted_count:
-                archived_ids.append(str(card_uuid))
-                changes.append(
-                    KanbanCardChange(
-                        card_id=str(card_uuid),
-                        title=baseline_card.title,
-                        action="archived",
-                        from_status=baseline_card.status,
+                # Track as "archived" if done, "deleted" if forcefully removed while incomplete
+                if baseline_card.status == PersistentAgentKanbanCard.Status.DONE:
+                    archived_ids.append(str(card_uuid))
+                    changes.append(
+                        KanbanCardChange(
+                            card_id=str(card_uuid),
+                            title=baseline_card.title,
+                            action="archived",
+                            from_status=baseline_card.status,
+                        )
                     )
-                )
+                else:
+                    deleted_ids.append(str(card_uuid))
+                    changes.append(
+                        KanbanCardChange(
+                            card_id=str(card_uuid),
+                            title=baseline_card.title,
+                            action="deleted",
+                            from_status=baseline_card.status,
+                        )
+                    )
 
     _drop_kanban_table()
 
@@ -357,6 +365,7 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
         created_ids=created_ids,
         updated_ids=updated_ids,
         archived_ids=archived_ids,
+        deleted_ids=deleted_ids,
         errors=errors,
         changes=changes,
         snapshot=snapshot,

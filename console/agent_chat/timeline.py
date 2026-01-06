@@ -922,6 +922,8 @@ def serialize_kanban_event(
     started_count = sum(1 for c in changes if c.action == "started")
     created_count = sum(1 for c in changes if c.action == "created")
     updated_count = sum(1 for c in changes if c.action == "updated")
+    deleted_count = sum(1 for c in changes if c.action == "deleted")
+    archived_count = sum(1 for c in changes if c.action == "archived")
 
     # Build display text
     if completed_count > 0 and completed_count == len(changes):
@@ -942,6 +944,18 @@ def serialize_kanban_event(
         else:
             display_text = f"{agent_name} added {created_count} tasks"
         primary_action = "created"
+    elif deleted_count > 0 and deleted_count == len(changes):
+        if deleted_count == 1:
+            display_text = f'{agent_name} removed "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} removed {deleted_count} tasks"
+        primary_action = "deleted"
+    elif archived_count > 0 and archived_count == len(changes):
+        if archived_count == 1:
+            display_text = f'{agent_name} archived "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} archived {archived_count} tasks"
+        primary_action = "archived"
     elif updated_count > 0 and updated_count == len(changes):
         if updated_count == 1:
             display_text = f'{agent_name} updated "{changes[0].title}"'
