@@ -1324,6 +1324,17 @@ if PIPEDREAM_GC_ENABLED:
         "schedule": crontab(hour=4, minute=45),
     }
 
+# ────────── Google Workspace (Docs/Sheets) ──────────
+GOOGLE_WORKSPACE_TOOLS_ENABLED = env.bool("GOOGLE_WORKSPACE_TOOLS_ENABLED", default=False)
+GOOGLE_WORKSPACE_CLIENT_ID = env("GOOGLE_WORKSPACE_CLIENT_ID", default="")
+GOOGLE_WORKSPACE_CLIENT_SECRET = env("GOOGLE_WORKSPACE_CLIENT_SECRET", default="")
+GOOGLE_WORKSPACE_REDIRECT_URI = env("GOOGLE_WORKSPACE_REDIRECT_URI", default="")
+GOOGLE_WORKSPACE_CONNECT_URL = env(
+    "GOOGLE_WORKSPACE_CONNECT_URL",
+    default=f"{PUBLIC_SITE_URL.rstrip('/')}/console/google/connect",
+)
+GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER = env("GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER", default="minimal")
+
 # File Handling
 
 # Maximum file size (in bytes) for downloads and inbound attachments
