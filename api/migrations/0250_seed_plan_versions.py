@@ -4,6 +4,7 @@ from typing import Any
 from django.conf import settings
 from django.db import migrations
 
+from config.plans import AGENTS_UNLIMITED
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 
 
@@ -74,7 +75,7 @@ PLAN_CONFIG_SNAPSHOT: dict[str, dict[str, Any]] = {
         "description": "Pro plan with enhanced features and support.",
         "monthly_task_credits": 500,
         "api_rate_limit": 600,
-        "agent_limit": -2147483648,
+        "agent_limit": AGENTS_UNLIMITED,
         "max_contacts_per_agent": 20,
         "credits_per_seat": 0,
         "org": False,
@@ -84,7 +85,7 @@ PLAN_CONFIG_SNAPSHOT: dict[str, dict[str, Any]] = {
         "description": "Scale plan with enhanced limits and support.",
         "monthly_task_credits": 10000,
         "api_rate_limit": 1500,
-        "agent_limit": -2147483648,
+        "agent_limit": AGENTS_UNLIMITED,
         "max_contacts_per_agent": 50,
         "credits_per_seat": 0,
         "org": False,
@@ -94,7 +95,7 @@ PLAN_CONFIG_SNAPSHOT: dict[str, dict[str, Any]] = {
         "description": "Team plan with collaboration features and priority support.",
         "monthly_task_credits": 2000,
         "api_rate_limit": 2000,
-        "agent_limit": -2147483648,
+        "agent_limit": AGENTS_UNLIMITED,
         "max_contacts_per_agent": 50,
         "credits_per_seat": 500,
         "org": True,
@@ -126,11 +127,12 @@ def _entry_value(entries_by_name: dict[str, Any], name: str) -> str:
             encrypted = encrypted.tobytes()
         try:
             from api.encryption import SecretsEncryption
-        except Exception:
+            from cryptography.exceptions import InvalidTag
+        except ImportError:
             return ""
         try:
             return SecretsEncryption.decrypt_value(encrypted)
-        except Exception:
+        except (TypeError, ValueError, InvalidTag):
             return ""
     return getattr(entry, "value_text", "") or ""
 

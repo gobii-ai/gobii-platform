@@ -85,7 +85,7 @@ class AddonEntitlementService:
                         price_map[row.kind].append(row.price_id)
                 if any(price_map.values()):
                     return price_map
-            except Exception:
+            except (LookupError, DatabaseError):
                 logger.debug(
                     "Failed to resolve add-on prices via plan version; falling back to StripeConfig",
                     exc_info=True,

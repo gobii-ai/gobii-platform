@@ -4,6 +4,8 @@ import uuid
 
 
 def _drop_toolratelimit_plan_fk(apps, schema_editor) -> None:
+    if schema_editor.connection.vendor == "sqlite":
+        return
     ToolRateLimit = apps.get_model("api", "ToolRateLimit")
     table = ToolRateLimit._meta.db_table
     with schema_editor.connection.cursor() as cursor:
@@ -16,20 +18,19 @@ def _drop_toolratelimit_plan_fk(apps, schema_editor) -> None:
             continue
         if "plan_id" not in (constraint.get("columns") or []):
             continue
-        schema_editor.execute(
-            "ALTER TABLE %s DROP CONSTRAINT %s"
-            % (
-                schema_editor.quote_name(table),
-                schema_editor.quote_name(name),
-            )
-        )
+        schema_editor.execute(schema_editor._delete_fk_sql(ToolRateLimit, name))
 
 
 def _drop_plan_name_primary_keys(apps, schema_editor) -> None:
-    if schema_editor.connection.vendor != "postgresql":
+    if schema_editor.connection.vendor == "sqlite":
         return
-    tables = ("api_dailycreditconfig", "api_browserconfig", "api_toolconfig")
-    for table in tables:
+    models = (
+        apps.get_model("api", "DailyCreditConfig"),
+        apps.get_model("api", "BrowserConfig"),
+        apps.get_model("api", "ToolConfig"),
+    )
+    for model in models:
+        table = model._meta.db_table
         with schema_editor.connection.cursor() as cursor:
             constraints = schema_editor.connection.introspection.get_constraints(cursor, table)
         for name, constraint in constraints.items():
@@ -38,13 +39,7 @@ def _drop_plan_name_primary_keys(apps, schema_editor) -> None:
             columns = constraint.get("columns") or []
             if "plan_name" not in columns:
                 continue
-            schema_editor.execute(
-                "ALTER TABLE %s DROP CONSTRAINT %s"
-                % (
-                    schema_editor.quote_name(table),
-                    schema_editor.quote_name(name),
-                )
-            )
+            schema_editor.execute(schema_editor._delete_primary_key_sql(model, name))
             break
 
 
