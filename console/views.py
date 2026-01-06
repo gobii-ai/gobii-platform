@@ -8930,7 +8930,12 @@ def update_addons(request, owner, owner_type):
     task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "task_pack")
     contact_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "contact_pack")
     browser_task_options = AddonEntitlementService.get_price_options(owner_type, plan_id, "browser_task_limit")
-    all_options = (task_options or []) + (contact_options or []) + (browser_task_options or [])
+    advanced_captcha_options = AddonEntitlementService.get_price_options(
+        owner_type,
+        plan_id,
+        "advanced_captcha_resolution",
+    )
+    all_options = (task_options or []) + (contact_options or []) + (browser_task_options or []) + (advanced_captcha_options or [])
     if not all_options:
         messages.error(request, "No add-ons are configured for your plan.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -8942,6 +8947,8 @@ def update_addons(request, owner, owner_type):
         price_to_kind[opt.price_id] = "contact_pack"
     for opt in browser_task_options or []:
         price_to_kind[opt.price_id] = "browser_task_limit"
+    for opt in advanced_captcha_options or []:
+        price_to_kind[opt.price_id] = "advanced_captcha_resolution"
 
     desired_quantities: dict[str, int] = {}
     for key, value in request.POST.items():

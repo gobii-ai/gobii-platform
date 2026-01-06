@@ -21,6 +21,7 @@ class AddonUplift:
     task_credits: int = 0
     contact_cap: int = 0
     browser_task_daily: int = 0
+    advanced_captcha_resolution: int = 0
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class AddonPriceConfig:
     task_credits_delta: int = 0
     contact_cap_delta: int = 0
     browser_task_daily_delta: int = 0
+    advanced_captcha_resolution_delta: int = 0
     unit_amount: int | None = None
     currency: str = ""
 
@@ -103,6 +105,9 @@ class AddonEntitlementService:
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
                 ),
+                "advanced_captcha_resolution": _normalize_price_list(
+                    getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_ids", ()),
+                ),
             }
 
         if plan_id == PlanNames.STARTUP:
@@ -116,6 +121,9 @@ class AddonEntitlementService:
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
                 ),
+                "advanced_captcha_resolution": _normalize_price_list(
+                    getattr(stripe_settings, "startup_advanced_captcha_resolution_price_ids", ()),
+                ),
             }
 
         if plan_id == PlanNames.SCALE:
@@ -128,6 +136,9 @@ class AddonEntitlementService:
                 ),
                 "browser_task_limit": _normalize_price_list(
                     getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
+                ),
+                "advanced_captcha_resolution": _normalize_price_list(
+                    getattr(stripe_settings, "scale_advanced_captcha_resolution_price_ids", ()),
                 ),
             }
 
@@ -194,8 +205,15 @@ class AddonEntitlementService:
         browser_task_daily_delta = AddonEntitlementService._safe_int(
             metadata.get("browser_task_daily_delta")
         )
+        advanced_captcha_resolution_delta = AddonEntitlementService._safe_int(
+            metadata.get("advanced_captcha_resolution_delta")
+            or metadata.get("advanced_captcha_resolution")
+            or metadata.get("captcha_resolution_delta")
+            or metadata.get("captcha_resolution")
+            or metadata.get("captcha_solver_enabled")
+        )
 
-        if task_delta == 0 and contact_delta == 0 and browser_task_daily_delta == 0:
+        if task_delta == 0 and contact_delta == 0 and browser_task_daily_delta == 0 and advanced_captcha_resolution_delta == 0:
             return None
 
         return AddonPriceConfig(
@@ -204,6 +222,7 @@ class AddonEntitlementService:
             task_credits_delta=task_delta,
             contact_cap_delta=contact_delta,
             browser_task_daily_delta=browser_task_daily_delta,
+            advanced_captcha_resolution_delta=advanced_captcha_resolution_delta,
             unit_amount=unit_amount,
             currency=currency or "",
         )
@@ -241,12 +260,20 @@ class AddonEntitlementService:
                 ),
                 0,
             ),
+            advanced_captcha_resolution=Coalesce(
+                Sum(
+                    F("advanced_captcha_resolution_delta") * F("quantity"),
+                    output_field=IntegerField(),
+                ),
+                0,
+            ),
         )
 
         return AddonUplift(
             task_credits=int(aggregates.get("task_credits", 0) or 0),
             contact_cap=int(aggregates.get("contact_cap", 0) or 0),
             browser_task_daily=int(aggregates.get("browser_task_daily", 0) or 0),
+            advanced_captcha_resolution=int(aggregates.get("advanced_captcha_resolution", 0) or 0),
         )
 
     @staticmethod
@@ -260,6 +287,10 @@ class AddonEntitlementService:
     @staticmethod
     def get_browser_task_daily_uplift(owner, at_time=None) -> int:
         return AddonEntitlementService.get_uplift(owner, at_time).browser_task_daily
+
+    @staticmethod
+    def has_advanced_captcha_resolution(owner, at_time=None) -> bool:
+        return bool(AddonEntitlementService.get_uplift(owner, at_time).advanced_captcha_resolution)
 
     @staticmethod
     def get_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
@@ -339,6 +370,7 @@ class AddonEntitlementService:
                 task_credits_delta=0,
                 contact_cap_delta=0,
                 browser_task_daily_delta=0,
+                advanced_captcha_resolution_delta=0,
                 unit_amount=None,
                 currency="",
             )
@@ -363,6 +395,7 @@ class AddonEntitlementService:
         total_task = 0
         total_contact = 0
         total_browser_task_daily = 0
+        total_advanced_captcha_resolution = 0
         total_amount = 0
         currency = ""
 
@@ -381,6 +414,8 @@ class AddonEntitlementService:
                     delta_value = cfg.contact_cap_delta
                 elif kind == "browser_task_limit":
                     delta_value = cfg.browser_task_daily_delta
+                elif kind == "advanced_captcha_resolution":
+                    delta_value = cfg.advanced_captcha_resolution_delta
                 else:
                     delta_value = 0
                 entitlements = AddonEntitlementService.get_active_entitlements(owner, price_id)
@@ -402,6 +437,8 @@ class AddonEntitlementService:
                     total_contact += cfg.contact_cap_delta * qty
                 if cfg.browser_task_daily_delta:
                     total_browser_task_daily += cfg.browser_task_daily_delta * qty
+                if cfg.advanced_captcha_resolution_delta:
+                    total_advanced_captcha_resolution += cfg.advanced_captcha_resolution_delta * qty
                 if cfg.unit_amount is not None:
                     total_amount += cfg.unit_amount * qty
                 currency = currency or (cfg.currency or "").upper()
@@ -414,6 +451,7 @@ class AddonEntitlementService:
                         "task_delta": cfg.task_credits_delta,
                         "contact_delta": cfg.contact_cap_delta,
                         "browser_task_daily_delta": cfg.browser_task_daily_delta,
+                        "advanced_captcha_resolution_delta": cfg.advanced_captcha_resolution_delta,
                         "expires_at": expires_at,
                         "unit_amount": cfg.unit_amount,
                         "currency": cfg.currency,
@@ -440,6 +478,7 @@ class AddonEntitlementService:
             "task_credits": total_task,
             "contact_cap": total_contact,
             "browser_task_daily": total_browser_task_daily,
+            "advanced_captcha_resolution": total_advanced_captcha_resolution,
             "amount_cents": total_amount,
             "currency": currency,
             "amount_display": amount_display,
@@ -581,6 +620,9 @@ class AddonEntitlementService:
                 if ent.browser_task_daily_delta != cfg.browser_task_daily_delta:
                     ent.browser_task_daily_delta = cfg.browser_task_daily_delta
                     updates.append("browser_task_daily_delta")
+                if ent.advanced_captcha_resolution_delta != cfg.advanced_captcha_resolution_delta:
+                    ent.advanced_captcha_resolution_delta = cfg.advanced_captcha_resolution_delta
+                    updates.append("advanced_captcha_resolution_delta")
                 if ent.starts_at != starts_at:
                     ent.starts_at = starts_at
                     updates.append("starts_at")
@@ -603,6 +645,7 @@ class AddonEntitlementService:
                     task_credits_delta=cfg.task_credits_delta,
                     contact_cap_delta=cfg.contact_cap_delta,
                     browser_task_daily_delta=cfg.browser_task_daily_delta,
+                    advanced_captcha_resolution_delta=cfg.advanced_captcha_resolution_delta,
                     starts_at=starts_at,
                     expires_at=ent_expires_at,
                     is_recurring=True,

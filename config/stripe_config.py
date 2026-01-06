@@ -33,6 +33,8 @@ class StripeSettings:
     startup_contact_cap_price_ids: tuple[str, ...]
     startup_browser_task_limit_product_id: str
     startup_browser_task_limit_price_ids: tuple[str, ...]
+    startup_advanced_captcha_resolution_product_id: str
+    startup_advanced_captcha_resolution_price_ids: tuple[str, ...]
     startup_product_id: str
     scale_price_id: str
     scale_additional_task_price_id: str
@@ -42,6 +44,8 @@ class StripeSettings:
     scale_contact_cap_price_ids: tuple[str, ...]
     scale_browser_task_limit_product_id: str
     scale_browser_task_limit_price_ids: tuple[str, ...]
+    scale_advanced_captcha_resolution_product_id: str
+    scale_advanced_captcha_resolution_price_ids: tuple[str, ...]
     scale_product_id: str
     org_team_product_id: str
     org_team_price_id: str
@@ -53,6 +57,8 @@ class StripeSettings:
     org_team_contact_cap_price_ids: tuple[str, ...]
     org_team_browser_task_limit_product_id: str
     org_team_browser_task_limit_price_ids: tuple[str, ...]
+    org_team_advanced_captcha_resolution_product_id: str
+    org_team_advanced_captcha_resolution_price_ids: tuple[str, ...]
     startup_dedicated_ip_product_id: str
     startup_dedicated_ip_price_id: str
     scale_dedicated_ip_product_id: str
@@ -113,6 +119,13 @@ def _env_defaults() -> StripeSettings:
         startup_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_STARTUP_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
         ),
+        startup_advanced_captcha_resolution_product_id=env(
+            "STRIPE_STARTUP_ADVANCED_CAPTCHA_RESOLUTION_PRODUCT_ID",
+            default="prod_dummy_startup_advanced_captcha_resolution",
+        ),
+        startup_advanced_captcha_resolution_price_ids=_parse_price_id_list(
+            env.list("STRIPE_STARTUP_ADVANCED_CAPTCHA_RESOLUTION_PRICE_IDS", default=[])
+        ),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
         scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
         scale_task_pack_product_id=env("STRIPE_SCALE_TASK_PACK_PRODUCT_ID", default="prod_dummy_scale_task_pack_product"),
@@ -126,6 +139,13 @@ def _env_defaults() -> StripeSettings:
         ),
         scale_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_SCALE_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
+        ),
+        scale_advanced_captcha_resolution_product_id=env(
+            "STRIPE_SCALE_ADVANCED_CAPTCHA_RESOLUTION_PRODUCT_ID",
+            default="prod_dummy_scale_advanced_captcha_resolution",
+        ),
+        scale_advanced_captcha_resolution_price_ids=_parse_price_id_list(
+            env.list("STRIPE_SCALE_ADVANCED_CAPTCHA_RESOLUTION_PRICE_IDS", default=[])
         ),
         scale_product_id=env("STRIPE_SCALE_PRODUCT_ID", default="prod_dummy_scale"),
         startup_dedicated_ip_product_id=env("STRIPE_STARTUP_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_startup_dedicated_ip"),
@@ -146,6 +166,13 @@ def _env_defaults() -> StripeSettings:
         ),
         org_team_browser_task_limit_price_ids=_parse_price_id_list(
             env.list("STRIPE_ORG_TEAM_BROWSER_TASK_LIMIT_PRICE_IDS", default=[])
+        ),
+        org_team_advanced_captcha_resolution_product_id=env(
+            "STRIPE_ORG_TEAM_ADVANCED_CAPTCHA_RESOLUTION_PRODUCT_ID",
+            default="prod_dummy_org_team_advanced_captcha_resolution",
+        ),
+        org_team_advanced_captcha_resolution_price_ids=_parse_price_id_list(
+            env.list("STRIPE_ORG_TEAM_ADVANCED_CAPTCHA_RESOLUTION_PRICE_IDS", default=[])
         ),
         org_team_dedicated_ip_product_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRODUCT_ID", default="prod_dummy_org_dedicated_ip"),
         org_team_dedicated_ip_price_id=env("STRIPE_ORG_TEAM_DEDICATED_IP_PRICE_ID", default="price_dummy_org_dedicated_ip"),
@@ -208,6 +235,12 @@ def _load_from_database() -> Optional[StripeSettings]:
     except Exception:
         startup_browser_task_limit_price_ids = tuple()
     try:
+        startup_advanced_captcha_resolution_price_ids = _parse_price_id_list(
+            getattr(config, "startup_advanced_captcha_resolution_price_ids", None)
+        )
+    except Exception:
+        startup_advanced_captcha_resolution_price_ids = tuple()
+    try:
         scale_task_pack_price_ids = _parse_price_id_list(getattr(config, "scale_task_pack_price_ids", None))
     except Exception:
         scale_task_pack_price_ids = tuple()
@@ -222,6 +255,12 @@ def _load_from_database() -> Optional[StripeSettings]:
     except Exception:
         scale_browser_task_limit_price_ids = tuple()
     try:
+        scale_advanced_captcha_resolution_price_ids = _parse_price_id_list(
+            getattr(config, "scale_advanced_captcha_resolution_price_ids", None)
+        )
+    except Exception:
+        scale_advanced_captcha_resolution_price_ids = tuple()
+    try:
         org_team_task_pack_price_ids = _parse_price_id_list(getattr(config, "org_team_task_pack_price_ids", None))
     except Exception:
         org_team_task_pack_price_ids = tuple()
@@ -235,6 +274,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         )
     except Exception:
         org_team_browser_task_limit_price_ids = tuple()
+    try:
+        org_team_advanced_captcha_resolution_price_ids = _parse_price_id_list(
+            getattr(config, "org_team_advanced_captcha_resolution_price_ids", None)
+        )
+    except Exception:
+        org_team_advanced_captcha_resolution_price_ids = tuple()
 
     return replace(
         env_defaults,
@@ -251,6 +296,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         startup_browser_task_limit_price_ids=(
             startup_browser_task_limit_price_ids or env_defaults.startup_browser_task_limit_price_ids
         ),
+        startup_advanced_captcha_resolution_product_id=(
+            config.startup_advanced_captcha_resolution_product_id or ""
+        ),
+        startup_advanced_captcha_resolution_price_ids=(
+            startup_advanced_captcha_resolution_price_ids or env_defaults.startup_advanced_captcha_resolution_price_ids
+        ),
         startup_product_id=config.startup_product_id or "",
         scale_price_id=config.scale_price_id or "",
         scale_task_pack_product_id=config.scale_task_pack_product_id or "",
@@ -261,6 +312,12 @@ def _load_from_database() -> Optional[StripeSettings]:
         scale_browser_task_limit_product_id=config.scale_browser_task_limit_product_id or "",
         scale_browser_task_limit_price_ids=(
             scale_browser_task_limit_price_ids or env_defaults.scale_browser_task_limit_price_ids
+        ),
+        scale_advanced_captcha_resolution_product_id=(
+            config.scale_advanced_captcha_resolution_product_id or ""
+        ),
+        scale_advanced_captcha_resolution_price_ids=(
+            scale_advanced_captcha_resolution_price_ids or env_defaults.scale_advanced_captcha_resolution_price_ids
         ),
         scale_product_id=config.scale_product_id or "",
         startup_dedicated_ip_product_id=config.startup_dedicated_ip_product_id or "",
@@ -278,6 +335,13 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_browser_task_limit_product_id=config.org_team_browser_task_limit_product_id or "",
         org_team_browser_task_limit_price_ids=(
             org_team_browser_task_limit_price_ids or env_defaults.org_team_browser_task_limit_price_ids
+        ),
+        org_team_advanced_captcha_resolution_product_id=(
+            config.org_team_advanced_captcha_resolution_product_id or ""
+        ),
+        org_team_advanced_captcha_resolution_price_ids=(
+            org_team_advanced_captcha_resolution_price_ids
+            or env_defaults.org_team_advanced_captcha_resolution_price_ids
         ),
         org_team_dedicated_ip_product_id=config.org_team_dedicated_ip_product_id or "",
         org_team_dedicated_ip_price_id=config.org_team_dedicated_ip_price_id or "",

@@ -427,6 +427,15 @@ class StripeConfigForm(ModelForm):
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
     )
+    startup_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Startup advanced captcha resolution product ID",
+        required=False,
+    )
+    startup_advanced_captcha_resolution_price_ids = forms.CharField(
+        label="Startup advanced captcha resolution price IDs",
+        required=False,
+        help_text="Comma-separated list of Stripe price IDs for advanced captcha resolution.",
+    )
     scale_price_id = forms.CharField(
         label="Scale base price ID",
         required=False,
@@ -465,6 +474,15 @@ class StripeConfigForm(ModelForm):
         label="Scale browser task limit price IDs",
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
+    )
+    scale_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Scale advanced captcha resolution product ID",
+        required=False,
+    )
+    scale_advanced_captcha_resolution_price_ids = forms.CharField(
+        label="Scale advanced captcha resolution price IDs",
+        required=False,
+        help_text="Comma-separated list of Stripe price IDs for advanced captcha resolution.",
     )
     startup_dedicated_ip_product_id = forms.CharField(
         label="Pro dedicated IP product ID",
@@ -525,6 +543,15 @@ class StripeConfigForm(ModelForm):
         required=False,
         help_text="Comma-separated list of Stripe price IDs for browser task limit tiers.",
     )
+    org_team_advanced_captcha_resolution_product_id = forms.CharField(
+        label="Org/Team advanced captcha resolution product ID",
+        required=False,
+    )
+    org_team_advanced_captcha_resolution_price_ids = forms.CharField(
+        label="Org/Team advanced captcha resolution price IDs",
+        required=False,
+        help_text="Comma-separated list of Stripe price IDs for advanced captcha resolution.",
+    )
     org_team_dedicated_ip_product_id = forms.CharField(
         label="Org/Team dedicated IP product ID",
         required=False,
@@ -579,6 +606,12 @@ class StripeConfigForm(ModelForm):
             self.fields["startup_browser_task_limit_price_ids"].initial = ",".join(
                 instance.startup_browser_task_limit_price_ids or []
             )
+            self.fields["startup_advanced_captcha_resolution_product_id"].initial = (
+                instance.startup_advanced_captcha_resolution_product_id
+            )
+            self.fields["startup_advanced_captcha_resolution_price_ids"].initial = ",".join(
+                instance.startup_advanced_captcha_resolution_price_ids or []
+            )
 
             self.fields["scale_price_id"].initial = instance.scale_price_id
             self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
@@ -592,6 +625,12 @@ class StripeConfigForm(ModelForm):
             self.fields["scale_browser_task_limit_product_id"].initial = instance.scale_browser_task_limit_product_id
             self.fields["scale_browser_task_limit_price_ids"].initial = ",".join(
                 instance.scale_browser_task_limit_price_ids or []
+            )
+            self.fields["scale_advanced_captcha_resolution_product_id"].initial = (
+                instance.scale_advanced_captcha_resolution_product_id
+            )
+            self.fields["scale_advanced_captcha_resolution_price_ids"].initial = ",".join(
+                instance.scale_advanced_captcha_resolution_price_ids or []
             )
 
             self.fields["startup_dedicated_ip_product_id"].initial = instance.startup_dedicated_ip_product_id
@@ -615,6 +654,12 @@ class StripeConfigForm(ModelForm):
             )
             self.fields["org_team_browser_task_limit_price_ids"].initial = ",".join(
                 instance.org_team_browser_task_limit_price_ids or []
+            )
+            self.fields["org_team_advanced_captcha_resolution_product_id"].initial = (
+                instance.org_team_advanced_captcha_resolution_product_id
+            )
+            self.fields["org_team_advanced_captcha_resolution_price_ids"].initial = ",".join(
+                instance.org_team_advanced_captcha_resolution_price_ids or []
             )
             self.fields["org_team_dedicated_ip_product_id"].initial = instance.org_team_dedicated_ip_product_id
             self.fields["org_team_dedicated_ip_price_id"].initial = instance.org_team_dedicated_ip_price_id
@@ -659,6 +704,8 @@ class StripeConfigForm(ModelForm):
             "startup_contact_cap_price_ids",
             "startup_browser_task_limit_product_id",
             "startup_browser_task_limit_price_ids",
+            "startup_advanced_captcha_resolution_product_id",
+            "startup_advanced_captcha_resolution_price_ids",
 
             "scale_product_id",
             "scale_price_id",
@@ -671,6 +718,8 @@ class StripeConfigForm(ModelForm):
             "scale_contact_cap_price_ids",
             "scale_browser_task_limit_product_id",
             "scale_browser_task_limit_price_ids",
+            "scale_advanced_captcha_resolution_product_id",
+            "scale_advanced_captcha_resolution_price_ids",
             "startup_dedicated_ip_product_id",
             "startup_dedicated_ip_price_id",
             "scale_dedicated_ip_product_id",
@@ -686,6 +735,8 @@ class StripeConfigForm(ModelForm):
             "org_team_contact_cap_price_ids",
             "org_team_browser_task_limit_product_id",
             "org_team_browser_task_limit_price_ids",
+            "org_team_advanced_captcha_resolution_product_id",
+            "org_team_advanced_captcha_resolution_price_ids",
             "org_team_dedicated_ip_product_id",
             "org_team_dedicated_ip_price_id",
             "task_meter_id",

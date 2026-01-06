@@ -202,6 +202,38 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertEqual(AddonEntitlementService.get_browser_task_daily_uplift(self.user), 12)
 
     @patch("billing.addons.get_stripe_settings")
+    def test_sync_sets_advanced_captcha_resolution_delta(self, mock_settings):
+        mock_settings.return_value = SimpleNamespace(
+            startup_advanced_captcha_resolution_price_ids=("price_captcha",),
+        )
+
+        items = [
+            {
+                "price": {
+                    "id": "price_captcha",
+                    "product": "prod_captcha",
+                    "metadata": {"advanced_captcha_resolution_delta": "1"},
+                },
+                "quantity": 1,
+            },
+        ]
+
+        AddonEntitlementService.sync_subscription_entitlements(
+            owner=self.user,
+            owner_type="user",
+            plan_id=PlanNames.STARTUP,
+            subscription_items=items,
+            period_start=self.period_start,
+            period_end=self.period_end,
+            created_via="test_sync",
+        )
+
+        ent = AddonEntitlementService.get_active_entitlements(self.user, "price_captcha").first()
+        self.assertIsNotNone(ent)
+        self.assertEqual(ent.advanced_captcha_resolution_delta, 1)
+        self.assertTrue(AddonEntitlementService.has_advanced_captcha_resolution(self.user))
+
+    @patch("billing.addons.get_stripe_settings")
     def test_sync_expires_entitlements_when_prices_missing(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
             startup_task_pack_price_ids=(),

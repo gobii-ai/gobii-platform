@@ -1,5 +1,5 @@
-{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack browser_task_limit=addon_context.browser_task_limit %}
-{% if task_pack.options or contact_pack.options or browser_task_limit.options %}
+{% with task_pack=addon_context.task_pack contact_pack=addon_context.contact_pack browser_task_limit=addon_context.browser_task_limit advanced_captcha=addon_context.advanced_captcha_resolution %}
+{% if task_pack.options or contact_pack.options or browser_task_limit.options or advanced_captcha.options %}
 <form method="post" action="{% url 'update_addons' %}">
   {% csrf_token %}
   <div class="{{ card_class|default:'gobii-card-base p-6' }}">
@@ -14,6 +14,7 @@
       {% include "console/partials/_addon_pack.html" with addon=task_pack title="Task packs" description="Add additional task credits for this cycle." single_label="Task pack" delta_unit="credits" addon_kind="task" aria_label="task pack" addons_disabled=addons_disabled %}
       {% include "console/partials/_addon_pack.html" with addon=contact_pack title="Contact packs" description="Increase per-agent contacts for this cycle." single_label="Contact pack" delta_unit="contacts" addon_kind="contact" aria_label="contact pack" addons_disabled=addons_disabled %}
       {% include "console/partials/_addon_pack.html" with addon=browser_task_limit title="Browser task packs" description="Increase the per-agent daily browser task limit for this cycle." single_label="Browser task pack" delta_unit="tasks" addon_kind="browser_task" aria_label="browser task pack" addons_disabled=addons_disabled %}
+      {% include "console/partials/_addon_toggle.html" with addon=advanced_captcha title="Advanced Captcha Resolution" description="Enable CapSolver-powered CAPTCHA solving during browser tasks." single_label="Advanced Captcha Resolution" addon_kind="advanced_captcha_resolution" aria_label="advanced captcha resolution" addons_disabled=addons_disabled %}
     </div>
 
     <div class="mt-6 flex flex-col gap-3">
@@ -56,6 +57,7 @@
   document.addEventListener("DOMContentLoaded", () => {
     const qtyInputs = document.querySelectorAll("input[data-addon-kind]");
     const adjustButtons = document.querySelectorAll("button[data-qty-target]");
+    const toggleInputs = document.querySelectorAll("input[data-addon-toggle]");
     const totalTasksEl = document.getElementById("addons-total-tasks");
     const totalContactsEl = document.getElementById("addons-total-contacts");
     const totalBrowserTasksEl = document.getElementById("addons-total-browser-tasks");
@@ -131,6 +133,27 @@
         if (display) display.textContent = next;
         target.dispatchEvent(new Event("input"));
       });
+    });
+
+    const syncToggle = (toggle) => {
+      const targetId = toggle.getAttribute("data-toggle-target");
+      const statusId = toggle.getAttribute("data-toggle-status");
+      const target = targetId ? document.getElementById(targetId) : null;
+      if (!target || target.disabled) return;
+      const nextValue = toggle.checked ? 1 : 0;
+      target.value = nextValue;
+      target.dispatchEvent(new Event("input"));
+      const statusEl = statusId ? document.getElementById(statusId) : null;
+      if (statusEl) {
+        const enabledLabel = statusEl.getAttribute("data-enabled-label") || "Enabled";
+        const disabledLabel = statusEl.getAttribute("data-disabled-label") || "Disabled";
+        statusEl.textContent = toggle.checked ? enabledLabel : disabledLabel;
+      }
+    };
+
+    toggleInputs.forEach((toggle) => {
+      toggle.addEventListener("change", () => syncToggle(toggle));
+      syncToggle(toggle);
     });
 
     recalcTotals();
