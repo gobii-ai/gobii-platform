@@ -111,6 +111,12 @@ KANBAN_DONE_SUMMARY_LIMIT = 5
 KANBAN_DONE_DESC_LIMIT = 140
 KANBAN_DONE_TITLE_LIMIT = 80
 KANBAN_DETAIL_DESC_LIMIT = 800
+KANBAN_DOING_DETAIL_LIMIT = 5
+KANBAN_TODO_DETAIL_LIMIT = 4
+KANBAN_SNAPSHOT_CARD_LIMIT = 3
+KANBAN_SNAPSHOT_DESC_LIMIT = 120
+KANBAN_ACTIVITY_EVENT_LIMIT = 10
+KANBAN_ACTIVITY_DESC_LIMIT = 120
 SIGNED_FILES_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
 )
@@ -951,6 +957,123 @@ def _format_kanban_card_detail(card: PersistentAgentKanbanCard) -> str:
     return "\n".join(lines)
 
 
+def _format_kanban_card_compact(
+    card: PersistentAgentKanbanCard,
+    *,
+    desc_limit: int,
+    include_status: bool = False,
+) -> str:
+    title = _truncate_kanban_text((card.title or "").strip(), KANBAN_DONE_TITLE_LIMIT)
+    description = _truncate_kanban_text((card.description or "").strip(), desc_limit)
+    friendly_id = format_kanban_friendly_id(card.title, card.id)
+    meta_parts = [f"friendly_id: {friendly_id}", f"priority: {card.priority}"]
+    if include_status:
+        meta_parts.append(f"status: {card.status}")
+    detail = f"{title} ({', '.join(meta_parts)})"
+    if description:
+        detail = f"{detail} - {description}"
+    return detail
+
+
+def _format_kanban_event_time(timestamp: datetime | None) -> str:
+    if not timestamp:
+        return "unknown"
+    ts = timestamp
+    if dj_timezone.is_naive(ts):
+        ts = dj_timezone.make_aware(ts, timezone.utc)
+    ts = ts.astimezone(timezone.utc).replace(microsecond=0)
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+def _format_kanban_snapshot_section(
+    label: str,
+    cards: Sequence[PersistentAgentKanbanCard],
+    *,
+    limit: int,
+    desc_limit: int,
+    order_hint: str,
+) -> str:
+    if not cards:
+        return f"{label}: none."
+    visible = cards[:limit]
+    lines = [f"{label} ({len(cards)} total, {order_hint}):"]
+    for card in visible:
+        lines.append(f"- {_format_kanban_card_compact(card, desc_limit=desc_limit)}")
+    if len(cards) > limit:
+        lines.append(f"... +{len(cards) - limit} more")
+    return "\n".join(lines)
+
+
+def _build_kanban_snapshot_text(
+    *,
+    doing_cards: Sequence[PersistentAgentKanbanCard],
+    todo_cards: Sequence[PersistentAgentKanbanCard],
+    done_cards: Sequence[PersistentAgentKanbanCard],
+) -> str:
+    total = len(doing_cards) + len(todo_cards) + len(done_cards)
+    lines = [
+        f"Total cards: {total} (todo={len(todo_cards)}, doing={len(doing_cards)}, done={len(done_cards)})"
+    ]
+    lines.append(
+        _format_kanban_snapshot_section(
+            "Doing",
+            doing_cards,
+            limit=KANBAN_SNAPSHOT_CARD_LIMIT,
+            desc_limit=KANBAN_SNAPSHOT_DESC_LIMIT,
+            order_hint="oldest to newest",
+        )
+    )
+    lines.append(
+        _format_kanban_snapshot_section(
+            "To Do",
+            todo_cards,
+            limit=KANBAN_SNAPSHOT_CARD_LIMIT,
+            desc_limit=KANBAN_SNAPSHOT_DESC_LIMIT,
+            order_hint="oldest to newest",
+        )
+    )
+    lines.append(
+        _format_kanban_snapshot_section(
+            "Done",
+            done_cards,
+            limit=KANBAN_SNAPSHOT_CARD_LIMIT,
+            desc_limit=KANBAN_SNAPSHOT_DESC_LIMIT,
+            order_hint="oldest to newest",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _build_kanban_activity_text(cards: Sequence[PersistentAgentKanbanCard]) -> str:
+    events: list[tuple[datetime, str, PersistentAgentKanbanCard]] = []
+    for card in cards:
+        created_at = card.created_at
+        if created_at:
+            events.append((created_at, "created", card))
+        completed_at = card.completed_at
+        if completed_at:
+            events.append((completed_at, "completed", card))
+        updated_at = card.updated_at
+        if updated_at and updated_at != created_at:
+            if not completed_at or updated_at != completed_at:
+                events.append((updated_at, "updated", card))
+
+    events.sort(key=lambda entry: entry[0])
+    if not events:
+        return "No recent kanban activity."
+
+    events = events[-KANBAN_ACTIVITY_EVENT_LIMIT:]
+    lines = []
+    for timestamp, action, card in events:
+        detail = _format_kanban_card_compact(
+            card,
+            desc_limit=KANBAN_ACTIVITY_DESC_LIMIT,
+            include_status=True,
+        )
+        lines.append(f"- {_format_kanban_event_time(timestamp)} | {action} | {detail}")
+    return "\n".join(lines)
+
+
 def _format_kanban_done_summary(cards: Sequence[PersistentAgentKanbanCard]) -> str:
     if not cards:
         return "No done cards yet."
@@ -974,37 +1097,78 @@ def _format_kanban_done_summary(cards: Sequence[PersistentAgentKanbanCard]) -> s
 def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     """Attach kanban summary sections to the prompt."""
     try:
-        doing_cards = list(
-            PersistentAgentKanbanCard.objects.filter(
-                assigned_agent=agent,
-                status=PersistentAgentKanbanCard.Status.DOING,
-            ).order_by("-priority", "created_at")
-        )
-        todo_card = (
-            PersistentAgentKanbanCard.objects.filter(
-                assigned_agent=agent,
-                status=PersistentAgentKanbanCard.Status.TODO,
+        cards = list(
+            PersistentAgentKanbanCard.objects.filter(assigned_agent=agent).only(
+                "id",
+                "title",
+                "description",
+                "status",
+                "priority",
+                "created_at",
+                "updated_at",
+                "completed_at",
             )
-            .order_by("-priority", "created_at")
-            .first()
-        )
-        done_cards = list(
-            PersistentAgentKanbanCard.objects.filter(
-                assigned_agent=agent,
-                status=PersistentAgentKanbanCard.Status.DONE,
-            )
-            .order_by("-completed_at", "-updated_at")[:KANBAN_DONE_SUMMARY_LIMIT]
         )
     except Exception:
         logger.exception("Failed to load kanban cards for agent %s", agent.id)
         return
 
-    kanban_group = parent_group.group("kanban", weight=4)
-    doing_text = (
-        "\n\n".join(_format_kanban_card_detail(card) for card in doing_cards)
-        if doing_cards
-        else "No cards in doing."
+    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+    def _safe_time(value: Optional[datetime]) -> datetime:
+        if not value:
+            return epoch
+        if dj_timezone.is_naive(value):
+            return dj_timezone.make_aware(value, timezone.utc)
+        return value
+
+    doing_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.DOING]
+    todo_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.TODO]
+    done_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.DONE]
+
+    doing_by_priority = sorted(doing_cards, key=lambda card: (-card.priority, _safe_time(card.created_at)))
+    todo_by_priority = sorted(todo_cards, key=lambda card: (-card.priority, _safe_time(card.created_at)))
+    done_by_recent = sorted(
+        done_cards,
+        key=lambda card: _safe_time(card.completed_at or card.updated_at or card.created_at),
+        reverse=True,
     )
+
+    doing_chrono = sorted(doing_cards, key=lambda card: _safe_time(card.created_at))
+    todo_chrono = sorted(todo_cards, key=lambda card: _safe_time(card.created_at))
+    done_chrono = sorted(
+        done_cards,
+        key=lambda card: _safe_time(card.completed_at or card.updated_at or card.created_at),
+    )
+
+    kanban_group = parent_group.group("kanban", weight=4)
+
+    kanban_group.section_text(
+        "kanban_snapshot",
+        _build_kanban_snapshot_text(
+            doing_cards=doing_chrono,
+            todo_cards=todo_chrono,
+            done_cards=done_chrono,
+        ),
+        weight=3,
+        non_shrinkable=True,
+    )
+
+    kanban_group.section_text(
+        "kanban_activity",
+        _build_kanban_activity_text(cards),
+        weight=2,
+        shrinker="hmt",
+    )
+
+    doing_preview = doing_by_priority[:KANBAN_DOING_DETAIL_LIMIT]
+    doing_text = "No cards in doing."
+    if doing_preview:
+        doing_text = "\n\n".join(_format_kanban_card_detail(card) for card in doing_preview)
+        remaining = len(doing_by_priority) - len(doing_preview)
+        if remaining > 0:
+            doing_text = f"{doing_text}\n\n... +{remaining} more doing cards."
+
     kanban_group.section_text(
         "kanban_doing",
         doing_text,
@@ -1012,7 +1176,19 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
         non_shrinkable=True,
     )
 
-    todo_text = _format_kanban_card_detail(todo_card) if todo_card else "No to-do cards."
+    todo_text = "No to-do cards."
+    if todo_by_priority:
+        todo_preview = todo_by_priority[:KANBAN_TODO_DETAIL_LIMIT]
+        todo_lines = ["Top to-do cards (priority order):"]
+        todo_lines.extend(
+            f"- {_format_kanban_card_compact(card, desc_limit=KANBAN_SNAPSHOT_DESC_LIMIT)}"
+            for card in todo_preview
+        )
+        remaining = len(todo_by_priority) - len(todo_preview)
+        if remaining > 0:
+            todo_lines.append(f"... +{remaining} more")
+        todo_text = "\n".join(todo_lines)
+
     kanban_group.section_text(
         "kanban_todo",
         todo_text,
@@ -1022,13 +1198,13 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
 
     kanban_group.section_text(
         "kanban_done",
-        _format_kanban_done_summary(done_cards),
+        _format_kanban_done_summary(done_by_recent[:KANBAN_DONE_SUMMARY_LIMIT]),
         weight=1,
         non_shrinkable=True,
     )
 
     # Hint to mark work done when there are active cards
-    if doing_cards or todo_card:
+    if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
             "Cards in doing/todo = work remains. Mark each done before stopping, or set a schedule if blocked.",
