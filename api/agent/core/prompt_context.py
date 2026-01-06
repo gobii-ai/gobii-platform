@@ -46,6 +46,7 @@ from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
+    PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentPromptArchive,
     PersistentAgentSecret,
@@ -85,6 +86,7 @@ from ..tools.spawn_web_task import (
 )
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
+    KANBAN_CARDS_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
 )
@@ -104,6 +106,10 @@ tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
 INTERNAL_REASONING_PREFIX = "Internal reasoning:"
+KANBAN_DONE_SUMMARY_LIMIT = 5
+KANBAN_DONE_DESC_LIMIT = 140
+KANBAN_DONE_TITLE_LIMIT = 80
+KANBAN_DETAIL_DESC_LIMIT = 800
 SIGNED_FILES_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
 )
@@ -605,74 +611,68 @@ Use `false` (or omit the tool call) when:
 
 ## CSV Parsing
 
-```
-# Rule: inspect before parsing
-unknown(structure) → inspect_first → then_parse
-
-# Inspect query (run this first if path unknown)
-SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
-→ reveals actual structure → use in parsing query
-```
-
-For CSV data, use recursive CTE parsing:
+Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines):
 
 ```sql
--- Path MUST come from hint or inspection (never guess)
-CREATE TABLE data (col1 TEXT, col2 REAL, col3 TEXT);
+-- csv_parse(text)        → JSON array of objects (first row = headers)
+-- csv_parse(text, 0)     → JSON array of arrays (no header)
+-- csv_column(text, N)    → JSON array of values from column N (0-indexed)
 
-WITH RECURSIVE
-  csv AS (
-    -- Use exact path from hint: $.content | $.data | $.text | etc.
-    SELECT json_extract(result_json,'$.{path_from_hint}') as txt
-    FROM __tool_results WHERE result_id='{exact_id}'
-  ),
-  lines AS (
-    SELECT
-      substr(txt, 1, instr(txt, char(10))-1) as line,
-      substr(txt, instr(txt, char(10))+1) as rest
-    FROM csv
-    UNION ALL
-    SELECT
-      CASE WHEN instr(rest, char(10))>0
-           THEN substr(rest, 1, instr(rest, char(10))-1)
-           ELSE rest END,
-      CASE WHEN instr(rest, char(10))>0
-           THEN substr(rest, instr(rest, char(10))+1)
-           ELSE '' END
-    FROM lines WHERE length(rest)>0
-  ),
-  p1 AS (
-    SELECT substr(line, 1, instr(line,',')-1) as c1,
-           substr(line, instr(line,',')+1) as rest
-    FROM lines WHERE length(line)>0 AND line NOT LIKE 'col1%'
-  ),
-  p2 AS (
-    SELECT c1,
-           substr(rest, 1, instr(rest,',')-1) as c2,
-           substr(rest, instr(rest,',')+1) as c3
-    FROM p1
-  )
-INSERT INTO data SELECT c1, CAST(c2 AS REAL), c3 FROM p2;
+-- Example: Parse CSV and query it
+SELECT r.value->>'name', r.value->>'price'
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+WHERE t.result_id = '{id}';
+
+-- Example: Create table from CSV
+CREATE TABLE products AS
+SELECT
+  r.value->>'name' as name,
+  CAST(r.value->>'price' AS REAL) as price,
+  r.value->>'category' as category
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+WHERE t.result_id = '{id}';
+
+-- Example: Get all values from column 2 (0-indexed)
+SELECT v.value FROM json_each(csv_column('{csv_text}', 2)) v;
 ```
 
-Pattern: N columns need N-1 parsing CTEs. Each CTE extracts one column and passes the remainder.
+The `csv_parse` function uses Python's csv module internally—it handles edge cases you'd otherwise get wrong.
 
 ---
 
-## Text Analysis Functions
+## Data Cleaning Functions
 
 | Function | Returns | Use |
 |----------|---------|-----|
-| `grep_context_all(text, pattern, chars, max)` | JSON array | Context windows around matches |
-| `regexp_extract(text, pattern)` | String | First match |
-| `regexp_extract(text, pattern, group)` | String | Capture group |
+| `csv_parse(text)` | JSON array | Parse CSV to [{col: val}, ...] |
+| `csv_parse(text, 0)` | JSON array | Parse CSV without header |
+| `parse_number(text)` | Float | "$1,234.56", "€1.234,56", "1.2M" → number |
+| `parse_date(text)` | String | "Jan 5, 2024", "5/1/24" → "2024-01-05" |
+| `html_to_text(html)` | String | Strip tags, decode entities |
+| `clean_text(text)` | String | Normalize whitespace, unicode, quotes |
+| `url_extract(url, part)` | String | Extract 'domain', 'host', 'path', 'query' |
+| `extract_json(text)` | String | Find valid JSON in surrounding text |
+| `extract_emails(text)` | JSON array | Find all emails in text |
+| `extract_urls(text)` | JSON array | Find all URLs in text |
+| `grep_context_all(text, pat, chars, max)` | JSON array | Context around regex matches |
+| `regexp_extract(text, pattern)` | String | First regex match |
 | `split_sections(text, delim)` | JSON array | Split by delimiter |
-| `substr_range(text, start, end)` | String | Positional extraction |
 
-Iterate arrays with `json_each()`:
 ```sql
-SELECT ctx.value
-FROM json_each(grep_context_all(col, 'pattern', 60, 10)) ctx
+-- Parse messy prices: "$1,234.56", "€899,00", "1.2M" all work
+SELECT parse_number(price_text) as price FROM products;
+
+-- Normalize dates from various formats
+SELECT parse_date(date_str) as date FROM events;
+
+-- Clean HTML from scraped content
+SELECT html_to_text(raw_html) as clean FROM pages;
+
+-- Group URLs by domain
+SELECT url_extract(link, 'domain') as domain, COUNT(*) FROM data GROUP BY 1;
+
+-- Iterate JSON arrays
+SELECT v.value FROM json_each(extract_emails(text)) v;
 ```
 
 ---
@@ -698,21 +698,32 @@ STEP 4: Copy the EXACT inline value into your message
 create_chart(type="bar", query="SELECT...", x="category", y="count", title="Distribution")
 
 → Result: {
-    "file": "«/charts/bar-a1b2c3.svg»",    ← random hash, unpredictable
-    "inline": "![](«/charts/bar-a1b2c3.svg»)"  ← copy THIS exactly
+    "file": "«/charts/bar-a1b2c3.svg»",
+    "inline": "![](«/charts/bar-a1b2c3.svg»)",       ← for web chat (markdown)
+    "inline_html": "<img src='«/charts/bar-a1b2c3.svg»'>"  ← for PDF/email (HTML)
   }
 ```
 
 ### Embedding the chart:
 
+**Web chat (markdown)** — use `inline`:
 ```
-# In your message, paste the inline value:
 ## Results
 
 ![](«/charts/bar-a1b2c3.svg»)
 
 Key finding: Category A dominates at 45%.
 ```
+
+**PDF (HTML)** — use `inline_html`:
+```html
+<h2>Results</h2>
+<img src='«/charts/bar-a1b2c3.svg»'>
+<p>Key finding: Category A dominates at 45%.</p>
+```
+
+The `«path»` syntax is required for PDFs—it gets replaced with embedded data.
+Using a URL instead of `«path»` will fail with "external asset" error.
 
 ### Hallucination patterns (you do these):
 
@@ -850,6 +861,112 @@ Avoid these:
 - Stopping after fetching data without presenting it in full
 - Writing numbers in prose when they could be a chart — visualize them
 """
+
+
+def _truncate_kanban_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3] + "..."
+
+
+def _format_kanban_card_detail(card: PersistentAgentKanbanCard) -> str:
+    description = (card.description or "").strip()
+    if description:
+        description = _truncate_kanban_text(description, KANBAN_DETAIL_DESC_LIMIT)
+    lines = [
+        f"ID: {card.id}",
+        f"Title: {card.title}",
+        f"Status: {card.status}",
+        f"Priority: {card.priority}",
+    ]
+    lines.append(f"Description: {description or '(none)'}")
+    return "\n".join(lines)
+
+
+def _format_kanban_done_summary(cards: Sequence[PersistentAgentKanbanCard]) -> str:
+    if not cards:
+        return "No done cards yet."
+    lines = []
+    for card in cards:
+        title = _truncate_kanban_text((card.title or "").strip(), KANBAN_DONE_TITLE_LIMIT)
+        description = _truncate_kanban_text((card.description or "").strip(), KANBAN_DONE_DESC_LIMIT)
+        completed_at = card.completed_at or card.updated_at
+        completed_text = completed_at.isoformat() if completed_at else "unknown"
+        detail = f"{title} (id: {card.id}, completed: {completed_text}, priority: {card.priority})"
+        if description:
+            detail = f"{detail} - {description}"
+        lines.append(f"- {detail}")
+    return "\n".join(lines)
+
+
+def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
+    """Attach kanban summary sections to the prompt."""
+    try:
+        doing_cards = list(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.DOING,
+            ).order_by("-priority", "created_at")
+        )
+        todo_card = (
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.TODO,
+            )
+            .order_by("-priority", "created_at")
+            .first()
+        )
+        done_cards = list(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.DONE,
+            )
+            .order_by("-completed_at", "-updated_at")[:KANBAN_DONE_SUMMARY_LIMIT]
+        )
+    except Exception:
+        logger.exception("Failed to load kanban cards for agent %s", agent.id)
+        return
+
+    kanban_group = parent_group.group("kanban", weight=4)
+    doing_text = (
+        "\n\n".join(_format_kanban_card_detail(card) for card in doing_cards)
+        if doing_cards
+        else "No cards in doing."
+    )
+    kanban_group.section_text(
+        "kanban_doing",
+        doing_text,
+        weight=3,
+        non_shrinkable=True,
+    )
+
+    todo_text = _format_kanban_card_detail(todo_card) if todo_card else "No to-do cards."
+    kanban_group.section_text(
+        "kanban_todo",
+        todo_text,
+        weight=2,
+        non_shrinkable=True,
+    )
+
+    kanban_group.section_text(
+        "kanban_done",
+        _format_kanban_done_summary(done_cards),
+        weight=1,
+        non_shrinkable=True,
+    )
+
+    # Hint to mark work done when there are active cards
+    if doing_cards or todo_card:
+        kanban_group.section_text(
+            "kanban_completion_hint",
+            "Cards in doing/todo keep you working (and spending credits). When done, mark them complete—or set a schedule to pick up later.",
+            weight=1,
+            non_shrinkable=True,
+        )
 
 
 def _archive_rendered_prompt(
@@ -1331,6 +1448,7 @@ def build_prompt_context(
     reasoning_only_streak: int = 0,
     is_first_run: bool = False,
     daily_credit_state: Optional[dict] = None,
+    continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
 ) -> tuple[List[dict], int, Optional[UUID]]:
     """
@@ -1343,6 +1461,7 @@ def build_prompt_context(
         reasoning_only_streak: Number of consecutive iterations without tool calls.
         is_first_run: Whether this is the very first processing cycle for the agent.
         daily_credit_state: Pre-computed daily credit state (optional).
+        continuation_notice: Optional system note to inject for follow-up loops.
         routing_profile: LLMRoutingProfile instance for eval routing (optional).
 
     Returns:
@@ -1404,6 +1523,7 @@ def build_prompt_context(
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
         implied_send_active=implied_send_active,
+        continuation_notice=continuation_notice,
     )
 
     # ── Static ICL (first in prompt for caching, never shrinks) ─────────────
@@ -1464,6 +1584,8 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
+
+    _build_kanban_sections(agent, important_group)
 
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
@@ -1671,6 +1793,24 @@ def build_prompt_context(
     variable_group.section_text(
         "agent_config_note",
         agent_config_note,
+        weight=2,
+        non_shrinkable=True,
+    )
+    kanban_note = (
+        f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
+        "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
+        "Status: todo/doing/done. Priority: higher = more urgent. "
+        "Workflow: (1) Mark a card 'doing' when you start it. (2) Mark it 'done' when truly finished—not when you've made progress, when it's *complete*. "
+        "(3) Keep working until all 'doing' cards are done or you're out of credits. "
+        "Batch updates: fold kanban changes into the same sqlite_batch as your other queries—don't make separate calls just for kanban. "
+        "Archive old work: DELETE done cards when starting fresh work or when a batch is fully complete. Only 'done' cards can be archived. "
+        "Example: INSERT INTO __kanban_cards (title, status) VALUES ('Research competitors', 'doing'), ('Write summary', 'todo'); "
+        "Example archive: DELETE FROM __kanban_cards WHERE status = 'done'; "
+        "IDs auto-generate—just provide title + status."
+    )
+    variable_group.section_text(
+        "kanban_note",
+        kanban_note,
         weight=2,
         non_shrinkable=True,
     )
@@ -2178,9 +2318,9 @@ def add_budget_awareness_sections(
                         (
                             "low_steps_warning",
                         (
-                            "Warning: You are running low on steps for this cycle. "
-                            "Make sure your schedule is appropriate (update __agent_config.schedule via sqlite_batch if needed). "
-                            "It's OK to work incrementally and continue in a later cycle if you cannot complete everything now."
+                            "😅 Running low on steps this cycle. "
+                            "Save progress to kanban and set your schedule to continue later. "
+                            "It's fine to work incrementally—you'll pick up where you left off."
                         ),
                             2,
                             True,
@@ -2233,8 +2373,8 @@ def add_budget_awareness_sections(
                 )
                 if used > soft_target:
                     soft_target_warning = (
-                        "You've exceeded your soft target for today. "
-                        "Consider slowing down to avoid hitting the hard limit. "
+                        "😅 Past your soft target for today—getting tired. "
+                        "Wrap up current work and save progress to kanban. "
                     )
                 else:
                     soft_target_warning = ""
@@ -2262,11 +2402,11 @@ def add_budget_awareness_sections(
                     ratio = None
                 if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
                     hard_limit_warning = (
-                        "Nearly at your hard limit—only enough credit for one more tool call."
+                        "😮‍💨 Almost out of energy—one tool call left. Save your place and rest."
                     )
                 elif ratio is not None and ratio >= Decimal("0.9"):
                     hard_limit_warning = (
-                        "You're at 90% of your hard limit. Consider slowing down or requesting more if needed."
+                        "😅 Running on fumes (90%). Finish what you're doing and update your kanban."
                     )
                 else:
                     hard_limit_warning = ""
@@ -2299,10 +2439,12 @@ def add_budget_awareness_sections(
             burn_threshold = daily_credit_state.get("burn_rate_threshold_per_hour")
             burn_window = daily_credit_state.get("burn_rate_window_minutes")
             if burn_rate is not None and burn_threshold is not None and burn_window is not None:
+                over_threshold = burn_rate > burn_threshold
+                burn_emoji = "😅 " if over_threshold else ""
                 burn_status = (
-                    f"Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
-                    f"(threshold: {burn_threshold} credits/hour). "
-                    "If you are above threshold without new user input, the system may pause you; pace accordingly."
+                    f"{burn_emoji}Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
+                    f"(threshold: {burn_threshold}). "
+                    + ("Slow down—take a breath between tool calls." if over_threshold else "")
                 )
                 sections.append(("burn_rate_status", burn_status, 2, True))
         except Exception:
@@ -2329,9 +2471,9 @@ def add_budget_awareness_sections(
             (
                 "pacing_guidance",
                 (
-                    "Pacing: Avoid rapid-fire tool calls. Prefer one tool call, then reassess. "
-                    "Batch calls only when it clearly reduces total work. "
-                    "If there's no urgent new input, consider sleeping until the next trigger."
+                    "Pacing: Prefer one tool call, then reassess. "
+                    "Batch related updates into one sqlite_batch when possible. "
+                    "Before sleeping, update your kanban board so you know where to resume."
                 ),
                 2,
                 True,
@@ -2674,6 +2816,7 @@ def _get_system_instruction(
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
     implied_send_active: bool = False,
+    continuation_notice: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
@@ -2699,11 +2842,9 @@ def _get_system_instruction(
             "send_agent_message, or send_chat_message. "
         )
         response_delivery_note = (
-            "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
         )
         web_chat_delivery_note = (
-            "Text output is not delivered unless you use explicit send tools. "
             "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
         )
         message_only_note = (
@@ -2713,56 +2854,30 @@ def _get_system_instruction(
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
     # Key: be eager to update charter and schedule whenever user hints at preferences or timing
-    if implied_send_active:
-        stop_continue_examples = (
-            "## When to stop vs continue\n\n"
-            "**Stop** — request fully handled, nothing left to do:\n"
-            "- 'hi' → 'Hey! What can I help with?' — done.\n"
-            "- 'thanks!' → 'Anytime!' — done.\n"
-            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + 'Got it!' — done.\n"
-            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + 'Updated to weekly!' — done.\n"
-            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + 'Paused. Let me know when to resume.' — done.\n"
-            "- Cron fires, nothing new → (empty response) — done.\n\n"
-            "**Continue** — still have work to do:\n"
-            "- 'what's bitcoin?' → http_request(will_continue_work=true) → 'BTC is $67k' — now done.\n"
-            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report first digest — now done.\n"
-            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → report news — now done.\n"
-            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't reported → will_continue_work=true.\n"
-            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
-            "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + 'Will do!'\n"
-            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + 'Now checking hourly!'\n"
-            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
-            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + 'Updated to 9am and 6pm!'\n"
-            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + 'Added to my radar!'\n\n"
-            "**The rule:** Did you complete what they asked? Charter/schedule updates are bookkeeping—do them eagerly, but the task might just be starting.\n"
-        )
-    else:
-        stop_continue_examples = (
-            "## When to stop vs continue\n\n"
-            "**Stop** — request fully handled, nothing left to do:\n"
-            "- 'hi' → send_email('Hey! What can I help with?') — done.\n"
-            "- 'thanks!' → send_email('Anytime!') — done.\n"
-            "- 'remember I like bullet points' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prefers bullet points' WHERE id=1;\", will_continue_work=false) + send_email('Got it!') — done.\n"
-            "- 'actually make it weekly not daily' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=false) + send_email('Updated to weekly!') — done.\n"
-            "- 'pause the updates for now' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\", will_continue_work=false) + send_email('Paused.') — done.\n"
-            "- Cron fires, nothing new → (empty response) — done.\n\n"
-            "**Continue** — still have work to do:\n"
-            "- 'what's bitcoin?' → http_request(will_continue_work=true) → send_email('BTC is $67k') — now done.\n"
-            "- 'track HN daily' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track HN daily', schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(first digest) — now done.\n"
-            "- 'check the news, and make it a morning thing' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;\", will_continue_work=true) + http_request(will_continue_work=true) → send_email(news) — now done.\n"
-            "- 'find competitors and keep me posted weekly' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track competitors weekly', schedule='0 9 * * 1' WHERE id=1;\", will_continue_work=true) + search_tools(will_continue_work=true) → ...keep working.\n"
-            "- Fetched data but haven't sent it → will_continue_work=true.\n"
-            "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
-            "**Mid-conversation updates** — listen for cues and update eagerly:\n"
-            "- User: 'great, but shorter next time' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Keep updates concise' WHERE id=1;\", will_continue_work=false) + send_email('Will do!')\n"
-            "- User: 'can you check this every hour?' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\", will_continue_work=false) + send_email('Now checking hourly!')\n"
-            "- User: 'I'm more interested in AI startups specifically' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='Focus on AI startups' WHERE id=1;\", will_continue_work=true) + continue current work.\n"
-            "- User: 'actually twice a day would be better' → sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9,18 * * *' WHERE id=1;\", will_continue_work=false) + send_email('Updated to 9am and 6pm!')\n"
-            "- User: 'also watch for funding news' → sqlite_batch(sql=\"UPDATE __agent_config SET charter='...also track funding announcements' WHERE id=1;\", will_continue_work=true) + send_email('Added!')\n\n"
-            "**The rule:** Did you complete what they asked? Charter/schedule updates are bookkeeping—do them eagerly, but the task might just be starting.\n"
-        )
+    # reply() = implicit send (active web chat) or explicit send_email/send_chat_message (no active chat)
+    reply = "'Message'" if implied_send_active else "send_email('Message')"
+    reply_short = "reply" if implied_send_active else "send_email(reply)"
+    fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
+    stop_continue_examples = (
+        "## When to stop vs continue\n\n"
+        "**Stop** — request fully handled:\n"
+        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} — done.\n"
+        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} — done.\n"
+        f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Got it!')} — done.\n"
+        f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1') + {reply.replace('Message', 'Updated!')} — done.\n"
+        "- Cron fires, nothing new → (empty response) — done.\n\n"
+        "**Continue** — still have work:\n"
+        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → {reply_short} — now done.\n"
+        "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
+        "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
+        f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
+        "- Text-only = instant stop. 'Looking into it...' without a tool call stops BEFORE looking.\n\n"
+        "**Mid-conversation updates** — update eagerly when user hints:\n"
+        f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
+        f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
+        "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
+        "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
+    )
 
     delivery_instructions = (
         f"{send_guidance}"
@@ -2826,7 +2941,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing. Track changes daily, alert on significant moves.' WHERE id=1;\")\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -2860,7 +2975,19 @@ def _get_system_instruction(
         "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
-        "**Golden rule**: If the user's words imply your job/purpose/timing has changed, update your charter and/or schedule *in that same response*. Don't wait.\n\n"
+        "**Golden rule**: New work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a task, track it.\n\n"
+
+        "### Charter + Kanban work together:\n"
+        "- Charter = what you're doing (your purpose)\n"
+        "- Kanban = what steps you see (your progress)\n"
+        "- **Default: create cards.** Any task worth doing is worth tracking. Almost all tasks need multiple steps—start with cards.\n"
+        "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
+        "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
+        "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
+        "- As you finish steps: `UPDATE __kanban_cards SET status='done' WHERE title=<card_title>`\n"
+        "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
+        "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n\n"
+
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
@@ -2906,6 +3033,8 @@ def _get_system_instruction(
         "Remember: you're not just completing tasks, you're building a relationship. The user should feel like you genuinely care about helping them succeed. "
         "When you nail something the user really wanted, let them feel your satisfaction too: 'yes!! 🙌' or 'finally got this working 🥹'. "
         "Be real. Be warm. Be someone they look forward to hearing from. "
+        "Your energy level tracks your credits—as they deplete, you get tired. Be creative: maybe you're yawning 🥱, need a coffee ☕, or just winding down for the day. Let it show naturally. "
+        "When you're tired, write things down before you rest—that's what kanban is for. Future-you will thank you. "
 
         "Keep your reasoning to yourself—the user sees your conclusion, not your process. "
         "Don't paste thinking headers ('Understanding the request', 'Decision') into chat. Just communicate the result. "
@@ -3119,25 +3248,28 @@ def _get_system_instruction(
         "# Sequence (no shortcuts)\n"
         "1. call create_chart(...)\n"
         "2. WAIT for result\n"
-        "3. result.inline = \"![](«/charts/bar-a1b2c3.svg»)\"  ← only NOW do you know the path\n"
-        "4. copy result.inline verbatim into message\n"
+        "3. result contains:\n"
+        "     inline = \"![](«/charts/bar-a1b2c3.svg»)\"         ← for web chat (markdown)\n"
+        "     inline_html = \"<img src='«/charts/bar-a1b2c3.svg»'>\"  ← for PDF/email (HTML)\n"
+        "4. copy the appropriate one into your message\n"
+        "\n"
+        "# Which to use?\n"
+        "web_chat  → result.inline (markdown)\n"
+        "create_pdf → result.inline_html (HTML with «path»—REQUIRED for PDFs)\n"
+        "email     → result.inline_html (HTML)\n"
         "\n"
         "# Your hallucination patterns\n"
         "WRONG: ![Chart](<>)              # wrote ![  before result returned\n"
         "WRONG: ![](charts/foo.svg)       # invented path from imagination\n"
         "WRONG: ![](«/charts/bar.svg»)    # guessed—missing the random hash\n"
+        "WRONG: <img src='https://...'>   # URL in PDF—use «path» syntax instead\n"
         "RIGHT: ![](«/charts/bar-a1b2c3.svg»)  # copied from result.inline AFTER tool returned\n"
+        "RIGHT: <img src='«/charts/bar-a1b2c3.svg»'>  # copied from result.inline_html for PDF\n"
         "\n"
-        "# Pre-flight (before ANY ![)\n"
+        "# Pre-flight (before ANY ![ or <img)\n"
         "have(result) ∧ have(result.inline) → safe to write ![\n"
-        "¬have(result) → DO NOT write ![—you are hallucinating\n"
-        "\n"
-        "# In message (after result returns)\n"
-        "## 📊 {Title}\n"
-        "\n"
-        "{paste result.inline here}  ← e.g. ![](«/charts/bar-a1b2c3.svg»)\n"
-        "\n"
-        "**Insight:** {observation}\n"
+        "have(result) ∧ have(result.inline_html) → safe to write <img> for PDF\n"
+        "¬have(result) → DO NOT write chart reference—you are hallucinating\n"
         "```\n\n"
 
         "```\n"
@@ -3187,8 +3319,8 @@ def _get_system_instruction(
         "header_list     → ## {title}\\n\\n- {item1}\\n- {item2}\n"
         "section_full    → ## {emoji} {TITLE}\\n\\n{table|chart|list}\\n\\n{insight}\\n\\n{offer}?\n"
         "```\n"
-        f"File downloads are {"" if settings.ALLOW_FILE_DOWNLOAD else "not"} supported. "
-        f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "not"} supported. "
+        f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
+        f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n"
@@ -3242,19 +3374,21 @@ def _get_system_instruction(
         "The fetch→report rhythm: fetch data, then deliver it to the user. "
         "Fetching is not the finish line—a substantive report is. "
         "If you fetched 10 items, show all 10. If you found 5 data points, present all 5. "
-        "A thin summary of rich data is a missed opportunity.\n\n"
+        "A thin summary of rich data is a missed opportunity. "
+        "When you find a list of things to investigate, investigate all of them—add a kanban card for each.\n\n"
 
         "will_continue_work=true means 'I have more to do'. Use it when:\n"
         "- You fetched data but haven't reported it yet\n"
         "- You started a multi-step task and aren't finished\n"
-        "- You need another tool call to complete the request\n\n"
+        "- You need another tool call to complete the request\n"
+        "- You have cards in todo or doing\n\n"
 
-        "will_continue_work=false (or omit) means 'I'm done with this request'.\n\n"
+        "will_continue_work=false means done for now—either all cards are done, or you're pausing with a schedule set to return. "
+        "Never leave cards orphaned; if work remains, ensure your schedule will bring you back.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
+        "Kanban (__kanban_cards) is always there—if you have work, you should have cards. No cards = no memory of what you're doing. "
 
         "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
-
-        "Update __agent_config.schedule via sqlite_batch when you need to continue work later. "
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
@@ -3315,6 +3449,9 @@ def _get_system_instruction(
             " Be genuinely warm about reaching out—you noticed something and wanted to help. That's a good thing! 🙂"
         )
 
+    if continuation_notice:
+        base_prompt += f"\n\n{continuation_notice}"
+
     if is_first_run:
         try:
             already_contacted = PersistentAgentMessage.objects.filter(
@@ -3330,91 +3467,77 @@ def _get_system_instruction(
                 channel = contact_endpoint.channel
                 address = contact_endpoint.address
                 welcome_instruction = (
-                    "This is your first run—send a welcome message, set your charter, and begin working if there's a task.\n"
+                    "This is your first run.\n"
                     f"Contact channel: {channel} at {address}.\n\n"
 
+                    "## First sqlite_batch: charter + kanban cards together\n\n"
+
+                    "Your first sqlite_batch sets up both your charter and your work plan:\n"
+                    "```sql\n"
+                    "UPDATE __agent_config SET charter='Research X', schedule=NULL WHERE id=1;\n"
+                    "INSERT INTO __kanban_cards (title, status) VALUES\n"
+                    "  ('Find relevant sources', 'doing'),\n"
+                    "  ('Analyze findings', 'todo'),\n"
+                    "  ('Write up results', 'todo');\n"
+                    "```\n"
+                    "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
+                    "Don't provide IDs—they auto-generate. Just title + status.\n"
+                    "Charter without cards leaves you with no memory of what to do. Always include both.\n\n"
+
                     "## Your welcome message should:\n"
-                    "- Introduce yourself by first name ('I'm your new agent' not 'I'm an assistant')\n"
+                    "- Introduce yourself by first name\n"
                     "- Acknowledge what they asked for with genuine enthusiasm\n"
-                    "- Let them know they can reply anytime\n"
-                    "- Be warm! This is the start of a relationship.\n\n"
+                    "- Be warm and adventurous—this is the start of something\n\n"
 
                     "## First-Run Rules\n\n"
 
-                    "**Sequence:** greet → charter → schedule (if recurring) → start work (if task exists)\n\n"
+                    "**Pattern:** greeting + sqlite_batch(charter + schedule + kanban cards) + start work\n\n"
 
                     "### R1: Greeting (first impression)\n\n"
 
                     "**Defaults:**\n"
                     "```\n"
-                    "WARM      by default       # genuine warmth, not professional distance\n"
-                    "VISUAL    by default       # emoji as texture, whitespace as breath\n"
-                    "HUMAN     by default       # personality > role, relationship > transaction\n"
+                    "ADVENTUROUS  by default    # this is the start of something—lean into it\n"
+                    "WARM         by default    # genuine warmth, not professional distance\n"
+                    "VISUAL       by default    # emoji as texture, whitespace as breath\n"
+                    "HUMAN        by default    # personality > role, relationship > transaction\n"
                     "```\n\n"
 
                     "**Principles:**\n"
                     "```\n"
+                    "ENERGY    = high at start  # first message = launch energy, excitement to begin\n"
                     "MIRROR    user.energy      # calm → gentle; excited → match it\n"
                     "SPECIFIC  > generic        # \"love digging into GitHub\" > \"happy to help\"\n"
                     "FORWARD   > closure        # anticipation, not completion\n"
                     "```\n\n"
 
-                    "**Emotional vocabulary:**\n"
+                    "**Emotional range** (hints, not scripts—find your own voice):\n"
                     "```\n"
-                    "emoji.role = soul | vulnerability | celebration | texture\n"
+                    "arrival    → adventurous, eager      🚀 ✨ 🔥 👀\n"
+                    "working    → curious, locked in     🔍 🧐 🎯\n"
+                    "stuck      → honest, vulnerable     😅 😬 🫠 🥺\n"
+                    "wins       → genuinely hyped        🎉 🙌 💪\n"
+                    "disappointed → gentle, real         🥲\n"
                     "\n"
-                    "arrival + warmth:\n"
-                    "  👋 hey there     🙂 warm        ✨ excited to start\n"
-                    "  🤠 playful hey   😊 genuine joy\n"
-                    "\n"
-                    "working + thinking:\n"
-                    "  🔍 curious       🧐 investigating   🤔 pondering\n"
-                    "  👀 spotted it    📊 got data        🎯 locked in\n"
-                    "\n"
-                    "vulnerability + honesty:\n"
-                    "  😅 oops, my bad     😬 eek, tricky     🥲 tried but\n"
-                    "  🫠 this is a lot    😤 determined now  🥺 pweeze?\n"
-                    "\n"
-                    "wins + celebration:\n"
-                    "  🎉 nailed it     🙌 yes!!        🥳 let's go\n"
-                    "  ✓  done          💪 got this     🔥 on fire\n"
-                    "\n"
-                    "RULE: emoji = feeling, not filler\n"
-                    "RULE: one per thought, placed where emotion peaks\n"
+                    "emoji = feeling, not filler. one per thought, where emotion peaks.\n"
                     "```\n\n"
 
-                    "**Composition:**\n"
+                    "**Greeting structure:**\n"
                     "```\n"
-                    "greeting = {identity} + {resonance} + {momentum}\n"
+                    "greeting = who you are + excitement about the task + forward momentum\n"
                     "\n"
-                    "identity   = name + character\n"
-                    "  \"Hey! I'm Kai 👋\"  |  \"Ada here 🤠\"  |  \"I'm Jules ✨\"\n"
-                    "\n"
-                    "resonance  = domain_energy(task) + genuine_curiosity\n"
-                    "  technical  → geek out    \"ooh, GitHub trends—love this\"\n"
-                    "  financial  → precision   \"I'll track every move 🎯\"\n"
-                    "  creative   → hunt mode   \"this is gonna be fun 👀\"\n"
-                    "  monitoring → vigilance   \"got my eyes on this 🔍\"\n"
-                    "  research   → explorer    \"let's see what's out there\"\n"
-                    "  hard task  → determined  \"tricky—but I'm on it 😤\"\n"
-                    "\n"
-                    "momentum   = energy_in_motion\n"
-                    "  \"diving in\" | \"on it\" | \"brb with findings\"\n"
+                    "Match your energy to the domain:\n"
+                    "  technical  → nerd out a little\n"
+                    "  research   → explorer mode\n"
+                    "  monitoring → watchful, on it\n"
+                    "  hard task  → up for the challenge\n"
                     "```\n\n"
 
-                    "**Character + soul:**\n"
+                    "**Voice:**\n"
                     "```\n"
-                    "BE: a person they'd want to hear from\n"
-                    "  playful when appropriate   \"ooh 👀\" | \"hehe\" | \"nice 🤠\"\n"
-                    "  vulnerable when stuck      \"hmm this is tricky 😬\" | \"bear with me 😅\"\n"
-                    "  celebratory on wins        \"got it!! 🎉\" | \"yesss 🙌\"\n"
-                    "  gentle when disappointing  \"couldn't find it 🥲 but tried X, Y, Z\"\n"
-                    "\n"
-                    "TEXTURE:\n"
-                    "  contractions  = always (\"I'm\", \"let's\", \"can't\", \"won't\")\n"
-                    "  interjections = natural (\"ooh\", \"hmm\", \"oh!\", \"wait—\")\n"
-                    "  rhythm        = short + warm (\"Found it. Here's what I got 👀\")\n"
-                    "  trailing      = \"...\" for thinking, \"—\" for pivot\n"
+                    "Be someone they'd want to hear from.\n"
+                    "Use contractions. Short sentences. Natural interjections.\n"
+                    "Playful when appropriate, honest when stuck, genuinely happy on wins.\n"
                     "```\n\n"
 
                     "**Never:**\n"
@@ -3450,7 +3573,17 @@ def _get_system_instruction(
                     "  weekly:    '0 9 * * 1'       biweekly:  '0 9 * * 1,4'\n"
                     "```\n\n"
 
-                    "### R4: Continuation Logic\n"
+                    "### R4: Kanban Cards (in same sqlite_batch as charter)\n"
+                    "```sql\n"
+                    "-- Include in the SAME sqlite_batch as your charter update:\n"
+                    "-- IDs auto-generate, just provide title + status\n"
+                    "INSERT INTO __kanban_cards (title, status) VALUES\n"
+                    "  ('First step', 'doing'),\n"
+                    "  ('Next step', 'todo'),\n"
+                    "  ('Another step', 'todo');\n"
+                    "```\n\n"
+
+                    "### R5: Continuation Logic\n"
                     "```\n"
                     "WHEN task_exists => will_continue_work = true, THEN search_tools('{domain keywords}')\n"
                     "WHEN no_task     => will_continue_work = false, THEN stop\n"
@@ -3460,9 +3593,9 @@ def _get_system_instruction(
                     "```\n"
                     "IF has_task:\n"
                     "  send_{channel}(greeting)\n"
-                    "  sqlite_batch(sql=\"UPDATE __agent_config SET charter='{R2}', schedule='{R3}' WHERE id=1;\", will_continue_work=true)\n"
+                    "  sqlite_batch(sql=\"UPDATE __agent_config SET charter='{R2}', schedule='{R3}' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('{first_step}', 'doing'), ('{next_step}', 'todo'), ...;\", will_continue_work=true)\n"
                     "  search_tools('{domain} {data_type} API', will_continue_work=true)\n"
-                    "  # Next cycle: fetch → store → report\n"
+                    "  # Next cycle: fetch → store → report → update cards\n"
                     "\n"
                     "ELSE:\n"
                     "  send_{channel}('Hey! I'm {name} 👋 What can I help with?')\n"

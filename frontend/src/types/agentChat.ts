@@ -95,7 +95,35 @@ export type ThinkingEvent = {
   completionId?: string | null
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent
+export type KanbanCardChange = {
+  cardId: string
+  title: string
+  action: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
+  fromStatus?: string | null
+  toStatus?: string | null
+}
+
+export type KanbanBoardSnapshot = {
+  todoCount: number
+  doingCount: number
+  doneCount: number
+  todoTitles: string[]
+  doingTitles: string[]
+  doneTitles: string[]
+}
+
+export type KanbanEvent = {
+  kind: 'kanban'
+  cursor: string
+  timestamp?: string | null
+  agentName: string
+  displayText: string
+  primaryAction: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
+  changes: KanbanCardChange[]
+  snapshot: KanbanBoardSnapshot
+}
+
+export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | KanbanEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]

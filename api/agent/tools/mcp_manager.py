@@ -936,13 +936,17 @@ class MCPToolManager:
             if self._is_tool_blacklisted(full_name):
                 blacklisted_count += 1
                 continue
+            description = tool.description or f"{tool.name} from {server.display_name}"
+            # Augment scrape tools with guidance to prefer http_request for data files
+            if tool.name in ("scrape_as_markdown", "scrape_as_html"):
+                description += " NOT for data files (.csv, .json, .xml, .txt, /api/) — use http_request instead."
             tools.append(
                 MCPToolInfo(
                     config_id=server.config_id,
                     full_name=full_name,
                     server_name=server.name,
                     tool_name=tool.name,
-                    description=tool.description or f"{tool.name} from {server.display_name}",
+                    description=description,
                     parameters=tool.inputSchema or {"type": "object", "properties": {}}
                 )
             )

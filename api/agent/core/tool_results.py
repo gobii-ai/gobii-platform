@@ -33,6 +33,10 @@ LARGE_RESULT_PREVIEW_CAP = 200   # Max 200 bytes for large external results
 HUGE_RESULT_THRESHOLD = 15_000   # 15KB - this is already a lot of text
 HUGE_RESULT_PREVIEW_CAP = 100    # Minimal preview - rely on analysis hints
 
+# For fresh (most recent) tool call results, inline if under this threshold
+# to avoid requiring a separate inspection step. ~10K tokens ≈ 40KB.
+FRESH_RESULT_INLINE_THRESHOLD = 40_000  # 40KB - inline fresh results under this
+
 # SQLite results get MUCH more generous previews - this IS the extracted data
 # the agent needs to work with. Show full results up to reasonable limits.
 PREVIEW_TIERS_SQLITE = [
@@ -142,6 +146,7 @@ def prepare_tool_results_for_prompt(
             meta["bytes"],
             recency_position=recency_position,
             tool_name=record.tool_name,
+            is_fresh_tool_call=is_fresh_tool_call,
         )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
@@ -395,17 +400,33 @@ def _summarize_result(
     return meta, result_json, result_text_store, analysis
 
 
+def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
+    """Wrap result as if it came from a SQLite inspection query.
+
+    This primes the agent's mental model that the inspection step is already
+    done, avoiding a redundant query for reasonable-sized results.
+    """
+    # Format like: SELECT substr(result_text,1,40000) FROM __tool_results
+    char_limit = min(full_bytes, FRESH_RESULT_INLINE_THRESHOLD)
+    return (
+        f"[Auto-inspected: SELECT substr(result_text,1,{char_limit}) → {full_bytes} chars]\n"
+        f"{result_text}"
+    )
+
+
 def _build_prompt_preview(
     result_text: str,
     full_bytes: int,
     *,
     recency_position: Optional[int],
     tool_name: str,
+    is_fresh_tool_call: bool = False,
 ) -> Tuple[Optional[str], bool]:
     """Build a preview for the prompt.
 
     For external data (http_request, mcp_*): small structure hints only.
     For sqlite results: generous preview since this IS the extracted data.
+    For fresh (most recent) tool calls under threshold: full inline to skip inspection.
 
     Returns (preview_text, is_inline) where:
     - preview_text is a sample of the result
@@ -419,6 +440,12 @@ def _build_prompt_preview(
     # No position means meta only (old result beyond tier range)
     if recency_position is None or recency_position >= tier_count:
         return None, False
+
+    # For fresh tool calls under ~10K tokens, return full result inline
+    # wrapped as a "pre-executed" SQLite query result to prime the agent's
+    # mental model that inspection is already done
+    if is_fresh_tool_call and full_bytes <= FRESH_RESULT_INLINE_THRESHOLD:
+        return _wrap_as_sqlite_result(result_text, full_bytes), True
 
     max_bytes = tiers[recency_position]
 

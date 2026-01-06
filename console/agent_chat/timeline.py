@@ -898,3 +898,103 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
         env.tool_call.tool_name for env in envelopes if env.tool_call
     )
     return _build_cluster(envelopes, label_map)
+
+
+def serialize_kanban_event(
+    agent_name: str,
+    changes: Sequence,  # Sequence[KanbanCardChange]
+    snapshot,  # KanbanBoardSnapshot
+) -> dict:
+    """Serialize a kanban timeline event for frontend display.
+
+    Args:
+        agent_name: The name of the agent (for display text)
+        changes: Sequence of KanbanCardChange objects
+        snapshot: KanbanBoardSnapshot with current board state
+    """
+    now = timezone.now()
+    timestamp = _format_timestamp(now)
+    cursor_value = _microsecond_epoch(now)
+    cursor = CursorPayload(value=cursor_value, kind="kanban", identifier=str(uuid.uuid4()))
+
+    # Determine primary action for display
+    completed_count = sum(1 for c in changes if c.action == "completed")
+    started_count = sum(1 for c in changes if c.action == "started")
+    created_count = sum(1 for c in changes if c.action == "created")
+    updated_count = sum(1 for c in changes if c.action == "updated")
+    deleted_count = sum(1 for c in changes if c.action == "deleted")
+    archived_count = sum(1 for c in changes if c.action == "archived")
+
+    # Build display text
+    if completed_count > 0 and completed_count == len(changes):
+        if completed_count == 1:
+            display_text = f'{agent_name} completed "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} completed {completed_count} tasks"
+        primary_action = "completed"
+    elif started_count > 0 and started_count == len(changes):
+        if started_count == 1:
+            display_text = f'{agent_name} started "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} started {started_count} tasks"
+        primary_action = "started"
+    elif created_count > 0 and created_count == len(changes):
+        if created_count == 1:
+            display_text = f'{agent_name} added "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} added {created_count} tasks"
+        primary_action = "created"
+    elif deleted_count > 0 and deleted_count == len(changes):
+        if deleted_count == 1:
+            display_text = f'{agent_name} removed "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} removed {deleted_count} tasks"
+        primary_action = "deleted"
+    elif archived_count > 0 and archived_count == len(changes):
+        if archived_count == 1:
+            display_text = f'{agent_name} archived "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} archived {archived_count} tasks"
+        primary_action = "archived"
+    elif updated_count > 0 and updated_count == len(changes):
+        if updated_count == 1:
+            display_text = f'{agent_name} updated "{changes[0].title}"'
+        else:
+            display_text = f"{agent_name} updated {updated_count} tasks"
+        primary_action = "updated"
+    else:
+        display_text = f"{agent_name} updated kanban"
+        primary_action = "updated"
+
+    # Serialize changes for animation
+    serialized_changes = [
+        {
+            "cardId": c.card_id,
+            "title": c.title,
+            "action": c.action,
+            "fromStatus": c.from_status,
+            "toStatus": c.to_status,
+        }
+        for c in changes
+    ]
+
+    # Serialize snapshot
+    serialized_snapshot = {
+        "todoCount": snapshot.todo_count,
+        "doingCount": snapshot.doing_count,
+        "doneCount": snapshot.done_count,
+        "todoTitles": list(snapshot.todo_titles),
+        "doingTitles": list(snapshot.doing_titles),
+        "doneTitles": list(snapshot.done_titles),
+    }
+
+    return {
+        "kind": "kanban",
+        "cursor": cursor.encode(),
+        "timestamp": timestamp,
+        "agentName": agent_name,
+        "displayText": display_text,
+        "primaryAction": primary_action,
+        "changes": serialized_changes,
+        "snapshot": serialized_snapshot,
+    }

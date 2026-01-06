@@ -155,31 +155,45 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   useEffect(() => {
     const scroller = getScrollContainer()
 
-    // Threshold for re-sticking when user scrolls back to bottom
-    const restickThreshold = 20
+    // Mobile detection for adaptive thresholds
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+
+    // Use larger thresholds on mobile to account for browser chrome changes (address bar, keyboard)
+    const restickThreshold = isTouchDevice ? 80 : 20
+    const touchScrollThreshold = 40 // More intentional gesture required to unpin
 
     const getDistanceToBottom = () => {
       const target = scroller || document.documentElement || document.body
-      return target.scrollHeight - target.clientHeight - target.scrollTop
+      // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+      const documentHeight = target.scrollHeight
+      const scrollTop = target.scrollTop
+      // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
+      const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
+      return documentHeight - effectiveClientHeight - scrollTop
     }
 
     // Detect user scrolling UP via wheel - immediately unstick
     const handleWheel = (e: WheelEvent) => {
       if (e.deltaY < 0 && autoScrollPinnedRef.current) {
-        // User is scrolling up - unstick immediately
         setAutoScrollPinned(false)
       }
     }
 
     // Detect user scrolling UP via touch
     let touchStartY = 0
+    let touchStartTime = 0
     const handleTouchStart = (e: TouchEvent) => {
       touchStartY = e.touches[0]?.clientY ?? 0
+      touchStartTime = Date.now()
     }
     const handleTouchMove = (e: TouchEvent) => {
+      if (!autoScrollPinnedRef.current) return
       const touchY = e.touches[0]?.clientY ?? 0
-      // Touch moved down = scrolling up (pulling content down)
-      if (touchY > touchStartY + 10 && autoScrollPinnedRef.current) {
+      const deltaY = touchY - touchStartY
+      const elapsed = Date.now() - touchStartTime
+      // Require more intentional gesture: larger movement AND not too fast (avoid accidental taps)
+      if (deltaY > touchScrollThreshold && elapsed > 50) {
         setAutoScrollPinned(false)
       }
     }
@@ -194,21 +208,35 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     }
 
     // Check if user has scrolled back to bottom (for re-sticking)
-    let ticking = false
-    const handleScroll = () => {
-      if (ticking) return
-      ticking = true
-      requestAnimationFrame(() => {
-        ticking = false
-        const distanceToBottom = getDistanceToBottom()
-        const currentlyPinned = autoScrollPinnedRef.current
-        const suppressedUntil = autoScrollPinSuppressedUntilRef.current
-        const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
+    let scrollTicking = false
+    const checkAndRestick = () => {
+      const distanceToBottom = getDistanceToBottom()
+      const currentlyPinned = autoScrollPinnedRef.current
+      const suppressedUntil = autoScrollPinSuppressedUntilRef.current
+      const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
 
-        // Re-stick when user scrolls to bottom
-        if (!currentlyPinned && !suppressionActive && distanceToBottom <= restickThreshold) {
-          setAutoScrollPinned(true)
-        }
+      if (!currentlyPinned && !suppressionActive && distanceToBottom <= restickThreshold) {
+        setAutoScrollPinned(true)
+      }
+    }
+
+    const handleScroll = () => {
+      if (scrollTicking) return
+      scrollTicking = true
+      requestAnimationFrame(() => {
+        scrollTicking = false
+        checkAndRestick()
+      })
+    }
+
+    // Handle viewport resize (keyboard show/hide, browser chrome changes on mobile)
+    let resizeTicking = false
+    const handleViewportResize = () => {
+      if (resizeTicking) return
+      resizeTicking = true
+      requestAnimationFrame(() => {
+        resizeTicking = false
+        checkAndRestick()
       })
     }
 
@@ -218,12 +246,25 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('scroll', handleScroll, { passive: true })
 
+    // Listen to visualViewport resize for mobile browser chrome changes
+    const vv = window.visualViewport
+    if (vv) {
+      vv.addEventListener('resize', handleViewportResize)
+      vv.addEventListener('scroll', handleViewportResize)
+    }
+    window.addEventListener('resize', handleViewportResize)
+
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
+      if (vv) {
+        vv.removeEventListener('resize', handleViewportResize)
+        vv.removeEventListener('scroll', handleViewportResize)
+      }
+      window.removeEventListener('resize', handleViewportResize)
     }
   }, [getScrollContainer, setAutoScrollPinned])
 
@@ -254,7 +295,13 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     const scroller = getScrollContainer()
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      window.scrollTo({ top: scroller.scrollHeight })
+      // Calculate max scroll accounting for visualViewport on mobile
+      const documentHeight = scroller.scrollHeight
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+      // On mobile with visualViewport, we need to account for the offset from page top
+      const vvOffsetTop = window.visualViewport?.offsetTop ?? 0
+      const scrollTarget = documentHeight - viewportHeight + vvOffsetTop
+      window.scrollTo({ top: Math.max(0, scrollTarget) })
     })
   }, [getScrollContainer])
 

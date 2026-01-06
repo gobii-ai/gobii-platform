@@ -1,4 +1,5 @@
 import base64
+import html as html_lib
 import logging
 import re
 from html.parser import HTMLParser
@@ -317,6 +318,9 @@ META_REFRESH_URL_RE = re.compile(r"url\s*=\s*(?P<url>[^;]+)", re.IGNORECASE)
 DATA_URL_RE = re.compile(r"^data:(?P<meta>[^,]*?),(?P<data>.*)$", re.IGNORECASE | re.DOTALL)
 SVG_URL_ATTR_RE = re.compile(r"(?:href|xlink:href)\s*=\s*['\"](?P<url>[^'\"]+)['\"]", re.IGNORECASE)
 URL_ATTRS = {"src", "href", "data", "poster", "action", "formaction", "xlink:href", "background"}
+MARKDOWN_IMAGE_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\(\s*(?P<url><[^>]+>|[^)\s]+)(?:\s+['\"][^'\"]*['\"])?\s*\)"
+)
 
 
 def _secure_url_fetcher(url, timeout=10, ssl_context=None):
@@ -508,6 +512,18 @@ def _contains_blocked_asset_references(html: str) -> bool:
     return parser.blocked
 
 
+def _coerce_markdown_images_to_html(html: str) -> str:
+    def replace(match: re.Match) -> str:
+        alt = html_lib.escape(match.group("alt") or "", quote=True)
+        url = match.group("url") or ""
+        if url.startswith("<") and url.endswith(">"):
+            url = url[1:-1].strip()
+        url = html_lib.escape(url, quote=True)
+        return f"<img src=\"{url}\" alt=\"{alt}\">"
+
+    return MARKDOWN_IMAGE_RE.sub(replace, html)
+
+
 def _inject_print_css(html: str) -> str:
     """Inject default print CSS for clean page breaks."""
     style_tag = f"<style>{DEFAULT_PRINT_CSS}</style>"
@@ -535,7 +551,9 @@ def get_create_pdf_tool() -> Dict[str, Any]:
             "name": "create_pdf",
             "description": (
                 "Create a publication-quality PDF from HTML. "
-                "Recommended path: /exports/your-file.pdf. HTML must be self-contained. "
+                "Recommended path: /exports/your-file.pdf. "
+                "\n\nEmbedding charts: Use <img src='«/charts/...»'> with the «path» from create_chart's inline_html. "
+                "The «path» syntax is required—it gets replaced with embedded data. URLs will fail."
                 "\n\nUtility classes:\n"
                 "- .page-break / .page-break-before: force page breaks\n"
                 "- .no-break: keep element together\n"
@@ -572,6 +590,8 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not isinstance(html, str) or not html.strip():
         return {"status": "error", "message": "Missing required parameter: html"}
 
+    html = _coerce_markdown_images_to_html(html)
+
     # Substitute «path» variables with data URIs (PDF needs embedded content, not URLs)
     html = substitute_variables_as_data_uris(html, agent)
 
@@ -590,8 +610,9 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return {
             "status": "error",
             "message": (
-                "HTML contains external or local asset references. "
-                "Use «/path» variables (from create_chart/create_csv/create_pdf) for embeds."
+                "HTML contains external or local asset references (URLs are not allowed). "
+                "To embed charts: use <img src='«/charts/...»'> with the «path» from create_chart's inline_html field. "
+                "The «guillemet» syntax is required—it gets replaced with embedded data."
             ),
         }
 

@@ -167,6 +167,495 @@ def _json_length(json_str: Optional[str]) -> Optional[int]:
         return None
 
 
+def _csv_parse(text: Optional[str], has_header: int = 1) -> Optional[str]:
+    """Parse CSV text into JSON array using Python's robust csv module.
+
+    Usage:
+      csv_parse(text)           -- assumes first row is header, returns [{col: val}, ...]
+      csv_parse(text, 1)        -- same as above (has_header=1)
+      csv_parse(text, 0)        -- no header, returns [[val1, val2, ...], ...]
+
+    With header (has_header=1): Returns JSON array of objects
+      Input: "name,age\\nAlice,30\\nBob,25"
+      Output: [{"name":"Alice","age":"30"},{"name":"Bob","age":"25"}]
+
+    Without header (has_header=0): Returns JSON array of arrays
+      Input: "Alice,30\\nBob,25"
+      Output: [["Alice","30"],["Bob","25"]]
+
+    Handles: quoted fields, embedded commas, embedded newlines, escaped quotes.
+    Safe: Pure computation, no I/O. Limited to 10000 rows, 100 columns.
+    """
+    import csv as csv_module
+    import io
+    import json as json_module
+
+    if text is None:
+        return None
+
+    # Normalize line endings
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    try:
+        reader = csv_module.reader(io.StringIO(text))
+        rows = []
+        headers = None
+        max_rows = 10000
+        max_cols = 100
+
+        for i, row in enumerate(reader):
+            if i >= max_rows + (1 if has_header else 0):
+                break
+            # Limit columns
+            row = row[:max_cols]
+
+            if has_header and i == 0:
+                # Sanitize headers: strip whitespace, replace empty with col_N
+                headers = []
+                for j, h in enumerate(row):
+                    h = h.strip()
+                    if not h:
+                        h = f"col_{j}"
+                    headers.append(h)
+                continue
+
+            if has_header and headers:
+                # Pad row if fewer columns than headers
+                while len(row) < len(headers):
+                    row.append("")
+                rows.append(dict(zip(headers, row)))
+            else:
+                rows.append(row)
+
+        return json_module.dumps(rows) if rows else "[]"
+    except Exception:
+        return None
+
+
+def _csv_column(text: Optional[str], column: int, has_header: int = 1) -> Optional[str]:
+    """Extract a single column from CSV as JSON array.
+
+    Usage:
+      csv_column(text, 0)       -- first column (0-indexed), skip header
+      csv_column(text, 2)       -- third column
+      csv_column(text, 0, 0)    -- first column, no header row
+
+    Returns: JSON array of values, e.g., ["Alice","Bob","Carol"]
+    Useful for: Getting all values in a column for aggregation or filtering.
+    """
+    import csv as csv_module
+    import io
+    import json as json_module
+
+    if text is None or column < 0:
+        return None
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    try:
+        reader = csv_module.reader(io.StringIO(text))
+        values = []
+        max_rows = 10000
+
+        for i, row in enumerate(reader):
+            if len(values) >= max_rows:
+                break
+            if has_header and i == 0:
+                continue
+            if column < len(row):
+                values.append(row[column])
+
+        return json_module.dumps(values) if values else "[]"
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Real-world data cleaning functions
+# ---------------------------------------------------------------------------
+
+def _html_to_text(html: Optional[str]) -> Optional[str]:
+    """Strip HTML tags and decode entities to get plain text.
+
+    Usage: html_to_text('<p>Hello &amp; <b>world</b></p>') → 'Hello & world'
+
+    Handles: tags, entities (&amp; &#39; etc), scripts/styles removal.
+    Perfect for: Scraped web content that has HTML mixed in.
+    """
+    import html as html_module
+
+    if html is None:
+        return None
+
+    text = html
+    # Remove script and style contents entirely
+    text = re.sub(r'<script[^>]*>.*?</script>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<style[^>]*>.*?</style>', ' ', text, flags=re.DOTALL | re.IGNORECASE)
+    # Replace block elements with newlines
+    text = re.sub(r'<(?:p|div|br|hr|li|tr|h[1-6])[^>]*>', '\n', text, flags=re.IGNORECASE)
+    # Remove all other tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+    # Decode HTML entities
+    text = html_module.unescape(text)
+    # Normalize whitespace
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n[ \t]+', '\n', text)
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _clean_text(text: Optional[str]) -> Optional[str]:
+    """Normalize messy text: whitespace, unicode, common artifacts.
+
+    Usage: clean_text('  Hello   world\\n\\n\\nFoo  ') → 'Hello world\\n\\nFoo'
+
+    Handles: excessive whitespace, unicode normalization, zero-width chars,
+             smart quotes → straight quotes, common mojibake patterns.
+    """
+    import unicodedata
+
+    if text is None:
+        return None
+
+    # Unicode normalize (NFC)
+    text = unicodedata.normalize('NFC', text)
+    # Remove zero-width characters
+    text = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', text)
+    # Smart quotes to straight quotes
+    text = text.replace('"', '"').replace('"', '"').replace(''', "'").replace(''', "'")
+    # Normalize dashes
+    text = text.replace('–', '-').replace('—', '-')
+    # Normalize ellipsis
+    text = text.replace('…', '...')
+    # Normalize whitespace (preserve intentional newlines)
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r' ?\n ?', '\n', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
+
+
+def _parse_number(text: Optional[str]) -> Optional[float]:
+    """Parse numbers from messy real-world formats.
+
+    Usage:
+      parse_number('$1,234.56')     → 1234.56
+      parse_number('€1.234,56')     → 1234.56  (European)
+      parse_number('1.2M')          → 1200000.0
+      parse_number('1.5B')          → 1500000000.0
+      parse_number('1,200')         → 1200.0
+      parse_number('-$50.00')       → -50.0
+      parse_number('(100)')         → -100.0  (accounting negative)
+
+    Returns: Float or NULL if unparseable.
+    """
+    if text is None:
+        return None
+
+    text = text.strip()
+    if not text:
+        return None
+
+    # Check for accounting-style negatives: (100)
+    is_negative = False
+    if text.startswith('(') and text.endswith(')'):
+        is_negative = True
+        text = text[1:-1]
+
+    # Check for leading minus or negative
+    if text.startswith('-'):
+        is_negative = True
+        text = text[1:]
+
+    # Strip currency symbols and whitespace
+    text = re.sub(r'^[£$€¥₹₽\s]+', '', text)
+    text = re.sub(r'[£$€¥₹₽\s]+$', '', text)
+
+    # Handle multiplier suffixes
+    multiplier = 1.0
+    suffix_match = re.search(r'([KkMmBbTt])\s*$', text)
+    if suffix_match:
+        suffix = suffix_match.group(1).upper()
+        multipliers = {'K': 1e3, 'M': 1e6, 'B': 1e9, 'T': 1e12}
+        multiplier = multipliers.get(suffix, 1.0)
+        text = text[:suffix_match.start()]
+
+    # Detect European vs US format
+    # European: 1.234,56 (dot for thousands, comma for decimal)
+    # US: 1,234.56 (comma for thousands, dot for decimal)
+    text = text.replace(' ', '')  # Remove thousand separators (space)
+
+    comma_pos = text.rfind(',')
+    dot_pos = text.rfind('.')
+    chars_after_comma = len(text) - comma_pos - 1 if comma_pos >= 0 else 0
+
+    # European format detection:
+    # 1) Comma after dot with 1-2 digits: "1.234,56"
+    # 2) Comma with exactly 2 digits at end, no dot: "899,00" (price format)
+    is_european = comma_pos >= 0 and chars_after_comma <= 2 and (
+        dot_pos >= 0 and comma_pos > dot_pos or  # Has dot before comma
+        (dot_pos < 0 and chars_after_comma == 2)  # No dot, exactly 2 decimal places
+    )
+
+    if is_european:
+        # 1.234,56 → 1234.56 or 899,00 → 899.00
+        text = text.replace('.', '').replace(',', '.')
+    else:
+        # US format or no decimal: just remove commas
+        text = text.replace(',', '')
+
+    try:
+        result = float(text) * multiplier
+        return -result if is_negative else result
+    except (ValueError, TypeError):
+        return None
+
+
+def _parse_date(text: Optional[str], output_format: str = '%Y-%m-%d') -> Optional[str]:
+    """Parse dates from various formats into standardized output.
+
+    Usage:
+      parse_date('Jan 5, 2024')      → '2024-01-05'
+      parse_date('5/1/24')           → '2024-01-05'  (US format assumed)
+      parse_date('2024-01-05')       → '2024-01-05'
+      parse_date('January 5th 2024') → '2024-01-05'
+      parse_date('5 Jan 2024')       → '2024-01-05'
+
+    Second arg changes output format:
+      parse_date('Jan 5, 2024', '%Y-%m-%d %H:%M:%S') → '2024-01-05 00:00:00'
+
+    Returns: Formatted date string or NULL if unparseable.
+    """
+    from datetime import datetime
+
+    if text is None:
+        return None
+
+    text = text.strip()
+    if not text:
+        return None
+
+    # Remove ordinal suffixes (1st, 2nd, 3rd, 4th, etc.)
+    text = re.sub(r'(\d+)(st|nd|rd|th)\b', r'\1', text, flags=re.IGNORECASE)
+
+    # Common formats to try (order matters - more specific first)
+    formats = [
+        '%Y-%m-%d %H:%M:%S',  # ISO with time
+        '%Y-%m-%dT%H:%M:%S',  # ISO T separator
+        '%Y-%m-%dT%H:%M:%SZ', # ISO with Z
+        '%Y-%m-%d',           # ISO date
+        '%Y/%m/%d',           # ISO with slashes
+        '%d/%m/%Y %H:%M:%S',  # European with time
+        '%d/%m/%Y',           # European
+        '%m/%d/%Y %H:%M:%S',  # US with time
+        '%m/%d/%Y',           # US
+        '%m/%d/%y',           # US short year
+        '%d-%m-%Y',           # European with dashes
+        '%B %d, %Y',          # January 5, 2024
+        '%b %d, %Y',          # Jan 5, 2024
+        '%d %B %Y',           # 5 January 2024
+        '%d %b %Y',           # 5 Jan 2024
+        '%B %d %Y',           # January 5 2024
+        '%b %d %Y',           # Jan 5 2024
+        '%d %B, %Y',          # 5 January, 2024
+        '%d %b, %Y',          # 5 Jan, 2024
+        '%Y%m%d',             # 20240105
+    ]
+
+    for fmt in formats:
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.strftime(output_format)
+        except ValueError:
+            continue
+
+    return None
+
+
+def _url_extract(url: Optional[str], part: str = 'domain') -> Optional[str]:
+    """Extract parts from a URL.
+
+    Usage:
+      url_extract('https://sub.example.com/path?q=1', 'domain')  → 'example.com'
+      url_extract('https://sub.example.com/path?q=1', 'host')    → 'sub.example.com'
+      url_extract('https://sub.example.com/path?q=1', 'path')    → '/path'
+      url_extract('https://sub.example.com/path?q=1', 'query')   → 'q=1'
+      url_extract('https://sub.example.com/path?q=1', 'scheme')  → 'https'
+
+    Parts: domain, host, path, query, scheme, port
+    Returns: Extracted part or NULL.
+    """
+    from urllib.parse import urlparse
+
+    if url is None:
+        return None
+
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return None
+
+    part = part.lower()
+
+    if part == 'scheme':
+        return parsed.scheme or None
+    elif part == 'host':
+        return parsed.netloc.split(':')[0] or None
+    elif part == 'domain':
+        # Extract registrable domain (strip subdomains)
+        host = parsed.netloc.split(':')[0]
+        if not host:
+            return None
+        parts = host.split('.')
+        # Handle common TLDs
+        if len(parts) >= 2:
+            # Check for two-part TLDs like co.uk, com.au
+            two_part_tlds = {'co.uk', 'com.au', 'co.nz', 'co.jp', 'com.br', 'co.in'}
+            if len(parts) >= 3 and f'{parts[-2]}.{parts[-1]}' in two_part_tlds:
+                return '.'.join(parts[-3:])
+            return '.'.join(parts[-2:])
+        return host
+    elif part == 'path':
+        return parsed.path or None
+    elif part == 'query':
+        return parsed.query or None
+    elif part == 'port':
+        if ':' in parsed.netloc:
+            return parsed.netloc.split(':')[1]
+        return None
+
+    return None
+
+
+def _extract_json(text: Optional[str]) -> Optional[str]:
+    """Extract and validate JSON from text that may have surrounding content.
+
+    Usage:
+      extract_json('Result: {"a": 1} end')  → '{"a": 1}'
+      extract_json('Data: [1, 2, 3]!')      → '[1, 2, 3]'
+
+    Finds the first valid JSON object or array in the text.
+    Returns: Valid JSON string or NULL if none found.
+    """
+    import json as json_module
+
+    if text is None:
+        return None
+
+    # Try to find JSON object or array
+    for start_char, end_char in [('{', '}'), ('[', ']')]:
+        start = text.find(start_char)
+        if start == -1:
+            continue
+
+        # Find matching end by counting braces
+        depth = 0
+        in_string = False
+        escape = False
+
+        for i in range(start, len(text)):
+            char = text[i]
+
+            if escape:
+                escape = False
+                continue
+
+            if char == '\\' and in_string:
+                escape = True
+                continue
+
+            if char == '"' and not escape:
+                in_string = not in_string
+                continue
+
+            if in_string:
+                continue
+
+            if char == start_char:
+                depth += 1
+            elif char == end_char:
+                depth -= 1
+                if depth == 0:
+                    candidate = text[start:i+1]
+                    try:
+                        json_module.loads(candidate)
+                        return candidate
+                    except json_module.JSONDecodeError:
+                        break
+
+    return None
+
+
+def _extract_emails(text: Optional[str]) -> Optional[str]:
+    """Extract all email addresses from text as JSON array.
+
+    Usage: extract_emails('Contact us at foo@bar.com or support@example.org')
+           → '["foo@bar.com", "support@example.org"]'
+
+    Returns: JSON array of unique emails, or NULL if none found.
+    """
+    import json as json_module
+
+    if text is None:
+        return None
+
+    # RFC 5322 inspired but practical pattern
+    pattern = r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}'
+    emails = re.findall(pattern, text)
+
+    if not emails:
+        return None
+
+    # Dedupe while preserving order
+    seen = set()
+    unique = []
+    for email in emails:
+        lower = email.lower()
+        if lower not in seen:
+            seen.add(lower)
+            unique.append(email)
+
+    return json_module.dumps(unique)
+
+
+def _extract_urls(text: Optional[str]) -> Optional[str]:
+    """Extract all URLs from text as JSON array.
+
+    Usage: extract_urls('Visit https://example.com or http://foo.bar/path')
+           → '["https://example.com", "http://foo.bar/path"]'
+
+    Returns: JSON array of unique URLs, or NULL if none found.
+    """
+    import json as json_module
+
+    if text is None:
+        return None
+
+    # Match http/https URLs
+    pattern = r'https?://[^\s<>"\')\]}>]+'
+    urls = re.findall(pattern, text)
+
+    if not urls:
+        return None
+
+    # Clean trailing punctuation that's likely not part of URL
+    cleaned = []
+    for url in urls:
+        # Strip trailing punctuation that's probably sentence-ending
+        url = re.sub(r'[.,;:!?]+$', '', url)
+        cleaned.append(url)
+
+    # Dedupe while preserving order
+    seen = set()
+    unique = []
+    for url in cleaned:
+        if url not in seen:
+            seen.add(url)
+            unique.append(url)
+
+    return json_module.dumps(unique)
+
+
 # ---------------------------------------------------------------------------
 # Common LLM hallucinations - aliases for functions from other databases
 # ---------------------------------------------------------------------------
@@ -440,6 +929,22 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("word_count", 1, _word_count)
     conn.create_function("char_count", 1, _char_count)
     conn.create_function("json_length", 1, _json_length)  # Alias for json_array_length
+    # CSV parsing (uses Python's csv module for robustness)
+    conn.create_function("csv_parse", 1, _csv_parse)  # With header
+    conn.create_function("csv_parse", 2, _csv_parse)  # With has_header arg
+    conn.create_function("csv_column", 2, _csv_column)  # Extract column, with header
+    conn.create_function("csv_column", 3, _csv_column)  # With has_header arg
+    # Real-world data cleaning
+    conn.create_function("html_to_text", 1, _html_to_text)
+    conn.create_function("clean_text", 1, _clean_text)
+    conn.create_function("parse_number", 1, _parse_number)
+    conn.create_function("parse_date", 1, _parse_date)
+    conn.create_function("parse_date", 2, _parse_date)  # With output format
+    conn.create_function("url_extract", 1, _url_extract)  # Default: domain
+    conn.create_function("url_extract", 2, _url_extract)  # With part arg
+    conn.create_function("extract_json", 1, _extract_json)
+    conn.create_function("extract_emails", 1, _extract_emails)
+    conn.create_function("extract_urls", 1, _extract_urls)
     # Common LLM hallucinations from other databases
     conn.create_function("NOW", 0, _now)  # MySQL/PostgreSQL
     conn.create_function("CURDATE", 0, _curdate)  # MySQL

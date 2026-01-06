@@ -357,17 +357,15 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           : current.agentColorHex
         const hasStreamingContent = Boolean(current.streaming?.content?.trim())
         const allowThinkingClear = Boolean(current.streaming) && !hasStreamingContent
-        const shouldClearThinkingStream = hasThinkingEvent && current.streaming?.done && allowThinkingClear
-        const shouldFlagThinkingClear = hasThinkingEvent && current.streaming && !current.streaming.done && allowThinkingClear
+        // Clear streaming immediately when thinking event arrives to avoid 2x thinking bubbles
+        const shouldClearThinkingStream = hasThinkingEvent && allowThinkingClear
         const nextStreaming = shouldClearThinkingStream ? null : current.streaming
         const nextStreamingClearOnDone =
           shouldClearThinkingStream
             ? false
-            : shouldFlagThinkingClear
-              ? true
-              : allowThinkingClear
-                ? current.streamingClearOnDone
-                : false
+            : allowThinkingClear
+              ? current.streamingClearOnDone
+              : false
         const baseEvents = removeOptimisticMatches(current.events, incoming)
         const basePendingEvents = removeOptimisticMatches(current.pendingEvents, incoming)
         if (!current.autoScrollPinned) {
@@ -590,17 +588,15 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
       const hasStreamingContent = Boolean(state.streaming?.content?.trim())
       const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
-      const shouldClearThinkingStream = normalized.kind === 'thinking' && state.streaming?.done && allowThinkingClear
-      const shouldFlagThinkingClear = normalized.kind === 'thinking' && state.streaming && !state.streaming.done && allowThinkingClear
+      // Clear streaming immediately when thinking event arrives to avoid 2x thinking bubbles
+      const shouldClearThinkingStream = normalized.kind === 'thinking' && allowThinkingClear
       const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
       const nextStreamingClearOnDone =
         shouldClearStream || shouldClearThinkingStream
           ? false
-          : shouldFlagThinkingClear
-            ? true
-            : allowThinkingClear
-              ? state.streamingClearOnDone
-              : false
+          : allowThinkingClear
+            ? state.streamingClearOnDone
+            : false
 
       if (normalized.kind === 'thinking' || normalized.kind === 'steps' || shouldClearStream) {
         awaitingResponse = false
