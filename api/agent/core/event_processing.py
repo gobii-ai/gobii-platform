@@ -152,6 +152,7 @@ MESSAGE_TOOL_NAMES = {
     "send_chat_message",
     "send_agent_message",
 }
+MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
     "send_sms": "body",
@@ -2309,6 +2310,7 @@ def _run_agent_loop(
             return cumulative_token_usage
 
     reasoning_only_streak = 0
+    continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
         if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
@@ -2388,6 +2390,8 @@ def _run_agent_loop(
 
             config_snapshot = seed_sqlite_agent_config(agent)
             kanban_snapshot = seed_sqlite_kanban(agent)
+            current_notice = continuation_notice
+            continuation_notice = None
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
@@ -2395,7 +2399,7 @@ def _run_agent_loop(
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
                 daily_credit_state=daily_state,
-                continuation_notice=None,
+                continuation_notice=current_notice,
                 routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
@@ -2656,7 +2660,7 @@ def _run_agent_loop(
 
             if not tool_calls:
                 config_errors = _apply_agent_config_updates()
-                kanban_errors = _apply_kanban_updates()
+                kanban_errors, _ = _apply_kanban_updates()
                 if config_errors or kanban_errors:
                     reasoning_only_streak = 0
                     continue
@@ -2766,6 +2770,7 @@ def _run_agent_loop(
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
                 has_user_facing_message = False
+            message_delivery_ok = False
             all_calls_sleep = not has_non_sleep_calls
 
             for idx, call in enumerate(tool_calls, start=1):
@@ -2989,6 +2994,10 @@ def _run_agent_loop(
                         result_preview,
                         "…" if len(result_content) > len(result_preview) else "",
                     )
+                    if tool_name in MESSAGE_TOOL_NAMES:
+                        status_label = str(status or "").lower()
+                        if status_label in MESSAGE_SUCCESS_STATUSES:
+                            message_delivery_ok = True
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
@@ -3068,9 +3077,8 @@ def _run_agent_loop(
             if config_had_errors or kanban_had_errors:
                 followup_required = True
 
-            # Kanban completion override: if all work is done, force auto-sleep
-            # UNLESS the agent explicitly said will_continue_work=true on any tool.
-            # This respects the agent's promise to do more work even after marking done.
+            # Kanban completion override: once final output is delivered, force auto-sleep.
+            # If no user-facing message was sent, keep the agent alive to send it.
             kanban_all_done = (
                 kanban_board_snapshot is not None
                 and kanban_board_snapshot.todo_count == 0
@@ -3081,18 +3089,26 @@ def _run_agent_loop(
                 kanban_board_snapshot is not None
                 and (kanban_board_snapshot.todo_count > 0 or kanban_board_snapshot.doing_count > 0)
             )
-            if kanban_all_done and followup_required and not all_calls_sleep and not any_explicit_continuation:
-                logger.info(
-                    "Agent %s: kanban shows all work complete (done=%d), overriding followup_required to allow auto-sleep.",
-                    agent.id,
-                    kanban_board_snapshot.done_count,
-                )
-                followup_required = False
-            elif kanban_all_done and any_explicit_continuation:
-                logger.info(
-                    "Agent %s: kanban all done but agent explicitly requested continuation; allowing one more turn.",
-                    agent.id,
-                )
+            if kanban_all_done:
+                if message_delivery_ok:
+                    if followup_required or any_explicit_continuation:
+                        logger.info(
+                            "Agent %s: kanban complete and final message sent; forcing auto-sleep.",
+                            agent.id,
+                        )
+                    followup_required = False
+                    any_explicit_continuation = False
+                elif not all_calls_sleep:
+                    if not followup_required:
+                        logger.info(
+                            "Agent %s: kanban complete but no user message sent; forcing continuation.",
+                            agent.id,
+                        )
+                    followup_required = True
+                    continuation_notice = (
+                        "Kanban is complete but no user-facing message was sent. "
+                        "Send the final output now, then stop."
+                    )
             # Kanban unfinished override: if work remains and no explicit sleep, force continuation
             # This prevents premature termination when tools return auto_sleep_ok but kanban has tasks
             elif kanban_has_work and not followup_required and not all_calls_sleep:

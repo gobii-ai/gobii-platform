@@ -612,67 +612,76 @@ Use `false` only when ALL are true:
 - You're delivering final findings to the user
 - There's nothing more to fetch, analyze, or compute
 
-Before stopping, mark every completed kanban card as done (clear finished work out of todo/doing). Batch the updates with any other sqlite changes.
+Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
 Example wrap-up (single response with tools):
 - sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');", will_continue_work=false)
-- send_chat_message(body="All done. Marked completed cards and sharing results.")
+- send_chat_message(body="All done. Sharing results.")
 
-WRONG: send_chat_message(body="Done! Marked all cards complete.") without sqlite_batch UPDATE in same response → card stays open, you lied.
-WRONG: Deliver report + mark 3/4 cards done, then take extra turn to mark 4th card → wasteful. Mark ALL cards in one batch.
-WRONG: After delivering results, send another message like "I've completed the research..." → redundant. Results speak for themselves.
+WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
+WRONG: send_chat_message(body="Done!") without sqlite_batch UPDATE in same response → card stays open.
+WRONG: `UPDATE ... SET status='done' WHERE status IN ('todo','doing')` → blindly marks incomplete work done.
+WRONG: After delivering results, send another message like "I've completed the research..." → redundant.
 
-**Efficient wrap-up** — mark all cards done in one shot:
-```sql
-UPDATE __kanban_cards SET status='done', completed_at=datetime('now') WHERE status IN ('todo','doing');
-```
-Pair with `will_continue_work=false` and your final message. One turn, done.
+**When to mark done:**
+- After tool call succeeds and you've verified the result (next turn, not same turn as the call)
+- After you've processed/delivered the output
+- Never optimistically before seeing results
 
 **The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
 
 ---
 
-## Stop Condition (Micro Trajectory)
+## Task Completion (Micro Trajectory)
 
-Before stopping, verify all kanban cards are marked done. This trajectory shows the pattern:
+Only mark a task done after you've verified its completion. This trajectory shows the correct pattern:
 
 ```
-[Turn N-1: finish last task]
-→ scrape_as_markdown(...) returns successfully
-→ sqlite_batch(sql="INSERT INTO findings SELECT ... WHERE result_id='abc123'")
+[Turn N-1: do the work]
+→ scrape_as_markdown(url="...") with will_continue_work=true
+   (DON'T mark done yet - haven't seen result)
 
-[Turn N: wrap up]
-THOUGHT: Task complete. Before stopping, check kanban state and mark cards done.
+[Turn N: verify result, then mark done]
+→ Result shows: successfully scraped 15KB of content
+THOUGHT: Scrape succeeded. Now I can mark that card done and process the data.
 
 sqlite_batch(sql="
-  -- 1. Check for any non-done cards
-  SELECT id, friendly_id, title, status FROM __kanban_cards WHERE status != 'done';
+  -- Mark the scraping task done (verified success)
+  UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-competitor-site';
 
-  -- 2. Mark completed work done
-  UPDATE __kanban_cards SET status='done', completed_at=datetime('now')
-  WHERE friendly_id IN ('research-competitors', 'extract-pricing-data');
+  -- Process the scraped data
+  INSERT INTO findings SELECT ... WHERE result_id='abc123';
+", will_continue_work=true)
 
-  -- 3. Verify nothing left
-  SELECT COUNT(*) as remaining FROM __kanban_cards WHERE status != 'done';
+[Turn N+1: finish remaining work, wrap up]
+→ All data processed
+sqlite_batch(sql="
+  UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
 ", will_continue_work=false)
 
-→ Returns: remaining = 0
-
-send_chat_message(body="Done! Found 12 competitors, pricing data extracted and saved.")
+send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...")
 ```
 
 **The pattern:**
-1. Query current kanban state
-2. Batch UPDATE all completed cards to 'done'
-3. Verify count of non-done = 0
-4. Only then use `will_continue_work=false`
+1. Do the work (tool call) with `will_continue_work=true`
+2. See the result - verify success
+3. Only then mark that specific card done
+4. Repeat for each task
 
-**If remaining > 0:** keep working or mark done first—never assume current work "counts" without UPDATE:
+**WRONG patterns:**
 ```sql
--- WRONG: "I'm doing work that addresses this card" + will_continue_work=false → orphans card
--- RIGHT: mark done explicitly, THEN stop
-UPDATE __kanban_cards SET status='done' WHERE friendly_id='compile-report';  -- mark done FIRST
--- only then: will_continue_work=false
+-- WRONG: Mark done in same turn as the tool call (haven't seen result yet)
+scrape_as_markdown(url="...")
+sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-site'")
+-- ^ Don't know if scrape succeeded!
+
+-- WRONG: Batch-mark all cards done without verifying each task completed
+UPDATE __kanban_cards SET status='done' WHERE status IN ('todo','doing');
+-- ^ Some of these might not actually be done!
+
+-- WRONG: Assume work "counts" without explicit UPDATE after verification
+scrape_as_markdown(url="...") + will_continue_work=false
+-- ^ Orphans the card even if scrape succeeds
 ```
 
 ---
@@ -1870,7 +1879,8 @@ def build_prompt_context(
                 f"## Implied Send → {display_name}\n\n"
                 f"Your text auto-sends to the active web chat user.\n"
                 f"You'll continue working after text-only replies (2 max before auto-stop).\n"
-                f"**Kanban completion = instant stop**: Marking all cards done ends your turn immediately—no more messages after.\n"
+                f"**Kanban completion = instant stop**: Once you send the final message, marking all cards done ends your turn immediately.\n"
+                f"If you close the last card without a user-facing message, you'll be prompted to send it next.\n"
                 f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
                 "**To reach someone else**, use explicit tools:\n"
                 f"- `{tool_example}` ← what implied send does for you\n"
@@ -2046,15 +2056,14 @@ def build_prompt_context(
         "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
         "Each card has a friendly_id (slug of the title) alongside id—use friendly_id in WHERE clauses. "
-        "Workflow: (1) INSERT new cards when starting work. (2) UPDATE existing cards to 'done' when finished. (3) Keep working until all cards are done. "
+        "Workflow: (1) INSERT new cards when starting work. (2) Do the work. (3) After verifying success, UPDATE to 'done'. (4) Repeat. "
         "Batch updates: fold kanban changes into the same sqlite_batch as your other queries. "
         "Create cards: INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'doing'), ('Step 2', 'todo'); "
         "Mark done: UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
-        "WRONG: INSERT with status='done' ← creates duplicate. "
-        "WRONG: work without UPDATE → orphans the card. "
-        "WRONG: saying 'Done!' in message without sqlite_batch UPDATE in same response → you lied, card stays open. "
-        "When wrapping up: mark ALL cards done in one batch—don't take extra turns for stragglers."
+        "WRONG: Mark done before seeing successful tool result → task might have failed. "
+        "WRONG: INSERT with status='done' → creates duplicate. "
+        "WRONG: `UPDATE ... WHERE status IN ('todo','doing')` → blindly marks incomplete work done."
     )
     variable_group.section_text(
         "kanban_note",
@@ -2549,14 +2558,15 @@ def _get_work_completion_prompt(
     if open_cards <= 0:
         if done_count > 0:
             # Has completed cards - work was done, now stop
-            # Note: System will auto-stop when kanban shows all-done, but we still
-            # tell the agent explicitly so it doesn't try to send unnecessary messages.
+            # Note: System will auto-stop after a user-facing message when kanban shows all-done,
+            # but we still tell the agent explicitly so it doesn't delay its final summary.
             return (
                 "work_complete",
                 (
                     f"✅ All work complete: {done_count} card(s) done, nothing remaining.\n"
-                    "System will auto-stop after this turn—this is your last chance to communicate.\n"
-                    "If you need to send a final summary, include it now with `sleep_until_next_trigger`."
+                    "System will auto-stop after you send a final update—this is your last chance to communicate.\n"
+                    "If you need to send a final summary, include it now (then `sleep_until_next_trigger`).\n"
+                    "If you close all cards without a user-facing message, you'll be prompted to send it next turn."
                 ),
                 9,  # Highest weight - must stop
             )
@@ -3270,8 +3280,8 @@ def _get_system_instruction(
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule.\n"
-        "**Auto-stop on completion:** When all kanban cards are done (todo=0, doing=0, done>0), system auto-stops immediately. "
-        "You won't get another turn after marking the last card done—no more messages, no more tool calls. "
+        "**Auto-stop on completion:** When all kanban cards are done (todo=0, doing=0, done>0) and you've sent a user-facing message, the system auto-stops immediately. "
+        "If you mark the last card done without sending output, you'll get one more turn to send it. "
         "Send your final summary with the last card update, not after.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
@@ -3280,7 +3290,8 @@ def _get_system_instruction(
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
             "- Text-only replies continue by default (up to 2 before auto-stop)\n"
-            "- **Kanban all-done = instant stop** — marking the last card done ends your session immediately\n"
+            "- **Kanban all-done = instant stop** — after your final message, marking the last card done ends the session\n"
+            "- If you close the last card without a user-facing message, you'll be prompted to send it next\n"
             "- Keep at least one card in 'doing' while working; close out atomically (mark last card done + final message + `will_continue_work=false`)\n"
             "- To stop early: use `sleep_until_next_trigger`\n"
         )
@@ -3289,7 +3300,7 @@ def _get_system_instruction(
             "**The will_continue_work flag:** "
             "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
             "Set false only after verifying no todo/doing cards remain. "
-            "**Kanban all-done = instant stop** — you won't get another turn after marking the last card done. "
+            "**Kanban all-done = instant stop** — after you send the final message, you won't get another turn. "
             "Keep at least one card in 'doing' while working; close out atomically (mark last card done + final results + `will_continue_work=false`).\n"
         )
 
@@ -3397,10 +3408,11 @@ def _get_system_instruction(
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
+        "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Share before marking done.** If work is complete but not yet shared with the user, share it first—then mark cards done. Marking done triggers auto-stop; share your findings in the same response.\n"
-        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. Close out atomically: mark last card done + deliver final results + `will_continue_work=false`, all in one response.\n\n"
+        "- **Share before marking done.** If work is complete but not yet shared with the user, share it first—then mark cards done. Marking done triggers auto-stop after the final message; share your findings in the same response.\n"
+        "- **Keep a 'doing' card while working.** System auto-stops after the final message when todo=0 and doing=0. Close out atomically: mark last card done + deliver final results + `will_continue_work=false`, all in one response.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
