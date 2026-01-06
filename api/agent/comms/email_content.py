@@ -263,7 +263,7 @@ def _replace_horizontal_rules(html_content: str) -> str:
     return HR_RE.sub("<br /><br />", html_content)
 
 
-def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
+def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> Tuple[str, str]:
     """Return (html_snippet, plaintext) derived from ``body``.
 
     The html_snippet is suitable for inclusion inside the application's
@@ -280,7 +280,11 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
     # Basic observability
     body_length = len(normalized_body)
     body_preview = normalized_body[:200] + ("..." if body_length > 200 else "")
-    logger.info(
+    def _log(message: str, *args: object) -> None:
+        if emit_logs:
+            logger.info(message, *args)
+
+    _log(
         "Email content conversion starting. Input body length: %d characters. Preview: %r",
         body_length,
         body_preview,
@@ -300,12 +304,12 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
         mode = "plaintext"
 
     if html_match:
-        logger.info(
+        _log(
             "HTML detection: found tag pattern %r at position %d",
             html_match.group(0),
             html_match.start(),
         )
-    logger.info(
+    _log(
         "Content detection summary: mode=%s html=%s markdown=%s",
         mode,
         has_html,
@@ -318,7 +322,7 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
         html_snippet = _replace_horizontal_rules(repaired)
         html_snippet = _add_table_styles(html_snippet)
         plaintext = get_text(html_snippet, config).strip()
-        logger.info(
+        _log(
             "Rich content processing complete. HTML length: %d, plaintext length: %d.",
             len(html_snippet),
             len(plaintext),
@@ -327,7 +331,7 @@ def convert_body_to_html_and_plaintext(body: str) -> Tuple[str, str]:
 
     html_snippet = _render_plaintext_html(normalized_body)
     plaintext = normalized_body.strip()
-    logger.info(
+    _log(
         "Plaintext processing complete. HTML-escaped length: %d.",
         len(html_snippet),
     )

@@ -20,6 +20,7 @@ from bleach.sanitizer import ALLOWED_TAGS as BLEACH_ALLOWED_TAGS_BASE
 from bleach.sanitizer import Cleaner
 
 from api.agent.core.processing_flags import get_processing_heartbeat, is_processing_queued
+from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -156,8 +157,14 @@ def _looks_like_html(body: str) -> bool:
     return bool(HTML_TAG_PATTERN.search(body))
 
 
-def _humanize_body(body: str) -> str:
+def _humanize_body(body: str, channel: str | None = None) -> str:
     body = body or ""
+    if channel and channel.lower() == "email":
+        try:
+            html_snippet, _ = convert_body_to_html_and_plaintext(body, emit_logs=False)
+        except Exception:
+            html_snippet = body
+        return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
     if _looks_like_html(body):
         return HTML_CLEANER.clean(body)
     return ""
@@ -355,7 +362,7 @@ def _serialize_message(env: MessageEnvelope) -> dict:
         "message": {
             "id": str(message.id),
             "cursor": env.cursor.encode(),
-            "bodyHtml": _humanize_body(message.body or ""),
+            "bodyHtml": _humanize_body(message.body or "", channel),
             "bodyText": message.body or "",
             "isOutbound": bool(message.is_outbound),
             "channel": channel,
