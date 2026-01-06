@@ -296,7 +296,7 @@ real(X)   ← X ∈ tool_result | X ∈ schema | X ∈ hint | X ∈ metadata
 claim(X) → verify: where did X come from?
 source(X) = tool_result   → safe to state
 source(X) = schema/hint   → safe to state
-source(X) = ???           → DO NOT STATE. You are about to hallucinate.
+source(X) = ???           → don't state it. You're about to hallucinate.
 
 # Common hallucination patterns (you do these)
 - Constructing URLs that look right but don't exist
@@ -758,7 +758,7 @@ STEP 3: Result contains: {"inline": "![]($[/charts/bar-a1b2c3.svg])"}
 STEP 4: Copy the EXACT inline value into your message
 ```
 
-**DO NOT write `![` until you have the result.** If you write `![]` before the tool returns, you are hallucinating.
+**Don't write `![` until you have the result.** If you write `![]` before the tool returns, you're hallucinating.
 
 ### What the tool returns:
 
@@ -1870,6 +1870,7 @@ def build_prompt_context(
                 f"## Implied Send → {display_name}\n\n"
                 f"Your text auto-sends to the active web chat user.\n"
                 f"You'll continue working after text-only replies (2 max before auto-stop).\n"
+                f"**Kanban completion = instant stop**: Marking all cards done ends your turn immediately—no more messages after.\n"
                 f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
                 "**To reach someone else**, use explicit tools:\n"
                 f"- `{tool_example}` ← what implied send does for you\n"
@@ -2536,11 +2537,32 @@ def _get_work_completion_prompt(
         ).count()
 
         open_cards = len(doing_cards) + todo_count
+
+        done_count = PersistentAgentKanbanCard.objects.filter(
+            assigned_agent=agent,
+            status=PersistentAgentKanbanCard.Status.DONE,
+        ).count()
     except Exception:
         return None
 
+    # If all work is done, tell the agent to stop
     if open_cards <= 0:
-        return None
+        if done_count > 0:
+            # Has completed cards - work was done, now stop
+            # Note: System will auto-stop when kanban shows all-done, but we still
+            # tell the agent explicitly so it doesn't try to send unnecessary messages.
+            return (
+                "work_complete",
+                (
+                    f"✅ All work complete: {done_count} card(s) done, nothing remaining.\n"
+                    "System will auto-stop after this turn—this is your last chance to communicate.\n"
+                    "If you need to send a final summary, include it now with `sleep_until_next_trigger`."
+                ),
+                9,  # Highest weight - must stop
+            )
+        else:
+            # No cards at all - nothing to do
+            return None
 
     has_schedule = bool(agent.schedule)
 
@@ -2564,25 +2586,25 @@ def _get_work_completion_prompt(
         cards_desc += f" (doing: {preview})"
 
     if not has_schedule and not low_credits:
-        # CRITICAL: No safety net, must complete work or set schedule
+        # No safety net - must complete work or set schedule
         return (
             "work_completion_required",
             (
-                f"🚨 UNFINISHED WORK: {open_cards} card(s) ({cards_desc}).\n"
-                "Before stopping, you MUST either:\n"
+                f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
+                "Before stopping, please either:\n"
                 "• Complete tasks: `UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
-                "• OR set a schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-                "Do NOT use sleep_until_next_trigger or let auto-stop happen until one of these is done."
+                "• Or set a schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
+                "Avoid using sleep_until_next_trigger until one of these is done."
             ),
-            8,  # High weight - critical
+            8,  # High weight
         )
 
     elif not has_schedule and low_credits:
-        # RESCUE: Low credits, no schedule - must set schedule to continue tomorrow
+        # Low credits, no schedule - should set schedule to continue tomorrow
         return (
             "work_rescue_required",
             (
-                f"⚠️ LOW CREDITS + UNFINISHED WORK: {open_cards} card(s) ({cards_desc}).\n"
+                f"⚠️ Low credits + unfinished work: {open_cards} card(s) ({cards_desc}).\n"
                 "Credits running low. Before stopping:\n"
                 "1. Update cards with current progress (what you've learned)\n"
                 "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
@@ -3237,15 +3259,32 @@ def _get_system_instruction(
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule.\n"
+        "**Auto-stop on completion:** When all kanban cards are done (todo=0, doing=0, done>0), system auto-stops immediately. "
+        "You won't get another turn after marking the last card done—no more messages, no more tool calls. "
+        "Send your final summary with the last card update, not after.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
+
+    if implied_send_active:
+        will_continue_guidance = (
+            "**How stopping works (implied send mode):**\n"
+            "- Text-only replies continue by default (up to 2 before auto-stop)\n"
+            "- **Kanban all-done = instant stop** — marking the last card done ends your session immediately\n"
+            "- Include your final message in the same turn as the last card completion\n"
+            "- To stop early: use `sleep_until_next_trigger`\n"
+        )
+    else:
+        will_continue_guidance = (
+            "**The will_continue_work flag:** "
+            "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
+            "Set false only after verifying no todo/doing cards remain. "
+            "**Kanban all-done = instant stop** — you won't get another turn after marking the last card done.\n"
+        )
 
     delivery_instructions = (
         f"{send_guidance}"
         f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
-        "The will_continue_work flag: "
-        "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
-        "Set false only after verifying no todo/doing cards remain."
+        f"{will_continue_guidance}"
         "Fetching data is just step one—reporting it to the user completes the task. "
         f"{message_only_note}"
         "How responses work: "
@@ -3448,10 +3487,10 @@ def _get_system_instruction(
         "delightful > adequate            # craft, don't just complete\n"
         "creative_risk > safe_boring\n"
         "\n"
-        "# Grounding (you WILL hallucinate without this)\n"
+        "# Grounding (you will hallucinate without this)\n"
         "fact → source ∈ tool_result   # or you made it up\n"
         "number → from(query)          # or you guessed it\n"
-        "url → from(result)            # NEVER constructed, NEVER \"fixed\"\n"
+        "url → from(result)            # never constructed, never \"fixed\"\n"
         "¬source → \"unclear\" | omit   # silence > fabrication\n"
         "plausible ≠ real              # sounding right ≠ being right\n"
         "\n"
@@ -3627,10 +3666,10 @@ def _get_system_instruction(
         "RIGHT: ![]($[/charts/bar-a1b2c3.svg])  # copied from result.inline AFTER tool returned\n"
         "RIGHT: <img src='$[/charts/bar-a1b2c3.svg]'>  # copied from result.inline_html for PDF\n"
         "\n"
-        "# Pre-flight (before ANY ![ or <img)\n"
+        "# Pre-flight (before any ![ or <img)\n"
         "have(result) ∧ have(result.inline) → safe to write ![\n"
         "have(result) ∧ have(result.inline_html) → safe to write <img> for PDF\n"
-        "¬have(result) → DO NOT write chart reference—you are hallucinating\n"
+        "¬have(result) → don't write chart reference—you'd be hallucinating\n"
         "```\n\n"
 
         "```\n"

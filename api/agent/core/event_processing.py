@@ -2561,7 +2561,9 @@ def _run_agent_loop(
                         )
                 return True
 
-            def _apply_kanban_updates() -> bool:
+            def _apply_kanban_updates() -> tuple[bool, Optional["KanbanBoardSnapshot"]]:
+                """Apply kanban updates and return (had_errors, snapshot)."""
+                from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot
                 kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
 
                 # Broadcast kanban changes to timeline if any
@@ -2576,7 +2578,7 @@ def _run_agent_loop(
                         )
 
                 if not kanban_apply.errors:
-                    return False
+                    return False, kanban_apply.snapshot
                 for error in kanban_apply.errors:
                     try:
                         step_kwargs = {
@@ -2592,7 +2594,7 @@ def _run_agent_loop(
                             agent.id,
                             exc_info=True,
                         )
-                return True
+                return True, kanban_apply.snapshot
 
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
@@ -3025,8 +3027,26 @@ def _run_agent_loop(
 
                     executed_calls += 1
 
-            if _apply_agent_config_updates() or _apply_kanban_updates():
+            config_had_errors = _apply_agent_config_updates()
+            kanban_had_errors, kanban_board_snapshot = _apply_kanban_updates()
+            if config_had_errors or kanban_had_errors:
                 followup_required = True
+
+            # Kanban completion override: if all work is done, force auto-sleep
+            # regardless of what will_continue_work flags were set.
+            kanban_all_done = (
+                kanban_board_snapshot is not None
+                and kanban_board_snapshot.todo_count == 0
+                and kanban_board_snapshot.doing_count == 0
+                and kanban_board_snapshot.done_count > 0
+            )
+            if kanban_all_done and followup_required and not all_calls_sleep:
+                logger.info(
+                    "Agent %s: kanban shows all work complete (done=%d), overriding followup_required to allow auto-sleep.",
+                    agent.id,
+                    kanban_board_snapshot.done_count,
+                )
+                followup_required = False
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
