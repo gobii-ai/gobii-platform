@@ -504,20 +504,149 @@ def _get_tool_call_name(call: Any) -> Optional[str]:
     if function is not None:
         name = getattr(function, "name", None)
         if name:
-            return name
+            return _sanitize_tool_name(name)
     if isinstance(call, dict):
         function = call.get("function")
         if isinstance(function, dict):
             name = function.get("name")
             if name:
-                return name
+                return _sanitize_tool_name(name)
         name = call.get("name")
         if name:
-            return name
+            return _sanitize_tool_name(name)
     name = getattr(call, "name", None)
     if name:
-        return name
+        return _sanitize_tool_name(name)
     return None
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Extract just the function name from a tool call.
+
+    Some models (e.g., GLM-4) may return the function name with arguments
+    like 'sqlite_batch(sql="...")' instead of just 'sqlite_batch'.
+    This extracts the base name before any opening parenthesis.
+    """
+    if not name:
+        return name
+    # Strip the function call syntax if present
+    paren_idx = name.find("(")
+    if paren_idx > 0:
+        return name[:paren_idx].strip()
+    return name
+
+
+def _persist_tool_call_step(
+    agent: "PersistentAgent",
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    result_content: str,
+    credits_consumed: Any,
+    consumed_credit: Any,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> Optional["PersistentAgentStep"]:
+    """Persist a tool call step with robust error handling.
+
+    This function handles all database errors gracefully to ensure agent
+    processing continues even if step persistence fails. The tool has already
+    executed - we're just recording it.
+
+    Returns the created step, or None if persistence failed.
+    """
+    from api.models import PersistentAgentStep, PersistentAgentToolCall
+
+    # Truncate tool_name as a safety measure (should already be sanitized, but be defensive)
+    safe_tool_name = (tool_name or "")[:256]
+
+    # Build a safe description (truncate if needed)
+    try:
+        params_preview = str(tool_params)[:100] if tool_params else ""
+        result_preview = (result_content or "")[:100]
+        description = f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
+    except Exception:
+        description = f"Tool call: {safe_tool_name}"
+
+    step_kwargs = {
+        "agent": agent,
+        "description": description[:500],  # Ensure description fits
+        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+        "task_credit": consumed_credit,
+    }
+
+    def _try_create_step() -> Optional[PersistentAgentStep]:
+        """Attempt to create the step and tool call record."""
+        attach_completion(step_kwargs)
+        step = PersistentAgentStep.objects.create(**step_kwargs)
+        attach_prompt_archive(step)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=safe_tool_name,
+            tool_params=tool_params,
+            result=result_content,
+        )
+        try:
+            from console.agent_chat.signals import emit_tool_call_realtime
+
+            emit_tool_call_realtime(step)
+        except Exception:
+            logger.debug(
+                "Failed to broadcast realtime tool call for agent %s step %s",
+                agent.id,
+                getattr(step, "id", None),
+                exc_info=True,
+            )
+        return step
+
+    # Try primary path
+    try:
+        step = _try_create_step()
+        logger.info(
+            "Agent %s: persisted tool call step_id=%s for %s",
+            agent.id,
+            getattr(step, "id", None),
+            safe_tool_name,
+        )
+        return step
+    except OperationalError:
+        # Stale connection - retry once
+        close_old_connections()
+        try:
+            step = _try_create_step()
+            logger.info(
+                "Agent %s: persisted tool call (retry) step_id=%s for %s",
+                agent.id,
+                getattr(step, "id", None),
+                safe_tool_name,
+            )
+            return step
+        except Exception as retry_exc:
+            logger.error(
+                "Agent %s: failed to persist tool call for %s after retry: %s",
+                agent.id,
+                safe_tool_name,
+                retry_exc,
+            )
+            return None
+    except DatabaseError as db_exc:
+        # Data errors, integrity errors, etc. - log and continue
+        logger.error(
+            "Agent %s: database error persisting tool call for %s: %s",
+            agent.id,
+            safe_tool_name,
+            db_exc,
+        )
+        return None
+    except Exception as exc:
+        # Catch-all for unexpected errors - never crash the agent
+        logger.error(
+            "Agent %s: unexpected error persisting tool call for %s: %s",
+            agent.id,
+            safe_tool_name,
+            exc,
+            exc_info=True,
+        )
+        return None
 
 
 def _get_tool_call_arguments(call: Any) -> Any:
@@ -3001,65 +3130,16 @@ def _run_agent_loop(
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
-                    try:
-                        # Create tool step with the execution result preview
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                            "task_credit": consumed_credit,
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
-                            step=step,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            result=result_content,
-                        )
-                        try:
-                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
-
-                            emit_tool_call_realtime(step)
-                        except Exception:  # pragma: no cover - defensive logging
-                            logger.debug(
-                                "Failed to broadcast realtime tool call for agent %s step %s",
-                                agent.id,
-                                getattr(step, "id", None),
-                                exc_info=True,
-                            )
-                        logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
-                    except OperationalError:
-                        close_old_connections()
-                        # Create tool step (retry path)
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                            "task_credit": consumed_credit,
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
-                            step=step,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            result=result_content,
-                        )
-                        try:
-                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
-
-                            emit_tool_call_realtime(step)
-                        except Exception:  # pragma: no cover - defensive logging
-                            logger.debug(
-                                "Failed to broadcast realtime tool call (retry) for agent %s step %s",
-                                agent.id,
-                                getattr(step, "id", None),
-                                exc_info=True,
-                            )
-                        logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+                    step = _persist_tool_call_step(
+                        agent=agent,
+                        tool_name=tool_name,
+                        tool_params=tool_params,
+                        result_content=result_content,
+                        credits_consumed=credits_consumed,
+                        consumed_credit=consumed_credit,
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                     tool_requires_followup = not allow_auto_sleep
 

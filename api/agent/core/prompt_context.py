@@ -316,6 +316,13 @@ source(X) = ???           → don't state it. You're about to hallucinate.
 When uncertain: "The page mentions X but doesn't specify Y" beats inventing Y.
 When you don't have data: say so. Don't fill the gap with plausible-sounding fabrication.
 
+**Cross-reference everything.** Every identifier you use—table names, column names, friendly_ids,
+JSON paths, URLs, result_ids—must trace back to a verifiable source in your context. Before you
+write any identifier, ask: "Where exactly did I see this?" If you can't point to the specific
+tool result, schema, or context section, you're about to hallucinate. This applies to SQL WHERE
+clauses, function arguments, API parameters—everything. Treat this as safety-critical: assume
+lives depend on your accuracy, because in production systems they sometimes do.
+
 ---
 
 ## Reading Hints
@@ -2031,7 +2038,9 @@ def build_prompt_context(
         "SQLite is always available. The built-in __tool_results table stores recent tool outputs "
         "for this cycle only and is dropped before persistence. Query it with sqlite_batch (not read_file). "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
-        "CREATE TABLE AS SELECT is a fast way to persist tool results."
+        "CREATE TABLE AS SELECT is a fast way to persist tool results. "
+        "Source all identifiers from ground truth—schema, tool results, prior query output, or context "
+        "(like kanban_snapshot). Never guess table names, column names, or WHERE clause values."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -2056,6 +2065,7 @@ def build_prompt_context(
         "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
         "Each card has a friendly_id (slug of the title) alongside id—use friendly_id in WHERE clauses. "
+        "Copy friendly_id exactly from the kanban_snapshot above—don't guess or assume values. "
         "Workflow: (1) INSERT new cards when starting work. (2) Do the work. (3) After verifying success, UPDATE to 'done'. (4) Repeat. "
         "Batch updates: fold kanban changes into the same sqlite_batch as your other queries. "
         "Create cards: INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'doing'), ('Step 2', 'todo'); "
@@ -2063,7 +2073,8 @@ def build_prompt_context(
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: Mark done before seeing successful tool result → task might have failed. "
         "WRONG: INSERT with status='done' → creates duplicate. "
-        "WRONG: `UPDATE ... WHERE status IN ('todo','doing')` → blindly marks incomplete work done."
+        "WRONG: `UPDATE ... WHERE status IN ('todo','doing')` → blindly marks incomplete work done. "
+        "WRONG: Guessing friendly_id instead of copying from kanban_snapshot → 0 rows affected."
     )
     variable_group.section_text(
         "kanban_note",
