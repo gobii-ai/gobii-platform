@@ -2831,11 +2831,9 @@ def _get_system_instruction(
             "send_agent_message, or send_chat_message. "
         )
         response_delivery_note = (
-            "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
         )
         web_chat_delivery_note = (
-            "Text output is not delivered unless you use explicit send tools. "
             "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
         )
         message_only_note = (

@@ -1,5 +1,5 @@
-import { memo, useEffect, useState } from 'react'
-import { Loader2, CheckCircle2 } from 'lucide-react'
+import { memo, useEffect, useState, useMemo } from 'react'
+import { CircleCheck, Play, Plus, ArrowRight, Sparkles } from 'lucide-react'
 import type { KanbanEvent, KanbanCardChange } from './types'
 import './kanban.css'
 
@@ -7,167 +7,200 @@ type KanbanEventCardProps = {
   event: KanbanEvent
 }
 
-const STATUS_CONFIG = {
-  todo: { label: 'Todo', icon: '○', color: 'kanban-status-todo' },
-  doing: { label: 'Doing', icon: '◐', color: 'kanban-status-doing' },
-  done: { label: 'Done', icon: '●', color: 'kanban-status-done' },
+const ACTION_CONFIG = {
+  completed: {
+    icon: CircleCheck,
+    label: 'Completed',
+    className: 'kanban-action--completed',
+  },
+  started: {
+    icon: Play,
+    label: 'Started',
+    className: 'kanban-action--started',
+  },
+  created: {
+    icon: Plus,
+    label: 'Created',
+    className: 'kanban-action--created',
+  },
+  updated: {
+    icon: ArrowRight,
+    label: 'Updated',
+    className: 'kanban-action--updated',
+  },
 } as const
 
-function getStatusKey(status: string | null | undefined): 'todo' | 'doing' | 'done' {
-  if (!status) return 'todo'
-  const s = status.toLowerCase()
-  if (s === 'done') return 'done'
-  if (s === 'doing') return 'doing'
-  return 'todo'
-}
+function ProgressRing({
+  done,
+  total,
+  animate,
+}: {
+  done: number
+  total: number
+  animate: boolean
+}) {
+  const percentage = total > 0 ? (done / total) * 100 : 0
+  const radius = 28
+  const strokeWidth = 5
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (percentage / 100) * circumference
 
-function ActionIcon({ action }: { action: string }) {
-  if (action === 'completed') {
-    return (
-      <span className="kanban-action-icon kanban-action-completed">
-        <CheckCircle2 size={14} strokeWidth={2.5} />
-      </span>
-    )
-  }
-  if (action === 'started') {
-    return (
-      <span className="kanban-action-icon kanban-action-started">
-        <Loader2 size={14} strokeWidth={2.5} />
-      </span>
-    )
-  }
-  return <span className="kanban-action-icon kanban-action-created" />
-}
-
-function ChangeItem({ change, animate }: { change: KanbanCardChange; animate: boolean }) {
-  const toStatus = getStatusKey(change.toStatus)
-  const config = STATUS_CONFIG[toStatus]
+  const isComplete = done === total && total > 0
 
   return (
-    <div className={`kanban-change-item ${animate ? 'kanban-change-animate' : ''} ${change.action === 'completed' ? 'kanban-change-completed' : ''}`}>
-      <ActionIcon action={change.action} />
+    <div className={`kanban-progress-ring ${isComplete ? 'kanban-progress-complete' : ''}`}>
+      <svg viewBox="0 0 70 70" className="kanban-ring-svg">
+        {/* Background track */}
+        <circle
+          cx="35"
+          cy="35"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          className="kanban-ring-track"
+        />
+        {/* Progress arc */}
+        <circle
+          cx="35"
+          cy="35"
+          r={radius}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={animate ? offset : circumference}
+          className="kanban-ring-progress"
+          transform="rotate(-90 35 35)"
+        />
+      </svg>
+      <div className="kanban-ring-content">
+        <span className="kanban-ring-done">{done}</span>
+        <span className="kanban-ring-divider">/</span>
+        <span className="kanban-ring-total">{total}</span>
+      </div>
+      {isComplete && animate && (
+        <div className="kanban-ring-glow" aria-hidden="true" />
+      )}
+    </div>
+  )
+}
+
+function ChangeItem({
+  change,
+  index,
+  animate,
+}: {
+  change: KanbanCardChange
+  index: number
+  animate: boolean
+}) {
+  const config = ACTION_CONFIG[change.action]
+  const Icon = config.icon
+
+  return (
+    <div
+      className={`kanban-change ${config.className} ${animate ? 'kanban-change--animate' : ''}`}
+      style={{ '--delay': `${index * 60}ms` } as React.CSSProperties}
+    >
+      <div className="kanban-change-icon">
+        <Icon size={14} strokeWidth={2.5} />
+      </div>
       <span className="kanban-change-title">{change.title}</span>
-      <span className={`kanban-change-status ${config.color}`}>
-        {config.label}
-      </span>
     </div>
   )
 }
 
-function BoardSummary({ snapshot }: { snapshot: KanbanEvent['snapshot'] }) {
-  const total = snapshot.todoCount + snapshot.doingCount + snapshot.doneCount
-  if (total === 0) return null
+function MiniColumn({
+  status,
+  label,
+  count,
+  titles,
+  animate,
+  delay,
+}: {
+  status: 'todo' | 'doing' | 'done'
+  label: string
+  count: number
+  titles: string[]
+  animate: boolean
+  delay: number
+}) {
+  if (count === 0) return null
+
+  const maxVisible = 3
+  const visibleTitles = titles.slice(0, maxVisible)
+  const remaining = count - visibleTitles.length
 
   return (
-    <div className="kanban-board-summary">
-      <div className="kanban-summary-bar">
-        {snapshot.doneCount > 0 && (
-          <div
-            className="kanban-bar-done"
-            style={{ flex: snapshot.doneCount }}
-            title={`${snapshot.doneCount} done`}
-          />
-        )}
-        {snapshot.doingCount > 0 && (
-          <div
-            className="kanban-bar-doing"
-            style={{ flex: snapshot.doingCount }}
-            title={`${snapshot.doingCount} in progress`}
-          />
-        )}
-        {snapshot.todoCount > 0 && (
-          <div
-            className="kanban-bar-todo"
-            style={{ flex: snapshot.todoCount }}
-            title={`${snapshot.todoCount} to do`}
-          />
-        )}
+    <div
+      className={`kanban-column kanban-column--${status} ${animate ? 'kanban-column--animate' : ''}`}
+      style={{ '--column-delay': `${delay}ms` } as React.CSSProperties}
+    >
+      <div className="kanban-column-header">
+        <span className="kanban-column-label">{label}</span>
+        <span className="kanban-column-count">{count}</span>
       </div>
-      <div className="kanban-summary-counts">
-        {snapshot.doneCount > 0 && (
-          <span className="kanban-count-item kanban-status-done">{snapshot.doneCount} done</span>
-        )}
-        {snapshot.doneCount > 0 && snapshot.doingCount > 0 && (
-          <span className="kanban-count-sep">·</span>
-        )}
-        {snapshot.doingCount > 0 && (
-          <span className="kanban-count-item kanban-status-doing">{snapshot.doingCount} doing</span>
-        )}
-        {(snapshot.doneCount > 0 || snapshot.doingCount > 0) && snapshot.todoCount > 0 && (
-          <span className="kanban-count-sep">·</span>
-        )}
-        {snapshot.todoCount > 0 && (
-          <span className="kanban-count-item kanban-status-todo">{snapshot.todoCount} todo</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function BoardPreview({ snapshot }: { snapshot: KanbanEvent['snapshot'] }) {
-  const sections = [
-    {
-      key: 'doing',
-      label: 'Doing',
-      count: snapshot.doingCount,
-      titles: snapshot.doingTitles,
-      dotClass: 'kanban-dot-doing',
-      labelClass: 'kanban-label-doing',
-    },
-    {
-      key: 'todo',
-      label: 'Todo',
-      count: snapshot.todoCount,
-      titles: snapshot.todoTitles,
-      dotClass: 'kanban-dot-todo',
-      labelClass: 'kanban-label-todo',
-    },
-    {
-      key: 'done',
-      label: 'Done',
-      count: snapshot.doneCount,
-      titles: snapshot.doneTitles,
-      dotClass: 'kanban-dot-done',
-      labelClass: 'kanban-label-done',
-    },
-  ] as const
-
-  const hasCards = sections.some((section) => section.count > 0)
-  if (!hasCards) return null
-
-  return (
-    <div className="kanban-board-preview">
-      {sections.map((section) => {
-        if (section.count === 0) return null
-        const remaining = section.count - section.titles.length
-        const hasTitles = section.titles.length > 0
-        return (
-          <div className="kanban-preview-row" key={section.key}>
-            <div className="kanban-preview-header">
-              <span className={`kanban-preview-label ${section.labelClass}`}>{section.label}</span>
-              <span className="kanban-preview-count">{section.count}</span>
-            </div>
-            <div className="kanban-preview-list">
-              {section.titles.map((title, index) => (
-                <div className="kanban-preview-item" key={`${section.key}-${index}`}>
-                  <span className={`kanban-preview-dot ${section.dotClass}`} aria-hidden="true" />
-                  <span className="kanban-preview-title">{title}</span>
-                </div>
-              ))}
-              {remaining > 0 && (
-                <div className="kanban-preview-more">
-                  {hasTitles ? `+${remaining} more` : `${remaining} tasks`}
-                </div>
-              )}
-            </div>
+      <div className="kanban-column-cards">
+        {visibleTitles.map((title, i) => (
+          <div
+            key={i}
+            className="kanban-mini-card"
+            style={{ '--card-delay': `${delay + (i + 1) * 40}ms` } as React.CSSProperties}
+          >
+            <span className="kanban-mini-card-dot" />
+            <span className="kanban-mini-card-title">{title}</span>
           </div>
-        )
-      })}
+        ))}
+        {remaining > 0 && (
+          <div className="kanban-column-more">+{remaining} more</div>
+        )}
+      </div>
     </div>
   )
 }
 
-export const KanbanEventCard = memo(function KanbanEventCard({ event }: KanbanEventCardProps) {
+function CelebrationParticles({ active }: { active: boolean }) {
+  const particles = useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => ({
+        id: i,
+        angle: (i * 30) + Math.random() * 20 - 10,
+        distance: 40 + Math.random() * 25,
+        size: 3 + Math.random() * 3,
+        delay: Math.random() * 100,
+        hue: [142, 45, 200, 340][i % 4], // green, gold, purple, pink
+      })),
+    []
+  )
+
+  if (!active) return null
+
+  return (
+    <div className="kanban-particles" aria-hidden="true">
+      {particles.map((p) => (
+        <div
+          key={p.id}
+          className="kanban-particle"
+          style={
+            {
+              '--angle': `${p.angle}deg`,
+              '--distance': `${p.distance}px`,
+              '--size': `${p.size}px`,
+              '--delay': `${p.delay}ms`,
+              '--hue': p.hue,
+            } as React.CSSProperties
+          }
+        />
+      ))}
+    </div>
+  )
+}
+
+export const KanbanEventCard = memo(function KanbanEventCard({
+  event,
+}: KanbanEventCardProps) {
   const [animate, setAnimate] = useState(false)
 
   useEffect(() => {
@@ -175,25 +208,77 @@ export const KanbanEventCard = memo(function KanbanEventCard({ event }: KanbanEv
     return () => clearTimeout(timer)
   }, [])
 
-  const hasCompletion = event.primaryAction === 'completed'
+  const { snapshot, changes, primaryAction } = event
+  const total = snapshot.todoCount + snapshot.doingCount + snapshot.doneCount
+  const hasCompletion = primaryAction === 'completed'
+  const allDone = snapshot.doneCount === total && total > 0
+
+  // Group changes by action type for better visual organization
+  const completedChanges = changes.filter((c) => c.action === 'completed')
+  const otherChanges = changes.filter((c) => c.action !== 'completed')
+  const sortedChanges = [...completedChanges, ...otherChanges]
 
   return (
-    <div className={`kanban-event-card ${hasCompletion ? 'kanban-event-completed' : ''}`}>
-      <div className="kanban-section-label">Changes</div>
-      <div className="kanban-changes">
-        {event.changes.map((change) => (
-          <ChangeItem key={change.cardId} change={change} animate={animate} />
-        ))}
+    <div
+      className={`kanban-card ${hasCompletion ? 'kanban-card--celebration' : ''} ${allDone ? 'kanban-card--all-done' : ''}`}
+    >
+      {/* Header with progress ring */}
+      <div className="kanban-header">
+        <ProgressRing done={snapshot.doneCount} total={total} animate={animate} />
+        <div className="kanban-header-text">
+          <div className="kanban-header-title">
+            {hasCompletion && <Sparkles size={14} className="kanban-sparkle-icon" />}
+            <span>{event.displayText}</span>
+          </div>
+          <div className="kanban-header-subtitle">
+            {snapshot.doneCount} of {total} tasks complete
+          </div>
+        </div>
       </div>
 
-      <div className="kanban-section-label kanban-section-label--summary">Board now</div>
-      <BoardSummary snapshot={event.snapshot} />
-      <BoardPreview snapshot={event.snapshot} />
-
-      {/* Celebration shimmer for completions */}
-      {hasCompletion && animate && (
-        <div className="kanban-shimmer" aria-hidden="true" />
+      {/* Changes feed */}
+      {sortedChanges.length > 0 && (
+        <div className="kanban-changes-section">
+          <div className="kanban-section-title">What changed</div>
+          <div className="kanban-changes-list">
+            {sortedChanges.map((change, i) => (
+              <ChangeItem key={change.cardId} change={change} index={i} animate={animate} />
+            ))}
+          </div>
+        </div>
       )}
+
+      {/* Mini kanban board */}
+      <div className="kanban-board">
+        <MiniColumn
+          status="doing"
+          label="In Progress"
+          count={snapshot.doingCount}
+          titles={snapshot.doingTitles}
+          animate={animate}
+          delay={200}
+        />
+        <MiniColumn
+          status="todo"
+          label="To Do"
+          count={snapshot.todoCount}
+          titles={snapshot.todoTitles}
+          animate={animate}
+          delay={280}
+        />
+        <MiniColumn
+          status="done"
+          label="Done"
+          count={snapshot.doneCount}
+          titles={snapshot.doneTitles}
+          animate={animate}
+          delay={360}
+        />
+      </div>
+
+      {/* Celebration effects */}
+      <CelebrationParticles active={hasCompletion && animate} />
+      {hasCompletion && animate && <div className="kanban-shimmer" aria-hidden="true" />}
     </div>
   )
 })
