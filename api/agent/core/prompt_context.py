@@ -232,12 +232,13 @@ guess(identifier) → error   # you ARE about to get "no such column"
 # Two-step pattern (critical for complex queries)
 unknown(structure) → step1: inspect → step2: use(inspected)
 step1: SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
+step1b: if result_json is NULL → SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
 step2: use exact paths/fields revealed by step1
 
 # Schema queries (when uncertain)
 unknown(table)  → SELECT name FROM sqlite_master WHERE type='table'
 unknown(column) → SELECT sql FROM sqlite_master WHERE name='{table}'
-unknown(path)   → inspect: SELECT substr(result_json,1,500)... | read hint.path
+unknown(path)   → inspect: SELECT substr(result_json,1,500)... | if NULL → substr(result_text,1,500) | read hint.path
 unknown(field)  → inspect: look at actual JSON | read hint.fields
 
 # Identifiers: copy, never construct
@@ -249,15 +250,17 @@ column_name  → copy_verbatim(schema | own_CREATE)
 transform(identifier) → error                      # no pluralize, no case change
 
 # __tool_results (special table)
-__tool_results.columns = {result_id, tool_name, result_json, created_at}
+__tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
 access_result → WHERE result_id = '{exact_id_from_result}'
 extract_json  → json_each(result_json, '{exact_path_from_hint}')
-no other columns exist in __tool_results
+result_json NULL → use result_text (raw output / CSV)
+analysis_json → optional hints (not the data)
+do not invent columns; only use those listed above
 
 # JSON: path from hint, field from hint
-hint shows "path: $.data.items" → json_each(result_json, '$.data.items')
-hint shows "fields: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
-hint absent → query first: SELECT result_json FROM __tool_results WHERE result_id='...' LIMIT 1
+hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
+hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
+hint absent → query first: SELECT result_json, result_text FROM __tool_results WHERE result_id='...' LIMIT 1
 
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})
@@ -316,13 +319,6 @@ source(X) = ???           → don't state it. You're about to hallucinate.
 When uncertain: "The page mentions X but doesn't specify Y" beats inventing Y.
 When you don't have data: say so. Don't fill the gap with plausible-sounding fabrication.
 
-**Cross-reference everything.** Every identifier you use—table names, column names, friendly_ids,
-JSON paths, URLs, result_ids—must trace back to a verifiable source in your context. Before you
-write any identifier, ask: "Where exactly did I see this?" If you can't point to the specific
-tool result, schema, or context section, you're about to hallucinate. This applies to SQL WHERE
-clauses, function arguments, API parameters—everything. Treat this as safety-critical: assume
-lives depend on your accuracy, because in production systems they sometimes do.
-
 ---
 
 ## Reading Hints
@@ -332,9 +328,9 @@ Every tool result includes metadata. Use it exactly:
 ```
 Result shows:
   result_id='7f3a2b1c'
-  → path: $.content.hits (30 items)
-  → fields: title, points, url
-  → query: SELECT json_extract(r.value,'$.title')...
+  → PATH: $.content.hits (30 items)
+  → FIELDS: title, points, url
+  → QUERY: SELECT json_extract(r.value,'$.title')...
 
 Your query uses:
   WHERE result_id='7f3a2b1c'           -- copy exactly
@@ -700,26 +696,38 @@ scrape_as_markdown(url="...") + will_continue_work=false
 Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines):
 
 ```sql
+# Rule: inspect before parsing
+unknown(structure) → inspect_first → then_parse
+SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
+SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
+
 -- csv_parse(text)        → JSON array of objects (first row = headers)
 -- csv_parse(text, 0)     → JSON array of arrays (no header)
 -- csv_column(text, N)    → JSON array of values from column N (0-indexed)
 
--- Example: Parse CSV and query it
+-- Example: CSV is the whole tool output (non-JSON)
 SELECT r.value->>'name', r.value->>'price'
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+FROM __tool_results t, json_each(csv_parse(t.result_text)) r
 WHERE t.result_id = '{id}';
 
--- Example: Create table from CSV
+-- Example: CSV inside JSON (path from hint)
+SELECT r.value->>'name', r.value->>'price'
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.{path_from_hint}'))) r
+WHERE t.result_id = '{id}';
+
+-- Example: Create table from CSV (path from hint)
 CREATE TABLE products AS
 SELECT
   r.value->>'name' as name,
   CAST(r.value->>'price' AS REAL) as price,
   r.value->>'category' as category
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.{path_from_hint}'))) r
 WHERE t.result_id = '{id}';
 
--- Example: Get all values from column 2 (0-indexed)
-SELECT v.value FROM json_each(csv_column('{csv_text}', 2)) v;
+-- Example: Get all values from column 2 (0-indexed) from raw CSV
+SELECT v.value
+FROM __tool_results t, json_each(csv_column(t.result_text, 2)) v
+WHERE t.result_id = '{id}';
 ```
 
 The `csv_parse` function uses Python's csv module internally—it handles edge cases you'd otherwise get wrong.
@@ -1889,7 +1897,8 @@ def build_prompt_context(
             implied_send_status = (
                 f"## Implied Send → {display_name}\n\n"
                 f"Your text auto-sends to the active web chat user.\n"
-                f"You'll continue working after text-only replies (2 max before auto-stop).\n"
+                f"Text-only replies auto-send; end with \"Continuing...\" to request another pass or "
+                f"\"Work complete.\" to stop.\n"
                 f"**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
                 f"If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
                 f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
@@ -1910,7 +1919,7 @@ def build_prompt_context(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → Message sends, you get another turn (up to 2 in a row before auto-stop)\n"
+            "  → Message sends\n"
             "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
             "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
             "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
@@ -1922,7 +1931,7 @@ def build_prompt_context(
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "To signal completion: include 'Work complete.' in your final message, or use `sleep_until_next_trigger`."
+            "To signal completion: include \"Work complete.\" in your final message, or use `sleep_until_next_trigger`."
         )
     else:
         response_patterns = (
@@ -3253,7 +3262,10 @@ def _get_system_instruction(
             "For the active web chat user, just write your message—it auto-sends to them only. "
             "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
         )
-        message_only_note = "Message-only responses mean you're done—verify kanban is clear first. Empty responses trigger auto-sleep. "
+        message_only_note = (
+            "Text-only replies can signal intent: end with \"Continuing...\" to request another pass, "
+            "or \"Work complete.\" to stop. Empty responses trigger auto-sleep. "
+        )
     else:
         send_guidance = (
             "Text output is not delivered unless you use explicit send tools. "
@@ -3290,7 +3302,7 @@ def _get_system_instruction(
         "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
         "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
-        "- Text-only replies continue (2 max before auto-stop). To stop: `sleep_until_next_trigger`.\n\n"
+        "- Text-only replies: end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n\n"
         "**Mid-conversation updates** — update eagerly when user hints:\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
@@ -3305,7 +3317,7 @@ def _get_system_instruction(
     if implied_send_active:
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
-            "- Text-only replies auto-send and continue by default (up to 2 before auto-stop)\n"
+            "- Text-only replies auto-send; end with \"Continuing...\" to request another pass or \"Work complete.\" to stop\n"
             "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
             "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
             "- To stop early: use `sleep_until_next_trigger`\n"
@@ -3328,7 +3340,8 @@ def _get_system_instruction(
         f"{response_delivery_note}"
         "Tool calls are actions you take. "
         f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Empty response = auto-stop. Text-only = continue (2 max). To stop explicitly: `sleep_until_next_trigger`."
+        "Empty response = auto-stop. Text-only replies: end with \"Continuing...\" to request another pass or "
+        "\"Work complete.\" to stop. To stop explicitly: `sleep_until_next_trigger`."
         f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
         f"{stop_continue_examples}"
         "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n"
