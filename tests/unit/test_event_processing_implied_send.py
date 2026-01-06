@@ -383,17 +383,20 @@ class ImpliedSendTests(TestCase):
         self.assertIsNotNone(correction_step)
         self.assertFalse(mock_send_email.called)
 
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
     def test_reasoning_only_content_list_auto_sleeps(
         self,
         mock_completion,
         mock_build_prompt,
+        _mock_llm_config,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         msg = MagicMock()
         msg.tool_calls = []
+        msg.function_call = None
         msg.content = [{"type": "thinking", "text": "Plan the response."}]
         msg.reasoning_content = None
         choice = MagicMock()
