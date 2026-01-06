@@ -106,7 +106,7 @@ class AddonEntitlementService:
                     getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
                 ),
                 "advanced_captcha_resolution": _normalize_price_list(
-                    getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_ids", ()),
+                    getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
@@ -122,7 +122,7 @@ class AddonEntitlementService:
                     getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
                 ),
                 "advanced_captcha_resolution": _normalize_price_list(
-                    getattr(stripe_settings, "startup_advanced_captcha_resolution_price_ids", ()),
+                    getattr(stripe_settings, "startup_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
@@ -138,7 +138,7 @@ class AddonEntitlementService:
                     getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
                 ),
                 "advanced_captcha_resolution": _normalize_price_list(
-                    getattr(stripe_settings, "scale_advanced_captcha_resolution_price_ids", ()),
+                    getattr(stripe_settings, "scale_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 

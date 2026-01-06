@@ -204,7 +204,7 @@ class AddonEntitlementSyncTests(TestCase):
     @patch("billing.addons.get_stripe_settings")
     def test_sync_sets_advanced_captcha_resolution_delta(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
-            startup_advanced_captcha_resolution_price_ids=("price_captcha",),
+            startup_advanced_captcha_resolution_price_id="price_captcha",
         )
 
         items = [

@@ -3701,6 +3701,14 @@ class StripeConfig(models.Model):
         self.set_value("startup_advanced_captcha_resolution_product_id", value)
 
     @property
+    def startup_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("startup_advanced_captcha_resolution_price_id")
+
+    @startup_advanced_captcha_resolution_price_id.setter
+    def startup_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("startup_advanced_captcha_resolution_price_id", value)
+
+    @property
     def startup_advanced_captcha_resolution_price_ids(self) -> list[str]:
         return self._parse_list_value(self.get_value("startup_advanced_captcha_resolution_price_ids"))
 
@@ -3789,6 +3797,14 @@ class StripeConfig(models.Model):
     @scale_advanced_captcha_resolution_product_id.setter
     def scale_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
         self.set_value("scale_advanced_captcha_resolution_product_id", value)
+
+    @property
+    def scale_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("scale_advanced_captcha_resolution_price_id")
+
+    @scale_advanced_captcha_resolution_price_id.setter
+    def scale_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("scale_advanced_captcha_resolution_price_id", value)
 
     @property
     def scale_advanced_captcha_resolution_price_ids(self) -> list[str]:
@@ -3893,6 +3909,14 @@ class StripeConfig(models.Model):
     @org_team_advanced_captcha_resolution_product_id.setter
     def org_team_advanced_captcha_resolution_product_id(self, value: str | None) -> None:
         self.set_value("org_team_advanced_captcha_resolution_product_id", value)
+
+    @property
+    def org_team_advanced_captcha_resolution_price_id(self) -> str:
+        return self.get_value("org_team_advanced_captcha_resolution_price_id")
+
+    @org_team_advanced_captcha_resolution_price_id.setter
+    def org_team_advanced_captcha_resolution_price_id(self, value: str | None) -> None:
+        self.set_value("org_team_advanced_captcha_resolution_price_id", value)
 
     @property
     def org_team_advanced_captcha_resolution_price_ids(self) -> list[str]:
