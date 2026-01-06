@@ -35,7 +35,11 @@ def _def_create_spreadsheet() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_create_spreadsheet",
-            "description": "Create a new Google Sheets spreadsheet.",
+            "description": (
+                "Create a new Google Sheets spreadsheet. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -51,7 +55,11 @@ def _def_create_worksheet() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_create_worksheet",
-            "description": "Create a worksheet inside an existing spreadsheet.",
+            "description": (
+                "Create a worksheet inside an existing spreadsheet. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -71,7 +79,11 @@ def _def_append_values() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_append_values",
-            "description": "Append values to a range in a spreadsheet.",
+            "description": (
+                "Append values to a range in a spreadsheet. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -95,7 +107,11 @@ def _def_get_values() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_get_values_in_range",
-            "description": "Retrieve values from a range in a spreadsheet.",
+            "description": (
+                "Retrieve values from a range in a spreadsheet. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -113,7 +129,11 @@ def _def_update_cell() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_update_cell",
-            "description": "Update a single cell or range in a spreadsheet.",
+            "description": (
+                "Update a single cell or range in a spreadsheet. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -137,7 +157,11 @@ def _def_get_current_user() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_sheets_get_current_user",
-            "description": "Return the connected Google account email for the current agent binding.",
+            "description": (
+                "Return the connected Google account email for the current agent binding. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     }

@@ -17,7 +17,11 @@ def _definition_create_document() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_docs_create_document",
-            "description": "Create a Google Doc with an optional title and initial body content.",
+            "description": (
+                "Create a Google Doc with an optional title and initial body content. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -34,7 +38,11 @@ def _definition_find_document() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_docs_find_document",
-            "description": "Find Google Docs by name using Drive metadata search.",
+            "description": (
+                "Find Google Docs by name using Drive metadata search. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -52,7 +60,11 @@ def _definition_get_current_user() -> Dict[str, Any]:
         "type": "function",
         "function": {
             "name": "google_docs_get_current_user",
-            "description": "Return the connected Google account email for the current agent binding.",
+            "description": (
+                "Return the connected Google account email for the current agent binding. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
             "parameters": {"type": "object", "properties": {}},
         },
     }
