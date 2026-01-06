@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 import logging
 from typing import Any, Iterable, Mapping
@@ -96,53 +96,67 @@ class AddonEntitlementService:
         stripe_settings = get_stripe_settings()
         if owner_type == "organization":
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_browser_task_limit_price_ids", ()),
                 ),
-                "advanced_captcha_resolution": _normalize_price_list(
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         if plan_id == PlanNames.STARTUP:
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_browser_task_limit_price_ids", ()),
                 ),
-                "advanced_captcha_resolution": _normalize_price_list(
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "startup_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         if plan_id == PlanNames.SCALE:
             return {
-                "task_pack": _normalize_price_list(
+                "task_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_task_pack_price_ids", ()),
                 ),
-                "contact_pack": _normalize_price_list(
+                "contact_pack": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_contact_cap_price_ids", ()),
                 ),
-                "browser_task_limit": _normalize_price_list(
+                "browser_task_limit": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_browser_task_limit_price_ids", ()),
                 ),
-                "advanced_captcha_resolution": _normalize_price_list(
+                "advanced_captcha_resolution": AddonEntitlementService._normalize_price_list(
                     getattr(stripe_settings, "scale_advanced_captcha_resolution_price_id", ""),
                 ),
             }
 
         return {}
+
+    @staticmethod
+    def _advanced_captcha_price_ids() -> set[str]:
+        stripe_settings = get_stripe_settings()
+        return set(
+            AddonEntitlementService._normalize_price_list(
+                getattr(stripe_settings, "startup_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "scale_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_id", ""),
+                getattr(stripe_settings, "startup_advanced_captcha_resolution_price_ids", ()),
+                getattr(stripe_settings, "scale_advanced_captcha_resolution_price_ids", ()),
+                getattr(stripe_settings, "org_team_advanced_captcha_resolution_price_ids", ()),
+            )
+        )
 
     @staticmethod
     def _get_model():
@@ -156,7 +170,11 @@ class AddonEntitlementService:
             return 0
 
     @staticmethod
-    def _extract_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
+    def _extract_price_config(
+        price_id: str,
+        price_data: Mapping[str, Any] | None = None,
+        allow_zero_delta: bool = False,
+    ) -> AddonPriceConfig | None:
         """Return deltas for a Stripe price from embedded or cached metadata."""
         if not price_id:
             return None
@@ -205,15 +223,15 @@ class AddonEntitlementService:
         browser_task_daily_delta = AddonEntitlementService._safe_int(
             metadata.get("browser_task_daily_delta")
         )
-        advanced_captcha_resolution_delta = AddonEntitlementService._safe_int(
-            metadata.get("advanced_captcha_resolution_delta")
-            or metadata.get("advanced_captcha_resolution")
-            or metadata.get("captcha_resolution_delta")
-            or metadata.get("captcha_resolution")
-            or metadata.get("captcha_solver_enabled")
-        )
+        advanced_captcha_resolution_delta = 0
 
-        if task_delta == 0 and contact_delta == 0 and browser_task_daily_delta == 0 and advanced_captcha_resolution_delta == 0:
+        if (
+            not allow_zero_delta
+            and task_delta == 0
+            and contact_delta == 0
+            and browser_task_daily_delta == 0
+            and advanced_captcha_resolution_delta == 0
+        ):
             return None
 
         return AddonPriceConfig(
@@ -290,7 +308,18 @@ class AddonEntitlementService:
 
     @staticmethod
     def has_advanced_captcha_resolution(owner, at_time=None) -> bool:
-        return bool(AddonEntitlementService.get_uplift(owner, at_time).advanced_captcha_resolution)
+        if not owner:
+            return False
+        if AddonEntitlementService.get_uplift(owner, at_time).advanced_captcha_resolution:
+            return True
+        price_ids = AddonEntitlementService._advanced_captcha_price_ids()
+        if not price_ids:
+            return False
+        return (
+            AddonEntitlementService._active_entitlements(owner, at_time)
+            .filter(price_id__in=price_ids, quantity__gt=0)
+            .exists()
+        )
 
     @staticmethod
     def get_price_config(price_id: str, price_data: Mapping[str, Any] | None = None) -> AddonPriceConfig | None:
@@ -355,16 +384,20 @@ class AddonEntitlementService:
         """Return relevant add-on price configs for the owner/plan."""
         price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
         price_ids: list[str] = []
-        for ids in price_lists.values():
+        price_kinds: dict[str, str] = {}
+        for kind, ids in price_lists.items():
             for pid in ids or []:
                 if pid not in price_ids:
                     price_ids.append(pid)
+                price_kinds[pid] = kind
 
         price_map: dict[str, AddonPriceConfig] = {}
         for pid in price_ids:
             if not pid:
                 continue
-            cfg = AddonEntitlementService._extract_price_config(pid) or AddonPriceConfig(
+            kind = price_kinds.get(pid, "")
+            allow_zero_delta = kind == "advanced_captcha_resolution"
+            cfg = AddonEntitlementService._extract_price_config(pid, allow_zero_delta=allow_zero_delta) or AddonPriceConfig(
                 price_id=pid,
                 product_id="",
                 task_credits_delta=0,
@@ -374,6 +407,8 @@ class AddonEntitlementService:
                 unit_amount=None,
                 currency="",
             )
+            if kind == "advanced_captcha_resolution":
+                cfg = replace(cfg, advanced_captcha_resolution_delta=1)
             price_map[pid] = cfg
         return price_map
 

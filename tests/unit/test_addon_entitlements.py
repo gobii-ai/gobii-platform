@@ -202,7 +202,7 @@ class AddonEntitlementSyncTests(TestCase):
         self.assertEqual(AddonEntitlementService.get_browser_task_daily_uplift(self.user), 12)
 
     @patch("billing.addons.get_stripe_settings")
-    def test_sync_sets_advanced_captcha_resolution_delta(self, mock_settings):
+    def test_sync_enables_advanced_captcha_without_metadata(self, mock_settings):
         mock_settings.return_value = SimpleNamespace(
             startup_advanced_captcha_resolution_price_id="price_captcha",
         )
@@ -212,7 +212,7 @@ class AddonEntitlementSyncTests(TestCase):
                 "price": {
                     "id": "price_captcha",
                     "product": "prod_captcha",
-                    "metadata": {"advanced_captcha_resolution_delta": "1"},
+                    "metadata": {},
                 },
                 "quantity": 1,
             },
