@@ -74,7 +74,12 @@ class AddonEntitlementService:
                     PlanVersionPrice.objects
                     .filter(
                         plan_version_id=plan_version_id,
-                        kind__in=("task_pack", "contact_pack", "browser_task_limit"),
+                        kind__in=(
+                            "task_pack",
+                            "contact_pack",
+                            "browser_task_limit",
+                            "advanced_captcha_resolution",
+                        ),
                     )
                     .order_by("kind", "price_id")
                 )
@@ -82,6 +87,7 @@ class AddonEntitlementService:
                     "task_pack": [],
                     "contact_pack": [],
                     "browser_task_limit": [],
+                    "advanced_captcha_resolution": [],
                 }
                 for row in rows:
                     if row.price_id and row.price_id not in price_map[row.kind]:

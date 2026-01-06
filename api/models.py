@@ -728,6 +728,7 @@ class PlanPriceKindChoices(models.TextChoices):
     TASK_PACK = "task_pack", "Task pack"
     CONTACT_PACK = "contact_pack", "Contact pack"
     BROWSER_TASK_LIMIT = "browser_task_limit", "Browser task limit"
+    ADVANCED_CAPTCHA_RESOLUTION = "advanced_captcha_resolution", "Advanced captcha resolution"
     DEDICATED_IP = "dedicated_ip", "Dedicated IP"
 
 
