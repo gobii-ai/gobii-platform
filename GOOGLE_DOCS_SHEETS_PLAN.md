@@ -85,3 +85,12 @@
 - Multi-account: v1 will use a single bound account per agent; defer per-call multi-account selection unless a multi-tenant need appears.
 - Any existing Pipedream-dependent prompts/workflows we must preserve verbatim (e.g., exact return shapes) beyond matching tool names?
 - Service accounts: target later phase; confirm requirements/tenants before adding.
+
+## Iteration 1 (Lean Slice)
+- Scopes: support Minimal (`documents`, `spreadsheets`) and Search-enabled (`+ drive.metadata.readonly`) only; defer `drive.file` to later. `find_document` returns `action_required` + upgrade link if Drive metadata scope is missing.
+- Auth/UI: OAuth start/callback, encrypted credential + scopes + account email, single binding per agent, lightweight console page to connect/reconnect/upgrade and display binding + scope tier.
+- Models/Settings/Flags: add `GoogleWorkspaceCredential` + `AgentGoogleWorkspaceBinding`, settings for client id/secret/redirects/scope tiers, feature flag to prefer builtin Docs/Sheets tools per agent while keeping Pipedream fallback.
+- Services: auth helper (load binding, refresh token, clear-and-action_required on invalid_grant), client factory with retry/backoff, Drive metadata search for `find_document`, Docs create/find, Sheets create/append/get/update cell(s).
+- Tools (implemented): `google_docs_create_document`, `google_docs_find_document`, `google_docs_get_current_user`, `google_sheets_create_spreadsheet`, `google_sheets_create_worksheet`, `google_sheets_append_values`, `google_sheets_get_values_in_range`, `google_sheets_update_cell`, `google_sheets_get_current_user`.
+- Tools (placeholders): register remaining tool names; return `action_required`/`not yet implemented` with guidance so prompts stay stable while we iterate.
+- Tests: mocked Google clients for auth refresh and the implemented tool set; ensure tags are added to `ci.yml`.
