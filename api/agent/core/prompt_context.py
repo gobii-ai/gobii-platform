@@ -84,6 +84,7 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
+from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
     KANBAN_CARDS_TABLE,
@@ -608,7 +609,7 @@ Use `false` only when ALL are true:
 Before stopping, mark every completed kanban card as done (clear finished work out of todo/doing). Batch the updates with any other sqlite changes.
 
 Example wrap-up (single response with tools):
-- sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE title IN ('Step 1', 'Step 2');", will_continue_work=false)
+- sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');", will_continue_work=false)
 - send_chat_message(body="All done. Marked completed cards and sharing results.")
 
 WRONG: send_chat_message(body="Done! Marked all cards complete.") without sqlite_batch UPDATE in same response → card stays open, you lied.
@@ -639,11 +640,11 @@ THOUGHT: Task complete. Before stopping, check kanban state and mark cards done.
 
 sqlite_batch(sql="
   -- 1. Check for any non-done cards
-  SELECT id, title, status FROM __kanban_cards WHERE status != 'done';
+  SELECT id, friendly_id, title, status FROM __kanban_cards WHERE status != 'done';
 
   -- 2. Mark completed work done
   UPDATE __kanban_cards SET status='done', completed_at=datetime('now')
-  WHERE title IN ('Research competitors', 'Extract pricing data');
+  WHERE friendly_id IN ('research-competitors', 'extract-pricing-data');
 
   -- 3. Verify nothing left
   SELECT COUNT(*) as remaining FROM __kanban_cards WHERE status != 'done';
@@ -664,7 +665,7 @@ send_chat_message(body="Done! Found 12 competitors, pricing data extracted and s
 ```sql
 -- WRONG: "I'm doing work that addresses this card" + will_continue_work=false → orphans card
 -- RIGHT: mark done explicitly, THEN stop
-UPDATE __kanban_cards SET status='done' WHERE title='Compile report';  -- mark done FIRST
+UPDATE __kanban_cards SET status='done' WHERE friendly_id='compile-report';  -- mark done FIRST
 -- only then: will_continue_work=false
 ```
 
@@ -938,7 +939,9 @@ def _format_kanban_card_detail(card: PersistentAgentKanbanCard) -> str:
     description = (card.description or "").strip()
     if description:
         description = _truncate_kanban_text(description, KANBAN_DETAIL_DESC_LIMIT)
+    friendly_id = format_kanban_friendly_id(card.title, card.id)
     lines = [
+        f"Friendly ID: {friendly_id}",
         f"ID: {card.id}",
         f"Title: {card.title}",
         f"Status: {card.status}",
@@ -957,7 +960,11 @@ def _format_kanban_done_summary(cards: Sequence[PersistentAgentKanbanCard]) -> s
         description = _truncate_kanban_text((card.description or "").strip(), KANBAN_DONE_DESC_LIMIT)
         completed_at = card.completed_at or card.updated_at
         completed_text = completed_at.isoformat() if completed_at else "unknown"
-        detail = f"{title} (id: {card.id}, completed: {completed_text}, priority: {card.priority})"
+        friendly_id = format_kanban_friendly_id(card.title, card.id)
+        detail = (
+            f"{title} (friendly_id: {friendly_id}, id: {card.id}, completed: {completed_text}, "
+            f"priority: {card.priority})"
+        )
         if description:
             detail = f"{detail} - {description}"
         lines.append(f"- {detail}")
@@ -1861,10 +1868,11 @@ def build_prompt_context(
         f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
         "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
+        "Each card has a friendly_id (slug of the title) alongside id—use friendly_id in WHERE clauses. "
         "Workflow: (1) INSERT new cards when starting work. (2) UPDATE existing cards to 'done' when finished. (3) Keep working until all cards are done. "
         "Batch updates: fold kanban changes into the same sqlite_batch as your other queries. "
         "Create cards: INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'doing'), ('Step 2', 'todo'); "
-        "Mark done: UPDATE __kanban_cards SET status='done' WHERE title='Step 1'; "
+        "Mark done: UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: INSERT with status='done' ← creates duplicate. "
         "WRONG: work without UPDATE → orphans the card. "
@@ -3065,7 +3073,7 @@ def _get_system_instruction(
         "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
-        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE title='Step 1';` (never INSERT with status='done'—that creates duplicates)\n"
+        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n\n"
 

@@ -12,6 +12,7 @@ from typing import Optional, Sequence
 
 from django.db import transaction
 from django.utils import timezone
+from django.utils.text import slugify
 
 from api.models import PersistentAgentKanbanCard
 
@@ -19,6 +20,16 @@ from .sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_con
 from .sqlite_state import KANBAN_CARDS_TABLE, get_sqlite_db_path
 
 logger = logging.getLogger(__name__)
+
+
+def format_kanban_friendly_id(title: str, card_id: Optional[str] = None) -> str:
+    slug = slugify((title or "").strip())
+    if slug:
+        return slug
+    if card_id:
+        short_id = str(card_id).replace("-", "")[:8]
+        return f"card-{short_id}"
+    return "card"
 
 
 @dataclass(frozen=True)
@@ -85,6 +96,7 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
             f"""
             CREATE TABLE "{KANBAN_CARDS_TABLE}" (
                 id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+                friendly_id TEXT,
                 title TEXT NOT NULL,
                 description TEXT,
                 status TEXT NOT NULL DEFAULT 'todo',
@@ -109,6 +121,8 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
         snapshot_cards: dict[str, KanbanCardSnapshot] = {}
         for card in cards:
             card_id = str(card.id)
+            title = card.title.strip()
+            friendly_id = format_kanban_friendly_id(title, card_id)
             description = (card.description or "").strip()
             status = (card.status or PersistentAgentKanbanCard.Status.TODO).strip()
             priority = int(card.priority or 0)
@@ -116,7 +130,8 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
             rows.append(
                 (
                     card_id,
-                    card.title.strip(),
+                    friendly_id,
+                    title,
                     description,
                     status,
                     priority,
@@ -128,7 +143,7 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
             )
             snapshot_cards[card_id] = KanbanCardSnapshot(
                 card_id=card_id,
-                title=card.title.strip(),
+                title=title,
                 description=description,
                 status=status,
                 priority=priority,
@@ -139,8 +154,8 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
             conn.executemany(
                 f"""
                 INSERT INTO "{KANBAN_CARDS_TABLE}"
-                    (id, title, description, status, priority, assigned_agent_id, created_at, updated_at, completed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    (id, friendly_id, title, description, status, priority, assigned_agent_id, created_at, updated_at, completed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
                 rows,
             )
