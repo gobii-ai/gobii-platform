@@ -192,6 +192,27 @@ AUTOTOOL_HEURISTICS: list[dict] = [
             "mcp_brightdata_web_data_google_shopping",
         ],
     },
+    # Google Docs
+    {
+        "keywords": ["google doc", "google docs", "gdoc", "gdocs"],
+        "tools": [
+            "google_docs_create_document",
+            "google_docs_find_document",
+            "google_docs_get_current_user",
+        ],
+    },
+    # Google Sheets
+    {
+        "keywords": ["google sheet", "google sheets", "gsheet", "gsheets", "spreadsheet"],
+        "tools": [
+            "google_sheets_create_spreadsheet",
+            "google_sheets_create_worksheet",
+            "google_sheets_append_values",
+            "google_sheets_get_values_in_range",
+            "google_sheets_update_cell",
+            "google_sheets_get_current_user",
+        ],
+    },
     # Reuters
     {
         "keywords": ["reuters"],

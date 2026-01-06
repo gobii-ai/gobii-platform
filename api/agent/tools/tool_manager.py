@@ -77,6 +77,20 @@ CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
+GOOGLE_BUILTIN_DEFAULT_TOOLS = {
+    # Docs
+    "google_docs_create_document",
+    "google_docs_find_document",
+    "google_docs_get_current_user",
+    # Sheets (implemented subset in Iteration 1)
+    "google_sheets_create_spreadsheet",
+    "google_sheets_create_worksheet",
+    "google_sheets_append_values",
+    "google_sheets_get_values_in_range",
+    "google_sheets_update_cell",
+    "google_sheets_get_current_user",
+}
+
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
@@ -607,7 +621,10 @@ def ensure_default_tools_enabled(
     )
     default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
     missing_mcp = default_tools - enabled_tools
-    missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
+    builtin_set = set(DEFAULT_BUILTIN_TOOLS)
+    if getattr(settings, "GOOGLE_WORKSPACE_TOOLS_ENABLED", False):
+        builtin_set |= GOOGLE_BUILTIN_DEFAULT_TOOLS
+    missing_builtin = builtin_set - enabled_tools
     if not missing_mcp and not missing_builtin:
         return
 
