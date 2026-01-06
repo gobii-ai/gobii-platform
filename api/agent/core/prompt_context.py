@@ -1487,7 +1487,8 @@ def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
     lines: list[str] = [
         "Agent email address/endpoints: create or update the agent's email address (endpoint).",
         "SMTP (outbound): host/port, security (SSL or STARTTLS), auth mode, username/password, outbound enable toggle.",
-        "IMAP (inbound): host/port, security (SSL or STARTTLS), username/password, folder, inbound enable toggle, IDLE enable, poll interval seconds.",
+        "IMAP (inbound): host/port, security (SSL or STARTTLS), auth mode, username/password, folder, inbound enable toggle, IDLE enable, poll interval seconds.",
+        "OAuth 2.0: connect Gmail or Microsoft accounts and select OAuth auth mode for SMTP/IMAP.",
         "Utilities: Test SMTP, Test IMAP, Poll now for inbound mail (after saving credentials).",
         f"Manage agent email settings: {email_settings_url}",
     ]

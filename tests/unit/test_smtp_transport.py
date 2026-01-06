@@ -9,6 +9,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     AgentEmailAccount,
+    AgentEmailOAuthCredential,
 )
 from api.agent.comms.smtp_transport import SmtpTransport
 
@@ -16,7 +17,7 @@ from api.agent.comms.smtp_transport import SmtpTransport
 User = get_user_model()
 
 
-@tag("smtp")
+@tag("smtp", "batch_outbound_email")
 class TestSmtpTransport(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="smtpuser", email="smtpuser@example.com", password="pw")
@@ -88,3 +89,32 @@ class TestSmtpTransport(TestCase):
         client.send_message.assert_called()
         client.quit.assert_called()
 
+    @patch("smtplib.SMTP")
+    def test_send_oauth2_auth(self, mock_smtp):
+        acct = self._create_acct(security=AgentEmailAccount.SmtpSecurity.STARTTLS, auth=AgentEmailAccount.AuthMode.OAUTH2)
+        credential = AgentEmailOAuthCredential.objects.create(
+            account=acct,
+            user=self.user,
+            provider="gmail",
+        )
+        credential.access_token = "oauth-token"
+        credential.save()
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        SmtpTransport.send(
+            account=acct,
+            from_addr=self.from_ep.address,
+            to_addrs=[self.to_addr],
+            subject="OAuth",
+            plaintext_body="Hi",
+            html_body="<p>Hi</p>",
+            attempt_id="attempt-3",
+        )
+
+        client.login.assert_not_called()
+        client.auth.assert_called()
+        auth_args = client.auth.call_args[0]
+        self.assertEqual(auth_args[0], "XOAUTH2")
+        auth_callback = auth_args[1]
+        self.assertIn("oauth-token", auth_callback(b""))

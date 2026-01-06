@@ -230,6 +230,8 @@ jobs:
             tag: batch_console_api
           - batch: console_mcp_oauth
             tag: batch_console_mcp_oauth
+          - batch: console_email_oauth
+            tag: batch_console_email_oauth
           - batch: console_mcp_servers
             tag: batch_console_mcp_servers
           - batch: charter_tools

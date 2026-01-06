@@ -1,4 +1,5 @@
 {% extends "console_page.html" %}
+{% load static %}
 {% block console_content %}
 <div class="space-y-6 pb-6">
   <!-- Heading panel (standalone) -->
@@ -40,21 +41,100 @@
           <input type="email" name="endpoint_address" value="{{ endpoint.address }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" required />
           <p class="text-xs text-gray-500 mt-1">This should match the email account you configure below.</p>
         </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Connection Method</label>
+          <select name="connection_mode" id="email-connection-mode" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+            <option value="oauth2" {% if form.initial.connection_mode == 'oauth2' %}selected{% endif %}>OAuth 2.0 (Gmail/Generic)</option>
+            <option value="custom" {% if form.initial.connection_mode == 'custom' or not form.initial.connection_mode %}selected{% endif %}>Custom SMTP/IMAP (username/password)</option>
+          </select>
+          <p class="text-xs text-gray-500 mt-1">Choose OAuth for Gmail or bring your own SMTP/IMAP.</p>
+        </div>
+      </div>
+      <div class="space-y-3 email-oauth-only" id="email-oauth-panel"
+           {% if account %}
+           data-account-id="{{ account.pk }}"
+           data-oauth-start-url="{% url 'console-email-oauth-start' %}"
+           data-oauth-status-url="{% url 'console-email-oauth-status' account.pk %}"
+           data-oauth-revoke-url="{% url 'console-email-oauth-revoke' account.pk %}"
+           data-oauth-callback-path="{% url 'console-email-oauth-callback-view' %}"
+           data-return-url="{{ oauth_return_url }}"
+           {% endif %}>
+        <div>
+          <h2 class="text-lg font-semibold text-gray-800">OAuth 2.0</h2>
+          <p class="text-sm text-gray-600">Connect Gmail or Microsoft accounts without app passwords. OAuth is shared across SMTP + IMAP for this agent.</p>
+        </div>
+        {% if not account %}
+          <div class="text-sm text-gray-600">Create or update the agent email address above to enable OAuth connections.</div>
+        {% else %}
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <input type="hidden" name="oauth_provider" id="email-oauth-provider-hidden" value="{{ oauth_provider|default:'gmail' }}" />
+            <div>
+              <label class="block text-sm font-medium text-gray-700">Provider</label>
+              <select id="email-oauth-provider" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                <option value="gmail">Gmail</option>
+                <option value="generic">Generic OAuth 2.0</option>
+              </select>
+            </div>
+            <div id="email-oauth-tenant-row" class="hidden">
+              <label class="block text-sm font-medium text-gray-700">Tenant</label>
+              <input type="text" id="email-oauth-tenant" placeholder="organizations or tenant-id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div id="email-oauth-auth-row" class="hidden">
+              <label class="block text-sm font-medium text-gray-700">Authorization URL</label>
+              <input type="text" id="email-oauth-auth-url" placeholder="https://example.com/oauth/authorize" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div id="email-oauth-token-row" class="hidden">
+              <label class="block text-sm font-medium text-gray-700">Token URL</label>
+              <input type="text" id="email-oauth-token-url" placeholder="https://example.com/oauth/token" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div id="email-oauth-client-id-row">
+              <label class="block text-sm font-medium text-gray-700">OAuth Client ID</label>
+              <input type="text" id="email-oauth-client-id" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div id="email-oauth-client-secret-row">
+              <label class="block text-sm font-medium text-gray-700">OAuth Client Secret</label>
+              <input type="password" id="email-oauth-client-secret" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div class="md:col-span-2">
+              <label class="block text-sm font-medium text-gray-700">Scope</label>
+              <input type="text" id="email-oauth-scope" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
+            </div>
+            <div class="md:col-span-2 text-sm text-gray-700">
+              <div>Status: <span id="email-oauth-status" class="font-semibold">{% if oauth_connected %}Connected{% else %}Not connected{% endif %}</span></div>
+              {% if oauth_scope %}
+                <div>Scope: <span class="font-mono text-xs">{{ oauth_scope }}</span></div>
+              {% endif %}
+              {% if oauth_expires_at %}
+                <div>Expires: <span class="font-mono text-xs">{{ oauth_expires_at }}</span></div>
+              {% endif %}
+              <div class="text-xs text-gray-500 mt-2">Gmail uses the Gobii-managed OAuth app. Generic OAuth requires your own client credentials.</div>
+            </div>
+            <div class="md:col-span-2 flex flex-wrap items-center gap-2">
+              <button type="button" id="email-oauth-connect" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
+                Connect OAuth 2.0
+              </button>
+              <button type="button" id="email-oauth-disconnect" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50" {% if not oauth_connected %}disabled{% endif %}>
+                Disconnect
+              </button>
+              <span id="email-oauth-error" class="text-xs text-amber-600 hidden"></span>
+            </div>
+          </div>
+        {% endif %}
       </div>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <!-- SMTP -->
-        <div class="space-y-4">
+        <div class="space-y-4 email-protocol-section">
           <h2 class="text-lg font-semibold text-gray-800">SMTP (Outbound)</h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Host</label>
               <input type="text" name="smtp_host" value="{{ form.initial.smtp_host }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Port</label>
               <input type="number" name="smtp_port" value="{{ form.initial.smtp_port }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Security</label>
               <select name="smtp_security" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
                 <option value="starttls" {% if form.initial.smtp_security == 'starttls' %}selected{% endif %}>STARTTLS</option>
@@ -62,19 +142,20 @@
                 <option value="none" {% if form.initial.smtp_security == 'none' %}selected{% endif %}>None</option>
               </select>
             </div>
-            <div>
+            <div class="email-custom-only">
               <label class="block text-sm font-medium text-gray-700">Auth Mode</label>
               <select name="smtp_auth" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
                 <option value="login" {% if form.initial.smtp_auth == 'login' %}selected{% endif %}>LOGIN</option>
                 <option value="plain" {% if form.initial.smtp_auth == 'plain' %}selected{% endif %}>PLAIN</option>
+                <option value="oauth2" {% if form.initial.smtp_auth == 'oauth2' %}selected{% endif %}>OAuth 2.0</option>
                 <option value="none" {% if form.initial.smtp_auth == 'none' %}selected{% endif %}>None</option>
               </select>
             </div>
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Username</label>
               <input type="text" name="smtp_username" value="{{ form.initial.smtp_username }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-custom-only">
               <label class="block text-sm font-medium text-gray-700">Password</label>
               <input type="password" name="smtp_password" placeholder="••••••••" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
@@ -88,18 +169,18 @@
         </div>
 
         <!-- IMAP -->
-        <div class="space-y-4">
+        <div class="space-y-4 email-protocol-section">
           <h2 class="text-lg font-semibold text-gray-800">IMAP (Inbound)</h2>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Host</label>
               <input type="text" name="imap_host" value="{{ form.initial.imap_host }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Port</label>
               <input type="number" name="imap_port" value="{{ form.initial.imap_port }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Security</label>
               <select name="imap_security" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
                 <option value="ssl" {% if form.initial.imap_security == 'ssl' %}selected{% endif %}>SSL</option>
@@ -107,11 +188,19 @@
                 <option value="none" {% if form.initial.imap_security == 'none' %}selected{% endif %}>None</option>
               </select>
             </div>
-            <div>
+            <div class="email-custom-only">
+              <label class="block text-sm font-medium text-gray-700">Auth Mode</label>
+              <select name="imap_auth" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm">
+                <option value="login" {% if form.initial.imap_auth == 'login' %}selected{% endif %}>LOGIN</option>
+                <option value="oauth2" {% if form.initial.imap_auth == 'oauth2' %}selected{% endif %}>OAuth 2.0</option>
+                <option value="none" {% if form.initial.imap_auth == 'none' %}selected{% endif %}>None</option>
+              </select>
+            </div>
+            <div class="email-server-settings">
               <label class="block text-sm font-medium text-gray-700">Username</label>
               <input type="text" name="imap_username" value="{{ form.initial.imap_username }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
-            <div>
+            <div class="email-custom-only">
               <label class="block text-sm font-medium text-gray-700">Password</label>
               <input type="password" name="imap_password" placeholder="••••••••" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm" />
             </div>
@@ -144,13 +233,13 @@
         <button type="submit" name="action" value="save" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-transparent bg-blue-600 text-white hover:bg-blue-700">
           Save
         </button>
-        <button type="submit" name="action" value="test_smtp" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="test_smtp" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Test SMTP
         </button>
-        <button type="submit" name="action" value="test_imap" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="test_imap" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Test IMAP
         </button>
-        <button type="submit" name="action" value="poll_now" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50">
+        <button type="submit" name="action" value="poll_now" class="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-800 hover:bg-gray-50 email-protocol-action">
           Poll Now
         </button>
       </div>
@@ -174,4 +263,9 @@
     {% endif %}
   </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  <script src="{% static 'js/agent_email_oauth.js' %}"></script>
 {% endblock %}

@@ -2902,7 +2902,12 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
                 if acct.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
                     client.starttls()
                     client.ehlo()
-                if acct.smtp_auth != AgentEmailAccount.AuthMode.NONE:
+                if acct.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
+                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
+                    identity, access_token, _credential = resolve_oauth_identity_and_token(acct, "smtp")
+                    auth_string = build_xoauth2_string(identity, access_token)
+                    client.auth("XOAUTH2", lambda _: auth_string)
+                elif acct.smtp_auth != AgentEmailAccount.AuthMode.NONE:
                     client.login(acct.smtp_username or '', acct.get_smtp_password() or '')
                 # Try NOOP
                 try:
@@ -2987,7 +2992,13 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
                 if acct.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
                     client.starttls()
             try:
-                client.login(acct.imap_username or '', acct.get_imap_password() or '')
+                if acct.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
+                    identity, access_token, _credential = resolve_oauth_identity_and_token(acct, "imap")
+                    auth_string = build_xoauth2_string(identity, access_token)
+                    client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
+                elif acct.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
+                    client.login(acct.imap_username or '', acct.get_imap_password() or '')
                 client.select(acct.imap_folder or 'INBOX', readonly=True)
                 try:
                     client.noop()

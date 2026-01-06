@@ -18,6 +18,7 @@ from django.db import close_old_connections
 from imapclient import IMAPClient
 
 from api.models import AgentEmailAccount
+from api.agent.comms.email_oauth import get_oauth_sasl_mechanism, resolve_oauth_identity_and_token
 from api.agent.tasks import poll_imap_inbox
 from config.redis_client import get_redis_client
 
@@ -49,9 +50,10 @@ def _acct_config_sig(acct: AgentEmailAccount) -> str:
         host = acct.imap_host or ""
         port = int(acct.imap_port or (993 if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL else 143))
         sec = acct.imap_security or ""
+        auth = acct.imap_auth or ""
         user = acct.imap_username or ""
         folder = acct.imap_folder or "INBOX"
-        return f"{host}|{port}|{sec}|{user}|{folder}"
+        return f"{host}|{port}|{sec}|{auth}|{user}|{folder}"
     except Exception:
         return ""
 
@@ -313,7 +315,12 @@ def _watch_account(
             if acct.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
                 client.starttls()
 
-            client.login(acct.imap_username or "", acct.get_imap_password() or "")
+            if acct.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+                identity, access_token, credential = resolve_oauth_identity_and_token(acct, "imap")
+                mechanism = get_oauth_sasl_mechanism(credential)
+                client.oauth2_login(identity, access_token, mech=mechanism)
+            elif acct.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
+                client.login(acct.imap_username or "", acct.get_imap_password() or "")
             folder = acct.imap_folder or "INBOX"
             client.select_folder(folder, readonly=True)
 
