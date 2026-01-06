@@ -1552,6 +1552,7 @@ dependencies = [
     { name = "redis" },
     { name = "requests" },
     { name = "segment-analytics-python" },
+    { name = "sqlglot" },
     { name = "tenacity" },
     { name = "twilio" },
     { name = "ulid-py" },
@@ -1681,6 +1682,7 @@ requires-dist = [
     { name = "redis", specifier = "~=6.2.0" },
     { name = "requests", specifier = "~=2.32.4" },
     { name = "segment-analytics-python", specifier = "~=2.3.4" },
+    { name = "sqlglot", specifier = ">=28.5.0" },
     { name = "tenacity", specifier = "~=8.5.0" },
     { name = "twilio", specifier = "==9.6.3" },
     { name = "ulid-py", specifier = "~=1.1.0" },
@@ -7842,6 +7844,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3b/05/ca38458e353991676fff9c8ad027a516bc8483b5c11ff7521c19e4ddddc2/speechrecognition-3.14.4.tar.gz", hash = "sha256:e698248b611589b5ba4f760fcf6ec9bc3a8a25a87a2e0e88ec926c63539b6a6f", size = 32859616, upload-time = "2025-11-19T12:14:02.273Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/44/9645d4eccf04508c9677e4f75816c977a1ce306cf39e6f258f9d9deee8f9/speechrecognition-3.14.4-py3-none-any.whl", hash = "sha256:8b09d99a6ed31f994ed6b1749d6f921717e41179aa6387a79e8d514d30d98577", size = 32856066, upload-time = "2025-11-19T12:13:57.054Z" },
+]
+
+[[package]]
+name = "sqlglot"
+version = "28.5.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bf/8c/a4d24b6103305467506c1dea9c3ca8dc92773a91bae246c2517c256a0cf9/sqlglot-28.5.0.tar.gz", hash = "sha256:b3213b3e867dcc306074f1c90480aeee89a0e635cf0dfe70eb4a3af7b61972e6", size = 5652688, upload-time = "2025-12-17T23:38:00.121Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ec/f7/6a7effd2526f64bcb0d2264c0dbebc7f8508add3f2c0748540d1448a24a3/sqlglot-28.5.0-py3-none-any.whl", hash = "sha256:5798bfdb6e9bc36c964e6c64d7222624d98b2631cc20f44628a82eba7cf7b4bf", size = 561086, upload-time = "2025-12-17T23:37:57.972Z" },
 ]
 
 [[package]]

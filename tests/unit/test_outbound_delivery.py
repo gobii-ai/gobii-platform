@@ -297,13 +297,20 @@ class EmailDeliveryTests(TestCase):
             
             deliver_agent_email(message)
             
-            # Verify inscriptis get_text was called with the message body and config
-            mock_get_text.assert_called_once()
-            args, kwargs = mock_get_text.call_args
-            self.assertEqual(args[0].replace("\n", ""), html_body)  # First argument should be the HTML body
-            # Second argument should be a ParserConfig object
+            # Verify inscriptis get_text was called at least once with the message body and config
+            # Note: get_text may be called multiple times (once during message creation via
+            # the post_save signal for WebSocket broadcast, and once during delivery)
+            self.assertGreaterEqual(mock_get_text.call_count, 1)
+            # Find the call that has our HTML body (may be any of the calls)
             from inscriptis.model.config import ParserConfig
-            self.assertIsInstance(args[1], ParserConfig)
+            found_matching_call = False
+            for call_args in mock_get_text.call_args_list:
+                args, kwargs = call_args
+                if args and args[0].replace("\n", "") == html_body:
+                    found_matching_call = True
+                    self.assertIsInstance(args[1], ParserConfig)
+                    break
+            self.assertTrue(found_matching_call, "get_text was not called with the expected HTML body")
             
             # Verify AnymailMessage was created with inscriptis plaintext
             mock_anymail.assert_called_once()
@@ -618,9 +625,11 @@ That's all!"""
         self.assertEqual(len(list_lines), 3, "Should have 3 separate list item lines")
         
         # Each list item should be on its own line with markers preserved
-        self.assertIn("-   First item", list_lines)
-        self.assertIn("-   Second item", list_lines)
-        self.assertIn("-   Third item", list_lines)
+        # Note: pypandoc may use varying spacing after the dash, so we normalize
+        normalized_lines = [line.replace("-   ", "- ").replace("-  ", "- ") for line in list_lines]
+        self.assertIn("- First item", normalized_lines)
+        self.assertIn("- Second item", normalized_lines)
+        self.assertIn("- Third item", normalized_lines)
         
         # Test ordered list
         ordered_list = """Steps to follow:
