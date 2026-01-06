@@ -68,7 +68,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or «/path» variables to include.",
+                        "description": "Optional list of filespace paths or $[/path] variables to include.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -87,7 +87,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     raw_body = params.get("body", "")
     # Normalize LLM output: decode escapes, strip control chars, normalize whitespace
     body = normalize_llm_output((raw_body or "").strip())
-    # Substitute «var» placeholders with actual values (e.g., «/charts/...»).
+    # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     body = substitute_variables_with_filespace(body, agent)
     if not body:
         return {"status": "error", "message": "Message body is required."}

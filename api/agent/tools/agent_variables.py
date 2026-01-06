@@ -2,24 +2,29 @@
 Agent variable system for placeholder substitution.
 
 Allows tools to set variables (e.g., file URLs) that the LLM can reference
-using «var_name» placeholders in messages. Placeholders are substituted with
+using $[var_name] placeholders in messages. Placeholders are substituted with
 actual values before sending.
 
 Variable names are file paths (e.g., "/charts/sales_q4.svg"). This ensures
 uniqueness—creating multiple files won't cause collisions. The path is
 human-readable and matches what the agent sees in tool results.
 
-The «» syntax is intentional—it's visually distinctive and won't conflict
-with template languages (Handlebars, Jinja, Mustache all use {{}}). The LLM
-never sees actual URLs, forcing it to use variables and preventing corruption
-of signed URLs or hallucinated paths.
+The $[...] syntax is designed for LLM compatibility:
+- ASCII-only characters for reliable tokenization (even small LLMs handle it)
+- $ universally signals "variable/substitution" in code
+- Square brackets provide clear delimiters
+- Unlikely to appear in real-world data (not a standard syntax in any language)
+- Easy to type on any keyboard
+
+The LLM never sees actual URLs, forcing it to use variables and preventing
+corruption of signed URLs or hallucinated paths.
 
 Usage:
     # In a tool (using path as variable name):
     set_agent_variable("/charts/sales_q4.svg", signed_url)
 
     # In LLM output:
-    "Here's the chart: ![](«/charts/sales_q4.svg»)"
+    "Here's the chart: ![]($[/charts/sales_q4.svg])"
 
     # Before sending:
     body = substitute_variables(body)
@@ -35,9 +40,9 @@ logger = logging.getLogger(__name__)
 # Store for agent variables - persists across tool calls within a session
 _agent_variables: ContextVar[Dict[str, str]] = ContextVar("agent_variables", default={})
 
-# Pattern for «var_name» placeholders (guillemet quotes - visually distinct, won't conflict with code)
+# Pattern for $[var_name] placeholders (ASCII, LLM-friendly)
 # Matches paths like /charts/sales.svg as well as simple names
-_PLACEHOLDER_PATTERN = re.compile(r'«([^»]+)»')
+_PLACEHOLDER_PATTERN = re.compile(r'\$\[([^\]]+)\]')
 _MARKDOWN_IMAGE_PATTERN = re.compile(
     r"!\[(?P<alt>[^\]]*)\]\(\s*(?P<url><[^>]+>|[^)\s]+)(?:\s+['\"][^'\"]*['\"])?\s*\)"
 )
@@ -51,8 +56,10 @@ def _normalize_filespace_path(raw: str) -> Optional[str]:
     if not raw:
         return None
     value = raw.strip()
-    if value.startswith("«") and value.endswith("»"):
-        value = value[1:-1].strip()
+    # Strip $[...] wrapper if present
+    if value.startswith("$[") and value.endswith("]"):
+        value = value[2:-1].strip()
+    # Also handle angle brackets from markdown links
     if value.startswith("<") and value.endswith(">"):
         value = value[1:-1].strip()
     if not value:
@@ -71,7 +78,7 @@ def _normalize_filespace_path(raw: str) -> Optional[str]:
 
 
 def set_agent_variable(name: str, value: str) -> None:
-    """Set a variable that can be referenced in messages as «name».
+    """Set a variable that can be referenced in messages as $[name].
 
     Convention: Use file paths as variable names (e.g., "/charts/sales.svg").
     This ensures uniqueness when multiple files are created.
@@ -98,12 +105,12 @@ def clear_variables() -> None:
 
 
 def substitute_variables(text: str) -> str:
-    """Replace «var_name» placeholders with actual values.
+    """Replace $[var_name] placeholders with actual values.
 
     If a variable is not found, the placeholder is left unchanged
     (allows LLM to see it wasn't substituted).
     """
-    if not text or '«' not in text:
+    if not text or '$[' not in text:
         return text
 
     variables = _agent_variables.get({})
@@ -115,17 +122,17 @@ def substitute_variables(text: str) -> str:
         if var_name in variables:
             return variables[var_name]
         # Keep original placeholder if variable not found
-        logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+        logger.debug("Variable $[%s] not found, keeping placeholder", var_name)
         return match.group(0)
 
     return _PLACEHOLDER_PATTERN.sub(replace_match, text)
 
 
 def substitute_variables_with_filespace(text: str, agent) -> str:
-    """Replace «var_name» placeholders with actual values or filespace URLs.
+    """Replace $[var_name] placeholders with actual values or filespace URLs.
 
     Falls back to signed filespace URLs when a placeholder looks like a filespace
-    path (e.g., «/charts/q4.svg») but no in-memory variable is present.
+    path (e.g., $[/charts/q4.svg]) but no in-memory variable is present.
     """
     if not text:
         return text
@@ -194,7 +201,7 @@ def substitute_variables_with_filespace(text: str, agent) -> str:
         resolved = _resolve_value(var_name)
         if resolved:
             return resolved
-        logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+        logger.debug("Variable $[%s] not found, keeping placeholder", var_name)
         return match.group(0)
 
     substituted = _PLACEHOLDER_PATTERN.sub(replace_match, text)
@@ -231,17 +238,17 @@ def format_variables_for_prompt() -> str:
         return ""
 
     lines = [
-        "Available file variables (use «name» in messages; for attachments, pass the same «name»):"
+        "Available file variables (use $[name] in messages; for attachments, pass the same $[name]):"
     ]
     for name in variables.keys():
         # Don't show value - just the variable name. This prevents LLM from copying URLs.
-        lines.append(f"  «{name}»")
+        lines.append(f"  $[{name}]")
 
     return "\n".join(lines)
 
 
 def substitute_variables_as_data_uris(text: str, agent) -> str:
-    """Replace «path» placeholders with base64 data URIs.
+    """Replace $[path] placeholders with base64 data URIs.
 
     Used by tools like create_pdf that need embedded content instead of URLs.
     Looks up files in the agent's filespace and converts to data URIs.
@@ -316,7 +323,7 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
         resolved = _resolve_value(var_name)
         if resolved:
             return resolved
-        logger.debug("Variable «%s» not found, keeping placeholder", var_name)
+        logger.debug("Variable $[%s] not found, keeping placeholder", var_name)
         return match.group(0)
 
     substituted = _PLACEHOLDER_PATTERN.sub(replace_match, text)

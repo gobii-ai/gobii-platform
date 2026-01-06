@@ -488,7 +488,7 @@ def execute_create_chart(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
         set_agent_variable(path, signed_url)
 
         # Return with ready-to-use references
-        var_ref = f"«{path}»"
+        var_ref = f"$[{path}]"
         return {
             "status": "ok",
             "file": var_ref,

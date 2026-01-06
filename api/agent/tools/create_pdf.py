@@ -552,8 +552,8 @@ def get_create_pdf_tool() -> Dict[str, Any]:
             "description": (
                 "Create a publication-quality PDF from HTML. "
                 "Recommended path: /exports/your-file.pdf. "
-                "\n\nEmbedding charts: Use <img src='«/charts/...»'> with the «path» from create_chart's inline_html. "
-                "The «path» syntax is required—it gets replaced with embedded data. URLs will fail."
+                "\n\nEmbedding charts: Use <img src='$[/charts/...]'> with the $[path] from create_chart's inline_html. "
+                "The $[path] syntax is required—it gets replaced with embedded data. URLs will fail."
                 "\n\nUtility classes:\n"
                 "- .page-break / .page-break-before: force page breaks\n"
                 "- .no-break: keep element together\n"
@@ -592,7 +592,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
 
     html = _coerce_markdown_images_to_html(html)
 
-    # Substitute «path» variables with data URIs (PDF needs embedded content, not URLs)
+    # Substitute $[path] variables with data URIs (PDF needs embedded content, not URLs)
     html = substitute_variables_as_data_uris(html, agent)
 
     max_size = getattr(settings, "MAX_FILE_SIZE", None)
@@ -611,8 +611,8 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             "status": "error",
             "message": (
                 "HTML contains external or local asset references (URLs are not allowed). "
-                "To embed charts: use <img src='«/charts/...»'> with the «path» from create_chart's inline_html field. "
-                "The «guillemet» syntax is required—it gets replaced with embedded data."
+                "To embed charts: use <img src='$[/charts/...]'> with the $[path] from create_chart's inline_html field. "
+                "The $[path] syntax is required—it gets replaced with embedded data."
             ),
         }
 
@@ -660,7 +660,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     )
     set_agent_variable(file_path, signed_url)
 
-    var_ref = f"«{file_path}»"
+    var_ref = f"$[{file_path}]"
     return {
         "status": "ok",
         "file": var_ref,

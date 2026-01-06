@@ -385,7 +385,7 @@ def _get_tool_call_name(call: Any) -> Optional[str]:
 
 
 def _substitute_variables_in_params(params: Any) -> Any:
-    """Recursively substitute «var» placeholders in tool parameters.
+    """Recursively substitute $[var] placeholders in tool parameters.
 
     Handles nested dicts, lists, and string values. Non-string values
     are returned unchanged.
@@ -2824,7 +2824,7 @@ def _run_agent_loop(
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
-                    # Substitute «var» placeholders in tool parameters (unless tool opts out)
+                    # Substitute $[var] placeholders in tool parameters (unless tool opts out)
                     if should_skip_auto_substitution(tool_name):
                         exec_params = tool_params  # Tool handles substitution itself
                     else:

@@ -616,7 +616,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
             node_id=node_id,
         )
         set_agent_variable(file_path, signed_url)
-        var_ref = f"«{file_path}»"
+        var_ref = f"$[{file_path}]"
         response.update(
             {
                 "file": var_ref,

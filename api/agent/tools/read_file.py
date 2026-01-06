@@ -50,8 +50,9 @@ def _resolve_path(params: Dict[str, Any]) -> Optional[str]:
         value = params.get(key)
         if isinstance(value, str) and value.strip():
             cleaned = value.strip()
-            if cleaned.startswith("«") and cleaned.endswith("»"):
-                cleaned = cleaned[1:-1].strip()
+            # Strip $[...] wrapper if present
+            if cleaned.startswith("$[") and cleaned.endswith("]"):
+                cleaned = cleaned[2:-1].strip()
             return cleaned
     return None
 
@@ -114,7 +115,7 @@ def get_read_file_tool() -> Dict[str, Any]:
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to a file in the agent filespace (accepts «/path» variables).",
+                        "description": "Path to a file in the agent filespace (accepts $[/path] variables).",
                     },
                     "max_chars": {
                         "type": "integer",

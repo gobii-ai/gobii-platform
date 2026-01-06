@@ -82,7 +82,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     )
     set_agent_variable(file_path, signed_url)
 
-    var_ref = f"«{file_path}»"
+    var_ref = f"$[{file_path}]"
     return {
         "status": "ok",
         "file": var_ref,

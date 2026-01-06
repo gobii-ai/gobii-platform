@@ -50,7 +50,7 @@ class FileExportToolTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["file"], "«/exports/report.csv»")
+        self.assertEqual(result["file"], "$[/exports/report.csv]")
         node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
         self.assertEqual(node.mime_type, "text/csv")
         with node.content.open("rb") as handle:
@@ -68,8 +68,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["file"], "«/exports/report.csv»")
-        self.assertEqual(second["file"], "«/exports/report.csv»")
+        self.assertEqual(first["file"], "$[/exports/report.csv]")
+        self.assertEqual(second["file"], "$[/exports/report.csv]")
         # Verify only one node exists (overwritten)
         nodes = AgentFsNode.objects.filter(created_by_agent=self.agent, path="/exports/report.csv")
         self.assertEqual(nodes.count(), 1)
@@ -88,8 +88,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["file"], "«/exports/report.csv»")
-        self.assertEqual(second["file"], "«/exports/report (2).csv»")
+        self.assertEqual(first["file"], "$[/exports/report.csv]")
+        self.assertEqual(second["file"], "$[/exports/report (2).csv]")
         # Verify two distinct nodes were created
         first_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
         second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).csv")
@@ -181,7 +181,7 @@ class FileExportToolTests(TestCase):
         )
 
         self.assertEqual(result["status"], "ok")
-        self.assertEqual(result["file"], "«/exports/hello.pdf»")
+        self.assertEqual(result["file"], "$[/exports/hello.pdf]")
         node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/hello.pdf")
         self.assertEqual(node.mime_type, "application/pdf")
         with node.content.open("rb") as handle:
@@ -200,8 +200,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["file"], "«/exports/report.pdf»")
-        self.assertEqual(second["file"], "«/exports/report (2).pdf»")
+        self.assertEqual(first["file"], "$[/exports/report.pdf]")
+        self.assertEqual(second["file"], "$[/exports/report (2).pdf]")
         # Verify two distinct nodes were created
         first_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.pdf")
         second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).pdf")
@@ -220,8 +220,8 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(first["status"], "ok")
         self.assertEqual(second["status"], "ok")
-        self.assertEqual(first["file"], "«/exports/report.pdf»")
-        self.assertEqual(second["file"], "«/exports/report.pdf»")
+        self.assertEqual(first["file"], "$[/exports/report.pdf]")
+        self.assertEqual(second["file"], "$[/exports/report.pdf]")
         # Verify only one node exists (overwritten)
         nodes = AgentFsNode.objects.filter(created_by_agent=self.agent, path="/exports/report.pdf")
         self.assertEqual(nodes.count(), 1)

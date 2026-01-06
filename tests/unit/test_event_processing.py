@@ -1306,7 +1306,7 @@ class HttpRequestSecretPlaceholderTests(TestCase):
         result = _execute_http_request(self.agent, params)
 
         self.assertEqual(result["status"], "ok", result)
-        self.assertEqual(result["file"], "«/downloads/report.pdf»")
+        self.assertEqual(result["file"], "$[/downloads/report.pdf]")
         self.assertEqual(result["node_id"], "node-123")
         self.assertEqual(result["filename"], "report.pdf")
         mock_write.assert_called_once()

@@ -70,7 +70,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or «/path» variables to include as download links.",
+                        "description": "Optional list of filespace paths or $[/path] variables to include as download links.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -91,7 +91,7 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     body = decode_unicode_escapes(params.get("body"))
     body = strip_control_chars(body)
     body = strip_markdown_for_sms(body)
-    # Substitute «var» placeholders with actual values (e.g., «/charts/...»).
+    # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     body = substitute_variables_with_filespace(body, agent)
     cc_numbers = params.get("cc_numbers", [])  # Optional list for group SMS
     will_continue = _should_continue_work(params)

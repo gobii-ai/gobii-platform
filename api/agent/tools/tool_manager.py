@@ -95,7 +95,7 @@ SKIP_AUTO_SUBSTITUTION_TOOL_NAMES = {
 def should_skip_auto_substitution(tool_name: str) -> bool:
     """Check if a tool opts out of automatic variable substitution.
 
-    Tools that skip auto-substitution handle «var» placeholders themselves,
+    Tools that skip auto-substitution handle $[var] placeholders themselves,
     typically because they need context-specific resolution (e.g., create_pdf
     converts filespace paths to data URIs instead of signed URLs).
     """

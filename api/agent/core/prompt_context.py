@@ -686,7 +686,7 @@ SELECT v.value FROM json_each(extract_emails(text)) v;
 ```
 STEP 1: Call create_chart(...)
 STEP 2: Wait for result
-STEP 3: Result contains: {"inline": "![](«/charts/bar-a1b2c3.svg»)"}
+STEP 3: Result contains: {"inline": "![]($[/charts/bar-a1b2c3.svg])"}
 STEP 4: Copy the EXACT inline value into your message
 ```
 
@@ -698,9 +698,9 @@ STEP 4: Copy the EXACT inline value into your message
 create_chart(type="bar", query="SELECT...", x="category", y="count", title="Distribution")
 
 → Result: {
-    "file": "«/charts/bar-a1b2c3.svg»",
-    "inline": "![](«/charts/bar-a1b2c3.svg»)",       ← for web chat (markdown)
-    "inline_html": "<img src='«/charts/bar-a1b2c3.svg»'>"  ← for PDF/email (HTML)
+    "file": "$[/charts/bar-a1b2c3.svg]",
+    "inline": "![]($[/charts/bar-a1b2c3.svg])",       ← for web chat (markdown)
+    "inline_html": "<img src='$[/charts/bar-a1b2c3.svg]'>"  ← for PDF/email (HTML)
   }
 ```
 
@@ -710,7 +710,7 @@ create_chart(type="bar", query="SELECT...", x="category", y="count", title="Dist
 ```
 ## Results
 
-![](«/charts/bar-a1b2c3.svg»)
+![]($[/charts/bar-a1b2c3.svg])
 
 Key finding: Category A dominates at 45%.
 ```
@@ -718,21 +718,21 @@ Key finding: Category A dominates at 45%.
 **PDF (HTML)** — use `inline_html`:
 ```html
 <h2>Results</h2>
-<img src='«/charts/bar-a1b2c3.svg»'>
+<img src='$[/charts/bar-a1b2c3.svg]'>
 <p>Key finding: Category A dominates at 45%.</p>
 ```
 
-The `«path»` syntax is required for PDFs—it gets replaced with embedded data.
-Using a URL instead of `«path»` will fail with "external asset" error.
+The `$[path]` syntax is required for PDFs—it gets replaced with embedded data.
+Using a URL instead of `$[path]` will fail with "external asset" error.
 
 ### Hallucination patterns (you do these):
 
 ```
-WRONG: ![Chart](<>)                    ← you wrote this before getting the result
-WRONG: ![](charts/foo.svg)             ← you invented a path
-WRONG: ![](/charts/bar.svg)            ← you guessed without the hash
-WRONG: ![](«/charts/bar.svg»)          ← close but wrong—real path has random hash
-RIGHT: ![](«/charts/bar-a1b2c3.svg»)   ← copied from result.inline after tool returned
+WRONG: ![Chart](<>)                      ← you wrote this before getting the result
+WRONG: ![](charts/foo.svg)               ← you invented a path
+WRONG: ![](/charts/bar.svg)              ← you guessed without the hash
+WRONG: ![]($[/charts/bar.svg])           ← close but wrong—real path has random hash
+RIGHT: ![]($[/charts/bar-a1b2c3.svg])    ← copied from result.inline after tool returned
 ```
 
 ### Pre-flight checklist:
@@ -1762,7 +1762,7 @@ def build_prompt_context(
         shrinker="hmt"
     )
 
-    # Agent variables - placeholder values set by tools (e.g., «/charts/...»)
+    # Agent variables - placeholder values set by tools (e.g., $[/charts/...])
     variables_block = format_variables_for_prompt()
     if variables_block:
         variable_group.section_text(
@@ -2632,7 +2632,7 @@ def _get_formatting_guidance(
             "Default to visual: if you're about to write numbers in a paragraph, stop—chart or table them.\n"
             "Example:\n"
             '  "## 📊 Market Snapshot\n\n'
-            "  ![](«result.inline from create_chart»)\n\n"
+            "  ![](result.inline from create_chart)\n\n"
             "  | Asset | Price | 24h | 7d | Signal |\n"
             "  |-------|-------|-----|-----|--------|\n"
             "  | [**BTC**](url) | $67,240 | +2.3% 📈 | +8.1% | 🟢 Bullish |\n"
@@ -2664,7 +2664,7 @@ def _get_formatting_guidance(
             "• No markdown—pure HTML\n\n"
             "Example—a visually rich update with chart:\n"
             "  \"<h2>📊 Your Daily Crypto Update</h2>\n"
-            "  <img src='«/charts/crypto-a1b2c3.svg»'>  <!-- path from create_chart result.inline -->\n"
+            "  <img src='$[/charts/crypto-a1b2c3.svg]'>  <!-- path from create_chart result.inline -->\n"
             "  <p>Here's how your watchlist performed today:</p>\n"
             "  <table style='border-collapse: collapse; width: 100%;'>\n"
             "    <tr style='background: #f5f5f5;'>\n"
@@ -3249,22 +3249,22 @@ def _get_system_instruction(
         "1. call create_chart(...)\n"
         "2. WAIT for result\n"
         "3. result contains:\n"
-        "     inline = \"![](«/charts/bar-a1b2c3.svg»)\"         ← for web chat (markdown)\n"
-        "     inline_html = \"<img src='«/charts/bar-a1b2c3.svg»'>\"  ← for PDF/email (HTML)\n"
+        "     inline = \"![]($[/charts/bar-a1b2c3.svg])\"         ← for web chat (markdown)\n"
+        "     inline_html = \"<img src='$[/charts/bar-a1b2c3.svg]'>\"  ← for PDF/email (HTML)\n"
         "4. copy the appropriate one into your message\n"
         "\n"
         "# Which to use?\n"
         "web_chat  → result.inline (markdown)\n"
-        "create_pdf → result.inline_html (HTML with «path»—REQUIRED for PDFs)\n"
+        "create_pdf → result.inline_html (HTML with $[path]—REQUIRED for PDFs)\n"
         "email     → result.inline_html (HTML)\n"
         "\n"
         "# Your hallucination patterns\n"
-        "WRONG: ![Chart](<>)              # wrote ![  before result returned\n"
-        "WRONG: ![](charts/foo.svg)       # invented path from imagination\n"
-        "WRONG: ![](«/charts/bar.svg»)    # guessed—missing the random hash\n"
-        "WRONG: <img src='https://...'>   # URL in PDF—use «path» syntax instead\n"
-        "RIGHT: ![](«/charts/bar-a1b2c3.svg»)  # copied from result.inline AFTER tool returned\n"
-        "RIGHT: <img src='«/charts/bar-a1b2c3.svg»'>  # copied from result.inline_html for PDF\n"
+        "WRONG: ![Chart](<>)                # wrote ![  before result returned\n"
+        "WRONG: ![](charts/foo.svg)         # invented path from imagination\n"
+        "WRONG: ![]($[/charts/bar.svg])     # guessed—missing the random hash\n"
+        "WRONG: <img src='https://...'>     # URL in PDF—use $[path] syntax instead\n"
+        "RIGHT: ![]($[/charts/bar-a1b2c3.svg])  # copied from result.inline AFTER tool returned\n"
+        "RIGHT: <img src='$[/charts/bar-a1b2c3.svg]'>  # copied from result.inline_html for PDF\n"
         "\n"
         "# Pre-flight (before ANY ![ or <img)\n"
         "have(result) ∧ have(result.inline) → safe to write ![\n"
@@ -3648,7 +3648,7 @@ def _format_recent_minutes_suffix(timestamp: datetime) -> str:
 
 
 def _redact_signed_filespace_urls(text: str, agent: PersistentAgent) -> str:
-    """Replace signed filespace download URLs with «/path» placeholders."""
+    """Replace signed filespace download URLs with $[/path] placeholders."""
     if not text:
         return text
 
@@ -3673,7 +3673,7 @@ def _redact_signed_filespace_urls(text: str, agent: PersistentAgent) -> str:
             )
             if not node or not node.path:
                 return match.group(0)
-            return f"«{node.path}»"
+            return f"$[{node.path}]"
         except Exception:
             logger.debug("Failed to redact signed filespace URL", exc_info=True)
             return match.group(0)
@@ -4003,7 +4003,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
         attachment_paths = _get_message_attachment_paths(m)
         if attachment_paths:
-            components["attachments"] = "\n".join(f"- «{path}»" for path in attachment_paths)
+            components["attachments"] = "\n".join(f"- $[{path}]" for path in attachment_paths)
 
         structured_events.append((m.timestamp, event_type, components))
 

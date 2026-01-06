@@ -67,7 +67,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or «/path» variables from the default filespace.",
+                        "description": "Optional list of filespace paths or $[/path] variables from the default filespace.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -87,7 +87,7 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     # Decode escape sequences and strip control chars from HTML body
     mobile_first_html = decode_unicode_escapes(params.get("mobile_first_html"))
     mobile_first_html = strip_control_chars(mobile_first_html)
-    # Substitute «var» placeholders with actual values (e.g., «/charts/...»).
+    # Substitute $[var] placeholders with actual values (e.g., $[/charts/...]).
     mobile_first_html = substitute_variables_with_filespace(mobile_first_html, agent)
     cc_addresses = params.get("cc_addresses", [])  # Optional list of CC addresses
     will_continue = _should_continue_work(params)

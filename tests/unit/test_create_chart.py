@@ -151,9 +151,9 @@ class CreateChartToolTests(TestCase):
             self.assertIn("attach", result)
             self.assertIn("file", result)
             # inline uses path-based variable
-            self.assertIn("«/charts/bar.svg»", result["inline"])
-            self.assertEqual(result["attach"], "«/charts/bar.svg»")
-            self.assertEqual(result["file"], "«/charts/bar.svg»")
+            self.assertIn("$[/charts/bar.svg]", result["inline"])
+            self.assertEqual(result["attach"], "$[/charts/bar.svg]")
+            self.assertEqual(result["file"], "$[/charts/bar.svg]")
             # No url exposed - prevents LLM from copying it
             self.assertNotIn("url", result)
             # No data_uri - we don't flood LLM context with base64
