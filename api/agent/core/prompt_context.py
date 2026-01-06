@@ -903,16 +903,17 @@ WHERE a.value != b.value;
 ## Advanced: Statistics
 
 ```sql
--- Standard deviation
-SELECT sqrt(avg(x*x) - avg(x)*avg(x)) as stdev FROM t;
+-- Standard deviation (sample and population variants available)
+SELECT STDDEV(x) as stdev_sample, STDDEV_POP(x) as stdev_pop FROM t;
+
+-- Variance
+SELECT VARIANCE(x) as var_sample, VAR_POP(x) as var_pop FROM t;
 
 -- Percentile rank
 SELECT *, PERCENT_RANK() OVER (ORDER BY value) as pct FROM t;
 
 -- Outliers (beyond 2 std dev)
-SELECT * FROM t
-WHERE ABS(value - (SELECT AVG(value) FROM t)) >
-      2 * (SELECT sqrt(avg(value*value) - avg(value)*avg(value)) FROM t);
+SELECT * FROM t WHERE ABS(value - (SELECT AVG(value) FROM t)) > 2 * (SELECT STDDEV(value) FROM t);
 ```
 
 ---

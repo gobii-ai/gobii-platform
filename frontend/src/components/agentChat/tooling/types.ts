@@ -60,6 +60,8 @@ export type ToolDescriptorTransform = {
   sqlStatements?: string[]
   summary?: string | null
   detailComponent?: ToolDetailComponent
+  /** If true, this tool entry should be hidden from the timeline */
+  skip?: boolean
 }
 
 export type ToolDescriptor = {

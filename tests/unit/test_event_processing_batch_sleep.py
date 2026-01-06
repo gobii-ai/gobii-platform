@@ -509,7 +509,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.apply_sqlite_kanban_updates')
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_kanban_done_with_message_stops_even_with_continuation(
+    def test_kanban_done_with_message_stops(
         self,
         mock_completion,
         mock_build_prompt,
@@ -517,6 +517,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_send_chat,
         _mock_credit,
     ):
+        """When kanban is complete and a final message is sent (no will_continue_work), agent stops."""
         mock_build_prompt.return_value = (
             [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
             1000,
@@ -545,7 +546,8 @@ class TestBatchToolCallsWithSleep(TestCase):
             tc.function.arguments = args
             return tc
 
-        tc_message = mk_tc('send_chat_message', '{"body": "Done.", "will_continue_work": true}')
+        # No will_continue_work flag - this is a final message
+        tc_message = mk_tc('send_chat_message', '{"body": "Done."}')
 
         msg = MagicMock()
         msg.tool_calls = [tc_message]
