@@ -32,6 +32,16 @@
           <span id="addons-total-browser-tasks" class="font-semibold text-slate-900">{{ addon_context.totals.browser_task_daily|default:"0" }}</span>
         </span>
         <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
+          <span class="text-slate-500">Captcha resolution</span>
+          <span id="addons-total-captcha" class="font-semibold text-slate-900">
+            {% if addon_context.totals.advanced_captcha_resolution %}
+              Enabled
+            {% else %}
+              Disabled
+            {% endif %}
+          </span>
+        </span>
+        <span class="inline-flex items-center gap-1 px-3 py-2 rounded-md bg-blue-50/60 border border-slate-200">
           <span class="text-slate-500">Total add-on price</span>
           <span id="addons-total-price" class="font-semibold text-slate-900">
             {% if addon_context.totals.amount_display %}
@@ -62,6 +72,7 @@
     const totalContactsEl = document.getElementById("addons-total-contacts");
     const totalBrowserTasksEl = document.getElementById("addons-total-browser-tasks");
     const totalPriceEl = document.getElementById("addons-total-price");
+    const totalCaptchaEl = document.getElementById("addons-total-captcha");
 
     const formatMoney = (cents, currency) => {
       if (!cents) return "—";
@@ -85,6 +96,7 @@
       let contactTotal = 0;
       let browserTaskTotal = 0;
       let priceCents = 0;
+      let captchaEnabled = 0;
       let currency = "";
 
       qtyInputs.forEach((input) => {
@@ -104,6 +116,8 @@
           contactTotal += delta * qty;
         } else if (kind === "browser_task") {
           browserTaskTotal += delta * qty;
+        } else if (kind === "advanced_captcha_resolution") {
+          captchaEnabled += qty;
         }
         priceCents += cents * qty;
       });
@@ -112,6 +126,7 @@
       if (totalContactsEl) totalContactsEl.textContent = contactTotal;
       if (totalBrowserTasksEl) totalBrowserTasksEl.textContent = browserTaskTotal;
       if (totalPriceEl) totalPriceEl.textContent = priceCents > 0 ? formatMoney(priceCents, currency || "USD") : "—";
+      if (totalCaptchaEl) totalCaptchaEl.textContent = captchaEnabled > 0 ? "Enabled" : "Disabled";
     };
 
     qtyInputs.forEach((input) => {
