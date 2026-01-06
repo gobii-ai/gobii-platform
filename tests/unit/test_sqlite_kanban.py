@@ -135,3 +135,46 @@ class SqliteKanbanTests(TestCase):
             PersistentAgentKanbanCard.objects.filter(title="Other agent task").exists()
         )
         self.assertTrue(result.errors)
+
+    def test_sqlite_kanban_emits_update_for_non_status_changes(self):
+        card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Unchanged status",
+            description="Original",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_kanban(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.execute(
+                        f"""
+                        UPDATE "{KANBAN_CARDS_TABLE}"
+                        SET title = ?, description = ?, priority = ?
+                        WHERE id = ?;
+                        """,
+                        ("Updated title", "New description", 3, str(card.id)),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_kanban_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        card.refresh_from_db()
+        self.assertEqual(card.title, "Updated title")
+        self.assertEqual(card.description, "New description")
+        self.assertEqual(card.priority, 3)
+        self.assertFalse(result.errors)
+        self.assertEqual(len(result.changes), 1)
+        self.assertEqual(result.changes[0].action, "updated")
+        self.assertEqual(result.changes[0].to_status, PersistentAgentKanbanCard.Status.TODO)
+        self.assertIsNotNone(result.snapshot)
+        self.assertEqual(result.snapshot.todo_count, 1)

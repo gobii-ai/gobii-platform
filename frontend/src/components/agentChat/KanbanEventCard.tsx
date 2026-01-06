@@ -104,6 +104,69 @@ function BoardSummary({ snapshot }: { snapshot: KanbanEvent['snapshot'] }) {
   )
 }
 
+function BoardPreview({ snapshot }: { snapshot: KanbanEvent['snapshot'] }) {
+  const sections = [
+    {
+      key: 'doing',
+      label: 'Doing',
+      count: snapshot.doingCount,
+      titles: snapshot.doingTitles,
+      dotClass: 'kanban-dot-doing',
+      labelClass: 'kanban-label-doing',
+    },
+    {
+      key: 'todo',
+      label: 'Todo',
+      count: snapshot.todoCount,
+      titles: snapshot.todoTitles,
+      dotClass: 'kanban-dot-todo',
+      labelClass: 'kanban-label-todo',
+    },
+    {
+      key: 'done',
+      label: 'Done',
+      count: snapshot.doneCount,
+      titles: snapshot.doneTitles,
+      dotClass: 'kanban-dot-done',
+      labelClass: 'kanban-label-done',
+    },
+  ] as const
+
+  const hasCards = sections.some((section) => section.count > 0)
+  if (!hasCards) return null
+
+  return (
+    <div className="kanban-board-preview">
+      {sections.map((section) => {
+        if (section.count === 0) return null
+        const remaining = section.count - section.titles.length
+        const hasTitles = section.titles.length > 0
+        return (
+          <div className="kanban-preview-row" key={section.key}>
+            <div className="kanban-preview-header">
+              <span className={`kanban-preview-label ${section.labelClass}`}>{section.label}</span>
+              <span className="kanban-preview-count">{section.count}</span>
+            </div>
+            <div className="kanban-preview-list">
+              {section.titles.map((title, index) => (
+                <div className="kanban-preview-item" key={`${section.key}-${index}`}>
+                  <span className={`kanban-preview-dot ${section.dotClass}`} aria-hidden="true" />
+                  <span className="kanban-preview-title">{title}</span>
+                </div>
+              ))}
+              {remaining > 0 && (
+                <div className="kanban-preview-more">
+                  {hasTitles ? `+${remaining} more` : `${remaining} tasks`}
+                </div>
+              )}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export const KanbanEventCard = memo(function KanbanEventCard({ event }: KanbanEventCardProps) {
   const [animate, setAnimate] = useState(false)
 
@@ -116,19 +179,16 @@ export const KanbanEventCard = memo(function KanbanEventCard({ event }: KanbanEv
 
   return (
     <div className={`kanban-event-card ${hasCompletion ? 'kanban-event-completed' : ''}`}>
-      {/* What changed - the important part */}
+      <div className="kanban-section-label">Changes</div>
       <div className="kanban-changes">
         {event.changes.map((change) => (
-          <ChangeItem
-            key={change.cardId}
-            change={change}
-            animate={animate}
-          />
+          <ChangeItem key={change.cardId} change={change} animate={animate} />
         ))}
       </div>
 
-      {/* Board state summary */}
+      <div className="kanban-section-label kanban-section-label--summary">Board now</div>
       <BoardSummary snapshot={event.snapshot} />
+      <BoardPreview snapshot={event.snapshot} />
 
       {/* Celebration shimmer for completions */}
       {hasCompletion && animate && (

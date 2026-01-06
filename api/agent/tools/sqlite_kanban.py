@@ -250,19 +250,25 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
 
             update_fields: list[str] = []
             old_status = card_obj.status
+            status_changed = False
+            non_status_changed = False
             if card_obj.title != current_card.title:
                 card_obj.title = current_card.title
                 update_fields.append("title")
+                non_status_changed = True
             if (card_obj.description or "") != (current_card.description or ""):
                 card_obj.description = current_card.description
                 update_fields.append("description")
+                non_status_changed = True
             if card_obj.priority != current_card.priority:
                 card_obj.priority = current_card.priority
                 update_fields.append("priority")
+                non_status_changed = True
 
             if card_obj.status != current_card.status:
                 card_obj.status = current_card.status
                 update_fields.append("status")
+                status_changed = True
                 if current_card.status == PersistentAgentKanbanCard.Status.DONE:
                     if card_obj.completed_at is None:
                         card_obj.completed_at = timezone.now()
@@ -278,13 +284,23 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
                 updated_ids.append(str(card_uuid))
 
                 # Track meaningful changes for timeline
-                if old_status != current_card.status:
+                if status_changed:
                     action = _determine_action(old_status, current_card.status)
                     changes.append(
                         KanbanCardChange(
                             card_id=str(card_uuid),
                             title=current_card.title,
                             action=action,
+                            from_status=old_status,
+                            to_status=current_card.status,
+                        )
+                    )
+                elif non_status_changed:
+                    changes.append(
+                        KanbanCardChange(
+                            card_id=str(card_uuid),
+                            title=current_card.title,
+                            action="updated",
                             from_status=old_status,
                             to_status=current_card.status,
                         )
