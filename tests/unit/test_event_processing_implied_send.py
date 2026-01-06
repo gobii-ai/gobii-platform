@@ -507,6 +507,7 @@ class ImpliedSendTests(TestCase):
         self.assertIsNotNone(sleep_step, "Other tool calls should execute even when implied send fails")
 
 
+@tag("batch_event_processing")
 class ContinuationSignalTests(TestCase):
     """Tests for the _has_continuation_signal helper function."""
 
