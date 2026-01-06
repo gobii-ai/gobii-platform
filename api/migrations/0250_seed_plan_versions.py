@@ -468,7 +468,7 @@ def noop_reverse(apps, schema_editor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0247_plan_versioning"),
+        ("api", "0249_plan_versioning"),
     ]
 
     operations = [

@@ -31,7 +31,7 @@ def _backfill_toolratelimit_plan_ids(apps, schema_editor) -> None:
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0248_seed_plan_versions"),
+        ("api", "0250_seed_plan_versions"),
     ]
 
     operations = [

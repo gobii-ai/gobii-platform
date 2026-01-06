@@ -27,7 +27,7 @@ def _drop_toolratelimit_plan_fk(apps, schema_editor) -> None:
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0246_add_google_docs_to_pipedream_prefetch"),
+        ("api", "0248_alter_promptconfig_premium_tool_call_history_limit_and_more"),
     ]
 
     operations = [
