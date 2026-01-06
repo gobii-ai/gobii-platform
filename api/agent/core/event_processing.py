@@ -102,6 +102,7 @@ from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
 )
+from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
 from ..tools.sqlite_state import agent_sqlite_db
 from ..tools.secure_credentials_request import execute_secure_credentials_request
 from ..tools.request_contact_permission import execute_request_contact_permission
@@ -2231,6 +2232,7 @@ def _run_agent_loop(
                     return cumulative_token_usage
 
             config_snapshot = seed_sqlite_agent_config(agent)
+            kanban_snapshot = seed_sqlite_kanban(agent)
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
@@ -2403,6 +2405,27 @@ def _run_agent_loop(
                         )
                 return True
 
+            def _apply_kanban_updates() -> bool:
+                kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
+                if not kanban_apply.errors:
+                    return False
+                for error in kanban_apply.errors:
+                    try:
+                        step_kwargs = {
+                            "agent": agent,
+                            "description": f"Kanban update failed: {error}",
+                        }
+                        _attach_completion(step_kwargs)
+                        step = PersistentAgentStep.objects.create(**step_kwargs)
+                        _attach_prompt_archive(step)
+                    except Exception:
+                        logger.debug(
+                            "Failed to persist kanban update error step for agent %s",
+                            agent.id,
+                            exc_info=True,
+                        )
+                return True
+
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
 
@@ -2459,7 +2482,8 @@ def _run_agent_loop(
 
             if not tool_calls:
                 config_errors = _apply_agent_config_updates()
-                if config_errors:
+                kanban_errors = _apply_kanban_updates()
+                if config_errors or kanban_errors:
                     reasoning_only_streak = 0
                     continue
                 if not message_text:
@@ -2823,7 +2847,7 @@ def _run_agent_loop(
 
                     executed_calls += 1
 
-            if _apply_agent_config_updates():
+            if _apply_agent_config_updates() or _apply_kanban_updates():
                 followup_required = True
 
             if all_calls_sleep:

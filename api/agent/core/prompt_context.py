@@ -46,6 +46,7 @@ from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
+    PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentPromptArchive,
     PersistentAgentSecret,
@@ -85,6 +86,7 @@ from ..tools.spawn_web_task import (
 )
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
+    KANBAN_CARDS_TABLE,
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
 )
@@ -104,6 +106,10 @@ tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
 INTERNAL_REASONING_PREFIX = "Internal reasoning:"
+KANBAN_DONE_SUMMARY_LIMIT = 5
+KANBAN_DONE_DESC_LIMIT = 140
+KANBAN_DONE_TITLE_LIMIT = 80
+KANBAN_DETAIL_DESC_LIMIT = 800
 SIGNED_FILES_URL_RE = re.compile(
     r"https?://[^\s\"'<>]+/d/(?P<token>[^\s\"'<>/]+)(?:/)?"
 )
@@ -863,6 +869,103 @@ Avoid these:
 """
 
 
+def _truncate_kanban_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0:
+        return ""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3] + "..."
+
+
+def _format_kanban_card_detail(card: PersistentAgentKanbanCard) -> str:
+    description = (card.description or "").strip()
+    if description:
+        description = _truncate_kanban_text(description, KANBAN_DETAIL_DESC_LIMIT)
+    lines = [
+        f"ID: {card.id}",
+        f"Title: {card.title}",
+        f"Status: {card.status}",
+        f"Priority: {card.priority}",
+    ]
+    lines.append(f"Description: {description or '(none)'}")
+    return "\n".join(lines)
+
+
+def _format_kanban_done_summary(cards: Sequence[PersistentAgentKanbanCard]) -> str:
+    if not cards:
+        return "No done cards yet."
+    lines = []
+    for card in cards:
+        title = _truncate_kanban_text((card.title or "").strip(), KANBAN_DONE_TITLE_LIMIT)
+        description = _truncate_kanban_text((card.description or "").strip(), KANBAN_DONE_DESC_LIMIT)
+        completed_at = card.completed_at or card.updated_at
+        completed_text = completed_at.isoformat() if completed_at else "unknown"
+        detail = f"{title} (id: {card.id}, completed: {completed_text}, priority: {card.priority})"
+        if description:
+            detail = f"{detail} - {description}"
+        lines.append(f"- {detail}")
+    return "\n".join(lines)
+
+
+def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
+    """Attach kanban summary sections to the prompt."""
+    try:
+        doing_cards = list(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.DOING,
+            ).order_by("-priority", "created_at")
+        )
+        todo_card = (
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.TODO,
+            )
+            .order_by("-priority", "created_at")
+            .first()
+        )
+        done_cards = list(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status=PersistentAgentKanbanCard.Status.DONE,
+            )
+            .order_by("-completed_at", "-updated_at")[:KANBAN_DONE_SUMMARY_LIMIT]
+        )
+    except Exception:
+        logger.exception("Failed to load kanban cards for agent %s", agent.id)
+        return
+
+    kanban_group = parent_group.group("kanban", weight=4)
+    doing_text = (
+        "\n\n".join(_format_kanban_card_detail(card) for card in doing_cards)
+        if doing_cards
+        else "No cards in doing."
+    )
+    kanban_group.section_text(
+        "kanban_doing",
+        doing_text,
+        weight=3,
+        non_shrinkable=True,
+    )
+
+    todo_text = _format_kanban_card_detail(todo_card) if todo_card else "No to-do cards."
+    kanban_group.section_text(
+        "kanban_todo",
+        todo_text,
+        weight=2,
+        non_shrinkable=True,
+    )
+
+    kanban_group.section_text(
+        "kanban_done",
+        _format_kanban_done_summary(done_cards),
+        weight=1,
+        non_shrinkable=True,
+    )
+
+
 def _archive_rendered_prompt(
     agent: PersistentAgent,
     system_prompt: str,
@@ -1476,6 +1579,8 @@ def build_prompt_context(
         non_shrinkable=True
     )
 
+    _build_kanban_sections(agent, important_group)
+
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
         cap_group = important_group.group("agent_capabilities", weight=2)
@@ -1682,6 +1787,21 @@ def build_prompt_context(
     variable_group.section_text(
         "agent_config_note",
         agent_config_note,
+        weight=2,
+        non_shrinkable=True,
+    )
+    kanban_note = (
+        f"The kanban board lives in {KANBAN_CARDS_TABLE} (auto-seeded each cycle). "
+        "Use sqlite_batch to create or update cards. "
+        "Status values: todo, doing, done. "
+        "Priority uses larger numbers for higher priority. "
+        "Only create or edit cards assigned to you. "
+        "Example: INSERT INTO __kanban_cards (title, description, status, priority) "
+        "VALUES ('Draft outreach list', 'Collect 10 targets for review.', 'todo', 5);"
+    )
+    variable_group.section_text(
+        "kanban_note",
+        kanban_note,
         weight=2,
         non_shrinkable=True,
     )
@@ -3201,8 +3321,8 @@ def _get_system_instruction(
         "header_list     → ## {title}\\n\\n- {item1}\\n- {item2}\n"
         "section_full    → ## {emoji} {TITLE}\\n\\n{table|chart|list}\\n\\n{insight}\\n\\n{offer}?\n"
         "```\n"
-        f"File downloads are {"" if settings.ALLOW_FILE_DOWNLOAD else "not"} supported. "
-        f"File uploads are {"" if settings.ALLOW_FILE_UPLOAD else "not"} supported. "
+        f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
+        f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n"
@@ -3265,6 +3385,9 @@ def _get_system_instruction(
 
         "will_continue_work=false (or omit) means 'I'm done with this request'.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
+        "Track your work in the kanban board (__kanban_cards). Break large work into multiple cards, "
+        "keep active items in 'doing', and move them to 'done' when complete. "
+        "Status values: todo, doing, done. Only create or edit cards assigned to you. "
 
         "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
 

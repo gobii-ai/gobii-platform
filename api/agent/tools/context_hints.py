@@ -81,15 +81,15 @@ TEXT_FIELDS = frozenset({
     'full_text', 'body', 'message',
 })
 
-# Hard limits
-MAX_HINT_BYTES = 400
+# Hard limits - conservative for scalability with long histories
+MAX_HINT_BYTES = 500  # Enough for 4 items + URLs, not more
 MAX_ITEMS = 4
 MAX_URLS = 3
 MAX_FIELD_LEN = 50
 MAX_LINE_LEN = 120
 BARBELL_TARGET_BYTES = 8000
-GOLDILOCKS_MIN_BYTES = 20000
-GOLDILOCKS_MAX_BYTES = 8000
+GOLDILOCKS_MIN_BYTES = 8000  # Trigger for mid-sized messy JSON (was 20KB)
+GOLDILOCKS_MAX_BYTES = 6000  # Cap output to avoid context bloat
 GOLDILOCKS_HINT_PREFIX = "JSON_FOCUS:"
 
 

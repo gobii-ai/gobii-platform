@@ -4803,6 +4803,49 @@ class PersistentAgent(models.Model):
             return self.__class__.objects.filter(pk=self.pk).delete()
 
 
+class PersistentAgentKanbanCard(models.Model):
+    """Kanban card assigned to a persistent agent."""
+
+    class Status(models.TextChoices):
+        TODO = "todo", "To Do"
+        DOING = "doing", "Doing"
+        DONE = "done", "Done"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    assigned_agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="kanban_cards",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.TODO,
+    )
+    priority = models.IntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-priority", "created_at"]
+        indexes = [
+            models.Index(
+                fields=["assigned_agent", "status", "-priority"],
+                name="kanban_agent_status_pri_idx",
+            ),
+            models.Index(
+                fields=["assigned_agent", "status", "-completed_at"],
+                name="kanban_agent_status_done_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"Kanban<{self.title}> ({self.status})"
+
+
 class MCPServerConfig(models.Model):
     """Configurable MCP server definition scoped to platform, org, or user."""
 

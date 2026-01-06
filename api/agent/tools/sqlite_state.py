@@ -32,10 +32,12 @@ _sqlite_db_path_var: contextvars.ContextVar[str] = contextvars.ContextVar("sqlit
 
 TOOL_RESULTS_TABLE = "__tool_results"
 AGENT_CONFIG_TABLE = "__agent_config"
-EPHEMERAL_TABLES = {TOOL_RESULTS_TABLE, AGENT_CONFIG_TABLE}
+KANBAN_CARDS_TABLE = "__kanban_cards"
+EPHEMERAL_TABLES = {TOOL_RESULTS_TABLE, AGENT_CONFIG_TABLE, KANBAN_CARDS_TABLE}
 BUILTIN_TABLE_NOTES = {
     TOOL_RESULTS_TABLE: "built-in, ephemeral (dropped before persistence)",
     AGENT_CONFIG_TABLE: "built-in, ephemeral (reset every LLM call; charter/schedule updates)",
+    KANBAN_CARDS_TABLE: "built-in, ephemeral (syncs to kanban cards after tool execution)",
 }
 
 MAX_PROMPT_BYTES = 30000
