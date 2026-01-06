@@ -8792,13 +8792,14 @@ def _update_addon_quantity(
             else:
                 items_payload = [{"price": price_id, "quantity": desired_qty}]
 
-            updated_subscription = stripe.Subscription.modify(
-                subscription.id,
-                items=items_payload,
-                proration_behavior="always_invoice",
-                payment_behavior="pending_if_incomplete",
-                expand=["items.data.price"],
-            )
+            modify_kwargs = {
+                "items": items_payload,
+                "proration_behavior": "always_invoice",
+                "expand": ["items.data.price"],
+            }
+            if not any(item.get("deleted") for item in items_payload):
+                modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+            updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
                 updated_items = []
@@ -9018,13 +9019,14 @@ def update_addons(request, owner, owner_type):
             changes_made = True
 
         if changes_made:
-            updated_subscription = stripe.Subscription.modify(
-                subscription.id,
-                items=items_payload,
-                proration_behavior="always_invoice",
-                payment_behavior="pending_if_incomplete",
-                expand=["items.data.price"],
-            )
+            modify_kwargs = {
+                "items": items_payload,
+                "proration_behavior": "always_invoice",
+                "expand": ["items.data.price"],
+            }
+            if not any(item.get("deleted") for item in items_payload):
+                modify_kwargs["payment_behavior"] = "pending_if_incomplete"
+            updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
                 updated_items = []
