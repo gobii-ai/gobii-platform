@@ -36,7 +36,8 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, Plan, PlanVersion, PlanVersionPrice,
+    EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
     MeteringBatch,
     UsageThresholdSent,
@@ -714,6 +715,116 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
         return False
+
+
+@admin.register(Plan)
+class PlanAdmin(admin.ModelAdmin):
+    list_display = ("slug", "is_org", "is_active", "created_at", "updated_at")
+    search_fields = ("slug",)
+    list_filter = ("is_org", "is_active")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("slug", "is_org", "is_active", "created_at", "updated_at")
+
+
+@admin.register(PlanVersion)
+class PlanVersionAdmin(admin.ModelAdmin):
+    list_display = (
+        "plan",
+        "version_code",
+        "legacy_plan_code",
+        "is_active_for_new_subs",
+        "display_name",
+        "effective_start_at",
+        "effective_end_at",
+        "updated_at",
+    )
+    search_fields = ("plan__slug", "version_code", "legacy_plan_code", "display_name")
+    list_filter = ("plan", "is_active_for_new_subs")
+    list_select_related = ("plan",)
+    autocomplete_fields = ("plan",)
+    readonly_fields = ("created_at", "updated_at")
+    fieldsets = (
+        (None, {"fields": ("plan", "version_code", "legacy_plan_code", "is_active_for_new_subs")}),
+        ("Marketing", {"fields": ("display_name", "tagline", "description", "marketing_features")}),
+        ("Availability", {"fields": ("effective_start_at", "effective_end_at")}),
+        ("Metadata", {"fields": ("created_at", "updated_at")}),
+    )
+
+
+@admin.register(PlanVersionPrice)
+class PlanVersionPriceAdmin(admin.ModelAdmin):
+    list_display = (
+        "plan_version",
+        "kind",
+        "billing_interval",
+        "price_id",
+        "product_id",
+        "updated_at",
+    )
+    search_fields = (
+        "price_id",
+        "product_id",
+        "plan_version__plan__slug",
+        "plan_version__version_code",
+        "plan_version__legacy_plan_code",
+    )
+    list_filter = ("kind", "billing_interval")
+    list_select_related = ("plan_version",)
+    autocomplete_fields = ("plan_version",)
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("plan_version", "kind", "billing_interval", "price_id", "product_id", "created_at", "updated_at")
+
+
+@admin.register(EntitlementDefinition)
+class EntitlementDefinitionAdmin(admin.ModelAdmin):
+    list_display = ("key", "display_name", "value_type", "unit", "updated_at")
+    search_fields = ("key", "display_name", "description")
+    list_filter = ("value_type",)
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("key", "display_name", "description", "value_type", "unit", "created_at", "updated_at")
+
+
+@admin.register(PlanVersionEntitlement)
+class PlanVersionEntitlementAdmin(admin.ModelAdmin):
+    list_display = ("plan_version", "entitlement", "value_summary", "currency", "updated_at")
+    search_fields = (
+        "plan_version__plan__slug",
+        "plan_version__version_code",
+        "plan_version__legacy_plan_code",
+        "entitlement__key",
+        "entitlement__display_name",
+        "value_text",
+    )
+    list_filter = ("plan_version", "entitlement")
+    list_select_related = ("plan_version", "entitlement")
+    autocomplete_fields = ("plan_version", "entitlement")
+    readonly_fields = ("created_at", "updated_at")
+    fields = (
+        "plan_version",
+        "entitlement",
+        "value_int",
+        "value_decimal",
+        "value_bool",
+        "value_text",
+        "value_json",
+        "currency",
+        "created_at",
+        "updated_at",
+    )
+
+    @admin.display(description="Value")
+    def value_summary(self, obj):
+        if obj.value_int is not None:
+            return obj.value_int
+        if obj.value_decimal is not None:
+            return obj.value_decimal
+        if obj.value_bool is not None:
+            return obj.value_bool
+        if obj.value_text:
+            return obj.value_text
+        if obj.value_json is not None:
+            return obj.value_json
+        return ""
 
 
 @admin.register(DailyCreditConfig)

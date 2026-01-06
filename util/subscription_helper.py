@@ -7,9 +7,9 @@ from django.db.utils import IntegrityError
 from djstripe.models import Customer
 
 from constants.grant_types import GrantTypeChoices
-from config.plans import PLAN_CONFIG, get_plan_by_product_id, AGENTS_UNLIMITED
+from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
 from config.stripe_config import get_stripe_settings
-from constants.plans import PlanNames
+from constants.plans import LEGACY_PLAN_BY_SLUG, PlanNames
 from datetime import datetime, timedelta, date, time
 from decimal import Decimal
 from django.utils import timezone
@@ -27,6 +27,10 @@ from djstripe.enums import SubscriptionStatus
 from django.apps import apps
 from dateutil.relativedelta import relativedelta
 from billing.addons import AddonEntitlementService
+from billing.plan_resolver import (
+    get_owner_plan_context,
+    get_plan_version_by_legacy_code,
+)
 from billing.services import BillingService
 
 try:
@@ -613,21 +617,25 @@ def get_owner_plan(owner) -> dict[str, int | str]:
         owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
         logger.debug("get_owner_plan %s %s", owner_type, owner_id)
 
+        try:
+            plan_context = get_owner_plan_context(owner)
+            if plan_context:
+                return plan_context
+        except Exception:
+            logger.warning(
+                "get_owner_plan %s: failed to resolve plan context; falling back to legacy config",
+                owner_id,
+                exc_info=True,
+            )
+
         billing_record = _get_billing_record(owner)
-
-        if not billing_record:
-            return PLAN_CONFIG[PlanNames.FREE]
-
-        sub_name = getattr(billing_record, "subscription", None)
-
-        return PLAN_CONFIG[str(sub_name).lower()] if sub_name in PLAN_CONFIG else PLAN_CONFIG[PlanNames.FREE]
+        sub_name = getattr(billing_record, "subscription", None) if billing_record else None
+        sub_key = str(sub_name).lower() if sub_name else PlanNames.FREE
+        return PLAN_CONFIG.get(sub_key, PLAN_CONFIG[PlanNames.FREE])
 
 def get_user_plan(user) -> dict[str, int | str]:
     return get_owner_plan(user)
 
-
-def get_organization_plan(organization) -> dict[str, int | str]:
-    return get_owner_plan(organization)
 
 def get_user_task_credit_limit(user) -> int:
     """
@@ -1020,7 +1028,7 @@ def filter_users_without_active_subscription(users):
     with traced("SUBSCRIPTION Filter Users Without Active Subscription"):
         return [user for user in users if not get_active_subscription(user)]
 
-def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = True):
+def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = True, plan_version=None):
     """Persist the selected plan on the owner billing record (user or organization)."""
     with traced("SUBSCRIPTION Mark Billing with Plan") as span:
         owner_type = _resolve_owner_type(owner)
@@ -1030,7 +1038,16 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
             span.set_attribute("owner.id", str(owner_id))
         span.set_attribute("update_anchor", str(update_anchor))
 
+        normalized_plan_name = str(plan_name).lower() if plan_name else None
+        if normalized_plan_name:
+            plan_name = LEGACY_PLAN_BY_SLUG.get(normalized_plan_name, plan_name)
+
+        if plan_version is None and plan_name:
+            plan_version = get_plan_version_by_legacy_code(plan_name)
+
         defaults = {"subscription": plan_name}
+        if plan_version is not None:
+            defaults["plan_version"] = plan_version
         if update_anchor:
             defaults["billing_cycle_anchor"] = timezone.now().day
 
@@ -1099,12 +1116,12 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
         return billing_record
 
 
-def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True):
-    return mark_owner_billing_with_plan(user, plan_name, update_anchor)
+def mark_user_billing_with_plan(user, plan_name: str, update_anchor: bool = True, plan_version=None):
+    return mark_owner_billing_with_plan(user, plan_name, update_anchor, plan_version=plan_version)
 
 
-def mark_organization_billing_with_plan(organization, plan_name: str, update_anchor: bool = True):
-    return mark_owner_billing_with_plan(organization, plan_name, update_anchor)
+def mark_organization_billing_with_plan(organization, plan_name: str, update_anchor: bool = True, plan_version=None):
+    return mark_owner_billing_with_plan(organization, plan_name, update_anchor, plan_version=plan_version)
 
 
 # ------------------------------------------------------------------------------
@@ -1115,28 +1132,21 @@ def get_organization_plan(organization) -> dict[str, int | str]:
     """Return the plan configuration dictionary for an organization."""
     with traced("SUBSCRIPTION Get Organization Plan"):
         billing = getattr(organization, "billing", None)
+        if billing and (getattr(billing, "plan_version", None) or getattr(billing, "subscription", None)):
+            return get_owner_plan(organization)
 
-        plan_key: str | None = None
-        if billing and getattr(billing, "subscription", None):
-            plan_key = billing.subscription
-        elif getattr(organization, "plan", None):
-            plan_key = organization.plan
-
-        if not plan_key:
-            plan_key = PlanNames.FREE
-
+        plan_key = getattr(organization, "plan", None) or PlanNames.FREE
         plan_key = str(plan_key).lower()
         plan = PLAN_CONFIG.get(plan_key)
+        if plan:
+            return plan
 
-        if not plan:
-            logger.warning(
-                "get_organization_plan %s: Unknown plan '%s', defaulting to free",
-                getattr(organization, "id", "n/a"),
-                plan_key,
-            )
-            return PLAN_CONFIG[PlanNames.FREE]
-
-        return plan
+        logger.warning(
+            "get_organization_plan %s: Unknown plan '%s', defaulting to free",
+            getattr(organization, "id", "n/a"),
+            plan_key,
+        )
+        return PLAN_CONFIG[PlanNames.FREE]
 
 
 def get_organization_task_credit_limit(organization) -> int:

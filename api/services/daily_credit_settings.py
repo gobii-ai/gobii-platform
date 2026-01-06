@@ -5,8 +5,8 @@ from typing import Optional
 
 from django.core.cache import cache
 
-from constants.plans import PlanNames, PlanNamesChoices
-from util.subscription_helper import get_owner_plan
+from constants.plans import PlanNamesChoices
+from api.services.plan_settings import resolve_owner_plan_identifiers, select_plan_settings_payload
 
 from api.models import DailyCreditConfig
 
@@ -49,10 +49,11 @@ def _coalesce_int(value, fallback: int) -> int:
         return fallback
 
 
-def _serialise(configs) -> dict:
-    payload = {}
+def _serialise(configs) -> dict[str, dict[str, dict]]:
+    by_plan_version: dict[str, dict] = {}
+    by_plan_name: dict[str, dict] = {}
     for config in configs:
-        payload[config.plan_name] = {
+        payload = {
             "slider_min": _coalesce_decimal(config.slider_min, DEFAULT_SLIDER_MIN),
             "slider_max": _coalesce_decimal(config.slider_max, DEFAULT_SLIDER_MAX),
             "slider_step": _coalesce_decimal(config.slider_step, DEFAULT_SLIDER_STEP),
@@ -69,13 +70,35 @@ def _serialise(configs) -> dict:
                 DEFAULT_HARD_LIMIT_MULTIPLIER,
             ),
         }
-    return payload
+        if getattr(config, "plan_version_id", None):
+            by_plan_version[str(config.plan_version_id)] = payload
+        if config.plan_name:
+            by_plan_name[config.plan_name] = payload
+    return {"by_plan_version": by_plan_version, "by_plan_name": by_plan_name}
 
 
 def _ensure_defaults_exist() -> None:
     for plan_name in PlanNamesChoices.values:
         DailyCreditConfig.objects.get_or_create(
             plan_name=plan_name,
+            defaults={
+                "slider_min": DEFAULT_SLIDER_MIN,
+                "slider_max": DEFAULT_SLIDER_MAX,
+                "slider_step": DEFAULT_SLIDER_STEP,
+                "burn_rate_threshold_per_hour": DEFAULT_BURN_RATE_THRESHOLD,
+                "burn_rate_window_minutes": DEFAULT_BURN_RATE_WINDOW_MINUTES,
+                "hard_limit_multiplier": DEFAULT_HARD_LIMIT_MULTIPLIER,
+            },
+        )
+    try:
+        from django.apps import apps
+
+        PlanVersion = apps.get_model("api", "PlanVersion")
+    except Exception:
+        return
+    for plan_version in PlanVersion.objects.all():
+        DailyCreditConfig.objects.get_or_create(
+            plan_version=plan_version,
             defaults={
                 "slider_min": DEFAULT_SLIDER_MIN,
                 "slider_max": DEFAULT_SLIDER_MAX,
@@ -99,12 +122,12 @@ def _load_settings() -> dict:
     return payload
 
 
-def get_daily_credit_settings_for_plan(plan_name: Optional[str]) -> DailyCreditSettings:
+def get_daily_credit_settings_for_plan_version(
+    plan_version_id: Optional[str],
+    plan_name: Optional[str] = None,
+) -> DailyCreditSettings:
     settings_map = _load_settings()
-    normalized_plan = (plan_name or PlanNames.FREE).lower()
-    config = settings_map.get(normalized_plan) or settings_map.get(PlanNames.FREE)
-
-    config = config or {}
+    config = select_plan_settings_payload(settings_map, plan_version_id, plan_name)
     return DailyCreditSettings(
         slider_min=_coalesce_decimal(config.get("slider_min"), DEFAULT_SLIDER_MIN),
         slider_max=_coalesce_decimal(config.get("slider_max"), DEFAULT_SLIDER_MAX),
@@ -124,16 +147,13 @@ def get_daily_credit_settings_for_plan(plan_name: Optional[str]) -> DailyCreditS
     )
 
 
+def get_daily_credit_settings_for_plan(plan_name: Optional[str]) -> DailyCreditSettings:
+    return get_daily_credit_settings_for_plan_version(None, plan_name)
+
+
 def get_daily_credit_settings_for_owner(owner) -> DailyCreditSettings:
-    plan_name = None
-    if owner:
-        try:
-            plan = get_owner_plan(owner)
-            plan_name = plan.get("id")
-        except Exception as exc:
-            logger.warning("Failed to resolve plan for owner %s: %s", owner, exc, exc_info=True)
-            plan_name = None
-    return get_daily_credit_settings_for_plan(plan_name)
+    plan_name, plan_version_id = resolve_owner_plan_identifiers(owner, logger=logger)
+    return get_daily_credit_settings_for_plan_version(plan_version_id, plan_name)
 
 
 def get_daily_credit_settings() -> DailyCreditSettings:

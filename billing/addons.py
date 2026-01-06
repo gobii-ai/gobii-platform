@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+import logging
 from typing import Any, Iterable, Mapping
 
 from django.apps import apps
@@ -11,6 +12,8 @@ from django.utils import timezone
 from config.stripe_config import get_stripe_settings
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,11 @@ class AddonEntitlementService:
     """Helpers for aggregating active add-on entitlements."""
 
     @staticmethod
-    def _resolve_price_ids(owner_type: str, plan_id: str | None) -> dict[str, str]:
+    def _resolve_price_ids(
+        owner_type: str,
+        plan_id: str | None,
+        plan_version=None,
+    ) -> dict[str, list[str]]:
         def _normalize_price_list(*values: Any) -> list[str]:
             ids: list[str] = []
             for raw in values:
@@ -55,6 +62,34 @@ class AddonEntitlementService:
                     if cid and cid not in ids:
                         ids.append(cid)
             return ids
+
+        if plan_version is not None:
+            try:
+                PlanVersionPrice = apps.get_model("api", "PlanVersionPrice")
+                plan_version_id = getattr(plan_version, "id", plan_version)
+                rows = (
+                    PlanVersionPrice.objects
+                    .filter(
+                        plan_version_id=plan_version_id,
+                        kind__in=("task_pack", "contact_pack", "browser_task_limit"),
+                    )
+                    .order_by("kind", "price_id")
+                )
+                price_map: dict[str, list[str]] = {
+                    "task_pack": [],
+                    "contact_pack": [],
+                    "browser_task_limit": [],
+                }
+                for row in rows:
+                    if row.price_id and row.price_id not in price_map[row.kind]:
+                        price_map[row.kind].append(row.price_id)
+                if any(price_map.values()):
+                    return price_map
+            except (LookupError, DatabaseError):
+                logger.debug(
+                    "Failed to resolve add-on prices via plan version; falling back to StripeConfig",
+                    exc_info=True,
+                )
 
         stripe_settings = get_stripe_settings()
         if owner_type == "organization":
@@ -248,14 +283,23 @@ class AddonEntitlementService:
         return qs
 
     @staticmethod
-    def get_price_ids(owner_type: str, plan_id: str | None) -> dict[str, list[str]]:
-        return AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+    def get_price_ids(
+        owner_type: str,
+        plan_id: str | None,
+        plan_version=None,
+    ) -> dict[str, list[str]]:
+        return AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
 
     @staticmethod
-    def get_price_options(owner_type: str, plan_id: str | None, addon_kind: str | None = None) -> list[AddonPriceConfig]:
+    def get_price_options(
+        owner_type: str,
+        plan_id: str | None,
+        addon_kind: str | None = None,
+        plan_version=None,
+    ) -> list[AddonPriceConfig]:
         """Return ordered price options for the add-on kind (or all kinds) for the plan/owner."""
-        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
-        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
+        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type, plan_version=plan_version)
 
         ordered_ids: list[str] = []
         if addon_kind:
@@ -272,9 +316,13 @@ class AddonEntitlementService:
         return options
 
     @staticmethod
-    def _build_price_map(plan_id: str | None, owner_type: str) -> dict[str, AddonPriceConfig]:
+    def _build_price_map(
+        plan_id: str | None,
+        owner_type: str,
+        plan_version=None,
+    ) -> dict[str, AddonPriceConfig]:
         """Return relevant add-on price configs for the owner/plan."""
-        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
         price_ids: list[str] = []
         for ids in price_lists.values():
             for pid in ids or []:
@@ -298,13 +346,18 @@ class AddonEntitlementService:
         return price_map
 
     @staticmethod
-    def get_addon_context_for_owner(owner, owner_type: str, plan_id: str | None) -> dict[str, dict[str, Any]]:
+    def get_addon_context_for_owner(
+        owner,
+        owner_type: str,
+        plan_id: str | None,
+        plan_version=None,
+    ) -> dict[str, dict[str, Any]]:
         """Return add-on context keyed by add-on kind for the given owner."""
-        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id)
+        price_lists = AddonEntitlementService._resolve_price_ids(owner_type, plan_id, plan_version=plan_version)
         if not price_lists:
             return {}
 
-        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
+        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type, plan_version=plan_version)
         addon_context: dict[str, dict[str, Any]] = {}
 
         total_task = 0
@@ -455,10 +508,15 @@ class AddonEntitlementService:
         subscription_items: Iterable[Mapping[str, Any]],
         period_start,
         period_end,
+        plan_version=None,
         created_via: str = "subscription_webhook",
     ) -> None:
         """Align entitlements to match subscription items and refresh TaskCredit blocks."""
-        price_map = AddonEntitlementService._build_price_map(plan_id, owner_type)
+        price_map = AddonEntitlementService._build_price_map(
+            plan_id,
+            owner_type,
+            plan_version=plan_version,
+        )
         if not price_map:
             model = AddonEntitlementService._get_model()
             now = timezone.now()
@@ -500,7 +558,14 @@ class AddonEntitlementService:
             ent = active_now.filter(price_id=price_id).first()
             starts_at = period_start or now
             ent_expires_at = period_end
-            product_id = cfg.product_id or str((price_obj.get("product") or "")) if isinstance(price_obj, Mapping) else ""
+            product_id = ""
+            if isinstance(price_obj, Mapping):
+                product = price_obj.get("product") or ""
+                if isinstance(product, Mapping):
+                    product_id = product.get("id") or ""
+                else:
+                    product_id = str(product or "")
+            product_id = cfg.product_id or product_id
 
             if ent:
                 updates: list[str] = []

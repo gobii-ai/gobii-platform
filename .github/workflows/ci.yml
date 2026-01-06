@@ -134,6 +134,8 @@ jobs:
             tag: batch_api_persistent_agents
           - batch: billing
             tag: batch_billing
+          - batch: plan_versioning
+            tag: batch_plan_versioning
           - batch: event_llm
             tag: batch_event_llm
           - batch: event_processing

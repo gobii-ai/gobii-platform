@@ -7,8 +7,8 @@ from django.conf import settings
 from django.core.cache import cache
 from django.db import DatabaseError
 
-from constants.plans import PlanNames, PlanNamesChoices
-from util.subscription_helper import get_owner_plan
+from constants.plans import PlanNamesChoices
+from api.services.plan_settings import resolve_owner_plan_identifiers, select_plan_settings_payload
 
 
 DEFAULT_MIN_CRON_SCHEDULE_MINUTES = getattr(settings, "PERSISTENT_AGENT_MIN_SCHEDULE_MINUTES", 30)
@@ -44,8 +44,9 @@ def _get_tool_config_model():
     return ToolConfig
 
 
-def _serialise(configs) -> dict:
-    payload = {}
+def _serialise(configs) -> dict[str, dict[str, dict]]:
+    by_plan_version: dict[str, dict] = {}
+    by_plan_name: dict[str, dict] = {}
     for config in configs:
         try:
             rate_limits = {
@@ -55,7 +56,7 @@ def _serialise(configs) -> dict:
         except (AttributeError, DatabaseError):
             logger.error("Failed to serialize rate limits for plan %s", config.plan_name, exc_info=True)
             rate_limits = {}
-        payload[config.plan_name] = {
+        payload = {
             "min_cron_schedule_minutes": config.min_cron_schedule_minutes,
             "rate_limits": rate_limits,
             "search_web_result_count": getattr(config, "search_web_result_count", DEFAULT_SEARCH_WEB_RESULT_COUNT),
@@ -75,7 +76,11 @@ def _serialise(configs) -> dict:
                 DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
             ),
         }
-    return payload
+        if getattr(config, "plan_version_id", None):
+            by_plan_version[str(config.plan_version_id)] = payload
+        if config.plan_name:
+            by_plan_name[config.plan_name] = payload
+    return {"by_plan_version": by_plan_version, "by_plan_name": by_plan_name}
 
 
 def _ensure_defaults_exist() -> None:
@@ -83,6 +88,23 @@ def _ensure_defaults_exist() -> None:
     for plan_name in PlanNamesChoices.values:
         ToolConfig.objects.get_or_create(
             plan_name=plan_name,
+            defaults={
+                "min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
+                "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
+                "search_engine_batch_query_limit": DEFAULT_SEARCH_ENGINE_BATCH_QUERY_LIMIT,
+                "brightdata_amazon_product_search_limit": DEFAULT_BRIGHTDATA_AMAZON_PRODUCT_SEARCH_LIMIT,
+                "duplicate_similarity_threshold": DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+            },
+        )
+    try:
+        from django.apps import apps
+
+        PlanVersion = apps.get_model("api", "PlanVersion")
+    except Exception:
+        return
+    for plan_version in PlanVersion.objects.all():
+        ToolConfig.objects.get_or_create(
+            plan_version=plan_version,
             defaults={
                 "min_cron_schedule_minutes": DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
                 "search_web_result_count": DEFAULT_SEARCH_WEB_RESULT_COUNT,
@@ -178,11 +200,12 @@ def normalize_duplicate_similarity_threshold(value: Optional[float]) -> float:
     return float_value
 
 
-def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
+def get_tool_settings_for_plan_version(
+    plan_version_id: Optional[str],
+    plan_name: Optional[str] = None,
+) -> ToolPlanSettings:
     settings_map = _load_settings()
-    normalized_plan = (plan_name or PlanNames.FREE).lower()
-    config = settings_map.get(normalized_plan) or settings_map.get(PlanNames.FREE)
-
+    config = select_plan_settings_payload(settings_map, plan_version_id, plan_name)
     return ToolPlanSettings(
         min_cron_schedule_minutes=_normalize_min_interval_minutes(
             config.get("min_cron_schedule_minutes") if config else None
@@ -203,16 +226,13 @@ def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
     )
 
 
+def get_tool_settings_for_plan(plan_name: Optional[str]) -> ToolPlanSettings:
+    return get_tool_settings_for_plan_version(None, plan_name)
+
+
 def get_tool_settings_for_owner(owner) -> ToolPlanSettings:
-    plan_name = None
-    if owner:
-        try:
-            plan = get_owner_plan(owner)
-            plan_name = plan.get("id")
-        except Exception as exc:
-            logger.warning("Failed to get owner plan for %s: %s", owner, exc, exc_info=True)
-            plan_name = None
-    return get_tool_settings_for_plan(plan_name)
+    plan_name, plan_version_id = resolve_owner_plan_identifiers(owner, logger=logger)
+    return get_tool_settings_for_plan_version(plan_version_id, plan_name)
 
 
 def invalidate_tool_settings_cache() -> None:
