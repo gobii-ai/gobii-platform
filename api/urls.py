@@ -16,6 +16,7 @@ from .webhooks import (
     open_and_link_webhook,
     pipedream_connect_webhook,
 )
+from api.integrations.google import views as google_views
 
 app_name = "api"
 
@@ -80,6 +81,9 @@ urlpatterns = [
     path('webhooks/inbound/email/mg/', email_webhook_mailgun, name='email_webhook_mailgun'),
     # Pipedream Connect webhook (one-time)
     path('webhooks/pipedream/connect/<uuid:session_id>/', pipedream_connect_webhook, name='pipedream_connect_webhook'),
+    # Google Workspace OAuth
+    path('google/workspace/oauth/start/<uuid:agent_id>/', google_views.start_oauth, name='google_workspace_oauth_start'),
+    path('google/workspace/oauth/callback/', google_views.oauth_callback, name='google_workspace_oauth_callback'),
 
     # Webhook for persistent agent email opens and link clicks business intelligence
     path("webhooks/bi/email/", open_and_link_webhook, name="open_and_link_webhook"),

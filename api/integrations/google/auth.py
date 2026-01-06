@@ -11,6 +11,8 @@ from typing import Iterable, Optional, Sequence
 
 from django.conf import settings
 from django.utils import timezone
+from django.core.cache import cache
+from django.core.mail import send_mail
 
 from api.models import AgentGoogleWorkspaceBinding, GoogleWorkspaceCredential, PersistentAgent
 
@@ -71,11 +73,22 @@ def scopes_satisfy(required: Sequence[str], granted: Sequence[str]) -> bool:
     return all(scope in granted_set for scope in required)
 
 
-def build_connect_url(scope_tier: str | None = None) -> str:
+def build_connect_url(agent_id: str, scope_tier: str | None = None) -> str:
     base = getattr(settings, "GOOGLE_WORKSPACE_CONNECT_URL", "") or ""
+    if not base:
+        try:
+            from django.urls import reverse
+
+            base = reverse("google_workspace_connect", kwargs={"agent_id": agent_id})
+        except Exception:
+            base = f"/console/google/connect/{agent_id}/"
     if scope_tier:
         separator = "&" if "?" in base else "?"
-        return f"{base}{separator}scope_tier={scope_tier}"
+        base = f"{base}{separator}scope_tier={scope_tier}"
+    # Prefer absolute URL for email delivery
+    public_site = getattr(settings, "PUBLIC_SITE_URL", "").rstrip("/")
+    if public_site and not base.startswith("http"):
+        return f"{public_site}{base}"
     return base
 
 
@@ -112,7 +125,8 @@ def resolve_binding(
         binding = None
 
     if not binding or not binding.credential:
-        url = build_connect_url(required_scope_tier)
+        url = build_connect_url(str(agent.id), required_scope_tier)
+        _maybe_email_connect_link(agent, url, required_scope_tier)
         return None, {
             "status": "action_required",
             "result": (
@@ -126,7 +140,11 @@ def resolve_binding(
     granted_scopes = credential.scopes_list()
     target_scopes = scope_list_for_tier(required_scope_tier or binding.scope_tier or credential.scope_tier)
     if not scopes_satisfy(target_scopes, granted_scopes):
-        url = build_connect_url(required_scope_tier or binding.scope_tier or credential.scope_tier)
+        url = build_connect_url(
+            str(agent.id),
+            required_scope_tier or binding.scope_tier or credential.scope_tier,
+        )
+        _maybe_email_connect_link(agent, url, required_scope_tier or binding.scope_tier or credential.scope_tier)
         return None, {
             "status": "action_required",
             "result": (
@@ -144,6 +162,31 @@ def resolve_binding(
         scope_tier=scope_tier,
     )
     return bundle, None
+
+
+def _maybe_email_connect_link(agent: PersistentAgent, url: str, scope_tier: Optional[str]) -> None:
+    """Email the agent owner a connect link, throttled to avoid spam."""
+    try:
+        owner_email = getattr(agent.user, "email", "") or ""
+        if not owner_email:
+            return
+        cache_key = f"gws_connect_email_sent:{agent.id}"
+        if cache.get(cache_key):
+            return
+
+        subject = "Connect Google Docs/Sheets for your agent"
+        scope_label = scope_tier or getattr(settings, "GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER", "minimal")
+        message = (
+            f"Hi,\n\n"
+            f"To enable Google Docs/Sheets actions for your agent '{getattr(agent, 'name', '')}', "
+            f"please connect your Google account here:\n{url}\n\n"
+            f"Scope tier requested: {scope_label}\n\n"
+            f"If you did not request this, you can ignore this email.\n"
+        )
+        send_mail(subject, message, getattr(settings, "DEFAULT_FROM_EMAIL", None), [owner_email], fail_silently=True)
+        cache.set(cache_key, True, timeout=3600)  # 1 hour throttle
+    except Exception:
+        logger.exception("Failed to send Google Workspace connect email for agent %s", getattr(agent, "id", None))
 
 
 def _build_google_credentials(bundle: BoundGoogleCredential):
