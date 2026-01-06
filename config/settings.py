@@ -974,6 +974,7 @@ POSTMARK_INCOMING_WEBHOOK_TOKEN = env("POSTMARK_INCOMING_WEBHOOK_TOKEN", default
 MAILGUN_INCOMING_WEBHOOK_TOKEN = env("MAILGUN_INCOMING_WEBHOOK_TOKEN", default="dummy-mailgun-incoming-token")
 
 EXA_SEARCH_API_KEY = env("EXA_SEARCH_API_KEY", default="dummy-exa-search-api-key")
+CAPSOLVER_API_KEY = env("CAPSOLVER_API_KEY", default="")
 
 GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
