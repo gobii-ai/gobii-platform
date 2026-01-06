@@ -94,6 +94,20 @@ PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
+GOOGLE_BUILTIN_DEFAULT_TOOLS = {
+    # Docs
+    "google_docs_create_document",
+    "google_docs_find_document",
+    "google_docs_get_current_user",
+    # Sheets (implemented subset in Iteration 1)
+    "google_sheets_create_spreadsheet",
+    "google_sheets_create_worksheet",
+    "google_sheets_append_values",
+    "google_sheets_get_values_in_range",
+    "google_sheets_update_cell",
+    "google_sheets_get_current_user",
+}
+
 
 def _sandbox_fallback_tools() -> Set[str]:
     tools = getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS", [])
@@ -745,7 +759,10 @@ def ensure_default_tools_enabled(
     )
     default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
     missing_mcp = default_tools - enabled_tools
-    missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
+    builtin_set = set(DEFAULT_BUILTIN_TOOLS)
+    if getattr(settings, "GOOGLE_WORKSPACE_TOOLS_ENABLED", False):
+        builtin_set |= GOOGLE_BUILTIN_DEFAULT_TOOLS
+    missing_builtin = builtin_set - enabled_tools
     if not missing_mcp and not missing_builtin:
         return
 
