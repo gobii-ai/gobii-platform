@@ -181,7 +181,7 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
     shared = current_ids & baseline_ids
 
     with transaction.atomic():
-        for card_id in sorted(created):
+        for card_id in (cid for cid in current_cards if cid in created):
             card = current_cards.get(card_id)
             if not card:
                 continue
@@ -385,7 +385,8 @@ def _read_kanban_cards(agent) -> tuple[Optional[dict[str, KanbanCardSnapshot]], 
         cur.execute(
             f"""
             SELECT id, title, description, status, priority, assigned_agent_id
-            FROM "{KANBAN_CARDS_TABLE}";
+            FROM "{KANBAN_CARDS_TABLE}"
+            ORDER BY rowid;
             """
         )
         rows = cur.fetchall()

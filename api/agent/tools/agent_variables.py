@@ -306,16 +306,19 @@ def substitute_variables_as_data_uris(text: str, agent) -> str:
         value = (raw or "").strip()
         if not value:
             return None
-        if value in variables:
-            return variables[value]
+        direct_value = variables.get(value)
+        if direct_value and direct_value.lower().startswith("data:"):
+            return direct_value
         normalized = _normalize_filespace_path(value)
-        if not normalized:
-            return None
-        data_uri = _load_data_uri(normalized)
-        if data_uri:
-            return data_uri
-        if normalized in variables:
-            return variables[normalized]
+        if normalized:
+            data_uri = _load_data_uri(normalized)
+            if data_uri:
+                return data_uri
+            normalized_value = variables.get(normalized)
+            if normalized_value:
+                return normalized_value
+        if direct_value:
+            return direct_value
         return None
 
     def replace_match(match: re.Match) -> str:

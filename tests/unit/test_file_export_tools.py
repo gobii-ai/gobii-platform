@@ -5,6 +5,8 @@ from unittest.mock import patch, MagicMock
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 
+from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.tools.agent_variables import clear_variables, set_agent_variable
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_pdf import execute_create_pdf
 from api.models import AgentFsNode, BrowserUseAgent, PersistentAgent
@@ -147,6 +149,32 @@ class FileExportToolTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("asset", result["message"].lower())
+
+    @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
+    def test_create_pdf_embeds_filespace_images(self):
+        clear_variables()
+        try:
+            image_bytes = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00"
+            write_result = write_bytes_to_dir(
+                agent=self.agent,
+                content_bytes=image_bytes,
+                extension=".png",
+                mime_type="image/png",
+                path="/charts/logo.png",
+                overwrite=True,
+            )
+            self.assertEqual(write_result["status"], "ok")
+
+            set_agent_variable("/charts/logo.png", "https://example.com/logo.png")
+
+            result = execute_create_pdf(
+                self.agent,
+                {"html": "<img src='$[/charts/logo.png]'>", "file_path": "/exports/logo.pdf"},
+            )
+
+            self.assertEqual(result["status"], "ok")
+        finally:
+            clear_variables()
 
     @override_settings(MAX_FILE_SIZE=10)
     def test_create_pdf_rejects_oversized_html(self):

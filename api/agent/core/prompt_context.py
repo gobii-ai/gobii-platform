@@ -605,7 +605,60 @@ Use `false` (or omit the tool call) when:
 - The user asked a question and you have the complete answer
 - There's nothing more to fetch, analyze, or compute
 
-**The loop continues until you decide it's done.** There's no fixed number of turns. Some tasks need 2 turns, some need 20. Keep iterating until you have what you need to deliver a complete, grounded answer—one where every finding comes from actual tool results, not inference.
+Before stopping, mark every completed kanban card as done (clear finished work out of todo/doing). Batch the updates with any other sqlite changes.
+
+Example wrap-up (single response with tools):
+- sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE title IN ('Step 1', 'Step 2');", will_continue_work=false)
+- send_chat_message(body="All done. Marked completed cards and sharing results.")
+
+**The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. If you're done, stop even if kanban has open cards; update the cards or set a schedule for later.
+
+---
+
+## Stop Condition (Micro Trajectory)
+
+Before stopping, verify all kanban cards are marked done. This trajectory shows the pattern:
+
+```
+[Turn N-1: finish last task]
+→ scrape_as_markdown(...) returns successfully
+→ sqlite_batch(sql="INSERT INTO findings SELECT ... WHERE result_id='abc123'")
+
+[Turn N: wrap up]
+THOUGHT: Task complete. Before stopping, check kanban state and mark cards done.
+
+sqlite_batch(sql="
+  -- 1. Check for any non-done cards
+  SELECT id, title, status FROM __kanban_cards WHERE status != 'done';
+
+  -- 2. Mark completed work done
+  UPDATE __kanban_cards SET status='done', completed_at=datetime('now')
+  WHERE title IN ('Research competitors', 'Extract pricing data');
+
+  -- 3. Verify nothing left
+  SELECT COUNT(*) as remaining FROM __kanban_cards WHERE status != 'done';
+", will_continue_work=false)
+
+→ Returns: remaining = 0
+
+send_chat_message(body="Done! Found 12 competitors, pricing data extracted and saved.")
+```
+
+**The pattern:**
+1. Query current kanban state
+2. Batch UPDATE all completed cards to 'done'
+3. Verify count of non-done = 0
+4. Only then use `will_continue_work=false`
+
+**If remaining > 0:**
+```sql
+-- Cards still open? Either finish them or explicitly defer:
+UPDATE __kanban_cards SET status='done' WHERE title='...'  -- if actually done
+-- OR update charter/schedule to return later
+UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;  -- defer to tomorrow
+```
+
+Never stop with open cards unless you've explicitly set a schedule to return.
 
 ---
 
@@ -963,7 +1016,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_card:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo keep you working (and spending credits). When done, mark them complete—or set a schedule to pick up later.",
+            "Cards in doing/todo are your checklist. When done, mark them complete. Open cards do not keep the loop alive; set a schedule if you need to return.",
             weight=1,
             non_shrinkable=True,
         )
@@ -2876,6 +2929,7 @@ def _get_system_instruction(
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
+        "**Before stopping:** mark every completed kanban card done (batch with sqlite_batch).\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 

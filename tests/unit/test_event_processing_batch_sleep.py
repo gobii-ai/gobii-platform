@@ -325,7 +325,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_auto_sleep_overridden_with_open_kanban_work(
+    def test_auto_sleep_not_overridden_with_open_kanban_work(
         self,
         mock_completion,
         mock_build_prompt,
@@ -368,16 +368,12 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         mock_completion.side_effect = [
             (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
-            (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
         ]
 
         from api.agent.core import event_processing as ep
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertEqual(mock_completion.call_count, 2)
-        self.assertEqual(len(notices), 2)
+        self.assertEqual(mock_completion.call_count, 1)
+        self.assertEqual(len(notices), 1)
         self.assertIsNone(notices[0])
-        self.assertIsNotNone(notices[1])
-        self.assertIn("kanban", notices[1].lower())
-        self.assertIn("credits", notices[1].lower())
