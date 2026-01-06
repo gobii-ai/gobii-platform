@@ -349,30 +349,22 @@ Chain them together: M1 → M2 → M5 → M6 for a typical research flow.
 
 ---
 
-### M1: Discover Tools
+### M1: Get Data
 
 ```
 when:
   - Need external data
-  - Don't know what extractors exist for this domain
 
 do:
+  # Known public API? → http_request directly (skip search_tools)
+  # Otherwise:
   search_tools(query="<domain keywords>", will_continue_work=true)
 
 then:
-  if found relevant extractors → M2 (use structured extractor)
-  if nothing relevant → M3 (search the web)
-  if already have a URL → M4 (scrape directly)
-```
-
-Example:
-```
-search_tools(query="linkedin company crunchbase")
-→ Found: web_data_linkedin_company_profile, web_data_crunchbase_company
-
-search_tools(query="pricing jobs careers")
-→ Found: web_data_linkedin_job_listings
-→ For pricing: need to scrape directly (M4)
+  if public API → http_request → M5 (store)
+  if found extractors → M2
+  if nothing → M3 (search)
+  if have URL → M4 (scrape)
 ```
 
 ---
@@ -3414,7 +3406,7 @@ def _get_system_instruction(
         "Your outputs should feel crafted, not generated. Complete, not partial. Linked, not isolated. Beautiful, not just functional. "
 
         "Use the right tools. "
-        "Structured data beats raw scraping. One extractor call beats 10 minutes of manual work. "
+        "APIs > extractors > scraping. Many sources have free APIs—try them first. "
         "Know your tools—they're your superpower. "
 
         "Follow every lead. "
@@ -3749,9 +3741,9 @@ def _get_system_instruction(
         "# example.com/about              → scrape_as_markdown (HTML page)\n"
         "\n"
         "# Priority\n"
-        "http_request > scrape    # for raw/structured data\n"
-        "extractor > scrape       # for known platforms\n"
-        "scrape = last_resort     # for HTML when no better option\n"
+        "api | feed | data → http_request  # check for public APIs first\n"
+        "extractor > scrape                # for known platforms\n"
+        "scrape = last_resort              # for HTML when no better option\n"
         "\n"
         "# Discovery (always available)\n"
         "need(X)                      → search_tools(X) → have(tools) | ∅\n"
