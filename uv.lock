@@ -643,6 +643,15 @@ wheels = [
 ]
 
 [[package]]
+name = "chardet"
+version = "5.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f3/0d/f7b6ab21ec75897ed80c17d79b15951a719226b9fababf1e40ea74d69079/chardet-5.2.0.tar.gz", hash = "sha256:1b3b6ff479a8c414bc3fa2c0852995695c4a026dcd6d0633b2dd092ca39c1cf7", size = 2069618, upload-time = "2023-08-01T19:23:02.662Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/6f/f5fbc992a329ee4e0f288c1fe0e2ad9485ed064cac731ed2fe47dcc38cbf/chardet-5.2.0-py3-none-any.whl", hash = "sha256:e1cf59446890a00105fe7b7912492ea04b6e6f06d4b742b2c788469e34c82970", size = 199385, upload-time = "2023-08-01T19:23:00.661Z" },
+]
+
+[[package]]
 name = "charset-normalizer"
 version = "3.4.3"
 source = { registry = "https://pypi.org/simple" }
@@ -682,6 +691,43 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/8c/9839225320046ed279c6e839d51f028342eb77c91c89b8ef2549f951f3ec/charset_normalizer-3.4.3-cp314-cp314-win32.whl", hash = "sha256:c6dbd0ccdda3a2ba7c2ecd9d77b37f3b5831687d8dc1b6ca5f56a4880cc7b7ce", size = 100086, upload-time = "2025-08-09T07:56:52.722Z" },
     { url = "https://files.pythonhosted.org/packages/ee/7a/36fbcf646e41f710ce0a563c1c9a343c6edf9be80786edeb15b6f62e17db/charset_normalizer-3.4.3-cp314-cp314-win_amd64.whl", hash = "sha256:73dc19b562516fc9bcf6e5d6e596df0b4eb98d87e4f79f3ae71840e6ed21361c", size = 107400, upload-time = "2025-08-09T07:56:55.172Z" },
     { url = "https://files.pythonhosted.org/packages/8a/1f/f041989e93b001bc4e44bb1669ccdcf54d3f00e628229a85b08d330615c5/charset_normalizer-3.4.3-py3-none-any.whl", hash = "sha256:ce571ab16d890d23b5c278547ba694193a45011ff86a9162a71307ed9f86759a", size = 53175, upload-time = "2025-08-09T07:57:26.864Z" },
+]
+
+[[package]]
+name = "clevercsv"
+version = "0.8.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "chardet" },
+    { name = "packaging" },
+    { name = "regex" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b1/bc/b9ac6f226441f035a74480379adb008184e81dc8188c599419e81d418be8/clevercsv-0.8.4.tar.gz", hash = "sha256:aab847653e0476f15b241f0a267c55bf1d95248e85fa6e7995d364e20936daf0", size = 81282, upload-time = "2025-10-30T23:10:42.623Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/90/d6/1197e5918c7781e6a4d1a865393f108957b516d263fd7504ff76f4fdc611/clevercsv-0.8.4-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:43b4aae77c72cd560f81bc9b2360830724d2838bd4320a0d43c32c99a4221663", size = 87057, upload-time = "2025-10-30T23:10:06.847Z" },
+    { url = "https://files.pythonhosted.org/packages/f4/31/bdc089118ecb7feda6ef29c45330406ae4c119350292d46b9d7c70d4cf9f/clevercsv-0.8.4-cp312-cp312-macosx_10_13_x86_64.whl", hash = "sha256:db6ac7b21692146fb1acae926ea12bcbeb5b66b41f3848b41ce046411fe08566", size = 78327, upload-time = "2025-10-30T23:10:07.818Z" },
+    { url = "https://files.pythonhosted.org/packages/0a/a6/c06c18cec27a702d87a6093a3f11a7092e4886767aa80cdfe844cf90a63d/clevercsv-0.8.4-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:23a4eebb16164d878fc28de4b48541fd4227101e1d08e309106e297ca54520b2", size = 79226, upload-time = "2025-10-30T23:10:08.886Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/71/6c07dbb513a88170627a47460e784dd16536faddb2eec41043b0df88d46c/clevercsv-0.8.4-cp312-cp312-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:5ba7a05017662d4d7e133dc082e68c93cacf28c88370b4568c3b9c5faffb8d37", size = 113429, upload-time = "2025-10-30T23:10:10.217Z" },
+    { url = "https://files.pythonhosted.org/packages/79/14/48c32be09bd1d0b5198259f3222ce9cf952d8ab49aea4349df33902ef099/clevercsv-0.8.4-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:ab535a30b7bee8bebc1e5fb54edaf01041459f164b36cd4ed507934d0d6a29e2", size = 115087, upload-time = "2025-10-30T23:10:11.86Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/72/b07b87bf0880dce76ea8f1b7a7fe273648c7ba1bf54b00ba3960c65a698a/clevercsv-0.8.4-cp312-cp312-win_amd64.whl", hash = "sha256:d2307b73f654b48e5960fe1b341017f36d0316d65e8a24880e46eefac69f47da", size = 84498, upload-time = "2025-10-30T23:10:13.271Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/79/fa504e42e821fef4a5c89d7783c6865a079211066f819d95df44aa442fd7/clevercsv-0.8.4-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:13dd2422fee9038545a2a505120e74bc3cb69a111ea1f8742cfd224d13ee25d7", size = 87072, upload-time = "2025-10-30T23:10:14.694Z" },
+    { url = "https://files.pythonhosted.org/packages/b3/dc/4ea284c67f19ba65298cac12949b19a48bcbb43de3fe4ad1ce259bc155fc/clevercsv-0.8.4-cp313-cp313-macosx_10_13_x86_64.whl", hash = "sha256:862e492d86f8aab2baa83373457cbfa9d2e961ac33cb26afd2f2e6417c4712a6", size = 78338, upload-time = "2025-10-30T23:10:15.691Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/dc/8006c936ccc79d0f5267b2a19d330d82a944021499d5f3f812c50d83b080/clevercsv-0.8.4-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:88da273b4bf22cfff1161eb8e6b4bcd020e375503a280abc180fb05d55c2fc5c", size = 79231, upload-time = "2025-10-30T23:10:16.683Z" },
+    { url = "https://files.pythonhosted.org/packages/ab/fc/f7ed35c163654cf2512bb2b845e66baedfd8887ded163aed240cb03258b1/clevercsv-0.8.4-cp313-cp313-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:851ca0094aa98b88f0daf846d4ed8a7f1f4e9a4f7a917da6075a164da43e44dc", size = 113532, upload-time = "2025-10-30T23:10:17.683Z" },
+    { url = "https://files.pythonhosted.org/packages/54/21/00a6fbcdcdc9071f1e400d2620663caa7966628616464e9bf9e693f7889a/clevercsv-0.8.4-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:48f8f0308b23ac7377d6d01f21777785c79a5fb440c8bf62854ad0bb89d908dc", size = 115186, upload-time = "2025-10-30T23:10:18.739Z" },
+    { url = "https://files.pythonhosted.org/packages/21/bf/c316621e37a6450e5faa11446aec463925811becddaf2388267d2ef84271/clevercsv-0.8.4-cp313-cp313-win_amd64.whl", hash = "sha256:254184c9849ff2343ff5e2558f9bc50e71e9ca762dbbc44e4c2a7a5f5d08e329", size = 84497, upload-time = "2025-10-30T23:10:19.84Z" },
+    { url = "https://files.pythonhosted.org/packages/cf/6e/ced64df23319a11b806bfc14ba13772796dc994edb636fe20a5730b49ce7/clevercsv-0.8.4-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:17d4cfd6a445b99cfbda2f17315bfd1656796f2c026cf5f4fc09c73f12bd82a7", size = 87172, upload-time = "2025-10-30T23:10:20.927Z" },
+    { url = "https://files.pythonhosted.org/packages/ee/a1/bb3615b0f42f2b1a9f52a0265b232863051338f74990a5d9ccced72fca9c/clevercsv-0.8.4-cp314-cp314-macosx_10_15_x86_64.whl", hash = "sha256:5342a5944b6eb1216e975d676a18d16b175a9791ad4a2ed5829071366e8bfdbb", size = 78479, upload-time = "2025-10-30T23:10:21.905Z" },
+    { url = "https://files.pythonhosted.org/packages/46/39/bb16f8799011050c9e5f3e4930cb0cd0cddda1c9569d835cc2092a215dd8/clevercsv-0.8.4-cp314-cp314-macosx_11_0_arm64.whl", hash = "sha256:c5c5ee0aab270f747ad8f5f3b46cc956e59b30a2d67823160f9106ecfc5106eb", size = 79282, upload-time = "2025-10-30T23:10:22.93Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/a0/6428b9c17a23188751c27bd51eb7b2e66a3646d6cb3b23b3c6d61cb2ab3f/clevercsv-0.8.4-cp314-cp314-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:c7dab67cabbb41bffd6c151e9107371950d0db33b898aa8124b537b35cbe0895", size = 113559, upload-time = "2025-10-30T23:10:24.611Z" },
+    { url = "https://files.pythonhosted.org/packages/a7/7d/35a6c43e1ecea601f42a98cd70c5087024f7cbf4a572b8f5dcb1d75a9bac/clevercsv-0.8.4-cp314-cp314-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:adb968e7a410fa39f645a80e156b311e922e8809363efda1b02309dbc2c4e84a", size = 115347, upload-time = "2025-10-30T23:10:25.679Z" },
+    { url = "https://files.pythonhosted.org/packages/6c/2e/cc252a320ca017b88cd1841f7596329b19dddbb6d93bd8f6e3407a8b57a1/clevercsv-0.8.4-cp314-cp314-win_amd64.whl", hash = "sha256:8232cc9cc0d10a966669e28bb25160724cd0d2ee55c6b0d5d4f1fafa63de1080", size = 85016, upload-time = "2025-10-30T23:10:27.139Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/43/bd19a9408ae1a118e8d9f7e0bfa015e13dd5c2a5855cca59accacb82ce09/clevercsv-0.8.4-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:511f646b0b940c8c83c83601874682f351c0a6b699fc8a1f167cd030d2efc625", size = 88127, upload-time = "2025-10-30T23:10:28.218Z" },
+    { url = "https://files.pythonhosted.org/packages/36/1a/1752c97f0d215829f8397a21ee52d689c4d115fd39b8cc41ea1e0ee32612/clevercsv-0.8.4-cp314-cp314t-macosx_10_15_x86_64.whl", hash = "sha256:e5c4b259d752de90ddb5f4f4d9c576473c2d1fb5b036665091022ae535de9aa2", size = 78998, upload-time = "2025-10-30T23:10:29.607Z" },
+    { url = "https://files.pythonhosted.org/packages/49/ef/9247fcf3244796c489a0a66d1b057c7154309c2c796d2a67dcd4f9d487dd/clevercsv-0.8.4-cp314-cp314t-macosx_11_0_arm64.whl", hash = "sha256:a554bf062e17103dccecdffe10f9d7e283d999b61e6746a5cb244b68291bd115", size = 79743, upload-time = "2025-10-30T23:10:30.787Z" },
+    { url = "https://files.pythonhosted.org/packages/75/3b/0dfbd9ad5b13faafa5ebbe4ab1982aac78eb41c538d0053eda03feed01cd/clevercsv-0.8.4-cp314-cp314t-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:cbb20e5826a54ff9da3eb8fe4f655587e190ff3884adece08fc7dda0462f9173", size = 121024, upload-time = "2025-10-30T23:10:31.777Z" },
+    { url = "https://files.pythonhosted.org/packages/ed/f0/d8e369e8f367600ae149e56025800edc6365735f98983953613eabed19dc/clevercsv-0.8.4-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:2a09c9cfa0f208e0ef8d4b2433e01e433f16d0eecf5536bf418d6e74d2919d08", size = 124168, upload-time = "2025-10-30T23:10:33.145Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/c3/824fe756ea6ccc3baf773376abb00ae2a272ebed9c17f2aaad21f63ebe6f/clevercsv-0.8.4-cp314-cp314t-win_amd64.whl", hash = "sha256:a8cf22c76116259d6f97ab93bc3a1d164f40844db6512d58b2765095f0f99db3", size = 85853, upload-time = "2025-10-30T23:10:34.743Z" },
 ]
 
 [[package]]
@@ -1446,6 +1492,7 @@ dependencies = [
     { name = "channels" },
     { name = "channels-redis" },
     { name = "charset-normalizer" },
+    { name = "clevercsv" },
     { name = "cron-descriptor" },
     { name = "cryptography" },
     { name = "daphne" },
@@ -1575,6 +1622,7 @@ requires-dist = [
     { name = "channels", specifier = ">=4.3.1" },
     { name = "channels-redis", specifier = ">=4.3.0" },
     { name = "charset-normalizer", specifier = ">=3.4.3" },
+    { name = "clevercsv", specifier = ">=0.8.4" },
     { name = "cron-descriptor", specifier = ">=2.0.6" },
     { name = "cryptography", specifier = "~=44.0.3" },
     { name = "daphne", specifier = ">=4.2.1" },

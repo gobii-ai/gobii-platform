@@ -1,11 +1,19 @@
 """SQLite guardrails for agent-managed databases."""
 
+import csv
 import logging
 import math
 import re
 import sqlite3
 import time
 from typing import Optional
+
+from ..core.csv_utils import (
+    build_csv_sample,
+    detect_csv_dialect,
+    normalize_csv_text,
+    read_csv_rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +175,47 @@ def _json_length(json_str: Optional[str]) -> Optional[int]:
         return None
 
 
+def _coerce_csv_header_flag(value: object) -> int:
+    if value is None:
+        return 1
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return 1 if value else 0
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"0", "false", "no"}:
+            return 0
+        if lowered in {"1", "true", "yes"}:
+            return 1
+        try:
+            return 1 if int(lowered) != 0 else 0
+        except ValueError:
+            return 1
+    return 1
+
+
+def _sanitize_csv_header(value: str, index: int) -> str:
+    header = str(value).strip()
+    if not header:
+        return f"col_{index}"
+    return header
+
+
+def _dedupe_headers(headers: list[str]) -> list[str]:
+    seen: dict[str, int] = {}
+    deduped: list[str] = []
+    for index, raw in enumerate(headers):
+        base = _sanitize_csv_header(raw, index)
+        count = seen.get(base, 0)
+        header = base
+        if count:
+            header = f"{base}_{count + 1}"
+        seen[base] = count + 1
+        deduped.append(header)
+    return deduped
+
+
 def _csv_parse(text: Optional[str], has_header: int = 1) -> Optional[str]:
     """Parse CSV text into JSON array using Python's robust csv module.
 
@@ -184,48 +233,70 @@ def _csv_parse(text: Optional[str], has_header: int = 1) -> Optional[str]:
       Output: [["Alice","30"],["Bob","25"]]
 
     Handles: quoted fields, embedded commas, embedded newlines, escaped quotes.
+    Also handles: BOM, Excel sep= prefix, delimiter detection (comma/tab/semicolon/pipe/caret).
     Safe: Pure computation, no I/O. Limited to 10000 rows, 100 columns.
     """
-    import csv as csv_module
-    import io
     import json as json_module
 
     if text is None:
         return None
 
+    has_header = _coerce_csv_header_flag(has_header)
+    text, explicit_delimiter = normalize_csv_text(text)
+    if not text.strip():
+        return "[]"
+
     # Normalize line endings
     text = text.replace('\r\n', '\n').replace('\r', '\n')
 
     try:
-        reader = csv_module.reader(io.StringIO(text))
-        rows = []
-        headers = None
+        max_field_size = max(1024, min(len(text), 5_000_000))
+        try:
+            csv.field_size_limit(max(csv.field_size_limit(), max_field_size))
+        except Exception:
+            pass
+
+        sample_text, sample_lines = build_csv_sample(text)
+        dialect = detect_csv_dialect(
+            sample_text,
+            sample_lines,
+            explicit_delimiter=explicit_delimiter,
+        )
         max_rows = 10000
         max_cols = 100
-
-        for i, row in enumerate(reader):
-            if i >= max_rows + (1 if has_header else 0):
+        row_limit = max_rows + (1 if has_header else 0) + 10
+        raw_rows = read_csv_rows(text, dialect, max_rows=row_limit)
+        rows = []
+        headers = None
+        row_index = 0
+        for row in raw_rows:
+            if row_index >= max_rows + (1 if has_header else 0):
                 break
-            # Limit columns
             row = row[:max_cols]
+            if not row or not any(cell.strip() for cell in row):
+                continue
 
-            if has_header and i == 0:
-                # Sanitize headers: strip whitespace, replace empty with col_N
-                headers = []
-                for j, h in enumerate(row):
-                    h = h.strip()
-                    if not h:
-                        h = f"col_{j}"
-                    headers.append(h)
+            if has_header and headers is None:
+                headers = _dedupe_headers(row)
+                row_index += 1
                 continue
 
             if has_header and headers:
-                # Pad row if fewer columns than headers
+                if len(row) > len(headers):
+                    extra = min(len(row), max_cols) - len(headers)
+                    if extra > 0:
+                        start = len(headers)
+                        new_headers = [f"col_{idx}" for idx in range(start, start + extra)]
+                        headers.extend(new_headers)
+                        for existing in rows:
+                            for new_header in new_headers:
+                                existing[new_header] = ""
                 while len(row) < len(headers):
                     row.append("")
                 rows.append(dict(zip(headers, row)))
             else:
                 rows.append(row)
+            row_index += 1
 
         return json_module.dumps(rows) if rows else "[]"
     except Exception:
@@ -243,27 +314,48 @@ def _csv_column(text: Optional[str], column: int, has_header: int = 1) -> Option
     Returns: JSON array of values, e.g., ["Alice","Bob","Carol"]
     Useful for: Getting all values in a column for aggregation or filtering.
     """
-    import csv as csv_module
-    import io
     import json as json_module
 
     if text is None or column < 0:
         return None
 
+    has_header = _coerce_csv_header_flag(has_header)
+    text, explicit_delimiter = normalize_csv_text(text)
+    if not text.strip():
+        return "[]"
+
     text = text.replace('\r\n', '\n').replace('\r', '\n')
 
     try:
-        reader = csv_module.reader(io.StringIO(text))
+        max_field_size = max(1024, min(len(text), 5_000_000))
+        try:
+            csv.field_size_limit(max(csv.field_size_limit(), max_field_size))
+        except Exception:
+            pass
+
+        sample_text, sample_lines = build_csv_sample(text)
+        dialect = detect_csv_dialect(
+            sample_text,
+            sample_lines,
+            explicit_delimiter=explicit_delimiter,
+        )
         values = []
         max_rows = 10000
+        row_limit = max_rows + (1 if has_header else 0) + 10
+        raw_rows = read_csv_rows(text, dialect, max_rows=row_limit)
+        row_index = 0
 
-        for i, row in enumerate(reader):
+        for row in raw_rows:
             if len(values) >= max_rows:
                 break
-            if has_header and i == 0:
+            if not row or not any(cell.strip() for cell in row):
+                continue
+            if has_header and row_index == 0:
+                row_index += 1
                 continue
             if column < len(row):
                 values.append(row[column])
+            row_index += 1
 
         return json_module.dumps(values) if values else "[]"
     except Exception:

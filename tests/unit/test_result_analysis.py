@@ -195,6 +195,16 @@ class TextAnalysisTests(SimpleTestCase):
         self.assertIsNotNone(analysis.csv_info)
         self.assertEqual(analysis.csv_info.delimiter, "\t")
 
+    def test_detects_csv_with_sep_prefix(self):
+        text = "sep=;\nid;name\n1;Alice\n2;Bob"
+
+        analysis = analyze_text(text)
+
+        self.assertEqual(analysis.format, "csv")
+        self.assertIsNotNone(analysis.csv_info)
+        self.assertEqual(analysis.csv_info.delimiter, ";")
+        self.assertIn("id", analysis.csv_info.columns)
+
     def test_csv_extracts_sample_rows_and_types(self):
         """CSV analysis should extract sample rows and infer column types."""
         text = """id,name,price,active
@@ -451,6 +461,7 @@ class FullAnalysisTests(SimpleTestCase):
         analysis = analyze_result(text, "test-id")
 
         self.assertIn("CSV", analysis.compact_summary)
+        self.assertIn("csv_parse", analysis.compact_summary)
         # When types are inferred, we use SCHEMA; otherwise COLUMNS
         self.assertTrue(
             "schema" in analysis.compact_summary.lower() or
@@ -682,6 +693,7 @@ class EdgeCaseTests(SimpleTestCase):
             "COLUMNS" in analysis.compact_summary
         )
         self.assertIn("GET CSV", analysis.compact_summary)
+        self.assertIn("csv_parse", analysis.compact_summary)
 
     def test_detects_embedded_json_string(self):
         """Detect JSON embedded in string fields and expose query hints."""

@@ -147,9 +147,9 @@ class ToolResultSchemaTests(SimpleTestCase):
 
     def test_fresh_text_result_adds_barbell_hint(self):
         long_text = (
-            "Header: Intro\n"
-            + ("Content line with punctuation, commas, and numbers 123. " * 400)
-            + "\nFooter: End"
+            "Header: Intro "
+            + ("Content line with punctuation and numbers 123. " * 400)
+            + "Footer: End"
         )
         record = tool_results.ToolCallResultRecord(
             step_id="step-4",
@@ -282,6 +282,23 @@ class ToolResultSchemaTests(SimpleTestCase):
         prompt_info = info.get("step-10")
         self.assertIsNotNone(prompt_info)
         self.assertIn("JSON_FOCUS:", prompt_info.meta)
+
+    def test_uuid_result_id_is_shortened(self):
+        record = tool_results.ToolCallResultRecord(
+            step_id="7f3a2b1c-1234-5678-9abc-def012345678",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=json.dumps({"name": "Alice"}),
+        )
+        info = tool_results.prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+        )
+
+        prompt_info = info.get(record.step_id)
+        self.assertIsNotNone(prompt_info)
+        self.assertIn("result_id=7f3a2b", prompt_info.meta)
+        self.assertNotIn(record.step_id, prompt_info.meta)
 
     def test_non_eligible_tool_gets_basic_meta(self):
         """Tools not in SCHEMA_ELIGIBLE_TOOL_PREFIXES get basic meta only."""

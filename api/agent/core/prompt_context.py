@@ -385,7 +385,7 @@ when:
   - Found matching extractor in M1
 
 do:
-  mcp_bright_data_<extractor>(url="<url>", will_continue_work=true)
+  mcp_brightdata_<extractor>(url="<url>", will_continue_work=true)
   # Multiple URLs? Call in parallel.
 
 then:
@@ -397,8 +397,8 @@ then:
 Example:
 ```
 # Parallel calls for company research
-mcp_bright_data_web_data_linkedin_company_profile(url="linkedin.com/company/acme")
-mcp_bright_data_web_data_crunchbase_company(url="crunchbase.com/organization/acme")
+mcp_brightdata_web_data_linkedin_company_profile(url="linkedin.com/company/acme")
+mcp_brightdata_web_data_crunchbase_company(url="crunchbase.com/organization/acme")
 
 # Result: clean JSON with employees, funding, headquarters
 → Store in table (M5)
@@ -1794,7 +1794,7 @@ def build_prompt_context(
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
-        implied_send_active=implied_send_active,
+        implied_send_context=implied_send_context,
         continuation_notice=continuation_notice,
     )
 
@@ -1885,72 +1885,8 @@ def build_prompt_context(
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
-    # Implied send status and formatting guidance
-    implied_send_status = None
-    if implied_send_context:
-        channel = implied_send_context["channel"]
-        display_name = implied_send_context["display_name"]
-        tool_example = implied_send_context["tool_example"]
-
-        if channel == "web":
-            # Active web session - simplest case
-            implied_send_status = (
-                f"## Implied Send → {display_name}\n\n"
-                f"Your text auto-sends to the active web chat user.\n"
-                f"Text-only replies auto-send; end with \"Continuing...\" to request another pass or "
-                f"\"Work complete.\" to stop.\n"
-                f"**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
-                f"If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
-                f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
-                "**To reach someone else**, use explicit tools:\n"
-                f"- `{tool_example}` ← what implied send does for you\n"
-                "- Other contacts: `send_email()`, `send_sms()`\n"
-                "- Peer agents: `send_agent_message()`\n\n"
-                "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly."
-            )
-
     # Dynamic formatting guidance based on current medium context
     formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
-
-    if implied_send_active:
-        response_patterns = (
-            "Your response structure signals your intent:\n\n"
-            "Empty response (no text, no tools)\n"
-            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
-            "  Use when: schedule fired but nothing to report\n\n"
-            "Message only (no tools)\n"
-            "  → Message sends\n"
-            "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
-            "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
-            "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
-            "Message + tools\n"
-            "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
-            "  Use when: acknowledging the user while taking action\n"
-            "  Example: 'Got it, looking into that now!' + http_request(...)\n\n"
-            "Tools only (no message)\n"
-            "  → 'Working quietly' → tools execute, no message sent\n"
-            "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "To signal completion: include \"Work complete.\" in your final message, or use `sleep_until_next_trigger`."
-        )
-    else:
-        response_patterns = (
-            "Your response structure signals your intent:\n\n"
-            "Empty response (no text, no tools)\n"
-            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
-            "  Use when: schedule fired but nothing to report\n\n"
-            "Message only (no tools)\n"
-            "  → Not delivered. Use explicit send tools when you need to communicate.\n"
-            "  Use when: never (avoid text-only replies)\n\n"
-            "Message + tools\n"
-            "  → Tools execute; if you need to communicate, include an explicit send tool\n"
-            "  Example: send_chat_message(...) + http_request(...)\n\n"
-            "Tools only (no message)\n"
-            "  → 'Working quietly' → tools execute, no message sent\n"
-            "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "Note: Without an active web chat session, text-only output is never delivered."
-        )
 
 
     # Secrets block
@@ -1963,9 +1899,7 @@ def build_prompt_context(
     important_group.section_text(
         "secrets_note",
         (
-            "Request credentials only when you'll use them immediately—API keys for http_request, or login credentials for spawn_web_task. "
-            "For MCP tools (Sheets, Slack, etc.), just call the tool; if it needs auth, it'll return a link to share with the user. "
-            "Never ask for passwords or 2FA codes for OAuth services."
+            "Request credentials only when you'll use them immediately—API keys for http_request, or login credentials for spawn_web_task."
         ),
         weight=1,
         non_shrinkable=True
@@ -1990,23 +1924,10 @@ def build_prompt_context(
     _get_unified_history_prompt(agent, unified_history_group)
 
     runtime_group = prompt.group("runtime_context", weight=6)
-    if implied_send_status:
-        runtime_group.section_text(
-            "implied_send_status",
-            implied_send_status,
-            weight=3,
-            non_shrinkable=True,
-        )
     runtime_group.section_text(
         "formatting_guidance",
         formatting_guidance,
         weight=3,
-        non_shrinkable=True,
-    )
-    runtime_group.section_text(
-        "response_patterns",
-        response_patterns,
-        weight=4,
         non_shrinkable=True,
     )
 
@@ -3243,45 +3164,78 @@ def _get_system_instruction(
     is_first_run: bool = False,
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
-    implied_send_active: bool = False,
+    implied_send_context: dict | None = None,
     continuation_notice: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
+    implied_send_active = implied_send_context is not None
+
     if implied_send_active:
-        send_guidance = (
-            "In an active web chat session, your text goes directly to that one user—but only them. "
-            "To reach anyone else (other contacts, peer agents, different channels), use explicit tools: "
-            "send_email, send_sms, send_agent_message, send_chat_message. "
+        display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
+        tool_example = implied_send_context.get("tool_example") if implied_send_context else "send_chat_message(...)"
+        delivery_context = (
+            f"## Implied Send → {display_name}\n\n"
+            "Your text auto-sends to the active web chat user.\n"
+            "Text-only replies auto-send; end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n"
+            "**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
+            "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
+            "To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
+            "**To reach someone else**, use explicit tools:\n"
+            f"- `{tool_example}` ← what implied send does for you\n"
+            "- Other contacts: `send_email()`, `send_sms()`\n"
+            "- Peer agents: `send_agent_message()`\n\n"
+            "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
-        response_delivery_note = (
-            "Text output auto-sends only to an active web chat user—nobody else. "
-            "For all other recipients (email contacts, SMS, peer agents), use explicit send tools. "
+        response_structure = (
+            "Your response structure signals your intent:\n\n"
+            "Empty response (no text, no tools)\n"
+            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
+            "  Use when: schedule fired but nothing to report\n\n"
+            "Message only (no tools)\n"
+            "  → Message sends\n"
+            "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
+            "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
+            "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
+            "Message + tools\n"
+            "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
+            "  Use when: acknowledging the user while taking action\n"
+            "  Example: 'Got it, looking into that now!' + http_request(...)\n\n"
+            "Tools only (no message)\n"
+            "  → 'Working quietly' → tools execute, no message sent\n"
+            "  Use when: background work, scheduled tasks with nothing to announce\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
+            "To signal completion: include \"Work complete.\" in your final message, or use `sleep_until_next_trigger`."
         )
-        web_chat_delivery_note = (
-            "For the active web chat user, just write your message—it auto-sends to them only. "
-            "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
-        )
-        message_only_note = (
-            "Text-only replies can signal intent: end with \"Continuing...\" to request another pass, "
-            "or \"Work complete.\" to stop. Empty responses trigger auto-sleep. "
-        )
+        tool_calls_note = "Tool calls are actions you take. You can combine text + tools in one response. "
+        stop_explicit_note = ""
     else:
-        send_guidance = (
+        delivery_context = (
+            "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
-            "To reach anyone (contacts, peer agents, web chat), use send_email, send_sms, "
-            "send_agent_message, or send_chat_message. "
-        )
-        response_delivery_note = (
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
-        )
-        web_chat_delivery_note = (
             "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
+            "Focus on tool calls—text alone is not delivered.\n\n"
         )
-        message_only_note = (
-            "Text-only responses are not delivered without an active web chat session. "
-            "Empty responses trigger auto-sleep. "
+        response_structure = (
+            "Your response structure signals your intent:\n\n"
+            "Empty response (no text, no tools)\n"
+            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
+            "  Use when: schedule fired but nothing to report\n\n"
+            "Message only (no tools)\n"
+            "  → Not delivered. Use explicit send tools when you need to communicate.\n"
+            "  Use when: never (avoid text-only replies)\n\n"
+            "Message + tools\n"
+            "  → Tools execute; if you need to communicate, include an explicit send tool\n"
+            "  Example: send_chat_message(...) + http_request(...)\n\n"
+            "Tools only (no message)\n"
+            "  → 'Working quietly' → tools execute, no message sent\n"
+            "  Use when: background work, scheduled tasks with nothing to announce\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
+            "Note: Without an active web chat session, text-only output is never delivered."
         )
+        tool_calls_note = "Tool calls are actions you take. "
+        stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
     # Key: be eager to update charter and schedule whenever user hints at preferences or timing
@@ -3289,6 +3243,11 @@ def _get_system_instruction(
     reply = "'Message'" if implied_send_active else "send_email('Message')"
     reply_short = "reply" if implied_send_active else "send_email(reply)"
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
+    text_only_guidance = (
+        "- Text-only replies: end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n\n"
+        if implied_send_active
+        else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
+    )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**Stop** — request fully handled AND kanban clear (no todo/doing cards):\n"
@@ -3302,7 +3261,7 @@ def _get_system_instruction(
         "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
         "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
-        "- Text-only replies: end with \"Continuing...\" to request another pass or \"Work complete.\" to stop.\n\n"
+        f"{text_only_guidance}"
         "**Mid-conversation updates** — update eagerly when user hints:\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
@@ -3331,21 +3290,14 @@ def _get_system_instruction(
         )
 
     delivery_instructions = (
-        f"{send_guidance}"
-        f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
+        f"{delivery_context}"
+        f"{response_structure}\n\n"
         f"{will_continue_guidance}"
+        f"{tool_calls_note}"
+        f"{stop_explicit_note}"
         "Fetching data is just step one—reporting it to the user completes the task. "
-        f"{message_only_note}"
-        "How responses work: "
-        f"{response_delivery_note}"
-        "Tool calls are actions you take. "
-        f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Empty response = auto-stop. Text-only replies: end with \"Continuing...\" to request another pass or "
-        "\"Work complete.\" to stop. To stop explicitly: `sleep_until_next_trigger`."
-        f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
+        "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n\n"
         f"{stop_continue_examples}"
-        "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n"
-        f"{web_chat_delivery_note}"
     )
 
     base_prompt = (
@@ -3462,7 +3414,6 @@ def _get_system_instruction(
         "Your outputs should feel crafted, not generated. Complete, not partial. Linked, not isolated. Beautiful, not just functional. "
 
         "Use the right tools. "
-        "`search_tools` is your gateway—it discovers and enables other tools. Always start there when unsure. "
         "Structured data beats raw scraping. One extractor call beats 10 minutes of manual work. "
         "Know your tools—they're your superpower. "
 
@@ -3820,7 +3771,8 @@ def _get_system_instruction(
         "For MCP tools (Google Sheets, Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
-        "`search_tools` unlocks integrations—call it to enable tools for Instagram, LinkedIn, Reddit, and more. "
+        "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
+        "Always start there when unsure. "
 
         f"{delivery_instructions}"
 

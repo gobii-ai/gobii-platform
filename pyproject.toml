@@ -136,6 +136,7 @@ dependencies = [
   # Chart generation for PDFs and messages
   "matplotlib>=3.8.0",
   "sqlglot>=28.5.0",
+  "clevercsv>=0.8.4",
 ]
 
 [build-system]

@@ -115,6 +115,8 @@ def get_sqlite_schema_prompt() -> str:
                 (count,) = cur.fetchone()
             except Exception:
                 count = "?"
+            if name == TOOL_RESULTS_TABLE and create_stmt:
+                create_stmt = _redact_tool_results_schema(create_stmt)
             create_stmt_single_line = _truncate_text(
                 " ".join((create_stmt or "").split()),
                 MAX_CREATE_STMT_CHARS,
@@ -204,6 +206,19 @@ def _truncate_text(text: str, max_chars: int) -> str:
     if max_chars <= 3:
         return text[:max_chars]
     return text[: max_chars - 3] + "..."
+
+
+def _redact_tool_results_schema(create_stmt: str) -> str:
+    cleaned = re.sub(
+        r"\blegacy_result_id\s+TEXT\s*,?",
+        "",
+        create_stmt,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r",\s*,", ", ", cleaned)
+    cleaned = re.sub(r"\(\s*,", "(", cleaned)
+    cleaned = re.sub(r",\s*\)", ")", cleaned)
+    return cleaned
 
 
 def _compact_text(text: str, max_chars: int, *, preserve_newlines: bool = False) -> str:

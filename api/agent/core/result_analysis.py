@@ -21,6 +21,12 @@ import json5
 from bs4 import BeautifulSoup
 from charset_normalizer import from_bytes
 
+from .csv_utils import (
+    build_csv_sample,
+    detect_csv_dialect,
+    normalize_csv_text,
+    read_csv_rows,
+)
 from ..tools.json_digest import JsonDigest, digest as digest_json
 from ..tools.text_digest import TextDigest, digest as digest_text
 
@@ -1507,62 +1513,42 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
     column types so agents can parse CSV without seeing full data.
     """
     info = CsvInfo()
-    lines = text.split('\n', 50)  # Check first 50 lines
-    if len(lines) < 2:
+    normalized_text, explicit_delimiter = normalize_csv_text(text)
+    if not normalized_text:
         return False, info
 
-    sample_lines = [line for line in lines[:20] if line.strip()]
+    sample_text, sample_lines = build_csv_sample(normalized_text)
     if len(sample_lines) < 2:
         return False, info
-    sample_text = "\n".join(sample_lines)
 
-    # Try csv.Sniffer first for messy real-world files.
-    sniffer = csv.Sniffer()
-    dialect = None
-    try:
-        dialect = sniffer.sniff(sample_text, delimiters=[",", "\t", ";", "|"])
-    except csv.Error:
-        dialect = None
-
-    # Fallback to simple delimiter consistency if sniffer fails.
-    delimiters = [',', '\t', ';', '|']
-    best_delimiter = ','
-    best_consistency = 0
-
-    if dialect:
-        best_delimiter = dialect.delimiter
-        best_consistency = 1
-    else:
-        for delim in delimiters:
-            counts = [line.count(delim) for line in sample_lines[:10] if line.strip()]
-            if not counts:
-                continue
-            # Check if counts are consistent
-            if max(counts) > 0 and max(counts) == min(counts):
-                if counts[0] > best_consistency:
-                    best_consistency = counts[0]
-                    best_delimiter = delim
-
-    if best_consistency < 1:
+    dialect = detect_csv_dialect(
+        sample_text,
+        sample_lines,
+        explicit_delimiter=explicit_delimiter,
+    )
+    if not dialect:
         return False, info
 
-    info.delimiter = best_delimiter
+    info.delimiter = dialect.delimiter
 
-    reader = csv.reader(sample_lines, delimiter=best_delimiter)
-    rows = list(reader)
+    raw_rows = read_csv_rows(sample_text, dialect, max_rows=10)
+    rows = [row for row in raw_rows if row and any(cell.strip() for cell in row)]
     if not rows:
         return False, info
 
     header_row = rows[0]
-    if header_row:
-        header_row[0] = header_row[0].lstrip("\ufeff")
     columns = [c.strip().strip('"\'') for c in header_row]
 
     # Check if first row looks like a header (non-numeric, reasonable names).
-    looks_like_header = sniffer.has_header(sample_text) if dialect else all(
-        not re.match(r'^-?\d+\.?\d*$', col) and len(col) < 50
-        for col in columns if col
-    )
+    try:
+        looks_like_header = csv.Sniffer().has_header(sample_text)
+    except csv.Error:
+        looks_like_header = False
+    if not looks_like_header:
+        looks_like_header = all(
+            not re.match(r'^-?\d+\.?\d*$', col) and len(col) < 50
+            for col in columns if col
+        )
 
     info.has_header = looks_like_header
     data_start_idx = 1 if looks_like_header else 0
@@ -1573,8 +1559,12 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
         info.columns = [f"col{i}" for i in range(len(columns))][:20]
 
     # Extract first 2-3 data rows (after header if present)
-    data_rows = [row for row in rows[data_start_idx:data_start_idx + 3] if any(cell.strip() for cell in row)]
-    info.sample_rows = [best_delimiter.join(row)[:300] for row in data_rows]
+    data_rows = [
+        row
+        for row in rows[data_start_idx:data_start_idx + 3]
+        if any(cell.strip() for cell in row)
+    ]
+    info.sample_rows = [dialect.delimiter.join(row)[:300] for row in data_rows]
 
     # Infer column types from sample data
     if data_rows and info.columns:
@@ -1588,7 +1578,7 @@ def _detect_csv(text: str) -> Tuple[bool, CsvInfo]:
         info.column_types = [_infer_column_type(vals) for vals in col_values]
 
     # Estimate row count
-    total_lines = text.count('\n') + 1
+    total_lines = normalized_text.count('\n') + 1
     info.row_count_estimate = total_lines - (1 if looks_like_header else 0)
 
     return True, info
@@ -2249,17 +2239,24 @@ def _generate_compact_summary(
                         parts.append(f"  SAMPLE: {sample}")
 
                     parts.append(f"  → GET CSV: {extract_query}")
-                    parts.append(f"  → CSV is TEXT - parse it line by line, do NOT use json_each()")
-                    if col_count > 1:
-                        cte_parts = []
-                        for i in range(1, col_count):
-                            if i < col_count - 1:
-                                cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
-                            else:
-                                cte_parts.append(f"p{i}(c{i},c{i+1})")
-                        cte_chain = "→".join(cte_parts)
-                        cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
-                        parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
+                    parse_suffix = "" if csv.has_header else ", 0"
+                    if parent_path:
+                        csv_expr = f"json_extract(r.value,'{item_path}')"
+                        parse_query = (
+                            f"SELECT r2.value "
+                            f"FROM __tool_results, json_each(result_json,'{parent_path}') AS r, "
+                            f"json_each(csv_parse({csv_expr}{parse_suffix})) AS r2 "
+                            f"WHERE result_id='{result_id}' LIMIT 25"
+                        )
+                    else:
+                        csv_expr = f"json_extract(result_json,'{emb.path}')"
+                        parse_query = (
+                            f"SELECT r.value "
+                            f"FROM __tool_results, json_each(csv_parse({csv_expr}{parse_suffix})) AS r "
+                            f"WHERE result_id='{result_id}' LIMIT 25"
+                        )
+                    parts.append("  → CSV is TEXT - use csv_parse(...) then json_each()")
+                    parts.append(f"  → PARSE: {parse_query}")
 
                 elif emb.format == "json":
                     parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT (use json_extract to unwrap, then json_each)")
@@ -2365,19 +2362,14 @@ def _generate_compact_summary(
                 parts.append(
                     f"→ QUERY: SELECT result_text FROM __tool_results WHERE result_id='{result_id}'"
                 )
-                parts.append(f"  → Parse CSV line by line. Do NOT use json_each()")
-                # Add pattern hint based on column count with concrete structure
-                if col_count > 1:
-                    # Build concrete CTE chain: p1(c1,r)→p2(c2,r2)→...→pN(cN,cN+1)
-                    cte_parts = []
-                    for i in range(1, col_count):
-                        if i < col_count - 1:
-                            cte_parts.append(f"p{i}(c{i},r{i if i > 1 else ''})")
-                        else:
-                            cte_parts.append(f"p{i}(c{i},c{i+1})")
-                    cte_chain = "→".join(cte_parts)
-                    cols = ",".join(f"c{i}" for i in range(1, col_count + 1))
-                    parts.append(f"  → PARSE: {cte_chain} then INSERT...SELECT {cols} FROM p{col_count-1}")
+                parse_suffix = "" if csv.has_header else ", 0"
+                parse_query = (
+                    f"SELECT r.value "
+                    f"FROM __tool_results t, json_each(csv_parse(t.result_text{parse_suffix})) AS r "
+                    f"WHERE t.result_id='{result_id}' LIMIT 25"
+                )
+                parts.append("  → CSV is TEXT - use csv_parse(...) then json_each()")
+                parts.append(f"  → PARSE: {parse_query}")
 
             elif fmt in ("markdown", "html") and text_analysis.doc_structure:
                 doc = text_analysis.doc_structure

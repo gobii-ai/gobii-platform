@@ -686,6 +686,42 @@ class SqliteBatchToolTests(TestCase):
             self.assertIn("no such table: metric", out.get("message", "").lower())
             self.assertNotIn("AUTO-CORRECTED", out.get("message", ""))
 
+    def test_tool_results_legacy_result_id_compat(self):
+        with self._with_temp_db() as (db_path, token, tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                cur = conn.cursor()
+                cur.execute(
+                    "CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, legacy_result_id TEXT, result_json TEXT)"
+                )
+                cur.execute("CREATE TABLE saved (result_id TEXT)")
+                legacy_id = "79b92bdd-ef82-405c-893e-e26989ce6a48"
+                cur.execute(
+                    "INSERT INTO __tool_results (result_id, legacy_result_id, result_json) VALUES (?, ?, ?)",
+                    ("abc123", legacy_id, json.dumps({"ok": True})),
+                )
+                cur.execute(
+                    "INSERT INTO saved (result_id) VALUES (?)",
+                    (legacy_id,),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT result_id FROM __tool_results WHERE result_id='79b92bdd-ef82-405c-893e-e26989ce6a48'"},
+            )
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(out["results"][0]["result"], [{"result_id": "abc123"}])
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {"sql": "SELECT t.result_id FROM __tool_results t JOIN saved s ON t.result_id = s.result_id"},
+            )
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(out["results"][0]["result"], [{"result_id": "abc123"}])
+
     def test_autocorrect_missing_column_with_schema_unqualified(self):
         """Auto-corrects unqualified column names using schema."""
         with self._with_temp_db():

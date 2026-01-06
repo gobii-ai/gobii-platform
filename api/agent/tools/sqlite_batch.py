@@ -704,6 +704,27 @@ def _replace_outside_literals(
     return "".join(parts), total
 
 
+def _placeholder_sql_literals(sql: str) -> tuple[str, list[str]]:
+    segments = _split_sql_outside_literals(sql)
+    literals: list[str] = []
+    parts: list[str] = []
+    for segment, is_code in segments:
+        if is_code:
+            parts.append(segment)
+        else:
+            placeholder = f"__lit_{len(literals)}__"
+            literals.append(segment)
+            parts.append(placeholder)
+    return "".join(parts), literals
+
+
+def _restore_sql_literals(sql: str, literals: list[str]) -> str:
+    restored = sql
+    for idx, literal in enumerate(literals):
+        restored = restored.replace(f"__lit_{idx}__", literal)
+    return restored
+
+
 def _normalize_identifier(identifier: str) -> str:
     cleaned = identifier.strip().strip('`"[]')
     return cleaned.lower()
@@ -916,6 +937,80 @@ def _get_schema_tables(conn: sqlite3.Connection) -> list[str]:
         seen.add(name)
         deduped.append(name)
     return deduped
+
+
+def _table_has_column(conn: sqlite3.Connection, table_name: str, column_name: str) -> bool:
+    try:
+        cur = conn.cursor()
+        cur.execute(f'PRAGMA table_info("{table_name}");')
+        target = column_name.lower()
+        return any((row[1] or "").lower() == target for row in cur.fetchall())
+    except Exception:
+        return False
+
+
+def _rewrite_result_id_comparisons(
+    sql: str,
+    *,
+    column_ref: str,
+    compat_ref: str,
+) -> str:
+    if column_ref.lower() not in sql.lower():
+        return sql
+
+    if "." in column_ref:
+        col_pattern = rf"\b{re.escape(column_ref)}\b"
+    else:
+        col_pattern = rf"(?<!\.)\b{re.escape(column_ref)}\b"
+
+    placeholder_sql, literals = _placeholder_sql_literals(sql)
+    patterns = [
+        (
+            rf"{col_pattern}\s*=\s*([^\s),;]+)",
+            rf"({column_ref} = \1 OR {compat_ref} = \1)",
+        ),
+        (
+            rf"([^\s(,;]+)\s*=\s*{col_pattern}",
+            rf"(\1 = {column_ref} OR \1 = {compat_ref})",
+        ),
+        (
+            rf"{col_pattern}\s+IN\s*(\([^)]*\))",
+            rf"({column_ref} IN \1 OR {compat_ref} IN \1)",
+        ),
+    ]
+
+    for pattern, replacement in patterns:
+        placeholder_sql = re.sub(pattern, replacement, placeholder_sql, flags=re.IGNORECASE)
+    return _restore_sql_literals(placeholder_sql, literals)
+
+
+def _apply_tool_results_result_id_compat(sql: str, conn: sqlite3.Connection) -> str:
+    if "__tool_results" not in sql.lower():
+        return sql
+    if not _table_has_column(conn, "__tool_results", "legacy_result_id"):
+        return sql
+
+    aliases = {
+        alias
+        for table_name, alias in _extract_table_refs(sql)
+        if table_name.lower() == "__tool_results"
+    }
+    if not aliases:
+        aliases = {"__tool_results"}
+
+    for alias in aliases:
+        if alias:
+            sql = _rewrite_result_id_comparisons(
+                sql,
+                column_ref=f"{alias}.result_id",
+                compat_ref=f"{alias}.legacy_result_id",
+            )
+    sql = _rewrite_result_id_comparisons(
+        sql,
+        column_ref="result_id",
+        compat_ref="legacy_result_id",
+    )
+    return sql
 
 
 def _get_schema_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
@@ -1563,6 +1658,7 @@ def _execute_sqlite_batch_inner(
                 error_message = f"Query {idx} blocked: {block_reason}"
                 break
 
+            query = _apply_tool_results_result_id_compat(query, conn)
             only_write_queries = only_write_queries and is_write_statement(query)
 
             result_entry, final_query, applied_corrections, failure_message = _execute_with_autocorrections(
