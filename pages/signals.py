@@ -1599,11 +1599,15 @@ def handle_subscription_event(event, **kwargs):
 
             if owner_type == "user":
                 mark_user_billing_with_plan(owner, plan_value, update_anchor=False, plan_version=plan_version)
-                TaskCreditService.grant_subscription_credits(
-                    owner,
-                    plan=plan,
-                    invoice_id=invoice_id or ""
-                )
+                should_grant = billing_reason in {"subscription_create", "subscription_cycle"}
+                if billing_reason is None and event_type == "customer.subscription.created":
+                    should_grant = True
+                if should_grant:
+                    TaskCreditService.grant_subscription_credits(
+                        owner,
+                        plan=plan,
+                        invoice_id=invoice_id or ""
+                    )
 
                 try:
                     ub = owner.billing
