@@ -611,6 +611,8 @@ Example wrap-up (single response with tools):
 - sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE title IN ('Step 1', 'Step 2');", will_continue_work=false)
 - send_chat_message(body="All done. Marked completed cards and sharing results.")
 
+WRONG: send_chat_message(body="Done! Marked all cards complete.") without sqlite_batch UPDATE in same response → card stays open, you lied.
+
 **The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
 
 ---
@@ -1857,7 +1859,8 @@ def build_prompt_context(
         "Mark done: UPDATE __kanban_cards SET status='done' WHERE title='Step 1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: INSERT with status='done' ← creates duplicate. "
-        "WRONG: doing work that 'addresses' a card + will_continue_work=false without UPDATE ← orphans the card."
+        "WRONG: work without UPDATE → orphans the card. "
+        "WRONG: saying 'Done!' in message without sqlite_batch UPDATE in same response → you lied, card stays open."
     )
     variable_group.section_text(
         "kanban_note",
