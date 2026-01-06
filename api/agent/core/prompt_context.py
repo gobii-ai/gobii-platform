@@ -3270,6 +3270,7 @@ def _get_system_instruction(
             "**How stopping works (implied send mode):**\n"
             "- Text-only replies continue by default (up to 2 before auto-stop)\n"
             "- **Kanban all-done = instant stop** — marking the last card done ends your session immediately\n"
+            "- Keep at least one card in 'doing' while working; only mark the last one done when delivering final results\n"
             "- Include your final message in the same turn as the last card completion\n"
             "- To stop early: use `sleep_until_next_trigger`\n"
         )
@@ -3278,7 +3279,8 @@ def _get_system_instruction(
             "**The will_continue_work flag:** "
             "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
             "Set false only after verifying no todo/doing cards remain. "
-            "**Kanban all-done = instant stop** — you won't get another turn after marking the last card done.\n"
+            "**Kanban all-done = instant stop** — you won't get another turn after marking the last card done. "
+            "Keep at least one card in 'doing' while working.\n"
         )
 
     delivery_instructions = (
@@ -3386,7 +3388,8 @@ def _get_system_instruction(
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
-        "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n\n"
+        "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
+        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. If you mark your last card done, you won't get another turn—even to create new cards. Transition atomically: complete last card + deliver results in the same response.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "

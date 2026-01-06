@@ -2720,6 +2720,7 @@ def _run_agent_loop(
 
             executed_calls = 0
             followup_required = False
+            any_explicit_continuation = False  # Track if any tool said will_continue_work=True
             try:
                 tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
@@ -3025,6 +3026,10 @@ def _run_agent_loop(
                     if tool_requires_followup:
                         followup_required = True
 
+                    # Track if any tool explicitly requested continuation
+                    if isinstance(tool_params, dict) and tool_params.get("will_continue_work") is True:
+                        any_explicit_continuation = True
+
                     executed_calls += 1
 
             config_had_errors = _apply_agent_config_updates()
@@ -3033,20 +3038,26 @@ def _run_agent_loop(
                 followup_required = True
 
             # Kanban completion override: if all work is done, force auto-sleep
-            # regardless of what will_continue_work flags were set.
+            # UNLESS the agent explicitly said will_continue_work=true on any tool.
+            # This respects the agent's promise to do more work even after marking done.
             kanban_all_done = (
                 kanban_board_snapshot is not None
                 and kanban_board_snapshot.todo_count == 0
                 and kanban_board_snapshot.doing_count == 0
                 and kanban_board_snapshot.done_count > 0
             )
-            if kanban_all_done and followup_required and not all_calls_sleep:
+            if kanban_all_done and followup_required and not all_calls_sleep and not any_explicit_continuation:
                 logger.info(
                     "Agent %s: kanban shows all work complete (done=%d), overriding followup_required to allow auto-sleep.",
                     agent.id,
                     kanban_board_snapshot.done_count,
                 )
                 followup_required = False
+            elif kanban_all_done and any_explicit_continuation:
+                logger.info(
+                    "Agent %s: kanban all done but agent explicitly requested continuation; allowing one more turn.",
+                    agent.id,
+                )
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
