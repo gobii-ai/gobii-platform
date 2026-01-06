@@ -25,6 +25,29 @@ def _drop_toolratelimit_plan_fk(apps, schema_editor) -> None:
         )
 
 
+def _drop_plan_name_primary_keys(apps, schema_editor) -> None:
+    if schema_editor.connection.vendor != "postgresql":
+        return
+    tables = ("api_dailycreditconfig", "api_browserconfig", "api_toolconfig")
+    for table in tables:
+        with schema_editor.connection.cursor() as cursor:
+            constraints = schema_editor.connection.introspection.get_constraints(cursor, table)
+        for name, constraint in constraints.items():
+            if not constraint.get("primary_key"):
+                continue
+            columns = constraint.get("columns") or []
+            if "plan_name" not in columns:
+                continue
+            schema_editor.execute(
+                "ALTER TABLE %s DROP CONSTRAINT %s"
+                % (
+                    schema_editor.quote_name(table),
+                    schema_editor.quote_name(name),
+                )
+            )
+            break
+
+
 class Migration(migrations.Migration):
     dependencies = [
         ("api", "0248_alter_promptconfig_premium_tool_call_history_limit_and_more"),
@@ -32,6 +55,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.RunPython(_drop_toolratelimit_plan_fk, migrations.RunPython.noop),
+        migrations.RunPython(_drop_plan_name_primary_keys, migrations.RunPython.noop),
         migrations.CreateModel(
             name="Plan",
             fields=[
