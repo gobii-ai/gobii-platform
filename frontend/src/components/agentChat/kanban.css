@@ -384,55 +384,57 @@
    Card-Level Change Indicators - The satisfying part
    ========================================================================== */
 
-/* Changed card base - adds glow effect */
+/* Changed card base - subtle but beautiful glow effect */
 .kanban-mini-card--changed {
   animation: kanban-card-fade 0.3s ease-out forwards,
-             kanban-card-glow 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+             kanban-card-highlight 1s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   animation-delay: var(--card-delay, 0ms);
+  background: rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.06),
+    0 1px 3px rgba(0, 0, 0, 0.08),
+    0 2px 8px rgba(0, 0, 0, 0.04);
 }
 
-/* Completed cards get a special treatment */
+/* Completed cards get the special green treatment */
 .kanban-mini-card--completed.kanban-mini-card--changed {
-  background: linear-gradient(135deg, rgba(var(--kanban-done), 0.12) 0%, rgba(255, 255, 255, 0.8) 100%);
-  border: 1px solid rgba(var(--kanban-done), 0.25);
+  background: linear-gradient(135deg, rgba(var(--kanban-done), 0.1) 0%, rgba(255, 255, 255, 0.95) 100%);
+  box-shadow:
+    0 0 0 1px rgba(var(--kanban-done), 0.2),
+    0 1px 4px rgba(var(--kanban-done), 0.12),
+    0 2px 8px rgba(var(--kanban-done), 0.08);
   animation: kanban-card-fade 0.3s ease-out forwards,
-             kanban-card-complete-glow 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+             kanban-card-complete-glow 0.9s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   animation-delay: var(--card-delay, 0ms);
 }
 
-/* Started cards - amber accent */
-.kanban-mini-card--started.kanban-mini-card--changed {
-  background: linear-gradient(135deg, rgba(var(--kanban-doing), 0.1) 0%, rgba(255, 255, 255, 0.8) 100%);
-  border: 1px solid rgba(var(--kanban-doing), 0.2);
-}
-
-/* Created cards - use todo blue with bolder treatment */
-.kanban-mini-card--created.kanban-mini-card--changed {
-  background: linear-gradient(135deg, rgba(var(--kanban-created), 0.15) 0%, rgba(255, 255, 255, 0.85) 100%);
-  border: 1px solid rgba(var(--kanban-created), 0.3);
-}
-
-@keyframes kanban-card-glow {
+@keyframes kanban-card-highlight {
   0% {
-    box-shadow: 0 0 0 0 rgba(var(--kanban-accent), 0);
-  }
-  50% {
-    box-shadow: 0 0 0 2px rgba(var(--kanban-accent), 0.15), 0 0 8px rgba(var(--kanban-accent), 0.1);
+    box-shadow:
+      0 0 0 2px rgba(0, 0, 0, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.12),
+      0 4px 16px rgba(0, 0, 0, 0.06);
   }
   100% {
-    box-shadow: none;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.06),
+      0 1px 3px rgba(0, 0, 0, 0.08),
+      0 2px 8px rgba(0, 0, 0, 0.04);
   }
 }
 
 @keyframes kanban-card-complete-glow {
   0% {
-    box-shadow: 0 0 0 0 rgba(var(--kanban-done), 0);
-  }
-  40% {
-    box-shadow: 0 0 0 3px rgba(var(--kanban-done), 0.2), 0 0 12px rgba(var(--kanban-done), 0.15);
+    box-shadow:
+      0 0 0 3px rgba(var(--kanban-done), 0.25),
+      0 2px 8px rgba(var(--kanban-done), 0.2),
+      0 4px 16px rgba(var(--kanban-done), 0.1);
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(var(--kanban-done), 0);
+    box-shadow:
+      0 0 0 1px rgba(var(--kanban-done), 0.2),
+      0 1px 4px rgba(var(--kanban-done), 0.12),
+      0 2px 8px rgba(var(--kanban-done), 0.08);
   }
 }
 
@@ -483,18 +485,6 @@
   }
 }
 
-/* Special dot colors for changed cards */
-.kanban-mini-card--completed .kanban-mini-card-dot {
-  background: rgb(var(--kanban-done));
-}
-
-.kanban-mini-card--started .kanban-mini-card-dot {
-  background: rgb(var(--kanban-doing));
-}
-
-.kanban-mini-card--created .kanban-mini-card-dot {
-  background: rgb(var(--kanban-created));
-}
 
 .kanban-column-more {
   font-size: 0.625rem;

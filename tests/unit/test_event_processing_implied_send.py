@@ -526,8 +526,8 @@ class ContinuationSignalTests(TestCase):
         self.assertTrue(ep._has_continuation_signal("i'll work on it"))
 
     def test_has_continuation_signal_false_for_done(self):
-        self.assertFalse(ep._has_continuation_signal("All done!"))
-        self.assertFalse(ep._has_continuation_signal("Here are the results."))
+        self.assertFalse(ep._has_continuation_signal("Work complete."))
+        self.assertFalse(ep._has_continuation_signal("That's everything you asked for."))
 
     def test_has_continuation_signal_empty(self):
         self.assertFalse(ep._has_continuation_signal(""))
@@ -538,3 +538,46 @@ class ContinuationSignalTests(TestCase):
 
     def test_has_continuation_signal_with_proceeding_to(self):
         self.assertTrue(ep._has_continuation_signal("Proceeding to extract the data."))
+
+
+@tag("batch_event_processing")
+class CompletionSignalTests(TestCase):
+    """Tests for the _has_completion_signal helper function."""
+
+    def test_has_completion_signal_with_work_complete(self):
+        self.assertTrue(ep._has_completion_signal("Work complete."))
+        self.assertTrue(ep._has_completion_signal("Work complete"))
+
+    def test_has_completion_signal_with_task_complete(self):
+        self.assertTrue(ep._has_completion_signal("Task complete! Here's the report."))
+
+    def test_has_completion_signal_with_all_done(self):
+        self.assertTrue(ep._has_completion_signal("All done! Let me know if you need anything else."))
+
+    def test_has_completion_signal_with_thats_everything(self):
+        self.assertTrue(ep._has_completion_signal("That's everything you asked for."))
+
+    def test_has_completion_signal_with_here_are_your_results(self):
+        self.assertTrue(ep._has_completion_signal("Here are your results: ..."))
+
+    def test_has_completion_signal_with_heres_what_i_found(self):
+        self.assertTrue(ep._has_completion_signal("Here's what I found in the data."))
+
+    def test_has_completion_signal_case_insensitive(self):
+        self.assertTrue(ep._has_completion_signal("WORK COMPLETE"))
+        self.assertTrue(ep._has_completion_signal("all done"))
+
+    def test_has_completion_signal_false_for_continuation(self):
+        self.assertFalse(ep._has_completion_signal("Let me check that."))
+        self.assertFalse(ep._has_completion_signal("I'll get that for you."))
+        self.assertFalse(ep._has_completion_signal("Continuing..."))
+
+    def test_has_completion_signal_empty(self):
+        self.assertFalse(ep._has_completion_signal(""))
+        self.assertFalse(ep._has_completion_signal(None))
+
+    def test_has_completion_signal_with_that_completes(self):
+        self.assertTrue(ep._has_completion_signal("That completes the analysis."))
+
+    def test_has_completion_signal_with_this_completes(self):
+        self.assertTrue(ep._has_completion_signal("This completes your request."))

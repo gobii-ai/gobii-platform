@@ -188,7 +188,33 @@ def _has_continuation_signal(text: str) -> bool:
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
 
 
-__all__ = ["process_agent_events", "CANONICAL_CONTINUATION_PHRASE"]
+# Canonical phrase the agent should use to signal completion (work is done).
+# Prompts tell the agent to include this exact phrase when delivering final output.
+CANONICAL_COMPLETION_PHRASE = "Work complete."
+
+# Flexible detection: canonical phrase + natural language variations.
+# Case-insensitive matching against message text or thinking content.
+COMPLETION_PHRASES = (
+    "work complete",  # Canonical - exact match (without period for flexibility)
+    "task complete",
+    "all done",
+    "that's everything",
+    "that completes",
+    "this completes",
+    "here are your results",
+    "here's what i found",
+)
+
+
+def _has_completion_signal(text: str) -> bool:
+    """Return True if text contains phrases indicating the agent is done."""
+    if not text:
+        return False
+    lower_text = text.lower()
+    return any(phrase in lower_text for phrase in COMPLETION_PHRASES)
+
+
+__all__ = ["process_agent_events", "CANONICAL_CONTINUATION_PHRASE", "CANONICAL_COMPLETION_PHRASE"]
 
 
 @dataclass(frozen=True)
@@ -2743,9 +2769,11 @@ def _run_agent_loop(
             implied_send = False
             tool_calls = list(raw_tool_calls)
             if message_text and not has_explicit_send:
-                # Invert the default: assume continuation unless agent explicitly sleeps.
-                # Agent must call sleep_until_next_trigger to signal "I'm done".
-                implied_will_continue = not has_explicit_sleep
+                # Check for explicit completion signal in message or thinking content.
+                # Agent can signal "I'm done" by including phrases like "Work complete."
+                has_completion = _has_completion_signal(message_text) or _has_completion_signal(thinking_content or "")
+                # Default: assume continuation unless agent explicitly sleeps OR signals completion.
+                implied_will_continue = not has_explicit_sleep and not has_completion
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,

@@ -1911,6 +1911,7 @@ def build_prompt_context(
             "Message only (no tools)\n"
             "  → Message sends, you get another turn (up to 2 in a row before auto-stop)\n"
             "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
+            "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
             "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
@@ -1920,7 +1921,7 @@ def build_prompt_context(
             "  → 'Working quietly' → tools execute, no message sent\n"
             "  Use when: background work, scheduled tasks with nothing to announce\n"
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "To signal completion: `sleep_until_next_trigger` (explicit stop) or 2 consecutive text-only replies (auto-stop)."
+            "To signal completion: include 'Work complete.' in your final message, or use `sleep_until_next_trigger`."
         )
     else:
         response_patterns = (
@@ -3121,7 +3122,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         patterns = (
             "(1) More work? Include a tool call, or end message with \"Continuing...\" "
             "(2) Replying + taking action? Text + tool calls. "
-            "(3) Done? sleep_until_next_trigger."
+            "(3) Done? Include \"Work complete.\" in your message, or use sleep_until_next_trigger."
         )
     else:
         patterns = (
