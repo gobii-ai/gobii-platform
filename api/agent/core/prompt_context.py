@@ -688,6 +688,7 @@ INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'done'), ('Step 2',
 
 ## CSV Parsing
 
+Always inspect before parsing—check the `path_from_hint` in `__tool_results` to understand the data format.
 Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines).
 
 **Key point**: `csv_parse` returns objects keyed by column names from the header row.
