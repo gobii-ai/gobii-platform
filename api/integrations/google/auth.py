@@ -131,7 +131,7 @@ def resolve_binding(
             "status": "action_required",
             "result": (
                 "Google Docs/Sheets access is not connected for this agent. "
-                "Please connect your Google account."
+                f"Please connect your Google account here: {url}"
             ),
             "connect_url": url,
         }
@@ -149,7 +149,7 @@ def resolve_binding(
             "status": "action_required",
             "result": (
                 "Additional Google permissions are required to continue. "
-                "Please re-connect with the broader scope."
+                f"Please re-connect with the broader scope here: {url}"
             ),
             "connect_url": url,
         }
