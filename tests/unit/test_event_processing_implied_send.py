@@ -51,6 +51,7 @@ class ImpliedSendTests(TestCase):
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
         msg.tool_calls = None
+        msg.function_call = None
         msg.content = content
         if reasoning_content is not None:
             msg.reasoning_content = reasoning_content

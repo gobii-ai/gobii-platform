@@ -312,6 +312,7 @@ class PromptContextBuilderTests(TestCase):
         """Running the agent loop should attach the prompt archive to the first generated step."""
         response_message = MagicMock()
         response_message.tool_calls = None
+        response_message.function_call = None
         response_message.content = "Reasoning output"
         response_choice = MagicMock(message=response_message)
         response = MagicMock()
@@ -353,6 +354,7 @@ class PromptContextBuilderTests(TestCase):
         """Agent loop should forward the preferred provider returned by the helper."""
         response_message = MagicMock()
         response_message.tool_calls = None
+        response_message.function_call = None
         response_message.content = "Reasoning output"
         response_choice = MagicMock(message=response_message)
         response = MagicMock()
@@ -390,6 +392,7 @@ class PromptContextBuilderTests(TestCase):
         """Agent loop should not request preferred configs on the agent's second run."""
         response_message = MagicMock()
         response_message.tool_calls = None
+        response_message.function_call = None
         response_message.content = "Reasoning output"
         response_choice = MagicMock(message=response_message)
         response = MagicMock()
@@ -416,6 +419,7 @@ class PromptContextBuilderTests(TestCase):
         """PersistentAgentCompletion should store provider/model even if usage isn't provided."""
         response_message = MagicMock()
         response_message.tool_calls = None
+        response_message.function_call = None
         response_message.content = "Reasoning output"
         response_choice = MagicMock(message=response_message)
         response = MagicMock()
@@ -445,6 +449,7 @@ class PromptContextBuilderTests(TestCase):
 
         response_message = MagicMock()
         response_message.tool_calls = None
+        response_message.function_call = None
         response_message.content = "Reasoning output"
         response_choice = MagicMock(message=response_message)
         response = MagicMock()

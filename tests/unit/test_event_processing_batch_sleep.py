@@ -289,6 +289,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         msg_followup = MagicMock()
         msg_followup.tool_calls = None
+        msg_followup.function_call = None
         msg_followup.content = "Done"
         followup_choice = MagicMock(); followup_choice.message = msg_followup
         followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
@@ -346,6 +347,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         msg_followup = MagicMock()
         msg_followup.tool_calls = None
+        msg_followup.function_call = None
         msg_followup.content = "Done"
         followup_choice = MagicMock(); followup_choice.message = msg_followup
         followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
@@ -483,6 +485,7 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         msg_followup = MagicMock()
         msg_followup.tool_calls = None
+        msg_followup.function_call = None
         msg_followup.content = None
         followup_choice = MagicMock(); followup_choice.message = msg_followup
         followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
