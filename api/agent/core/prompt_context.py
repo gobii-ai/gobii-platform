@@ -2500,9 +2500,8 @@ def _get_work_completion_prompt(
                 "work_complete",
                 (
                     f"✅ All work complete: {done_count} card(s) done, nothing remaining.\n"
-                    "System will auto-stop after you send a final update—this is your last chance to communicate.\n"
-                    "If you need to send a final summary, include it now (then `sleep_until_next_trigger`).\n"
-                    "If you close all cards without a user-facing message, you'll be prompted to send it next turn."
+                    "Already sent your results? Just `sleep_until_next_trigger` to finish.\n"
+                    "Still need to share findings? Include them now (one message is enough), then sleep."
                 ),
                 9,  # Highest weight - must stop
             )
