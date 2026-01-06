@@ -33,6 +33,24 @@ function getPendingSession(state) {
   }
 }
 
+function notifyCompletion(sessionData) {
+  const accountId = sessionData.accountId;
+  const completionKey = accountId ? `gobii:email_oauth_complete:${accountId}` : "gobii:email_oauth_complete";
+  const payload = {
+    accountId,
+    completedAt: new Date().toISOString(),
+  };
+  localStorage.setItem(completionKey, JSON.stringify(payload));
+}
+
+function hasOpener() {
+  try {
+    return Boolean(window.opener && !window.opener.closed);
+  } catch (error) {
+    return false;
+  }
+}
+
 async function completeOAuth() {
   const params = new URLSearchParams(window.location.search);
   const error = params.get("error");
@@ -77,11 +95,13 @@ async function completeOAuth() {
     }
 
     localStorage.removeItem(`gobii:email_oauth_state:${state}`);
-    setStatus("Connection complete! Redirecting...");
-    const payload = sessionData.returnUrl || "/console/agents/";
-    setTimeout(() => {
-      window.location.href = payload;
-    }, 1200);
+    notifyCompletion(sessionData);
+    setStatus("Connection complete! You can close this tab.");
+    if (hasOpener()) {
+      setTimeout(() => {
+        window.close();
+      }, 800);
+    }
   } catch (err) {
     console.error("OAuth callback failed", err);
     showError(err.message || "Failed to store OAuth tokens.");

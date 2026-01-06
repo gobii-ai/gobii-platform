@@ -60,6 +60,8 @@ if (panel && panel.dataset.accountId) {
   const clientIdInput = document.getElementById("email-oauth-client-id");
   const clientSecretInput = document.getElementById("email-oauth-client-secret");
   const connectionModeSelect = document.getElementById("email-connection-mode");
+  const form = panel.closest("form");
+  const endpointAddressInput = form ? form.querySelector('input[name="endpoint_address"]') : null;
   const customOnlyFields = document.querySelectorAll(".email-custom-only");
   const serverSettingsFields = document.querySelectorAll(".email-server-settings");
   const protocolSections = document.querySelectorAll(".email-protocol-section");
@@ -72,10 +74,13 @@ if (panel && panel.dataset.accountId) {
   const statusEl = document.getElementById("email-oauth-status");
   const errorEl = document.getElementById("email-oauth-error");
 
+  const accountId = panel.dataset.accountId;
   const callbackPath = panel.dataset.oauthCallbackPath || "";
   const startUrl = panel.dataset.oauthStartUrl || "";
+  const statusUrl = panel.dataset.oauthStatusUrl || "";
   const revokeUrl = panel.dataset.oauthRevokeUrl || "";
   const returnUrl = panel.dataset.returnUrl || window.location.pathname;
+  const completionKey = accountId ? `gobii:email_oauth_complete:${accountId}` : "gobii:email_oauth_complete";
 
   const defaultScopes = {
     gmail: "https://mail.google.com/",
@@ -178,11 +183,110 @@ if (panel && panel.dataset.accountId) {
   updateProviderFields();
   updateConnectionMode();
 
-  async function startOAuth() {
+  function setConnectionStatus(connected) {
+    if (statusEl) {
+      statusEl.textContent = connected ? "Connected" : "Not connected";
+    }
+    if (disconnectButton) {
+      if (connected) {
+        disconnectButton.removeAttribute("disabled");
+      } else {
+        disconnectButton.setAttribute("disabled", "disabled");
+      }
+    }
+  }
+
+  async function refreshOAuthStatus() {
+    if (!statusUrl) {
+      setConnectionStatus(true);
+      return;
+    }
+    try {
+      const response = await fetch(statusUrl, {
+        headers: {
+          Accept: "application/json",
+        },
+      });
+      if (!response.ok) {
+        return;
+      }
+      const payload = await response.json();
+      setConnectionStatus(Boolean(payload.connected));
+    } catch (error) {
+      console.warn("Failed to refresh OAuth status", error);
+    }
+  }
+
+  function handleOAuthCompletion(rawValue) {
+    if (!rawValue) {
+      return;
+    }
+    try {
+      const payload = JSON.parse(rawValue);
+      if (payload.accountId && payload.accountId !== accountId) {
+        return;
+      }
+      setConnectionStatus(true);
+      refreshOAuthStatus();
+    } catch (error) {
+      console.warn("Failed to parse OAuth completion payload", error);
+    }
+  }
+
+  window.addEventListener("storage", (event) => {
+    if (event.key !== completionKey) {
+      return;
+    }
+    handleOAuthCompletion(event.newValue);
+  });
+
+  function setAutoConnectFlag() {
+    if (!form) {
+      return;
+    }
+    let input = form.querySelector('input[name="auto_connect_oauth"]');
+    if (!input) {
+      input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "auto_connect_oauth";
+      form.appendChild(input);
+    }
+    input.value = "1";
+  }
+
+  function maybeStartAutoConnect() {
+    const params = new URLSearchParams(window.location.search);
+    const shouldAutoConnect = params.get("auto_connect_oauth");
+    if (!shouldAutoConnect) {
+      return;
+    }
+    params.delete("auto_connect_oauth");
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    window.history.replaceState({}, document.title, nextUrl);
+    if (connectionModeSelect && connectionModeSelect.value === "oauth2") {
+      startOAuth();
+    }
+  }
+
+  maybeStartAutoConnect();
+
+  function openOAuthWindow() {
+    const popup = window.open("", "_blank");
+    if (!popup) {
+      showError(errorEl, "Allow pop-ups to open the OAuth verification tab.");
+      return null;
+    }
+    return popup;
+  }
+
+  async function startOAuth(oauthWindow) {
     clearError(errorEl);
 
     if (!startUrl) {
       showError(errorEl, "OAuth start endpoint not configured.");
+      if (oauthWindow) {
+        oauthWindow.close();
+      }
       return;
     }
 
@@ -194,6 +298,9 @@ if (panel && panel.dataset.accountId) {
 
     if (!useManaged && !clientId) {
       showError(errorEl, "Provide an OAuth client ID.");
+      if (oauthWindow) {
+        oauthWindow.close();
+      }
       return;
     }
 
@@ -212,11 +319,17 @@ if (panel && panel.dataset.accountId) {
 
     if (!authorizationEndpoint || !tokenEndpoint) {
       showError(errorEl, "Authorization and token endpoints are required.");
+      if (oauthWindow) {
+        oauthWindow.close();
+      }
       return;
     }
 
     if (!scope) {
       showError(errorEl, "Provide an OAuth scope.");
+      if (oauthWindow) {
+        oauthWindow.close();
+      }
       return;
     }
 
@@ -233,7 +346,7 @@ if (panel && panel.dataset.accountId) {
           "X-CSRFToken": getCsrfToken(),
         },
         body: JSON.stringify({
-          account_id: panel.dataset.accountId,
+          account_id: accountId,
           provider,
           scope,
           token_endpoint: tokenEndpoint,
@@ -270,7 +383,7 @@ if (panel && panel.dataset.accountId) {
         `gobii:email_oauth_state:${stateKey}`,
         JSON.stringify({
           sessionId: payload.session_id,
-          accountId: panel.dataset.accountId,
+          accountId,
           returnUrl,
         })
       );
@@ -286,8 +399,21 @@ if (panel && panel.dataset.accountId) {
         ...extraParams,
       });
 
-      window.location.href = `${authorizationEndpoint}?${params.toString()}`;
+      const authUrl = `${authorizationEndpoint}?${params.toString()}`;
+      if (oauthWindow) {
+        if (oauthWindow.closed) {
+          showError(errorEl, "OAuth tab was closed before authorization started.");
+          return;
+        }
+        oauthWindow.location.href = authUrl;
+        oauthWindow.focus();
+        return;
+      }
+      window.location.href = authUrl;
     } catch (error) {
+      if (oauthWindow && !oauthWindow.closed) {
+        oauthWindow.close();
+      }
       showError(errorEl, error.message || "Failed to start OAuth flow.");
     }
   }
@@ -322,7 +448,23 @@ if (panel && panel.dataset.accountId) {
 
   if (connectButton) {
     connectButton.addEventListener("click", () => {
-      startOAuth();
+      clearError(errorEl);
+      if (endpointAddressInput) {
+        if (!endpointAddressInput.value.trim()) {
+          showError(errorEl, "Enter an email address to continue.");
+          return;
+        }
+        if (!endpointAddressInput.checkValidity()) {
+          endpointAddressInput.reportValidity();
+          showError(errorEl, "Enter a valid email address to continue.");
+          return;
+        }
+      }
+      const oauthWindow = openOAuthWindow();
+      if (!oauthWindow) {
+        return;
+      }
+      startOAuth(oauthWindow);
     });
   }
 
