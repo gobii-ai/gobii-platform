@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, useMemo } from 'react'
-import { CircleCheck, Play, Plus, ArrowRight, Sparkles, Trash2, Archive } from 'lucide-react'
+import { CircleCheck, Sparkles } from 'lucide-react'
 import type { KanbanEvent, KanbanCardChange } from './types'
 import './kanban.css'
 
@@ -7,38 +7,17 @@ type KanbanEventCardProps = {
   event: KanbanEvent
 }
 
-const ACTION_CONFIG = {
-  completed: {
-    icon: CircleCheck,
-    label: 'Completed',
-    className: 'kanban-action--completed',
-  },
-  started: {
-    icon: Play,
-    label: 'Started',
-    className: 'kanban-action--started',
-  },
-  created: {
-    icon: Plus,
-    label: 'Created',
-    className: 'kanban-action--created',
-  },
-  updated: {
-    icon: ArrowRight,
-    label: 'Updated',
-    className: 'kanban-action--updated',
-  },
-  deleted: {
-    icon: Trash2,
-    label: 'Removed',
-    className: 'kanban-action--deleted',
-  },
-  archived: {
-    icon: Archive,
-    label: 'Archived',
-    className: 'kanban-action--archived',
-  },
-} as const
+// Map change types to their visual treatment
+type ChangeInfo = {
+  action: KanbanCardChange['action']
+  title: string
+}
+
+type ColumnChangeMap = {
+  todo: ChangeInfo[]
+  doing: ChangeInfo[]
+  done: ChangeInfo[]
+}
 
 function ProgressRing({
   done,
@@ -97,31 +76,6 @@ function ProgressRing({
   )
 }
 
-function ChangeItem({
-  change,
-  index,
-  animate,
-}: {
-  change: KanbanCardChange
-  index: number
-  animate: boolean
-}) {
-  const config = ACTION_CONFIG[change.action]
-  const Icon = config.icon
-
-  return (
-    <div
-      className={`kanban-change ${config.className} ${animate ? 'kanban-change--animate' : ''}`}
-      style={{ '--delay': `${index * 60}ms` } as React.CSSProperties}
-    >
-      <div className="kanban-change-icon">
-        <Icon size={14} strokeWidth={2.5} />
-      </div>
-      <span className="kanban-change-title">{change.title}</span>
-    </div>
-  )
-}
-
 function MiniColumn({
   status,
   label,
@@ -129,6 +83,7 @@ function MiniColumn({
   titles,
   animate,
   delay,
+  changes,
 }: {
   status: 'todo' | 'doing' | 'done'
   label: string
@@ -136,33 +91,64 @@ function MiniColumn({
   titles: string[]
   animate: boolean
   delay: number
+  changes: ChangeInfo[]
 }) {
   if (count === 0) return null
 
   const maxVisible = 3
   const visibleTitles = titles.slice(0, maxVisible)
   const remaining = count - visibleTitles.length
+  const hasChanges = changes.length > 0
+
+  // Create a map of title -> action for quick lookup
+  const changeMap = useMemo(() => {
+    const map = new Map<string, KanbanCardChange['action']>()
+    changes.forEach(c => map.set(c.title, c.action))
+    return map
+  }, [changes])
+
+  // Determine column-level effect based on primary change type
+  const columnEffect = useMemo(() => {
+    if (!hasChanges) return ''
+    const actions = changes.map(c => c.action)
+    if (actions.includes('completed')) return 'kanban-column--pulse-done'
+    if (actions.includes('started')) return 'kanban-column--pulse-doing'
+    if (actions.includes('created')) return 'kanban-column--pulse-created'
+    return ''
+  }, [changes, hasChanges])
 
   return (
     <div
-      className={`kanban-column kanban-column--${status} ${animate ? 'kanban-column--animate' : ''}`}
+      className={`kanban-column kanban-column--${status} ${animate ? 'kanban-column--animate' : ''} ${animate ? columnEffect : ''}`}
       style={{ '--column-delay': `${delay}ms` } as React.CSSProperties}
     >
       <div className="kanban-column-header">
         <span className="kanban-column-label">{label}</span>
-        <span className="kanban-column-count">{count}</span>
+        <span className={`kanban-column-count ${hasChanges && animate ? 'kanban-column-count--changed' : ''}`}>
+          {count}
+        </span>
       </div>
       <div className="kanban-column-cards">
-        {visibleTitles.map((title, i) => (
-          <div
-            key={i}
-            className="kanban-mini-card"
-            style={{ '--card-delay': `${delay + (i + 1) * 40}ms` } as React.CSSProperties}
-          >
-            <span className="kanban-mini-card-dot" />
-            <span className="kanban-mini-card-title">{title}</span>
-          </div>
-        ))}
+        {visibleTitles.map((title, i) => {
+          const changeAction = changeMap.get(title)
+          const cardClass = changeAction
+            ? `kanban-mini-card kanban-mini-card--${changeAction}`
+            : 'kanban-mini-card'
+
+          return (
+            <div
+              key={i}
+              className={`${cardClass} ${animate && changeAction ? 'kanban-mini-card--changed' : ''}`}
+              style={{ '--card-delay': `${delay + (i + 1) * 40}ms` } as React.CSSProperties}
+            >
+              <span className={`kanban-mini-card-dot ${changeAction && animate ? 'kanban-mini-card-dot--pulse' : ''}`} />
+              <span className="kanban-mini-card-title">{title}</span>
+              {changeAction === 'completed' && animate && (
+                <CircleCheck size={11} className="kanban-mini-card-check" strokeWidth={2.5} />
+              )}
+            </div>
+          )
+        })}
         {remaining > 0 && (
           <div className="kanban-column-more">+{remaining} more</div>
         )}
@@ -225,11 +211,34 @@ export const KanbanEventCard = memo(function KanbanEventCard({
   const allDone = snapshot.doneCount === total && total > 0
   const boardCleared = total === 0
 
-  // Group changes by action type for better visual organization
-  const completedChanges = changes.filter((c) => c.action === 'completed')
-  const deletedChanges = changes.filter((c) => c.action === 'deleted' || c.action === 'archived')
-  const otherChanges = changes.filter((c) => c.action !== 'completed' && c.action !== 'deleted' && c.action !== 'archived')
-  const sortedChanges = [...completedChanges, ...deletedChanges, ...otherChanges]
+  // Build change map for each column based on toStatus
+  const columnChanges = useMemo<ColumnChangeMap>(() => {
+    const map: ColumnChangeMap = { todo: [], doing: [], done: [] }
+
+    changes.forEach(change => {
+      // Map toStatus to column, defaulting based on action if not specified
+      let column: keyof ColumnChangeMap | null = null
+
+      if (change.toStatus === 'todo' || change.toStatus === 'pending') {
+        column = 'todo'
+      } else if (change.toStatus === 'doing' || change.toStatus === 'in_progress') {
+        column = 'doing'
+      } else if (change.toStatus === 'done' || change.toStatus === 'completed') {
+        column = 'done'
+      } else {
+        // Infer from action type
+        if (change.action === 'completed') column = 'done'
+        else if (change.action === 'started') column = 'doing'
+        else if (change.action === 'created') column = 'todo'
+      }
+
+      if (column) {
+        map[column].push({ action: change.action, title: change.title })
+      }
+    })
+
+    return map
+  }, [changes])
 
   // Determine card variant class
   const cardClass = [
@@ -256,18 +265,6 @@ export const KanbanEventCard = memo(function KanbanEventCard({
         </div>
       </div>
 
-      {/* Changes feed */}
-      {sortedChanges.length > 0 && (
-        <div className="kanban-changes-section">
-          <div className="kanban-section-title">What changed</div>
-          <div className="kanban-changes-list">
-            {sortedChanges.map((change, i) => (
-              <ChangeItem key={change.cardId} change={change} index={i} animate={animate} />
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Mini kanban board - show empty state message when board is cleared */}
       {boardCleared ? (
         <div className="kanban-empty-board">
@@ -282,6 +279,7 @@ export const KanbanEventCard = memo(function KanbanEventCard({
             titles={snapshot.todoTitles}
             animate={animate}
             delay={200}
+            changes={columnChanges.todo}
           />
           <MiniColumn
             status="doing"
@@ -290,6 +288,7 @@ export const KanbanEventCard = memo(function KanbanEventCard({
             titles={snapshot.doingTitles}
             animate={animate}
             delay={280}
+            changes={columnChanges.doing}
           />
           <MiniColumn
             status="done"
@@ -298,6 +297,7 @@ export const KanbanEventCard = memo(function KanbanEventCard({
             titles={snapshot.doneTitles}
             animate={animate}
             delay={360}
+            changes={columnChanges.done}
           />
         </div>
       )}

@@ -1218,6 +1218,11 @@ def _execute_with_autocorrections(
                 query_upper = current_query.upper()
                 if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
                     msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
+                elif affected == 0 and ("UPDATE" in query_upper or "DELETE" in query_upper):
+                    msg += (
+                        " (No match—verify WHERE values against ground truth: "
+                        "schema, kanban snapshot, tool results, or prior query output.)"
+                    )
                 result_entry = {"message": msg}
             return result_entry, current_query, corrections, None
         except Exception as orig_exc:

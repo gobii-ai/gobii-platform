@@ -51,6 +51,7 @@ class ImpliedSendTests(TestCase):
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
         msg.tool_calls = None
+        msg.function_call = None
         msg.content = content
         if reasoning_content is not None:
             msg.reasoning_content = reasoning_content
@@ -383,17 +384,21 @@ class ImpliedSendTests(TestCase):
         self.assertIsNotNone(correction_step)
         self.assertFalse(mock_send_email.called)
 
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_reasoning_only_content_list_auto_sleeps(
+    def test_reasoning_only_content_list_continues_then_auto_sleeps(
         self,
         mock_completion,
         mock_build_prompt,
+        _mock_llm_config,
     ):
+        """Thinking-only responses continue up to MAX_NO_TOOL_STREAK before auto-sleeping."""
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         msg = MagicMock()
         msg.tool_calls = []
+        msg.function_call = None
         msg.content = [{"type": "thinking", "text": "Plan the response."}]
         msg.reasoning_content = None
         choice = MagicMock()
@@ -411,10 +416,12 @@ class ImpliedSendTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 3):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 5):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertEqual(mock_completion.call_count, 1)
+        # Should be called MAX_NO_TOOL_STREAK times before auto-sleeping
+        # (thinking content doesn't cause immediate stop; streak limit does)
+        self.assertEqual(mock_completion.call_count, ep.MAX_NO_TOOL_STREAK)
 
         reasoning_step = PersistentAgentStep.objects.filter(
             agent=self.agent,
@@ -499,3 +506,78 @@ class ImpliedSendTests(TestCase):
             description="Decided to sleep until next trigger.",
         ).first()
         self.assertIsNotNone(sleep_step, "Other tool calls should execute even when implied send fails")
+
+
+@tag("batch_event_processing")
+class ContinuationSignalTests(TestCase):
+    """Tests for the _has_continuation_signal helper function."""
+
+    def test_has_continuation_signal_with_let_me(self):
+        self.assertTrue(ep._has_continuation_signal("Let me check that for you."))
+
+    def test_has_continuation_signal_with_ill(self):
+        self.assertTrue(ep._has_continuation_signal("I'll compile a report now."))
+
+    def test_has_continuation_signal_with_im_going_to(self):
+        self.assertTrue(ep._has_continuation_signal("I'm going to fetch the data."))
+
+    def test_has_continuation_signal_case_insensitive(self):
+        self.assertTrue(ep._has_continuation_signal("LET ME DO THAT"))
+        self.assertTrue(ep._has_continuation_signal("i'll work on it"))
+
+    def test_has_continuation_signal_false_for_done(self):
+        self.assertFalse(ep._has_continuation_signal("Work complete."))
+        self.assertFalse(ep._has_continuation_signal("That's everything you asked for."))
+
+    def test_has_continuation_signal_empty(self):
+        self.assertFalse(ep._has_continuation_signal(""))
+        self.assertFalse(ep._has_continuation_signal(None))
+
+    def test_has_continuation_signal_with_working_on(self):
+        self.assertTrue(ep._has_continuation_signal("I'm currently working on the analysis."))
+
+    def test_has_continuation_signal_with_proceeding_to(self):
+        self.assertTrue(ep._has_continuation_signal("Proceeding to extract the data."))
+
+
+@tag("batch_event_processing")
+class CompletionSignalTests(TestCase):
+    """Tests for the _has_completion_signal helper function."""
+
+    def test_has_completion_signal_with_work_complete(self):
+        self.assertTrue(ep._has_completion_signal("Work complete."))
+        self.assertTrue(ep._has_completion_signal("Work complete"))
+
+    def test_has_completion_signal_with_task_complete(self):
+        self.assertTrue(ep._has_completion_signal("Task complete! Here's the report."))
+
+    def test_has_completion_signal_with_all_done(self):
+        self.assertTrue(ep._has_completion_signal("All done! Let me know if you need anything else."))
+
+    def test_has_completion_signal_with_thats_everything(self):
+        self.assertTrue(ep._has_completion_signal("That's everything you asked for."))
+
+    def test_has_completion_signal_with_here_are_your_results(self):
+        self.assertTrue(ep._has_completion_signal("Here are your results: ..."))
+
+    def test_has_completion_signal_with_heres_what_i_found(self):
+        self.assertTrue(ep._has_completion_signal("Here's what I found in the data."))
+
+    def test_has_completion_signal_case_insensitive(self):
+        self.assertTrue(ep._has_completion_signal("WORK COMPLETE"))
+        self.assertTrue(ep._has_completion_signal("all done"))
+
+    def test_has_completion_signal_false_for_continuation(self):
+        self.assertFalse(ep._has_completion_signal("Let me check that."))
+        self.assertFalse(ep._has_completion_signal("I'll get that for you."))
+        self.assertFalse(ep._has_completion_signal("Continuing..."))
+
+    def test_has_completion_signal_empty(self):
+        self.assertFalse(ep._has_completion_signal(""))
+        self.assertFalse(ep._has_completion_signal(None))
+
+    def test_has_completion_signal_with_that_completes(self):
+        self.assertTrue(ep._has_completion_signal("That completes the analysis."))
+
+    def test_has_completion_signal_with_this_completes(self):
+        self.assertTrue(ep._has_completion_signal("This completes your request."))

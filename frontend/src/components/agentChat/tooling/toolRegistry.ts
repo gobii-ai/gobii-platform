@@ -118,6 +118,11 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
   const parameters = isPlainObject(entry.parameters) ? (entry.parameters as Record<string, unknown>) : null
   const transform = descriptor.derive?.(entry, parameters) || {}
 
+  // Check if the derive function requested this entry be skipped (e.g., kanban-only SQL)
+  if (transform.skip) {
+    return null
+  }
+
   const caption = transform.caption ?? deriveCaptionFallback(entry, parameters)
   const mcpInfo = deriveMcpInfo(toolName, entry.result)
   const isDefaultDescriptor = descriptor.name === 'default'

@@ -767,6 +767,137 @@ class _CorrAggregate:
             return None
         return self.cov / math.sqrt(denom)
 
+
+class _StddevSampAggregate:
+    """Aggregate for sample standard deviation (STDDEV/STDDEV_SAMP).
+
+    Uses Welford's online algorithm for numerical stability.
+    Returns sqrt(sum((x - mean)^2) / (N-1)) - sample std dev.
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.mean = 0.0
+        self.m2 = 0.0  # Sum of squared differences from mean
+
+    def step(self, x: Optional[float]) -> None:
+        if x is None:
+            return
+        try:
+            x_val = float(x)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(x_val):
+            return
+        self.count += 1
+        delta = x_val - self.mean
+        self.mean += delta / self.count
+        delta2 = x_val - self.mean
+        self.m2 += delta * delta2
+
+    def finalize(self) -> Optional[float]:
+        if self.count < 2:
+            return None
+        variance = self.m2 / (self.count - 1)
+        return math.sqrt(variance)
+
+
+class _StddevPopAggregate:
+    """Aggregate for population standard deviation (STDDEV_POP).
+
+    Returns sqrt(sum((x - mean)^2) / N) - population std dev.
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+    def step(self, x: Optional[float]) -> None:
+        if x is None:
+            return
+        try:
+            x_val = float(x)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(x_val):
+            return
+        self.count += 1
+        delta = x_val - self.mean
+        self.mean += delta / self.count
+        delta2 = x_val - self.mean
+        self.m2 += delta * delta2
+
+    def finalize(self) -> Optional[float]:
+        if self.count < 1:
+            return None
+        variance = self.m2 / self.count
+        return math.sqrt(variance)
+
+
+class _VarianceSampAggregate:
+    """Aggregate for sample variance (VARIANCE/VAR_SAMP).
+
+    Returns sum((x - mean)^2) / (N-1).
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+    def step(self, x: Optional[float]) -> None:
+        if x is None:
+            return
+        try:
+            x_val = float(x)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(x_val):
+            return
+        self.count += 1
+        delta = x_val - self.mean
+        self.mean += delta / self.count
+        delta2 = x_val - self.mean
+        self.m2 += delta * delta2
+
+    def finalize(self) -> Optional[float]:
+        if self.count < 2:
+            return None
+        return self.m2 / (self.count - 1)
+
+
+class _VariancePopAggregate:
+    """Aggregate for population variance (VAR_POP).
+
+    Returns sum((x - mean)^2) / N.
+    """
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.mean = 0.0
+        self.m2 = 0.0
+
+    def step(self, x: Optional[float]) -> None:
+        if x is None:
+            return
+        try:
+            x_val = float(x)
+        except (TypeError, ValueError):
+            return
+        if not math.isfinite(x_val):
+            return
+        self.count += 1
+        delta = x_val - self.mean
+        self.mean += delta / self.count
+        delta2 = x_val - self.mean
+        self.m2 += delta * delta2
+
+    def finalize(self) -> Optional[float]:
+        if self.count < 1:
+            return None
+        return self.m2 / self.count
+
 _BLOCKED_ACTIONS = {
     sqlite3.SQLITE_ATTACH,
     sqlite3.SQLITE_DETACH,
@@ -960,6 +1091,14 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("RPAD", 3, _rpad)  # With pad char
     conn.create_function("SPLIT_PART", 3, _split_part)  # PostgreSQL
     conn.create_aggregate("CORR", 2, _CorrAggregate)  # PostgreSQL
+    # Statistical aggregates (common across MySQL, PostgreSQL, SQL Server)
+    conn.create_aggregate("STDDEV", 1, _StddevSampAggregate)  # Sample std dev (default)
+    conn.create_aggregate("STDEV", 1, _StddevSampAggregate)  # Alias
+    conn.create_aggregate("STDDEV_SAMP", 1, _StddevSampAggregate)  # Explicit sample
+    conn.create_aggregate("STDDEV_POP", 1, _StddevPopAggregate)  # Population std dev
+    conn.create_aggregate("VARIANCE", 1, _VarianceSampAggregate)  # Sample variance
+    conn.create_aggregate("VAR_SAMP", 1, _VarianceSampAggregate)  # Explicit sample
+    conn.create_aggregate("VAR_POP", 1, _VariancePopAggregate)  # Population variance
 
 
 def open_guarded_sqlite_connection(

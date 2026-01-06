@@ -37,6 +37,11 @@ HUGE_RESULT_PREVIEW_CAP = 100    # Minimal preview - rely on analysis hints
 # to avoid requiring a separate inspection step. ~10K tokens ≈ 40KB.
 FRESH_RESULT_INLINE_THRESHOLD = 40_000  # 40KB - inline fresh results under this
 
+# Small results are ALWAYS inlined regardless of recency position.
+# Critical for tools like create_chart where the result (a path) is essential
+# and tiny, but may fall outside the recency window if many tool calls follow.
+SMALL_RESULT_ALWAYS_INLINE = 2048  # 2KB - always show these in full
+
 # SQLite results get MUCH more generous previews - this IS the extracted data
 # the agent needs to work with. Show full results up to reasonable limits.
 PREVIEW_TIERS_SQLITE = [
@@ -427,11 +432,18 @@ def _build_prompt_preview(
     For external data (http_request, mcp_*): small structure hints only.
     For sqlite results: generous preview since this IS the extracted data.
     For fresh (most recent) tool calls under threshold: full inline to skip inspection.
+    For small results (≤2KB): always inline regardless of recency.
 
     Returns (preview_text, is_inline) where:
     - preview_text is a sample of the result
     - is_inline is True only for small results that fit entirely
     """
+    # Small results are ALWAYS inlined - critical for tools like create_chart
+    # where the result contains essential data (paths) that the agent needs
+    # even if many subsequent tool calls push it outside the recency window.
+    if full_bytes <= SMALL_RESULT_ALWAYS_INLINE:
+        return result_text, True
+
     # Determine which tier system to use
     is_sqlite = tool_name in EXCLUDED_TOOL_NAMES or tool_name.startswith("sqlite")
     tiers = PREVIEW_TIERS_SQLITE if is_sqlite else PREVIEW_TIERS_EXTERNAL

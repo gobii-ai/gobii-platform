@@ -141,6 +141,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
+MAX_NO_TOOL_STREAK = 2  # Auto-sleep after this many consecutive responses without tool calls
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -151,14 +152,69 @@ MESSAGE_TOOL_NAMES = {
     "send_chat_message",
     "send_agent_message",
 }
+MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
     "send_sms": "body",
     "send_chat_message": "body",
     "send_agent_message": "message",
 }
+# Canonical phrase the agent should use to signal continuation.
+# Prompts tell the agent to include this exact phrase when it has more work.
+CANONICAL_CONTINUATION_PHRASE = "Continuing..."
 
-__all__ = ["process_agent_events"]
+# Flexible detection: canonical phrase + natural language variations.
+# Case-insensitive matching against message text or thinking content.
+CONTINUATION_PHRASES = (
+    "continuing...",  # Canonical - exact match
+    "continuing with",
+    "let me ",
+    "i'll ",
+    "i will ",
+    "i'm going to ",
+    "next i ",
+    "now i ",
+    "working on ",
+    "proceeding to ",
+    "moving on to ",
+)
+
+
+def _has_continuation_signal(text: str) -> bool:
+    """Return True if text contains phrases indicating the agent wants to continue."""
+    if not text:
+        return False
+    lower_text = text.lower()
+    return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
+
+
+# Canonical phrase the agent should use to signal completion (work is done).
+# Prompts tell the agent to include this exact phrase when delivering final output.
+CANONICAL_COMPLETION_PHRASE = "Work complete."
+
+# Flexible detection: canonical phrase + natural language variations.
+# Case-insensitive matching against message text or thinking content.
+COMPLETION_PHRASES = (
+    "work complete",  # Canonical - exact match (without period for flexibility)
+    "task complete",
+    "all done",
+    "that's everything",
+    "that completes",
+    "this completes",
+    "here are your results",
+    "here's what i found",
+)
+
+
+def _has_completion_signal(text: str) -> bool:
+    """Return True if text contains phrases indicating the agent is done."""
+    if not text:
+        return False
+    lower_text = text.lower()
+    return any(phrase in lower_text for phrase in COMPLETION_PHRASES)
+
+
+__all__ = ["process_agent_events", "CANONICAL_CONTINUATION_PHRASE", "CANONICAL_COMPLETION_PHRASE"]
 
 
 @dataclass(frozen=True)
@@ -372,15 +428,269 @@ def _extract_message_content(message: Any) -> str:
     return ""
 
 
+def _coerce_function_call_tool(function_call: Any) -> Optional[dict]:
+    if function_call is None:
+        return None
+    if isinstance(function_call, dict):
+        name = function_call.get("name")
+        arguments = function_call.get("arguments")
+        call_id = function_call.get("id")
+    else:
+        name = getattr(function_call, "name", None)
+        arguments = getattr(function_call, "arguments", None)
+        call_id = getattr(function_call, "id", None)
+    return {
+        "id": call_id or "function_call",
+        "type": "function",
+        "function": {
+            "name": name or "",
+            "arguments": arguments or "",
+        },
+    }
+
+
+def _tool_calls_from_content(message: Any) -> list[dict]:
+    content = None
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return []
+    tool_calls: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if not isinstance(part_type, str):
+            continue
+        part_type = part_type.lower()
+        if part_type not in {"tool_use", "tool_call"}:
+            continue
+        name = part.get("name") or part.get("tool_name")
+        raw_input = part.get("input", part.get("arguments"))
+        if raw_input is None:
+            raw_input = {}
+        if isinstance(raw_input, str):
+            arguments = raw_input
+        else:
+            try:
+                arguments = json.dumps(raw_input)
+            except Exception:
+                arguments = str(raw_input)
+        tool_calls.append(
+            {
+                "id": part.get("id") or part.get("tool_use_id") or f"tool_use_{len(tool_calls)}",
+                "type": "function",
+                "function": {"name": name or "", "arguments": arguments},
+            }
+        )
+    return tool_calls
+
+
+def _normalize_tool_calls(message: Any) -> list[Any]:
+    if message is None:
+        return []
+    raw_tool_calls = None
+    if isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls")
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None)
+    if raw_tool_calls:
+        if isinstance(raw_tool_calls, str):
+            try:
+                raw_tool_calls = json.loads(raw_tool_calls)
+            except Exception:
+                return [raw_tool_calls]
+        if isinstance(raw_tool_calls, dict):
+            return [raw_tool_calls]
+        if isinstance(raw_tool_calls, list):
+            return list(raw_tool_calls)
+        try:
+            return list(raw_tool_calls)
+        except TypeError:
+            return [raw_tool_calls]
+
+    raw_function_call = None
+    if isinstance(message, dict):
+        raw_function_call = message.get("function_call")
+    else:
+        raw_function_call = getattr(message, "function_call", None)
+    if raw_function_call:
+        coerced = _coerce_function_call_tool(raw_function_call)
+        return [coerced] if coerced else []
+
+    return _tool_calls_from_content(message)
+
+
 def _get_tool_call_name(call: Any) -> Optional[str]:
     if call is None:
         return None
-    name = getattr(getattr(call, "function", None), "name", None)
-    if name:
-        return name
+    function = getattr(call, "function", None)
+    if function is not None:
+        name = getattr(function, "name", None)
+        if name:
+            return _sanitize_tool_name(name)
     if isinstance(call, dict):
-        return call.get("function", {}).get("name")
+        function = call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if name:
+                return _sanitize_tool_name(name)
+        name = call.get("name")
+        if name:
+            return _sanitize_tool_name(name)
+    name = getattr(call, "name", None)
+    if name:
+        return _sanitize_tool_name(name)
     return None
+
+
+def _sanitize_tool_name(name: str) -> str:
+    """Extract just the function name from a tool call.
+
+    Some models (e.g., GLM-4) may return the function name with arguments
+    like 'sqlite_batch(sql="...")' instead of just 'sqlite_batch'.
+    This extracts the base name before any opening parenthesis.
+    """
+    if not name:
+        return name
+    # Strip the function call syntax if present
+    paren_idx = name.find("(")
+    if paren_idx > 0:
+        return name[:paren_idx].strip()
+    return name
+
+
+def _persist_tool_call_step(
+    agent: "PersistentAgent",
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    result_content: str,
+    credits_consumed: Any,
+    consumed_credit: Any,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> Optional["PersistentAgentStep"]:
+    """Persist a tool call step with robust error handling.
+
+    This function handles all database errors gracefully to ensure agent
+    processing continues even if step persistence fails. The tool has already
+    executed - we're just recording it.
+
+    Returns the created step, or None if persistence failed.
+    """
+    from api.models import PersistentAgentStep, PersistentAgentToolCall
+
+    # Truncate tool_name as a safety measure (should already be sanitized, but be defensive)
+    safe_tool_name = (tool_name or "")[:256]
+
+    # Build a safe description (truncate if needed)
+    try:
+        params_preview = str(tool_params)[:100] if tool_params else ""
+        result_preview = (result_content or "")[:100]
+        description = f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
+    except Exception:
+        description = f"Tool call: {safe_tool_name}"
+
+    step_kwargs = {
+        "agent": agent,
+        "description": description[:500],  # Ensure description fits
+        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+        "task_credit": consumed_credit,
+    }
+
+    def _try_create_step() -> Optional[PersistentAgentStep]:
+        """Attempt to create the step and tool call record."""
+        attach_completion(step_kwargs)
+        step = PersistentAgentStep.objects.create(**step_kwargs)
+        attach_prompt_archive(step)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=safe_tool_name,
+            tool_params=tool_params,
+            result=result_content,
+        )
+        try:
+            from console.agent_chat.signals import emit_tool_call_realtime
+
+            emit_tool_call_realtime(step)
+        except Exception:
+            logger.debug(
+                "Failed to broadcast realtime tool call for agent %s step %s",
+                agent.id,
+                getattr(step, "id", None),
+                exc_info=True,
+            )
+        return step
+
+    # Try primary path
+    try:
+        step = _try_create_step()
+        logger.info(
+            "Agent %s: persisted tool call step_id=%s for %s",
+            agent.id,
+            getattr(step, "id", None),
+            safe_tool_name,
+        )
+        return step
+    except OperationalError:
+        # Stale connection - retry once
+        close_old_connections()
+        try:
+            step = _try_create_step()
+            logger.info(
+                "Agent %s: persisted tool call (retry) step_id=%s for %s",
+                agent.id,
+                getattr(step, "id", None),
+                safe_tool_name,
+            )
+            return step
+        except Exception as retry_exc:
+            logger.error(
+                "Agent %s: failed to persist tool call for %s after retry: %s",
+                agent.id,
+                safe_tool_name,
+                retry_exc,
+            )
+            return None
+    except DatabaseError as db_exc:
+        # Data errors, integrity errors, etc. - log and continue
+        logger.error(
+            "Agent %s: database error persisting tool call for %s: %s",
+            agent.id,
+            safe_tool_name,
+            db_exc,
+        )
+        return None
+    except Exception as exc:
+        # Catch-all for unexpected errors - never crash the agent
+        logger.error(
+            "Agent %s: unexpected error persisting tool call for %s: %s",
+            agent.id,
+            safe_tool_name,
+            exc,
+            exc_info=True,
+        )
+        return None
+
+
+def _get_tool_call_arguments(call: Any) -> Any:
+    if call is None:
+        return None
+    function = getattr(call, "function", None)
+    if function is not None:
+        arguments = getattr(function, "arguments", None)
+        if arguments is not None:
+            return arguments
+    if isinstance(call, dict):
+        function = call.get("function")
+        if isinstance(function, dict) and "arguments" in function:
+            return function.get("arguments")
+        if "arguments" in call:
+            return call.get("arguments")
+    arguments = getattr(call, "arguments", None)
+    return arguments
 
 
 def _substitute_variables_in_params(params: Any) -> Any:
@@ -2155,6 +2465,7 @@ def _run_agent_loop(
             return cumulative_token_usage
 
     reasoning_only_streak = 0
+    continuation_notice: Optional[str] = None
 
     for i in range(max_remaining):
         if max_runtime_seconds and _runtime_exceeded(run_started_at, max_runtime_seconds):
@@ -2234,6 +2545,8 @@ def _run_agent_loop(
 
             config_snapshot = seed_sqlite_agent_config(agent)
             kanban_snapshot = seed_sqlite_kanban(agent)
+            current_notice = continuation_notice
+            continuation_notice = None
             history, fitted_token_count, prompt_archive_id = build_prompt_context(
                 agent,
                 current_iteration=i + 1,
@@ -2241,7 +2554,7 @@ def _run_agent_loop(
                 reasoning_only_streak=reasoning_only_streak,
                 is_first_run=is_first_run,
                 daily_credit_state=daily_state,
-                continuation_notice=None,
+                continuation_notice=current_notice,
                 routing_profile=get_current_eval_routing_profile(),
             )
             prompt_archive_attached = False
@@ -2407,7 +2720,9 @@ def _run_agent_loop(
                         )
                 return True
 
-            def _apply_kanban_updates() -> bool:
+            def _apply_kanban_updates() -> tuple[bool, Optional["KanbanBoardSnapshot"]]:
+                """Apply kanban updates and return (had_errors, snapshot)."""
+                from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot
                 kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
 
                 # Broadcast kanban changes to timeline if any
@@ -2422,7 +2737,7 @@ def _run_agent_loop(
                         )
 
                 if not kanban_apply.errors:
-                    return False
+                    return False, kanban_apply.snapshot
                 for error in kanban_apply.errors:
                     try:
                         step_kwargs = {
@@ -2438,14 +2753,15 @@ def _run_agent_loop(
                             agent.id,
                             exc_info=True,
                         )
-                return True
+                return True, kanban_apply.snapshot
 
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
 
-            raw_tool_calls = list(getattr(msg, "tool_calls", None) or [])
+            raw_tool_calls = _normalize_tool_calls(msg)
             raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
             has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
+            has_explicit_sleep = any(name == "sleep_until_next_trigger" for name in raw_tool_names if name)
             has_other_tool_calls = any(
                 name and name != "sleep_until_next_trigger" for name in raw_tool_names
             )
@@ -2453,10 +2769,15 @@ def _run_agent_loop(
             implied_send = False
             tool_calls = list(raw_tool_calls)
             if message_text and not has_explicit_send:
+                # Check for explicit completion signal in message or thinking content.
+                # Agent can signal "I'm done" by including phrases like "Work complete."
+                has_completion = _has_completion_signal(message_text) or _has_completion_signal(thinking_content or "")
+                # Default: assume continuation unless agent explicitly sleeps OR signals completion.
+                implied_will_continue = not has_explicit_sleep and not has_completion
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,
-                    will_continue_work=has_other_tool_calls,
+                    will_continue_work=implied_will_continue,
                 )
                 if implied_call:
                     implied_send = True
@@ -2496,21 +2817,68 @@ def _run_agent_loop(
 
             if not tool_calls:
                 config_errors = _apply_agent_config_updates()
-                kanban_errors = _apply_kanban_updates()
+                kanban_errors, _ = _apply_kanban_updates()
                 if config_errors or kanban_errors:
                     reasoning_only_streak = 0
                     continue
-                if not message_text:
-                    # Empty response (no text, no tools) = agent is done, auto-sleep
+                if not message_text and not thinking_content:
+                    # Truly empty response (no text, no thinking, no tools) = agent is done
+                    # Log kanban state to help diagnose premature termination
+                    kanban_state = "unknown"
+                    try:
+                        from .prompt_context import get_kanban_snapshot
+                        snap = get_kanban_snapshot(agent)
+                        if snap:
+                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                    except Exception:
+                        pass
                     logger.info(
-                        "Agent %s: empty response (no message, no tools), auto-sleeping.",
+                        "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
+                        "Kanban at termination: %s. Raw msg_content type=%s, len=%s",
                         agent.id,
+                        kanban_state,
+                        type(msg_content).__name__,
+                        len(msg_content) if msg_content else 0,
                     )
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
-                # Message but no tools handled by implied send above; if we're here,
-                # implied send wasn't available or failed - increment streak
+                # Message or thinking content but no tools - increment streak.
+                # Thinking-only models (e.g., DeepSeek) put responses in thinking blocks;
+                # don't auto-sleep just because message_text is empty.
                 reasoning_only_streak += 1
+
+                # Check for continuation signals like "let me", "I'll", "I'm going to"
+                # in message or thinking content - gives agent one extra pass.
+                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
+                effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
+
+                if reasoning_only_streak >= effective_limit:
+                    # Log kanban state to help diagnose premature termination
+                    kanban_state = "unknown"
+                    try:
+                        from .prompt_context import get_kanban_snapshot
+                        snap = get_kanban_snapshot(agent)
+                        if snap:
+                            kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                            if snap.todo_count > 0 or snap.doing_count > 0:
+                                logger.warning(
+                                    "Agent %s: auto-sleeping with unfinished kanban work! %s",
+                                    agent.id,
+                                    kanban_state,
+                                )
+                    except Exception:
+                        pass
+                    logger.info(
+                        "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
+                        "Kanban: %s. Last message preview: %.100s",
+                        agent.id,
+                        reasoning_only_streak,
+                        effective_limit,
+                        kanban_state,
+                        message_text or thinking_content or "(none)",
+                    )
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
                 continue
 
             reasoning_only_streak = 0
@@ -2525,9 +2893,7 @@ def _run_agent_loop(
                 for idx, call in enumerate(list(tool_calls) or [], start=1):
                     try:
                         fn_name = _get_tool_call_name(call)
-                        raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
-                            call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
-                        )
+                        raw_args = _get_tool_call_arguments(call) or ""
                         call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
                         arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                         logger.info(
@@ -2544,17 +2910,11 @@ def _run_agent_loop(
             except Exception:
                 logger.debug("Tool call summary logging failed", exc_info=True)
 
-            all_calls_sleep = True
             executed_calls = 0
             followup_required = False
+            any_explicit_continuation = False  # Track if any tool said will_continue_work=True
             try:
-                tool_names = [
-                    (
-                        getattr(getattr(c, "function", None), "name", None)
-                        or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
-                    )
-                    for c in (tool_calls or [])
-                ]
+                tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
@@ -2567,6 +2927,8 @@ def _run_agent_loop(
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
                 has_user_facing_message = False
+            message_delivery_ok = False
+            all_calls_sleep = not has_non_sleep_calls
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
@@ -2661,9 +3023,7 @@ def _run_agent_loop(
                     credits_consumed = credit_info.get("cost")
                     consumed_credit = credit_info.get("credit")
                     try:
-                        raw_args = getattr(getattr(call, "function", None), "arguments", None)
-                        if raw_args is None and isinstance(call, dict):
-                            raw_args = call.get("function", {}).get("arguments")
+                        raw_args = _get_tool_call_arguments(call)
                         if isinstance(raw_args, dict):
                             tool_params = raw_args
                             raw_args = json.dumps(raw_args)
@@ -2791,77 +3151,89 @@ def _run_agent_loop(
                         result_preview,
                         "…" if len(result_content) > len(result_preview) else "",
                     )
+                    if tool_name in MESSAGE_TOOL_NAMES:
+                        status_label = str(status or "").lower()
+                        if status_label in MESSAGE_SUCCESS_STATUSES:
+                            message_delivery_ok = True
 
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
-                    try:
-                        # Create tool step with the execution result preview
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                            "task_credit": consumed_credit,
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
-                            step=step,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            result=result_content,
-                        )
-                        try:
-                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
-
-                            emit_tool_call_realtime(step)
-                        except Exception:  # pragma: no cover - defensive logging
-                            logger.debug(
-                                "Failed to broadcast realtime tool call for agent %s step %s",
-                                agent.id,
-                                getattr(step, "id", None),
-                                exc_info=True,
-                            )
-                        logger.info("Agent %s: persisted tool call step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
-                    except OperationalError:
-                        close_old_connections()
-                        # Create tool step (retry path)
-                        step_kwargs = {
-                            "agent": agent,
-                            "description": f"Tool call: {tool_name}({tool_params}) -> {result_content[:100]}",
-                            "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
-                            "task_credit": consumed_credit,
-                        }
-                        _attach_completion(step_kwargs)
-                        step = PersistentAgentStep.objects.create(**step_kwargs)
-                        _attach_prompt_archive(step)
-                        PersistentAgentToolCall.objects.create(
-                            step=step,
-                            tool_name=tool_name,
-                            tool_params=tool_params,
-                            result=result_content,
-                        )
-                        try:
-                            from console.agent_chat.signals import emit_tool_call_realtime  # noqa: WPS433
-
-                            emit_tool_call_realtime(step)
-                        except Exception:  # pragma: no cover - defensive logging
-                            logger.debug(
-                                "Failed to broadcast realtime tool call (retry) for agent %s step %s",
-                                agent.id,
-                                getattr(step, "id", None),
-                                exc_info=True,
-                            )
-                        logger.info("Agent %s: persisted tool call (retry) step_id=%s for %s", agent.id, getattr(step, 'id', None), tool_name)
+                    step = _persist_tool_call_step(
+                        agent=agent,
+                        tool_name=tool_name,
+                        tool_params=tool_params,
+                        result_content=result_content,
+                        credits_consumed=credits_consumed,
+                        consumed_credit=consumed_credit,
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                     tool_requires_followup = not allow_auto_sleep
 
                     if tool_requires_followup:
                         followup_required = True
 
+                    # Track if any tool explicitly requested continuation
+                    if isinstance(tool_params, dict) and tool_params.get("will_continue_work") is True:
+                        any_explicit_continuation = True
+
                     executed_calls += 1
 
-            if _apply_agent_config_updates() or _apply_kanban_updates():
+            config_had_errors = _apply_agent_config_updates()
+            kanban_had_errors, kanban_board_snapshot = _apply_kanban_updates()
+            if config_had_errors or kanban_had_errors:
+                followup_required = True
+
+            # Kanban completion override: once final output is delivered, force auto-sleep.
+            # If no user-facing message was sent, keep the agent alive to send it.
+            kanban_all_done = (
+                kanban_board_snapshot is not None
+                and kanban_board_snapshot.todo_count == 0
+                and kanban_board_snapshot.doing_count == 0
+                and kanban_board_snapshot.done_count > 0
+            )
+            kanban_has_work = (
+                kanban_board_snapshot is not None
+                and (kanban_board_snapshot.todo_count > 0 or kanban_board_snapshot.doing_count > 0)
+            )
+            if kanban_all_done:
+                if message_delivery_ok:
+                    if any_explicit_continuation:
+                        # Agent sent will_continue_work=true on the message - respect it.
+                        # The message was a progress update, not final output.
+                        logger.info(
+                            "Agent %s: kanban complete but message had will_continue_work=true; continuing.",
+                            agent.id,
+                        )
+                        followup_required = True
+                    else:
+                        # Message with will_continue_work=false (or unset) = final output
+                        logger.info(
+                            "Agent %s: kanban complete and final message sent; auto-sleeping.",
+                            agent.id,
+                        )
+                        followup_required = False
+                elif not all_calls_sleep:
+                    if not followup_required:
+                        logger.info(
+                            "Agent %s: kanban complete but no user message sent; forcing continuation.",
+                            agent.id,
+                        )
+                    followup_required = True
+                    continuation_notice = (
+                        "Kanban is complete but no user-facing message was sent. "
+                        "Send the final output now, then stop."
+                    )
+            # Kanban unfinished override: if work remains and no explicit sleep, force continuation
+            # This prevents premature termination when tools return auto_sleep_ok but kanban has tasks
+            elif kanban_has_work and not followup_required and not all_calls_sleep:
+                logger.warning(
+                    "Agent %s: kanban has unfinished work (todo=%d, doing=%d) but tools signaled auto-sleep; forcing continuation.",
+                    agent.id,
+                    kanban_board_snapshot.todo_count,
+                    kanban_board_snapshot.doing_count,
+                )
                 followup_required = True
 
             if all_calls_sleep:
@@ -2870,6 +3242,7 @@ def _run_agent_loop(
                 return cumulative_token_usage
             elif (
                 not followup_required
+                and not any_explicit_continuation
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
             ):
@@ -2879,6 +3252,11 @@ def _run_agent_loop(
                 )
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
+            elif not followup_required and any_explicit_continuation:
+                logger.info(
+                    "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",
+                    agent.id,
+                )
             else:
                 logger.info(
                     "Agent %s: executed %d/%d tool_call(s) this iteration",

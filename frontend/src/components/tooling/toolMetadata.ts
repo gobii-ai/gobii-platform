@@ -160,6 +160,24 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       }
 
       const statements = rawQueries.map(String)
+
+      // Detect kanban-only SQL batches and transform them into a nice display
+      // instead of showing raw SQL (the KanbanEventCard handles the detailed view)
+      const isKanbanOnlyBatch = statements.length > 0 && statements.every((stmt) => {
+        const normalized = stmt.trim().toUpperCase()
+        // Match statements that operate on __kanban_cards table
+        return (
+          normalized.includes('__KANBAN_CARDS') ||
+          normalized.includes('__KANBAN_') ||
+          // Also match common kanban operations by pattern
+          /^\s*(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+['"`]?__kanban/i.test(stmt)
+        )
+      })
+
+      if (isKanbanOnlyBatch) {
+        return { skip: true }
+      }
+
       const agentConfigUpdate = parseAgentConfigUpdates(statements)
       if (agentConfigUpdate) {
         const {
