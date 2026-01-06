@@ -600,9 +600,9 @@ Use `true` when:
 - You need to run another query to answer the question
 - You're uncertain whether you're done
 
-Use `false` (or omit the tool call) when:
+Use `false` only when ALL are true:
+- All kanban cards are done (or deferred with schedule)
 - You're delivering final findings to the user
-- The user asked a question and you have the complete answer
 - There's nothing more to fetch, analyze, or compute
 
 Before stopping, mark every completed kanban card as done (clear finished work out of todo/doing). Batch the updates with any other sqlite changes.
@@ -611,7 +611,7 @@ Example wrap-up (single response with tools):
 - sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE title IN ('Step 1', 'Step 2');", will_continue_work=false)
 - send_chat_message(body="All done. Marked completed cards and sharing results.")
 
-**The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. If you're done, stop even if kanban has open cards; update the cards or set a schedule for later.
+**The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
 
 ---
 
@@ -650,15 +650,13 @@ send_chat_message(body="Done! Found 12 competitors, pricing data extracted and s
 3. Verify count of non-done = 0
 4. Only then use `will_continue_work=false`
 
-**If remaining > 0:**
+**If remaining > 0:** keep working or mark done first—never assume current work "counts" without UPDATE:
 ```sql
--- Cards still open? Either finish them or explicitly defer:
-UPDATE __kanban_cards SET status='done' WHERE title='...'  -- if actually done
--- OR update charter/schedule to return later
-UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;  -- defer to tomorrow
+-- WRONG: "I'm doing work that addresses this card" + will_continue_work=false → orphans card
+-- RIGHT: mark done explicitly, THEN stop
+UPDATE __kanban_cards SET status='done' WHERE title='Compile report';  -- mark done FIRST
+-- only then: will_continue_work=false
 ```
-
-Never stop with open cards unless you've explicitly set a schedule to return.
 
 ---
 
@@ -1016,7 +1014,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_card:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo are your checklist. When done, mark them complete. Open cards do not keep the loop alive; set a schedule if you need to return.",
+            "Cards in doing/todo = work remains. Mark each done before stopping, or set a schedule if blocked.",
             weight=1,
             non_shrinkable=True,
         )
@@ -1697,7 +1695,7 @@ def build_prompt_context(
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
             "  → IMMEDIATE STOP after sending. No more turns. No undo.\n"
-            "  Use when: task 100% complete, nothing left to fetch/compute/verify\n"
+            "  Use when: task 100% complete, all kanban cards done, nothing left to fetch/compute/verify\n"
             "  If uncertain, add will_continue_work=true to ANY tool call to stay in the loop.\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
@@ -1853,13 +1851,13 @@ def build_prompt_context(
         f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
         "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
-        "Workflow: (1) Mark a card 'doing' when you start it. (2) Mark it 'done' when truly finished—not when you've made progress, when it's *complete*. "
-        "(3) Keep working until all 'doing' cards are done or you're out of credits. "
-        "Batch updates: fold kanban changes into the same sqlite_batch as your other queries—don't make separate calls just for kanban. "
-        "Archive old work: DELETE done cards when starting fresh work or when a batch is fully complete. Only 'done' cards can be archived. "
-        "Example: INSERT INTO __kanban_cards (title, status) VALUES ('Research competitors', 'doing'), ('Write summary', 'todo'); "
-        "Example archive: DELETE FROM __kanban_cards WHERE status = 'done'; "
-        "IDs auto-generate—just provide title + status."
+        "Workflow: (1) INSERT new cards when starting work. (2) UPDATE existing cards to 'done' when finished. (3) Keep working until all cards are done. "
+        "Batch updates: fold kanban changes into the same sqlite_batch as your other queries. "
+        "Create cards: INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'doing'), ('Step 2', 'todo'); "
+        "Mark done: UPDATE __kanban_cards SET status='done' WHERE title='Step 1'; "
+        "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
+        "WRONG: INSERT with status='done' ← creates duplicate. "
+        "WRONG: doing work that 'addresses' a card + will_continue_work=false without UPDATE ← orphans the card."
     )
     variable_group.section_text(
         "kanban_note",
@@ -2348,6 +2346,26 @@ def add_budget_awareness_sections(
         )
     sections.append(("iteration_progress", iteration_text, 3, True))
 
+    # Kanban status reminder - appears in critical section right before agent responds
+    if agent:
+        try:
+            open_cards = PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=agent,
+                status__in=[
+                    PersistentAgentKanbanCard.Status.TODO,
+                    PersistentAgentKanbanCard.Status.DOING,
+                ],
+            ).count()
+            if open_cards > 0:
+                sections.append((
+                    "kanban_status",
+                    f"⚠️ {open_cards} kanban card(s) not done—mark done before will_continue_work=false.",
+                    4,
+                    True,
+                ))
+        except Exception:
+            pass
+
     try:
         ctx = get_budget_context()
         if ctx is not None:
@@ -2526,7 +2544,7 @@ def add_budget_awareness_sections(
                 (
                     "Pacing: Prefer one tool call, then reassess. "
                     "Batch related updates into one sqlite_batch when possible. "
-                    "Before sleeping, update your kanban board so you know where to resume."
+                    "Before sleeping: if todo/doing cards remain, keep working or set a schedule—don't orphan work."
                 ),
                 2,
                 True,
@@ -2579,10 +2597,7 @@ def add_budget_awareness_sections(
                 sections.append(
                     (
                         "iteration_warning",
-                        (
-                            "You are running out of iterations to finish your work. "
-                            "Update your schedule or contact the user if needed so you can resume later."
-                        ),
+                        "Running low on iterations. Save progress to kanban and set schedule to resume.",
                         2,
                         True,
                     )
@@ -2887,7 +2902,7 @@ def _get_system_instruction(
             "For the active web chat user, just write your message—it auto-sends to them only. "
             "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
         )
-        message_only_note = "Message-only responses mean you're done. Empty responses trigger auto-sleep. "
+        message_only_note = "Message-only responses mean you're done—verify kanban is clear first. Empty responses trigger auto-sleep. "
     else:
         send_guidance = (
             "Text output is not delivered unless you use explicit send tools. "
@@ -2913,7 +2928,7 @@ def _get_system_instruction(
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
-        "**Stop** — request fully handled:\n"
+        "**Stop** — request fully handled AND kanban clear (no todo/doing cards):\n"
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} — done.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} — done.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Got it!')} — done.\n"
@@ -2929,7 +2944,7 @@ def _get_system_instruction(
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
-        "**Before stopping:** mark every completed kanban card done (batch with sqlite_batch).\n"
+        "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
@@ -2938,23 +2953,23 @@ def _get_system_instruction(
         f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
         "The will_continue_work flag: "
         "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
-        "Set false (or omit) when you're done. "
+        "Set false only after verifying no todo/doing cards remain."
         "Fetching data is just step one—reporting it to the user completes the task. "
         f"{message_only_note}"
         "How responses work: "
         f"{response_delivery_note}"
         "Tool calls are actions you take. "
         f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Text-only OR empty response = IMMEDIATE STOP. When in doubt, include a tool call with will_continue_work=true."
+        "Text-only OR empty response = IMMEDIATE STOP. Check kanban before stopping—if cards remain, keep working."
         f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
         f"{stop_continue_examples}"
-        "Processing cycles cost money. Once you've fully handled the request, stop.\n"
+        "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n"
         f"{web_chat_delivery_note}"
     )
 
     base_prompt = (
         f"You are a persistent AI agent."
-        "Use your tools to act on the user's request, then stop. "
+        "Use your tools to fulfill the user's request completely."
         "\n\n"
         "Language policy:\n"
         "- Default to English.\n"
@@ -3038,7 +3053,7 @@ def _get_system_instruction(
         "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
-        "- As you finish steps: `UPDATE __kanban_cards SET status='done' WHERE title=<card_title>`\n"
+        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE title='Step 1';` (never INSERT with status='done'—that creates duplicates)\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n\n"
 
@@ -3431,14 +3446,14 @@ def _get_system_instruction(
         "A thin summary of rich data is a missed opportunity. "
         "When you find a list of things to investigate, investigate all of them—add a kanban card for each.\n\n"
 
-        "will_continue_work=true means 'I have more to do'. Use it when:\n"
-        "- You fetched data but haven't reported it yet\n"
-        "- You started a multi-step task and aren't finished\n"
-        "- You need another tool call to complete the request\n"
-        "- You have cards in todo or doing\n\n"
+        "will_continue_work=true when:\n"
+        "- Fetched data but haven't reported it\n"
+        "- Cards in todo/doing remain\n"
+        "- More tool calls needed\n\n"
 
-        "will_continue_work=false means done for now—either all cards are done, or you're pausing with a schedule set to return. "
-        "Never leave cards orphaned; if work remains, ensure your schedule will bring you back.\n\n"
+        "will_continue_work=false only when: all cards done (or deferred with schedule). "
+        "WRONG: seeing a todo card, doing work you *think* addresses it, then setting false without marking it done → orphans the card. "
+        "RIGHT: UPDATE card to done FIRST, then set false.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
         "Kanban (__kanban_cards) is always there—if you have work, you should have cards. No cards = no memory of what you're doing. "
 
