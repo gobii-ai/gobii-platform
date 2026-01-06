@@ -1886,8 +1886,8 @@ def build_prompt_context(
                 f"## Implied Send → {display_name}\n\n"
                 f"Your text auto-sends to the active web chat user.\n"
                 f"You'll continue working after text-only replies (2 max before auto-stop).\n"
-                f"**Kanban completion = instant stop**: Once you send the final message, marking all cards done ends your turn immediately.\n"
-                f"If you close the last card without a user-facing message, you'll be prompted to send it next.\n"
+                f"**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
+                f"If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
                 f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
                 "**To reach someone else**, use explicit tools:\n"
                 f"- `{tool_example}` ← what implied send does for you\n"
@@ -3291,19 +3291,18 @@ def _get_system_instruction(
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule.\n"
-        "**Auto-stop on completion:** When all kanban cards are done (todo=0, doing=0, done>0) and you've sent a user-facing message, the system auto-stops immediately. "
-        "If you mark the last card done without sending output, you'll get one more turn to send it. "
-        "Send your final summary with the last card update, not after.\n"
+        "**Auto-stop on completion:** When all kanban cards are done and you send a message with `will_continue_work=false`, the system auto-stops. "
+        "If you use `will_continue_work=true`, you'll get another turn even if kanban is complete. "
+        "If you mark the last card done without sending output, you'll be prompted to send it.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
     if implied_send_active:
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
-            "- Text-only replies continue by default (up to 2 before auto-stop)\n"
-            "- **Kanban all-done = instant stop** — after your final message, marking the last card done ends the session\n"
-            "- If you close the last card without a user-facing message, you'll be prompted to send it next\n"
-            "- Keep at least one card in 'doing' while working; close out atomically (mark last card done + final message + `will_continue_work=false`)\n"
+            "- Text-only replies auto-send and continue by default (up to 2 before auto-stop)\n"
+            "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
+            "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
             "- To stop early: use `sleep_until_next_trigger`\n"
         )
     else:
@@ -3311,8 +3310,7 @@ def _get_system_instruction(
             "**The will_continue_work flag:** "
             "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
             "Set false only after verifying no todo/doing cards remain. "
-            "**Kanban all-done = instant stop** — after you send the final message, you won't get another turn. "
-            "Keep at least one card in 'doing' while working; close out atomically (mark last card done + final results + `will_continue_work=false`).\n"
+            "When all kanban cards are done: `will_continue_work=false` on your message = auto-stop, `will_continue_work=true` = continue.\n"
         )
 
     delivery_instructions = (

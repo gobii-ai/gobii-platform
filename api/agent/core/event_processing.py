@@ -3171,13 +3171,21 @@ def _run_agent_loop(
             )
             if kanban_all_done:
                 if message_delivery_ok:
-                    if followup_required or any_explicit_continuation:
+                    if any_explicit_continuation:
+                        # Agent sent will_continue_work=true on the message - respect it.
+                        # The message was a progress update, not final output.
                         logger.info(
-                            "Agent %s: kanban complete and final message sent; forcing auto-sleep.",
+                            "Agent %s: kanban complete but message had will_continue_work=true; continuing.",
                             agent.id,
                         )
-                    followup_required = False
-                    any_explicit_continuation = False
+                        followup_required = True
+                    else:
+                        # Message with will_continue_work=false (or unset) = final output
+                        logger.info(
+                            "Agent %s: kanban complete and final message sent; auto-sleeping.",
+                            agent.id,
+                        )
+                        followup_required = False
                 elif not all_calls_sleep:
                     if not followup_required:
                         logger.info(

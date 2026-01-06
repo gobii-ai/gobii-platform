@@ -79,16 +79,25 @@ class TestEventProcessingTokenCounting(TestCase):
                 with patch('api.agent.core.event_processing.get_llm_config_with_failover', side_effect=capturing_get_llm_config):
                     with patch('api.agent.core.event_processing._completion_with_failover') as mock_completion:
                         # Return tool call to end loop after one iteration
-                        mock_completion.return_value = MagicMock(
+                        # Must return tuple (response, token_usage_dict) like the real function
+                        resp = MagicMock(
                             choices=[MagicMock(
                                 message=MagicMock(
-                                    content="test", 
+                                    content="test",
                                     tool_calls=[MagicMock(
                                         function=MagicMock(name="sleep_until_next_trigger", arguments='{}')
                                     )]
                                 )
                             )]
                         )
+                        resp.model_extra = {"usage": MagicMock(
+                            prompt_tokens=10, completion_tokens=5, total_tokens=15,
+                            prompt_tokens_details=MagicMock(cached_tokens=0)
+                        )}
+                        mock_completion.return_value = (resp, {
+                            "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15,
+                            "model": "m", "provider": "p"
+                        })
                         
                         # Run one iteration of the agent loop
                         try:
