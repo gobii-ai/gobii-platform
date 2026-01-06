@@ -2,9 +2,11 @@ import type {
   AnchorHTMLAttributes,
   DetailedHTMLProps,
   HTMLAttributes,
+  ImgHTMLAttributes,
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from 'react'
+import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
@@ -18,10 +20,39 @@ type MarkdownViewerProps = {
   enableHighlight?: boolean
 }
 
+// Preload cache to prevent images from re-fetching during streaming re-renders.
+// When an image URL is first seen, we preload it so the browser caches it.
+const preloadedImages = new Set<string>()
+
+function preloadImage(src: string) {
+  if (preloadedImages.has(src)) return
+  preloadedImages.add(src)
+  const img = new Image()
+  img.src = src
+}
+
+const StableImage = memo(function StableImage(props: ImgHTMLAttributes<HTMLImageElement>) {
+  const { src, alt, ...rest } = props
+
+  // Preload on first encounter so browser caches the image data
+  if (src) preloadImage(src)
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading="eager"
+      className="max-w-full h-auto rounded my-2"
+      {...rest}
+    />
+  )
+}, (prev, next) => prev.src === next.src && prev.alt === next.alt)
+
 const markdownComponents = {
   a: (props: AnchorHTMLAttributes<HTMLAnchorElement>) => (
     <a {...props} target={props.target ?? '_blank'} rel={props.rel ?? 'noopener noreferrer'} />
   ),
+  img: StableImage,
   table: ({ className = '', children, ...rest }: DetailedHTMLProps<HTMLAttributes<HTMLTableElement>, HTMLTableElement>) => (
     <div className="my-4 overflow-x-auto">
       <table
