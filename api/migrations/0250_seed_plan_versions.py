@@ -414,52 +414,60 @@ def seed_plans(apps, schema_editor) -> None:
                 },
             )
 
-    plan_versions_by_legacy = {
-        pv.legacy_plan_code.lower(): pv
-        for pv in PlanVersion.objects.exclude(legacy_plan_code__isnull=True)
-        if pv.legacy_plan_code
-    }
-
     UserBilling = apps.get_model("api", "UserBilling")
     OrganizationBilling = apps.get_model("api", "OrganizationBilling")
     DailyCreditConfig = apps.get_model("api", "DailyCreditConfig")
     BrowserConfig = apps.get_model("api", "BrowserConfig")
     ToolConfig = apps.get_model("api", "ToolConfig")
 
-    for billing in UserBilling.objects.filter(plan_version__isnull=True):
-        legacy_code = (billing.subscription or "").lower()
-        plan_version = plan_versions_by_legacy.get(legacy_code)
-        if plan_version:
-            billing.plan_version_id = plan_version.id
-            billing.save(update_fields=["plan_version"])
+    plan_version_table = schema_editor.quote_name(PlanVersion._meta.db_table)
+    user_billing_table = schema_editor.quote_name(UserBilling._meta.db_table)
+    org_billing_table = schema_editor.quote_name(OrganizationBilling._meta.db_table)
+    daily_credit_table = schema_editor.quote_name(DailyCreditConfig._meta.db_table)
+    browser_config_table = schema_editor.quote_name(BrowserConfig._meta.db_table)
+    tool_config_table = schema_editor.quote_name(ToolConfig._meta.db_table)
 
-    for billing in OrganizationBilling.objects.filter(plan_version__isnull=True):
-        legacy_code = (billing.subscription or "").lower()
-        plan_version = plan_versions_by_legacy.get(legacy_code)
-        if plan_version:
-            billing.plan_version_id = plan_version.id
-            billing.save(update_fields=["plan_version"])
+    def _bulk_backfill_plan_version(table: str, legacy_column: str) -> None:
+        if schema_editor.connection.vendor == "postgresql":
+            schema_editor.execute(
+                """
+                UPDATE {table} AS target
+                SET plan_version_id = pv.id
+                FROM {plan_version_table} AS pv
+                WHERE target.plan_version_id IS NULL
+                  AND target.{legacy_column} IS NOT NULL
+                  AND pv.legacy_plan_code IS NOT NULL
+                  AND LOWER(pv.legacy_plan_code) = LOWER(target.{legacy_column})
+                """.format(
+                    table=table,
+                    plan_version_table=plan_version_table,
+                    legacy_column=legacy_column,
+                )
+            )
+        else:
+            schema_editor.execute(
+                """
+                UPDATE {table}
+                SET plan_version_id = (
+                    SELECT pv.id
+                    FROM {plan_version_table} AS pv
+                    WHERE pv.legacy_plan_code IS NOT NULL
+                      AND LOWER(pv.legacy_plan_code) = LOWER({table}.{legacy_column})
+                )
+                WHERE plan_version_id IS NULL
+                  AND {legacy_column} IS NOT NULL
+                """.format(
+                    table=table,
+                    plan_version_table=plan_version_table,
+                    legacy_column=legacy_column,
+                )
+            )
 
-    for config in DailyCreditConfig.objects.filter(plan_version__isnull=True).exclude(plan_name__isnull=True):
-        legacy_code = (config.plan_name or "").lower()
-        plan_version = plan_versions_by_legacy.get(legacy_code)
-        if plan_version:
-            config.plan_version_id = plan_version.id
-            config.save(update_fields=["plan_version"])
-
-    for config in BrowserConfig.objects.filter(plan_version__isnull=True).exclude(plan_name__isnull=True):
-        legacy_code = (config.plan_name or "").lower()
-        plan_version = plan_versions_by_legacy.get(legacy_code)
-        if plan_version:
-            config.plan_version_id = plan_version.id
-            config.save(update_fields=["plan_version"])
-
-    for config in ToolConfig.objects.filter(plan_version__isnull=True).exclude(plan_name__isnull=True):
-        legacy_code = (config.plan_name or "").lower()
-        plan_version = plan_versions_by_legacy.get(legacy_code)
-        if plan_version:
-            config.plan_version_id = plan_version.id
-            config.save(update_fields=["plan_version"])
+    _bulk_backfill_plan_version(user_billing_table, "subscription")
+    _bulk_backfill_plan_version(org_billing_table, "subscription")
+    _bulk_backfill_plan_version(daily_credit_table, "plan_name")
+    _bulk_backfill_plan_version(browser_config_table, "plan_name")
+    _bulk_backfill_plan_version(tool_config_table, "plan_name")
 
 
 def noop_reverse(apps, schema_editor) -> None:
