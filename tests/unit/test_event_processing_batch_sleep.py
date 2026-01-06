@@ -101,6 +101,56 @@ class TestBatchToolCallsWithSleep(TestCase):
         self.assertGreaterEqual(result_usage['total_tokens'], 15)
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
+    @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch('api.agent.core.event_processing.build_prompt_context')
+    @patch('api.agent.core.event_processing._completion_with_failover')
+    def test_tool_call_dict_is_executed(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        _mock_execute_enabled,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+            1000,
+            None,
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = {
+            "id": "call-1",
+            "function": {"name": "sqlite_batch", "arguments": "{\"sql\": \"select 1\"}"},
+        }
+        msg.content = None
+
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        resp.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+
+        mock_completion.return_value = (
+            resp,
+            {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"},
+        )
+
+        from api.agent.core import event_processing as ep
+        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        calls = list(PersistentAgentToolCall.objects.all().order_by('step__created_at'))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0].tool_name, 'sqlite_batch')
+
+    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ignored"})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')

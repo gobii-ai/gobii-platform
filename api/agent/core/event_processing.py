@@ -372,15 +372,140 @@ def _extract_message_content(message: Any) -> str:
     return ""
 
 
+def _coerce_function_call_tool(function_call: Any) -> Optional[dict]:
+    if function_call is None:
+        return None
+    if isinstance(function_call, dict):
+        name = function_call.get("name")
+        arguments = function_call.get("arguments")
+        call_id = function_call.get("id")
+    else:
+        name = getattr(function_call, "name", None)
+        arguments = getattr(function_call, "arguments", None)
+        call_id = getattr(function_call, "id", None)
+    return {
+        "id": call_id or "function_call",
+        "type": "function",
+        "function": {
+            "name": name or "",
+            "arguments": arguments or "",
+        },
+    }
+
+
+def _tool_calls_from_content(message: Any) -> list[dict]:
+    content = None
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    if not isinstance(content, list):
+        return []
+    tool_calls: list[dict] = []
+    for part in content:
+        if not isinstance(part, dict):
+            continue
+        part_type = part.get("type")
+        if not isinstance(part_type, str):
+            continue
+        part_type = part_type.lower()
+        if part_type not in {"tool_use", "tool_call"}:
+            continue
+        name = part.get("name") or part.get("tool_name")
+        raw_input = part.get("input", part.get("arguments"))
+        if raw_input is None:
+            raw_input = {}
+        if isinstance(raw_input, str):
+            arguments = raw_input
+        else:
+            try:
+                arguments = json.dumps(raw_input)
+            except Exception:
+                arguments = str(raw_input)
+        tool_calls.append(
+            {
+                "id": part.get("id") or part.get("tool_use_id") or f"tool_use_{len(tool_calls)}",
+                "type": "function",
+                "function": {"name": name or "", "arguments": arguments},
+            }
+        )
+    return tool_calls
+
+
+def _normalize_tool_calls(message: Any) -> list[Any]:
+    if message is None:
+        return []
+    raw_tool_calls = None
+    if isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls")
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None)
+    if raw_tool_calls:
+        if isinstance(raw_tool_calls, str):
+            try:
+                raw_tool_calls = json.loads(raw_tool_calls)
+            except Exception:
+                return [raw_tool_calls]
+        if isinstance(raw_tool_calls, dict):
+            return [raw_tool_calls]
+        if isinstance(raw_tool_calls, list):
+            return list(raw_tool_calls)
+        try:
+            return list(raw_tool_calls)
+        except TypeError:
+            return [raw_tool_calls]
+
+    raw_function_call = None
+    if isinstance(message, dict):
+        raw_function_call = message.get("function_call")
+    else:
+        raw_function_call = getattr(message, "function_call", None)
+    if raw_function_call:
+        coerced = _coerce_function_call_tool(raw_function_call)
+        return [coerced] if coerced else []
+
+    return _tool_calls_from_content(message)
+
+
 def _get_tool_call_name(call: Any) -> Optional[str]:
     if call is None:
         return None
-    name = getattr(getattr(call, "function", None), "name", None)
+    function = getattr(call, "function", None)
+    if function is not None:
+        name = getattr(function, "name", None)
+        if name:
+            return name
+    if isinstance(call, dict):
+        function = call.get("function")
+        if isinstance(function, dict):
+            name = function.get("name")
+            if name:
+                return name
+        name = call.get("name")
+        if name:
+            return name
+    name = getattr(call, "name", None)
     if name:
         return name
-    if isinstance(call, dict):
-        return call.get("function", {}).get("name")
     return None
+
+
+def _get_tool_call_arguments(call: Any) -> Any:
+    if call is None:
+        return None
+    function = getattr(call, "function", None)
+    if function is not None:
+        arguments = getattr(function, "arguments", None)
+        if arguments is not None:
+            return arguments
+    if isinstance(call, dict):
+        function = call.get("function")
+        if isinstance(function, dict) and "arguments" in function:
+            return function.get("arguments")
+        if "arguments" in call:
+            return call.get("arguments")
+    arguments = getattr(call, "arguments", None)
+    return arguments
 
 
 def _substitute_variables_in_params(params: Any) -> Any:
@@ -2443,7 +2568,7 @@ def _run_agent_loop(
             msg_content = _extract_message_content(msg)
             message_text = (msg_content or "").strip()
 
-            raw_tool_calls = list(getattr(msg, "tool_calls", None) or [])
+            raw_tool_calls = _normalize_tool_calls(msg)
             raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
             has_explicit_send = any(name in MESSAGE_TOOL_NAMES for name in raw_tool_names if name)
             has_other_tool_calls = any(
@@ -2525,9 +2650,7 @@ def _run_agent_loop(
                 for idx, call in enumerate(list(tool_calls) or [], start=1):
                     try:
                         fn_name = _get_tool_call_name(call)
-                        raw_args = getattr(getattr(call, "function", None), "arguments", None) or (
-                            call.get("function", {}).get("arguments") if isinstance(call, dict) else ""
-                        )
+                        raw_args = _get_tool_call_arguments(call) or ""
                         call_id = getattr(call, "id", None) or (call.get("id") if isinstance(call, dict) else None)
                         arg_preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                         logger.info(
@@ -2544,17 +2667,10 @@ def _run_agent_loop(
             except Exception:
                 logger.debug("Tool call summary logging failed", exc_info=True)
 
-            all_calls_sleep = True
             executed_calls = 0
             followup_required = False
             try:
-                tool_names = [
-                    (
-                        getattr(getattr(c, "function", None), "name", None)
-                        or (c.get("function", {}).get("name") if isinstance(c, dict) else None)
-                    )
-                    for c in (tool_calls or [])
-                ]
+                tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
                 actionable_calls_total = sum(
                     1 for name in tool_names if name != "sleep_until_next_trigger"
@@ -2567,6 +2683,7 @@ def _run_agent_loop(
                 has_non_sleep_calls = True
                 actionable_calls_total = len(tool_calls or []) if tool_calls else 0
                 has_user_facing_message = False
+            all_calls_sleep = not has_non_sleep_calls
 
             for idx, call in enumerate(tool_calls, start=1):
                 with tracer.start_as_current_span("Execute Tool") as tool_span:
@@ -2661,9 +2778,7 @@ def _run_agent_loop(
                     credits_consumed = credit_info.get("cost")
                     consumed_credit = credit_info.get("credit")
                     try:
-                        raw_args = getattr(getattr(call, "function", None), "arguments", None)
-                        if raw_args is None and isinstance(call, dict):
-                            raw_args = call.get("function", {}).get("arguments")
+                        raw_args = _get_tool_call_arguments(call)
                         if isinstance(raw_args, dict):
                             tool_params = raw_args
                             raw_args = json.dumps(raw_args)
