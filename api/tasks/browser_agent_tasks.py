@@ -1028,8 +1028,6 @@ async def _run_agent(
             profile = BrowserProfile(
                 stealth=True,
                 headless=headless_mode,
-                viewport={"width": 1280, "height": 800},
-                window_size={"width": 1280, "height": 800},
                 user_data_dir=temp_profile_dir,
                 timeout=30_000,
                 no_viewport=True,
