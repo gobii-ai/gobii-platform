@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0248_alter_promptconfig_premium_tool_call_history_limit_and_more"),
+        ("api", "0249_email_oauth_models"),
     ]
 
     operations = [
