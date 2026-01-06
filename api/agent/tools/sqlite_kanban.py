@@ -195,11 +195,26 @@ def apply_sqlite_kanban_updates(agent, baseline: Optional[KanbanSnapshot]) -> Ka
     created = current_ids - baseline_ids
     shared = current_ids & baseline_ids
 
+    # Detect duplicate title inserts (common LLM mistake: INSERT existing cards instead of UPDATE)
+    baseline_titles = {card.title.lower(): card for card in baseline_cards.values()}
+    duplicate_ids: set[str] = set()
+    for card_id in created:
+        card = current_cards.get(card_id)
+        if card and card.title.lower() in baseline_titles:
+            existing = baseline_titles[card.title.lower()]
+            errors.append(
+                f"Kanban duplicate blocked: '{card.title}' already exists (friendly_id: {format_kanban_friendly_id(existing.title, existing.card_id)}). "
+                f"Use UPDATE to change status, not INSERT. Cards persist across turns."
+            )
+            duplicate_ids.add(card_id)
+
     with transaction.atomic():
         for card_id in (cid for cid in current_cards if cid in created):
             card = current_cards.get(card_id)
             if not card:
                 continue
+            if card_id in duplicate_ids:
+                continue  # Skip duplicate title insertions
             if card.assigned_agent_id != str(agent.id):
                 errors.append(
                     f"Kanban create denied for {card.card_id}: only tasks assigned to this agent may be created."

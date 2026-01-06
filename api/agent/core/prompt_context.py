@@ -677,46 +677,47 @@ UPDATE __kanban_cards SET status='done' WHERE status IN ('todo','doing');
 -- WRONG: Assume work "counts" without explicit UPDATE after verification
 scrape_as_markdown(url="...") + will_continue_work=false
 -- ^ Orphans the card even if scrape succeeds
+
+-- WRONG: UPDATE status, then INSERT the same cards again
+UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';
+INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'done'), ('Step 2', 'doing');
+-- ^ Creates duplicates! Cards persist across turns. Only INSERT *new* cards.
 ```
 
 ---
 
 ## CSV Parsing
 
-Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines):
+Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines).
+
+**Key point**: `csv_parse` returns objects keyed by column names from the header row.
+Use `csv_headers()` first to discover the exact column names, then extract using those names.
 
 ```sql
-# Rule: inspect before parsing
-unknown(structure) → inspect_first → then_parse
-SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
-SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
-
--- csv_parse(text)        → JSON array of objects (first row = headers)
--- csv_parse(text, 0)     → JSON array of arrays (no header)
+-- csv_headers(text)      → JSON array of column names: ["col1", "col2", ...]
+-- csv_parse(text)        → JSON array of objects: [{col1: val, col2: val}, ...]
+-- csv_parse(text, 0)     → JSON array of arrays (no header): [[val1, val2], ...]
 -- csv_column(text, N)    → JSON array of values from column N (0-indexed)
 
--- Example: CSV is the whole tool output (non-JSON)
-SELECT r.value->>'name', r.value->>'price'
+-- Step 1: Discover column names (do this first!)
+SELECT csv_headers(result_text) FROM __tool_results WHERE result_id='{id}';
+-- → ["SepalLength","SepalWidth","PetalLength","PetalWidth","Name"]
+
+-- Step 2: Extract using exact column names from step 1
+SELECT r.value->>'$.SepalLength', r.value->>'$.Name'
 FROM __tool_results t, json_each(csv_parse(t.result_text)) r
 WHERE t.result_id = '{id}';
 
--- Example: CSV inside JSON (path from hint)
-SELECT r.value->>'name', r.value->>'price'
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.{path_from_hint}'))) r
-WHERE t.result_id = '{id}';
+-- WRONG: r.value->>'$.0' ← numeric indices don't work with csv_parse
+-- RIGHT: r.value->>'$.SepalLength' ← use actual column name from header
 
--- Example: Create table from CSV (path from hint)
-CREATE TABLE products AS
+-- Create table from CSV
+CREATE TABLE measurements AS
 SELECT
-  r.value->>'name' as name,
-  CAST(r.value->>'price' AS REAL) as price,
-  r.value->>'category' as category
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.{path_from_hint}'))) r
-WHERE t.result_id = '{id}';
-
--- Example: Get all values from column 2 (0-indexed) from raw CSV
-SELECT v.value
-FROM __tool_results t, json_each(csv_column(t.result_text, 2)) v
+  CAST(r.value->>'$.SepalLength' AS REAL) as sepal_length,
+  CAST(r.value->>'$.SepalWidth' AS REAL) as sepal_width,
+  r.value->>'$.Name' as species
+FROM __tool_results t, json_each(csv_parse(t.result_text)) r
 WHERE t.result_id = '{id}';
 ```
 
@@ -728,6 +729,7 @@ The `csv_parse` function uses Python's csv module internally—it handles edge c
 
 | Function | Returns | Use |
 |----------|---------|-----|
+| `csv_headers(text)` | JSON array | Get column names: ["col1", "col2", ...] |
 | `csv_parse(text)` | JSON array | Parse CSV to [{col: val}, ...] |
 | `csv_parse(text, 0)` | JSON array | Parse CSV without header |
 | `parse_number(text)` | Float | "$1,234.56", "€1.234,56", "1.2M" → number |
@@ -1997,7 +1999,7 @@ def build_prompt_context(
         "Mark done: UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: Mark done before seeing successful tool result → task might have failed. "
-        "WRONG: INSERT with status='done' → creates duplicate. "
+        "WRONG: INSERT existing cards (any status) → creates duplicates. Cards persist—only INSERT *new* cards, UPDATE existing ones. "
         "WRONG: `UPDATE ... WHERE status IN ('todo','doing')` → blindly marks incomplete work done. "
         "WRONG: Guessing friendly_id instead of copying from kanban_snapshot → 0 rows affected."
     )
@@ -3371,7 +3373,8 @@ def _get_system_instruction(
         "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
-        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
+        "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
+        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` Never INSERT to change status—that creates duplicates.\n"
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"

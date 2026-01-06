@@ -2225,38 +2225,53 @@ def _generate_compact_summary(
 
                 if emb.format == "csv" and emb.csv_info and emb.csv_info.columns:
                     csv = emb.csv_info
-                    parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows) - THIS IS TEXT, NOT JSON")
+                    parts.append(f"\n  📄 CSV DATA in {emb.path} ({csv.row_count_estimate} rows)")
 
+                    # Show columns - these are the exact keys to use
                     col_count = len(csv.columns)
-                    if csv.column_types and len(csv.column_types) == len(csv.columns):
-                        col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
-                        parts.append(f"  SCHEMA ({col_count} columns): {', '.join(col_with_types)}")
-                    else:
-                        parts.append(f"  COLUMNS ({col_count}): {', '.join(csv.columns[:12])}")
+                    parts.append(f"  COLUMNS ({col_count}): {', '.join(csv.columns[:12])}")
 
-                    if csv.sample_rows:
-                        sample = csv.sample_rows[0][:150]
-                        parts.append(f"  SAMPLE: {sample}")
-
-                    parts.append(f"  → GET CSV: {extract_query}")
+                    # Build extraction query using actual column names
                     parse_suffix = "" if csv.has_header else ", 0"
-                    if parent_path:
-                        csv_expr = f"json_extract(r.value,'{item_path}')"
-                        parse_query = (
-                            f"SELECT r2.value "
-                            f"FROM __tool_results, json_each(result_json,'{parent_path}') AS r, "
-                            f"json_each(csv_parse({csv_expr}{parse_suffix})) AS r2 "
-                            f"WHERE result_id='{result_id}' LIMIT 25"
-                        )
+                    if csv.columns and csv.has_header:
+                        sample_cols = csv.columns[:3]
+                        extracts = ", ".join(f"r2.value->>'$.{col}'" for col in sample_cols)
+                        if parent_path:
+                            csv_expr = f"json_extract(r.value,'{item_path}')"
+                            parse_query = (
+                                f"SELECT {extracts} "
+                                f"FROM __tool_results, json_each(result_json,'{parent_path}') AS r, "
+                                f"json_each(csv_parse({csv_expr})) AS r2 "
+                                f"WHERE result_id='{result_id}'"
+                            )
+                        else:
+                            csv_expr = f"json_extract(result_json,'{emb.path}')"
+                            parse_query = (
+                                f"SELECT {extracts} "
+                                f"FROM __tool_results, json_each(csv_parse({csv_expr})) AS r2 "
+                                f"WHERE result_id='{result_id}'"
+                            )
+                        parts.append(f"→ QUERY: {parse_query}")
+                        parts.append("  (use r2.value->>'$.COLUMN_NAME' with exact column names above)")
                     else:
-                        csv_expr = f"json_extract(result_json,'{emb.path}')"
-                        parse_query = (
-                            f"SELECT r.value "
-                            f"FROM __tool_results, json_each(csv_parse({csv_expr}{parse_suffix})) AS r "
-                            f"WHERE result_id='{result_id}' LIMIT 25"
-                        )
-                    parts.append("  → CSV is TEXT - use csv_parse(...) then json_each()")
-                    parts.append(f"  → PARSE: {parse_query}")
+                        # No header
+                        if parent_path:
+                            csv_expr = f"json_extract(r.value,'{item_path}')"
+                            parse_query = (
+                                f"SELECT r2.value->>'$[0]', r2.value->>'$[1]' "
+                                f"FROM __tool_results, json_each(result_json,'{parent_path}') AS r, "
+                                f"json_each(csv_parse({csv_expr}{parse_suffix})) AS r2 "
+                                f"WHERE result_id='{result_id}'"
+                            )
+                        else:
+                            csv_expr = f"json_extract(result_json,'{emb.path}')"
+                            parse_query = (
+                                f"SELECT r2.value->>'$[0]', r2.value->>'$[1]' "
+                                f"FROM __tool_results, json_each(csv_parse({csv_expr}{parse_suffix})) AS r2 "
+                                f"WHERE result_id='{result_id}'"
+                            )
+                        parts.append(f"→ QUERY: {parse_query}")
+                        parts.append("  (no header - use array indices $[0], $[1], ...)")
 
                 elif emb.format == "json":
                     parts.append(f"\n  🧩 JSON DATA in {emb.path} - JSON stored as TEXT (use json_extract to unwrap, then json_each)")
@@ -2347,29 +2362,34 @@ def _generate_compact_summary(
                 col_count = len(csv.columns)
                 parts.append(f"  TYPE: CSV (~{csv.row_count_estimate} rows, {col_count} columns)")
 
-                # Show columns with inferred types
-                if csv.column_types and len(csv.column_types) == len(csv.columns):
-                    col_with_types = [f"{c}:{t}" for c, t in zip(csv.columns[:12], csv.column_types[:12])]
-                    parts.append(f"  SCHEMA: {', '.join(col_with_types)}")
-                elif csv.columns:
+                # Show columns - these are the exact keys to use in extraction
+                if csv.columns:
                     parts.append(f"  COLUMNS: {', '.join(csv.columns[:12])}")
 
-                # Show sample data row
-                if csv.sample_rows:
-                    sample = csv.sample_rows[0][:150]
-                    parts.append(f"  SAMPLE: {sample}")
-
-                parts.append(
-                    f"→ QUERY: SELECT result_text FROM __tool_results WHERE result_id='{result_id}'"
-                )
+                # Build example extraction query using actual column names
                 parse_suffix = "" if csv.has_header else ", 0"
-                parse_query = (
-                    f"SELECT r.value "
-                    f"FROM __tool_results t, json_each(csv_parse(t.result_text{parse_suffix})) AS r "
-                    f"WHERE t.result_id='{result_id}' LIMIT 25"
-                )
-                parts.append("  → CSV is TEXT - use csv_parse(...) then json_each()")
-                parts.append(f"  → PARSE: {parse_query}")
+                if csv.columns and csv.has_header:
+                    # Show extraction with actual column names (first 2-3 columns)
+                    sample_cols = csv.columns[:3]
+                    extracts = ", ".join(
+                        f"r.value->>'$.{col}'" for col in sample_cols
+                    )
+                    extract_query = (
+                        f"SELECT {extracts} "
+                        f"FROM __tool_results t, json_each(csv_parse(t.result_text)) r "
+                        f"WHERE t.result_id='{result_id}'"
+                    )
+                    parts.append(f"→ QUERY: {extract_query}")
+                    parts.append(f"  (use r.value->>'$.COLUMN_NAME' with exact column names above)")
+                else:
+                    # No header - use array indices
+                    parse_query = (
+                        f"SELECT r.value->>'$[0]', r.value->>'$[1]' "
+                        f"FROM __tool_results t, json_each(csv_parse(t.result_text{parse_suffix})) r "
+                        f"WHERE t.result_id='{result_id}'"
+                    )
+                    parts.append(f"→ QUERY: {parse_query}")
+                    parts.append("  (no header - use array indices $[0], $[1], ...)")
 
             elif fmt in ("markdown", "html") and text_analysis.doc_structure:
                 doc = text_analysis.doc_structure

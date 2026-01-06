@@ -362,6 +362,58 @@ def _csv_column(text: Optional[str], column: int, has_header: int = 1) -> Option
         return None
 
 
+def _csv_headers(text: Optional[str]) -> Optional[str]:
+    """Extract column names from CSV header row as JSON array.
+
+    Usage:
+      csv_headers(text)  -- returns ["col1", "col2", ...]
+
+    Returns: JSON array of column names from the first row.
+    Useful for: Discovering column names before writing extraction queries.
+
+    Example:
+      SELECT csv_headers(result_text) FROM __tool_results WHERE result_id='abc123'
+      → ["SepalLength","SepalWidth","PetalLength","PetalWidth","Name"]
+
+    Then use these exact names in your extraction:
+      SELECT r.value->>'$.SepalLength' FROM ... json_each(csv_parse(...)) r
+    """
+    import json as json_module
+
+    if text is None:
+        return None
+
+    text, explicit_delimiter = normalize_csv_text(text)
+    if not text.strip():
+        return "[]"
+
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+
+    try:
+        max_field_size = max(1024, min(len(text), 5_000_000))
+        try:
+            csv.field_size_limit(max(csv.field_size_limit(), max_field_size))
+        except Exception:
+            pass
+
+        sample_text, sample_lines = build_csv_sample(text)
+        dialect = detect_csv_dialect(
+            sample_text,
+            sample_lines,
+            explicit_delimiter=explicit_delimiter,
+        )
+        raw_rows = read_csv_rows(text, dialect, max_rows=2)
+
+        for row in raw_rows:
+            if row and any(cell.strip() for cell in row):
+                headers = _dedupe_headers(row)
+                return json_module.dumps(headers)
+
+        return "[]"
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Real-world data cleaning functions
 # ---------------------------------------------------------------------------
@@ -1157,6 +1209,7 @@ def _register_safe_functions(conn: sqlite3.Connection) -> None:
     conn.create_function("csv_parse", 2, _csv_parse)  # With has_header arg
     conn.create_function("csv_column", 2, _csv_column)  # Extract column, with header
     conn.create_function("csv_column", 3, _csv_column)  # With has_header arg
+    conn.create_function("csv_headers", 1, _csv_headers)  # Get column names
     # Real-world data cleaning
     conn.create_function("html_to_text", 1, _html_to_text)
     conn.create_function("clean_text", 1, _clean_text)

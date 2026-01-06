@@ -684,16 +684,14 @@ class EdgeCaseTests(SimpleTestCase):
         self.assertIn("email", emb.csv_info.columns)
         self.assertEqual(emb.csv_info.row_count_estimate, 3)
 
-        # Compact summary should include CSV hints
+        # Compact summary should include CSV hints with column extraction example
         self.assertIn("CSV DATA", analysis.compact_summary)
         self.assertIn("$.content", analysis.compact_summary)
-        # When types are inferred, we use SCHEMA; otherwise COLUMNS
-        self.assertTrue(
-            "SCHEMA" in analysis.compact_summary or
-            "COLUMNS" in analysis.compact_summary
-        )
-        self.assertIn("GET CSV", analysis.compact_summary)
+        self.assertIn("COLUMNS", analysis.compact_summary)
         self.assertIn("csv_parse", analysis.compact_summary)
+        # New format shows actual column name extraction, not generic "GET CSV"
+        self.assertIn("r2.value->>'$.id'", analysis.compact_summary)
+        self.assertIn("COLUMN_NAME", analysis.compact_summary)
 
     def test_detects_embedded_json_string(self):
         """Detect JSON embedded in string fields and expose query hints."""

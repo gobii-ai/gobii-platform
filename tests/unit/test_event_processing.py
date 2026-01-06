@@ -163,11 +163,10 @@ class PromptContextBuilderTests(TestCase):
              patch('api.agent.core.prompt_context.ensure_comms_compacted'):
             context, _, _ = build_prompt_context(self.agent)
 
-        user_message = next((m for m in context if m['role'] == 'user'), None)
-        self.assertIsNotNone(user_message)
-        content = user_message['content']
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message['content']
         self.assertIn("Implied Send", content)
-        self.assertIn("<implied_send_status>", content)
 
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
