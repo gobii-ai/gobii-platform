@@ -612,6 +612,14 @@ Example wrap-up (single response with tools):
 - send_chat_message(body="All done. Marked completed cards and sharing results.")
 
 WRONG: send_chat_message(body="Done! Marked all cards complete.") without sqlite_batch UPDATE in same response → card stays open, you lied.
+WRONG: Deliver report + mark 3/4 cards done, then take extra turn to mark 4th card → wasteful. Mark ALL cards in one batch.
+WRONG: After delivering results, send another message like "I've completed the research..." → redundant. Results speak for themselves.
+
+**Efficient wrap-up** — mark all cards done in one shot:
+```sql
+UPDATE __kanban_cards SET status='done', completed_at=datetime('now') WHERE status IN ('todo','doing');
+```
+Pair with `will_continue_work=false` and your final message. One turn, done.
 
 **The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
 
@@ -1860,7 +1868,8 @@ def build_prompt_context(
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: INSERT with status='done' ← creates duplicate. "
         "WRONG: work without UPDATE → orphans the card. "
-        "WRONG: saying 'Done!' in message without sqlite_batch UPDATE in same response → you lied, card stays open."
+        "WRONG: saying 'Done!' in message without sqlite_batch UPDATE in same response → you lied, card stays open. "
+        "When wrapping up: mark ALL cards done in one batch—don't take extra turns for stragglers."
     )
     variable_group.section_text(
         "kanban_note",
