@@ -3165,6 +3165,15 @@ def _run_agent_loop(
                         # Abort remaining tool calls this iteration; retry next loop
                         followup_required = True
                         break
+                    if tool_name in MESSAGE_TOOL_NAMES:
+                        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                        if body_key and isinstance(tool_params.get(body_key), str):
+                            cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
+                                tool_params[body_key]
+                            )
+                            if found_phrase:
+                                tool_params[body_key] = cleaned_body
+                                tool_params["will_continue_work"] = True
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
