@@ -26,8 +26,17 @@ type MessageEventCardProps = {
   agentColorHex?: string
 }
 
+// Only animate messages that arrived recently (within last 3 seconds)
+function isRecentMessage(timestamp?: string | null): boolean {
+  if (!timestamp) return false
+  const messageTime = Date.parse(timestamp)
+  if (Number.isNaN(messageTime)) return false
+  return Date.now() - messageTime < 3000
+}
+
 export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
+  const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
   const hasPeerMetadata = Boolean(message.peerAgent || message.peerLinkId)
   const isPeer = Boolean(message.isPeer || hasPeerMetadata || channel === 'other')
@@ -102,6 +111,7 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
             bodyHtml={message.bodyHtml}
             bodyText={message.bodyText}
             showEmptyState={!message.attachments || message.attachments.length === 0}
+            animateIn={shouldAnimate}
           />
         </div>
         {message.attachments && message.attachments.length > 0 ? (

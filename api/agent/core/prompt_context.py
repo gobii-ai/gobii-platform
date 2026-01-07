@@ -669,6 +669,16 @@ You: sqlite_batch(UPDATE status='done') + "Here's the complete Gobii team analys
 
 The message you write IS what the user receives. There's no "compile" step after.
 
+**Forbidden phrases in final messages:**
+These announce intent instead of delivering results. Each one terminates you before delivery:
+- "Let me compile the findings..."
+- "Let me send you the report..."
+- "I'll summarize what I found..."
+- "Here's what I'll share with you..."
+- Any future-tense promise about what you're about to do
+
+If you catch yourself writing these → stop → write the actual content instead.
+
 **When to mark a card done:**
 - After tool call succeeds and you've verified the result (next turn, not same turn as the call)
 - After you've processed/delivered the output
@@ -1280,7 +1290,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo = work remains. When ready: deliver your complete report + mark done in one response.",
+            "Cards in doing/todo = work remains. When ready: write the actual report (not 'let me compile...') + mark done together.",
             weight=1,
             non_shrinkable=True,
         )
@@ -2603,8 +2613,8 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Time to wrap up. Send the actual report content, not 'let me compile...' Your message IS the deliverable.\n"
-                "One response: complete report + mark cards done together."
+                "Time to wrap up. Your next message must contain THE ACTUAL FINDINGS—not 'let me compile...' or 'let me send...'\n"
+                "Those phrases terminate you before delivery. Write the report itself, right now, in this response."
             ),
             8,  # High weight
         )
@@ -2641,7 +2651,8 @@ def _get_work_completion_prompt(
             "work_in_progress",
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
-                "Continue working. When ready to finish: deliver your complete report + mark done in one response.\n"
+                "Continue working. When ready to finish: write the actual report + mark done in one response.\n"
+                "Never 'let me compile...'—that terminates you before delivery. The report goes in your message.\n"
                 "Still working? End with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)."
             ),
             4,
