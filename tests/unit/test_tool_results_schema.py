@@ -22,7 +22,8 @@ class ToolResultSchemaTests(SimpleTestCase):
         # Pattern is now from analysis, not raw json_type
         self.assertEqual(meta["json_type"], "single_object")
         self.assertIsNotNone(stored_json)
-        self.assertIsNone(stored_text)
+        # result_text is always populated for robust querying
+        self.assertIsNotNone(stored_text)
         self.assertIsNotNone(analysis)
         self.assertTrue(analysis.is_json)
 
@@ -36,7 +37,8 @@ class ToolResultSchemaTests(SimpleTestCase):
         self.assertTrue(meta["is_json"])
         self.assertEqual(meta["json_type"], "array")
         self.assertIsNotNone(stored_json)
-        self.assertIsNone(stored_text)
+        # result_text is always populated for robust querying
+        self.assertIsNotNone(stored_text)
         self.assertIsNotNone(analysis)
         self.assertIsNotNone(analysis.json_analysis)
         self.assertIsNotNone(analysis.json_analysis.primary_array)

@@ -231,15 +231,8 @@ guess(identifier) → error   # you ARE about to get "no such column"
 
 # Two-step pattern (critical for complex queries)
 unknown(structure) → step1: inspect → step2: use(inspected)
-step1: SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
-step1b: if result_json is NULL → SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
+step1: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
 step2: use exact paths/fields revealed by step1
-
-# Schema queries (when uncertain)
-unknown(table)  → SELECT name FROM sqlite_master WHERE type='table'
-unknown(column) → SELECT sql FROM sqlite_master WHERE name='{table}'
-unknown(path)   → inspect: SELECT substr(result_json,1,500)... | if NULL → substr(result_text,1,500) | read hint.path
-unknown(field)  → inspect: look at actual JSON | read hint.fields
 
 # Identifiers: copy, never construct
 result_id    → copy_verbatim(tool_result.result_id)
@@ -252,15 +245,15 @@ transform(identifier) → error                      # no pluralize, no case cha
 # __tool_results (special table)
 __tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
 access_result → WHERE result_id = '{exact_id_from_result}'
-extract_json  → json_each(result_json, '{exact_path_from_hint}')
-result_json NULL → use result_text (raw output / CSV)
+result_text   → always populated (use this for inspection/extraction)
+result_json   → populated when is_json=1 (enables json_extract/json_each)
 analysis_json → optional hints (not the data)
 do not invent columns; only use those listed above
 
 # JSON: path from hint, field from hint
 hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
 hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
-hint absent → query first: SELECT result_json, result_text FROM __tool_results WHERE result_id='...' LIMIT 1
+hint absent → query first: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='...'
 
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})

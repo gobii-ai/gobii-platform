@@ -433,8 +433,10 @@ def _summarize_result(
     truncated_text, truncated_bytes = _truncate_to_bytes(storage_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
 
+    # Always store result_text for robustness - agent can always query it
+    # Additionally store result_json when applicable for json_extract() etc.
     result_json = truncated_text if is_json and not is_truncated else None
-    result_text_store = None if result_json else truncated_text
+    result_text_store = truncated_text  # Always set for robust querying
 
     meta = {
         "bytes": full_bytes,
