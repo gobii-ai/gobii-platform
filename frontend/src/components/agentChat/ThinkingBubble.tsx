@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useLayoutEffect } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { useTypewriter } from '../../hooks/useTypewriter'
 
@@ -11,18 +11,30 @@ type ThinkingBubbleProps = {
 
 export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: ThinkingBubbleProps) {
   const prevStreamingRef = useRef(isStreaming)
+  const previewRef = useRef<HTMLDivElement>(null)
 
   // Typewriter effect for thinking content
+  // Keep enabled when streaming (even if collapsed) so preview stays live
   const { displayedContent, isWaiting } = useTypewriter(reasoning, isStreaming, {
     charsPerFrame: 4,
     frameIntervalMs: 10,
     waitingThresholdMs: 200,
-    // Disable typewriter when collapsed to avoid wasted computation
-    disabled: collapsed,
+    disabled: !isStreaming && collapsed,
   })
 
   const hasContent = displayedContent.trim().length > 0
   const hasTargetContent = reasoning.trim().length > 0
+
+  // Show compact preview when streaming but collapsed
+  const showPreview = isStreaming && collapsed && hasContent
+  const showFullContent = !collapsed && hasContent
+
+  // Auto-scroll preview to bottom when content updates
+  useLayoutEffect(() => {
+    if (showPreview && previewRef.current) {
+      previewRef.current.scrollTop = previewRef.current.scrollHeight
+    }
+  }, [showPreview, displayedContent])
 
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming && !collapsed) {
@@ -42,6 +54,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
         data-collapsed={collapsed ? 'true' : 'false'}
         data-streaming={isStreaming ? 'true' : 'false'}
         data-waiting={isWaiting ? 'true' : 'false'}
+        data-has-preview={showPreview ? 'true' : 'false'}
       >
         <button
           type="button"
@@ -67,7 +80,15 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
             </svg>
           </span>
         </button>
-        {!collapsed && hasContent && (
+        {showPreview && (
+          <div ref={previewRef} className="thinking-bubble-preview">
+            <div className="thinking-bubble-preview-fade" aria-hidden="true" />
+            <div className="thinking-bubble-preview-content">
+              {displayedContent}
+            </div>
+          </div>
+        )}
+        {showFullContent && (
           <div className="thinking-bubble-content">
             <MarkdownViewer content={displayedContent} className="thinking-bubble-markdown" enableHighlight={false} />
           </div>

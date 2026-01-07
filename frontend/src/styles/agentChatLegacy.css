@@ -2304,23 +2304,30 @@
 }
 
 .thinking-bubble {
-  max-width: min(60rem, 100%);
-  border-radius: 1.375rem;
-  background: linear-gradient(180deg, rgba(238, 242, 255, 0.92) 0%, rgba(224, 231, 255, 0.88) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.18);
+  max-width: min(40rem, 100%);
+  border-radius: 1rem;
+  background: linear-gradient(135deg, rgba(248, 250, 255, 0.95) 0%, rgba(238, 242, 255, 0.9) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.15);
   box-shadow:
     0 1px 2px rgba(99, 102, 241, 0.04),
-    0 4px 12px rgba(99, 102, 241, 0.08);
+    0 2px 8px rgba(99, 102, 241, 0.06);
   overflow: hidden;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .thinking-bubble[data-streaming='true'] {
-  background: linear-gradient(180deg, rgba(238, 242, 255, 0.96) 0%, rgba(224, 231, 255, 0.92) 100%);
-  border-color: rgba(99, 102, 241, 0.3);
+  background: linear-gradient(135deg, rgba(248, 250, 255, 0.98) 0%, rgba(238, 242, 255, 0.95) 100%);
+  border-color: rgba(99, 102, 241, 0.25);
   box-shadow:
-    0 2px 4px rgba(99, 102, 241, 0.06),
-    0 6px 20px rgba(99, 102, 241, 0.12);
+    0 1px 3px rgba(99, 102, 241, 0.06),
+    0 4px 12px rgba(99, 102, 241, 0.1);
+}
+
+.thinking-bubble[data-has-preview='true'] {
+  box-shadow:
+    0 1px 3px rgba(99, 102, 241, 0.08),
+    0 6px 16px rgba(99, 102, 241, 0.12),
+    0 0 0 1px rgba(99, 102, 241, 0.08);
 }
 
 .thinking-bubble-header {
@@ -2328,20 +2335,20 @@
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  padding: 0.65rem 1rem;
+  padding: 0.5rem 0.875rem;
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.8rem;
+  font-size: 0.7rem;
   font-weight: 600;
-  color: #4338ca;
+  color: #6366f1;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   transition: background 0.15s ease;
 }
 
 .thinking-bubble-header:hover {
-  background: rgba(99, 102, 241, 0.08);
+  background: rgba(99, 102, 241, 0.06);
 }
 
 .thinking-bubble-header:focus-visible {
@@ -2353,22 +2360,36 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
-  height: 1.25rem;
+  width: 1.125rem;
+  height: 1.125rem;
   color: #6366f1;
 }
 
 .thinking-bubble-icon svg {
-  width: 1rem;
-  height: 1rem;
+  width: 0.875rem;
+  height: 0.875rem;
 }
 
 .thinking-pulse {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
-  background: #6366f1;
-  animation: processingPulse 1.6s ease-in-out infinite;
+  background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
+  box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+  animation: thinkingPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes thinkingPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 8px rgba(99, 102, 241, 0.4);
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.85;
+    box-shadow: 0 0 12px rgba(99, 102, 241, 0.6);
+  }
 }
 
 .thinking-bubble-label {
@@ -2380,23 +2401,60 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1rem;
-  height: 1rem;
-  color: #6366f1;
+  width: 0.875rem;
+  height: 0.875rem;
+  color: #818cf8;
   transition: transform 0.2s ease;
 }
 
 .thinking-bubble-chevron svg {
-  width: 0.85rem;
-  height: 0.85rem;
+  width: 0.75rem;
+  height: 0.75rem;
 }
 
 .thinking-bubble-chevron[data-collapsed='true'] {
   transform: rotate(-90deg);
 }
 
+/* Compact streaming preview - shows a few lines scrolling by */
+.thinking-bubble-preview {
+  position: relative;
+  max-height: 4.5rem;
+  overflow: hidden;
+  margin: 0 0.75rem 0.625rem;
+  border-radius: 0.5rem;
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.thinking-bubble-preview-fade {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1.5rem;
+  background: linear-gradient(
+    to bottom,
+    rgba(248, 250, 255, 0.98) 0%,
+    rgba(248, 250, 255, 0) 100%
+  );
+  pointer-events: none;
+  z-index: 1;
+}
+
+.thinking-bubble-preview-content {
+  padding: 0.5rem 0.625rem;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  color: #4338ca;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  opacity: 0.85;
+}
+
+/* Full expanded content */
 .thinking-bubble-content {
-  padding: 0 1rem 1rem;
+  padding: 0 0.875rem 0.75rem;
   animation: thinkingContentFadeIn 0.2s ease;
 }
 
@@ -2412,13 +2470,13 @@
 }
 
 .thinking-bubble-markdown {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: #1e1b4b;
   line-height: 1.55;
 }
 
 .thinking-bubble-markdown p {
-  margin: 0.4rem 0;
+  margin: 0.35rem 0;
 }
 
 .thinking-bubble-markdown p:first-child {
