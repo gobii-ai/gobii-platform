@@ -626,12 +626,17 @@ send_chat_message(body="All done. Here's what I found: ...",
                   will_continue_work=false)  # false because this IS the final report
 ```
 
-**Kanban complete + final message = auto-stop.** When all cards are done and you send your final message, you stop. Make sure you've actually delivered your findings—not just marked cards done.
+**Kanban complete + ANY message = immediate termination.** When all cards are done, your next message is your LAST message. There is no "let me send the report" - that message IS your only chance to send the report.
 
+**DO the thing, don't ANNOUNCE the thing.** If you say "Let me compile the findings..." you will be terminated before you can compile anything. Your announcement was your final output. Include the actual report in your message, not a promise to send it.
+
+WRONG: Mark all cards done → "I have the data! Let me send you the report..." → TERMINATED (report never sent)
 WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
 WRONG: send_chat_message(body="Done!") without sqlite_batch UPDATE in same response → card stays open.
 WRONG: `UPDATE ... SET status='done' WHERE status IN ('todo','doing')` → blindly marks incomplete work done.
 WRONG: After delivering results, send another message like "I've completed the research..." → redundant.
+
+RIGHT: Keep last card in 'doing' → compile findings → send complete report + mark card done in same response → terminated with report delivered
 
 **When to mark done:**
 - After tool call succeeds and you've verified the result (next turn, not same turn as the call)
@@ -3202,9 +3207,9 @@ def _get_system_instruction(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → Message sends, then stops by default\n"
-            "  To continue working: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n"
-            "  Default behavior: message sends, then auto-stops\n\n"
+            "  → Message sends, then TERMINATES (if kanban complete)\n"
+            "  'Let me send the report' = you never send it. Include actual content, not promises.\n"
+            "  To continue: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
             "  Use when: acknowledging the user while taking action\n"
@@ -3303,7 +3308,7 @@ def _get_system_instruction(
         f"{tool_calls_note}"
         f"{stop_explicit_note}"
         "Fetching data is just step one—reporting it to the user completes the task. "
-        "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n\n"
+        "Never say 'let me send the report'—include the actual report. Announcements terminate you before delivery.\n\n"
         f"{stop_continue_examples}"
     )
 
@@ -3398,8 +3403,8 @@ def _get_system_instruction(
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Share before marking done.** If work is complete but not yet shared with the user, share it first—then mark cards done. Marking done triggers auto-stop after the final message; share your findings in the same response.\n"
-        "- **Keep a 'doing' card while working.** System auto-stops after the final message when todo=0 and doing=0. Close out atomically: mark last card done + deliver final results, all in one response.\n\n"
+        "- **Share before marking done.** Never say 'let me send the report'—that message terminates you and the report is never sent. Include the actual findings in your message, not a promise to send them.\n"
+        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. Close out atomically: send complete report + mark last card done, all in one response.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
