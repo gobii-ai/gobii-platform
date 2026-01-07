@@ -32,7 +32,7 @@ dependencies = [
   "gunicorn==23.0.0",
   "zstandard~=0.23.0",
   "json-schema-to-pydantic~=0.4.1",
-  "litellm @ git+https://github.com/gobii-ai/litellm.git@38d759e3de5fd843adc5a448ec5ecdf35cc4c39c",
+  "litellm @ git+https://github.com/gobii-ai/litellm.git@b72f971c718b6b9689fe96be19954588ce319830",
   "markitdown[all]==0.1.4",
   "markdown~=3.8",
   "psycopg[binary]~=3.1",
