@@ -66,6 +66,12 @@ SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
 _BASE64_RE = re.compile(r"base64,", re.IGNORECASE)
 _IMAGE_RE = re.compile(r"data:image/|image_base64|image_url", re.IGNORECASE)
 BARBELL_TEXT_FORMATS = frozenset({"html", "markdown", "plain", "log"})
+_UUID_RESULT_ID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"
+)
+
+SHORT_RESULT_ID_MIN_LEN = 6
+SHORT_RESULT_ID_MAX_LEN = 12
 
 
 @dataclass(frozen=True)
@@ -84,6 +90,39 @@ class ToolResultPromptInfo:
     schema_text: Optional[str]
 
 
+def _build_short_result_id_map(result_ids: Sequence[str]) -> Dict[str, str]:
+    normalized: Dict[str, str] = {str(rid): str(rid) for rid in result_ids}
+    uuid_ids = [str(rid) for rid in result_ids if _UUID_RESULT_ID_RE.match(str(rid))]
+    if not uuid_ids:
+        return normalized
+
+    hex_map = {rid: rid.replace("-", "").lower() for rid in uuid_ids}
+    length = SHORT_RESULT_ID_MIN_LEN
+    while length <= SHORT_RESULT_ID_MAX_LEN:
+        seen: set[str] = set()
+        collision = False
+        for rid in result_ids:
+            rid_str = str(rid)
+            if rid_str in hex_map:
+                candidate = hex_map[rid_str][:length]
+            else:
+                candidate = rid_str
+            if candidate in seen:
+                collision = True
+                break
+            seen.add(candidate)
+        if not collision:
+            break
+        length += 1
+
+    if length > SHORT_RESULT_ID_MAX_LEN:
+        length = 32
+
+    for rid, hex_id in hex_map.items():
+        normalized[rid] = hex_id[:length]
+    return normalized
+
+
 def prepare_tool_results_for_prompt(
     records: Sequence[ToolCallResultRecord],
     *,
@@ -92,6 +131,9 @@ def prepare_tool_results_for_prompt(
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
+    short_id_map = _build_short_result_id_map(
+        [record.step_id for record in records if record.result_text]
+    )
 
     for record in records:
         if record.result_text is None:
@@ -100,9 +142,12 @@ def prepare_tool_results_for_prompt(
         if not result_text:
             continue
 
-        meta, stored_json, stored_text, analysis = _summarize_result(
-            result_text, record.step_id
-        )
+        result_id = short_id_map.get(record.step_id, record.step_id)
+        legacy_result_id = None
+        if result_id != record.step_id and _UUID_RESULT_ID_RE.match(str(record.step_id)):
+            legacy_result_id = record.step_id
+
+        meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id, record.tool_name)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
         # Only show rich analysis for tools that fetch external data with unknown structure
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
@@ -139,7 +184,7 @@ def prepare_tool_results_for_prompt(
             context_hint = hint_from_unstructured_text(analysis_text)
 
         meta_text = _format_meta_text(
-            record.step_id,
+            result_id,
             meta,
             analysis=analysis if is_analysis_eligible else None,
             stored_in_db=stored_in_db,
@@ -176,7 +221,8 @@ def prepare_tool_results_for_prompt(
 
             rows.append(
                 (
-                    record.step_id,
+                    result_id,
+                    legacy_result_id,
                     record.tool_name,
                     record.created_at.isoformat(),
                     meta["bytes"],
@@ -250,6 +296,7 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                 f"""
                 INSERT OR REPLACE INTO "{TOOL_RESULTS_TABLE}" (
                     result_id,
+                    legacy_result_id,
                     tool_name,
                     created_at,
                     bytes,
@@ -266,7 +313,7 @@ def _store_tool_results(rows: Sequence[Tuple]) -> None:
                     analysis_json,
                     result_text
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 rows,
@@ -288,6 +335,7 @@ def _ensure_tool_results_table(conn) -> None:
         f"""
         CREATE TABLE IF NOT EXISTS "{TOOL_RESULTS_TABLE}" (
             result_id TEXT PRIMARY KEY,
+            legacy_result_id TEXT,
             tool_name TEXT,
             created_at TEXT,
             bytes INTEGER,
@@ -316,6 +364,11 @@ def _ensure_tool_results_columns(conn) -> None:
             f"PRAGMA table_info('{TOOL_RESULTS_TABLE}')"
         )
     }
+    # Migration: add legacy_result_id column if missing
+    if "legacy_result_id" not in existing:
+        conn.execute(
+            f'ALTER TABLE "{TOOL_RESULTS_TABLE}" ADD COLUMN legacy_result_id TEXT;'
+        )
     # Migration: add analysis_json column if missing
     if "analysis_json" not in existing:
         conn.execute(
@@ -326,6 +379,7 @@ def _ensure_tool_results_columns(conn) -> None:
 def _summarize_result(
     result_text: str,
     result_id: str,
+    tool_name: str = "",
 ) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[ResultAnalysis]]:
     """Summarize a tool result and perform rich analysis.
 
@@ -380,8 +434,25 @@ def _summarize_result(
     truncated_text, truncated_bytes = _truncate_to_bytes(storage_text, MAX_TOOL_RESULT_BYTES)
     is_truncated = truncated_bytes > 0
 
+    # Always store result_text for robustness - agent can always query it
+    # Additionally store result_json when applicable for json_extract() etc.
     result_json = truncated_text if is_json and not is_truncated else None
-    result_text_store = None if result_json else truncated_text
+    result_text_store = truncated_text  # Always set for robust querying
+
+    # For http_request results, extract the content field directly into result_text
+    # so agents can read it without needing json_extract(result_json, '$.content')
+    if tool_name == "http_request" and is_json and not is_truncated:
+        try:
+            parsed = json.loads(truncated_text)
+            if isinstance(parsed, dict) and "content" in parsed:
+                content = parsed["content"]
+                if isinstance(content, str):
+                    result_text_store = content
+                elif content is not None:
+                    # Content is structured data (dict/list) - serialize it
+                    result_text_store = json.dumps(content, ensure_ascii=False)
+        except Exception:
+            pass  # Keep original on any error
 
     meta = {
         "bytes": full_bytes,

@@ -1,16 +1,27 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
-import { AgentChatBanner } from '../components/agentChat/AgentChatBanner'
-import type { ConnectionStatusTone } from '../components/agentChat/ConnectionStatusIndicator'
+import { AgentChatBanner, type ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
   return first || 'Agent'
+}
+
+function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
+  // Find the most recent kanban event (they're ordered oldest to newest)
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]
+    if (event.kind === 'kanban') {
+      return event.snapshot
+    }
+  }
+  return null
 }
 
 type ConnectionIndicator = {
@@ -319,6 +330,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   }, [scrollToBottom, events, processingActive, streaming])
 
   const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
+  const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const connectionIndicator = useMemo(
     () =>
       deriveConnectionIndicator({
@@ -410,6 +422,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
             connectionStatus={connectionIndicator.status}
             connectionLabel={connectionIndicator.label}
             connectionDetail={connectionIndicator.detail}
+            kanbanSnapshot={latestKanbanSnapshot}
+            processingActive={processingActive}
           />
         }
         events={events}

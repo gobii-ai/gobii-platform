@@ -190,10 +190,9 @@ def _search_with_llm(
         "- CoinGecko API | Free crypto prices API | https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd\n"
         "- CoinMarketCap | Crypto market data | https://coinmarketcap.com/currencies/bitcoin/\n\n"
         "## Rules\n"
-        "- `search_engine` only when you need URL/docs/news discovery\n"
+        "- Skip `search_engine` if query mentions a source with a known public API\n"
         "- `scrape_as_markdown` only when you expect page scraping\n"
-        "- Be inclusive: enable all tools that might help\n"
-        "- external_resources: only URLs you are certain exist\n"
+        "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
     user_prompt = (

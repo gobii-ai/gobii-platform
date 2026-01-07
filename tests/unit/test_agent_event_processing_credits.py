@@ -803,7 +803,8 @@ class PersistentAgentToolCreditTests(TestCase):
             }
 
         response = MagicMock()
-        response.choices = [MagicMock(message=MagicMock(content="thinking", tool_calls=[], function_call=None))]
+        # Use "let me" continuation signal so loop continues past no-tool streak limit
+        response.choices = [MagicMock(message=MagicMock(content="Let me think about this", tool_calls=[], function_call=None))]
         token_usage = {
             "prompt_tokens": 0,
             "completion_tokens": 0,

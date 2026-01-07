@@ -64,7 +64,8 @@ export function AgentChatLayout({
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
-  const showStreamingReasoning = hasStreamingReasoning
+  // Only show streaming reasoning while actually streaming - once done, the historical event takes over
+  const showStreamingReasoning = hasStreamingReasoning && isStreaming
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer

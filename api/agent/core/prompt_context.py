@@ -231,14 +231,8 @@ guess(identifier) → error   # you ARE about to get "no such column"
 
 # Two-step pattern (critical for complex queries)
 unknown(structure) → step1: inspect → step2: use(inspected)
-step1: SELECT substr(result_json, 1, 500) FROM __tool_results WHERE result_id='{id}'
+step1: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
 step2: use exact paths/fields revealed by step1
-
-# Schema queries (when uncertain)
-unknown(table)  → SELECT name FROM sqlite_master WHERE type='table'
-unknown(column) → SELECT sql FROM sqlite_master WHERE name='{table}'
-unknown(path)   → inspect: SELECT substr(result_json,1,500)... | read hint.path
-unknown(field)  → inspect: look at actual JSON | read hint.fields
 
 # Identifiers: copy, never construct
 result_id    → copy_verbatim(tool_result.result_id)
@@ -249,15 +243,17 @@ column_name  → copy_verbatim(schema | own_CREATE)
 transform(identifier) → error                      # no pluralize, no case change
 
 # __tool_results (special table)
-__tool_results.columns = {result_id, tool_name, result_json, created_at}
+__tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
 access_result → WHERE result_id = '{exact_id_from_result}'
-extract_json  → json_each(result_json, '{exact_path_from_hint}')
-no other columns exist in __tool_results
+result_text   → always populated (use this for inspection/extraction)
+result_json   → populated when is_json=1 (enables json_extract/json_each)
+analysis_json → optional hints (not the data)
+do not invent columns; only use those listed above
 
 # JSON: path from hint, field from hint
-hint shows "path: $.data.items" → json_each(result_json, '$.data.items')
-hint shows "fields: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
-hint absent → query first: SELECT result_json FROM __tool_results WHERE result_id='...' LIMIT 1
+hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
+hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
+hint absent → query first: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='...'
 
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})
@@ -316,13 +312,6 @@ source(X) = ???           → don't state it. You're about to hallucinate.
 When uncertain: "The page mentions X but doesn't specify Y" beats inventing Y.
 When you don't have data: say so. Don't fill the gap with plausible-sounding fabrication.
 
-**Cross-reference everything.** Every identifier you use—table names, column names, friendly_ids,
-JSON paths, URLs, result_ids—must trace back to a verifiable source in your context. Before you
-write any identifier, ask: "Where exactly did I see this?" If you can't point to the specific
-tool result, schema, or context section, you're about to hallucinate. This applies to SQL WHERE
-clauses, function arguments, API parameters—everything. Treat this as safety-critical: assume
-lives depend on your accuracy, because in production systems they sometimes do.
-
 ---
 
 ## Reading Hints
@@ -332,9 +321,9 @@ Every tool result includes metadata. Use it exactly:
 ```
 Result shows:
   result_id='7f3a2b1c'
-  → path: $.content.hits (30 items)
-  → fields: title, points, url
-  → query: SELECT json_extract(r.value,'$.title')...
+  → PATH: $.content.hits (30 items)
+  → FIELDS: title, points, url
+  → QUERY: SELECT json_extract(r.value,'$.title')...
 
 Your query uses:
   WHERE result_id='7f3a2b1c'           -- copy exactly
@@ -353,30 +342,20 @@ Chain them together: M1 → M2 → M5 → M6 for a typical research flow.
 
 ---
 
-### M1: Discover Tools
+### M1: Get Data
 
 ```
 when:
   - Need external data
-  - Don't know what extractors exist for this domain
 
 do:
-  search_tools(query="<domain keywords>", will_continue_work=true)
+  # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
+  # Otherwise → search_tools("<domain>", will_continue_work=true)
 
 then:
-  if found relevant extractors → M2 (use structured extractor)
-  if nothing relevant → M3 (search the web)
-  if already have a URL → M4 (scrape directly)
-```
-
-Example:
-```
-search_tools(query="linkedin company crunchbase")
-→ Found: web_data_linkedin_company_profile, web_data_crunchbase_company
-
-search_tools(query="pricing jobs careers")
-→ Found: web_data_linkedin_job_listings
-→ For pricing: need to scrape directly (M4)
+  if found extractors → M2
+  if nothing → M3 (search)
+  if have URL → M4 (scrape)
 ```
 
 ---
@@ -389,7 +368,7 @@ when:
   - Found matching extractor in M1
 
 do:
-  mcp_bright_data_<extractor>(url="<url>", will_continue_work=true)
+  mcp_brightdata_<extractor>(url="<url>", will_continue_work=true)
   # Multiple URLs? Call in parallel.
 
 then:
@@ -401,8 +380,8 @@ then:
 Example:
 ```
 # Parallel calls for company research
-mcp_bright_data_web_data_linkedin_company_profile(url="linkedin.com/company/acme")
-mcp_bright_data_web_data_crunchbase_company(url="crunchbase.com/organization/acme")
+mcp_brightdata_web_data_linkedin_company_profile(url="linkedin.com/company/acme")
+mcp_brightdata_web_data_crunchbase_company(url="crunchbase.com/organization/acme")
 
 # Result: clean JSON with employees, funding, headquarters
 → Store in table (M5)
@@ -599,51 +578,118 @@ Categorized data is perfect for visualization—a pie chart of categories tells 
 
 ## Continuity
 
-`will_continue_work` tells the system whether you need another turn.
+**Stopping is permanent.** When you stop, you are terminated until:
+- Your next scheduled trigger (only if you set a schedule), OR
+- An incoming message from the user
+
+No schedule + no incoming message = you never run again. Your work dies with you.
+
+**If you're running low on credits:** Set a schedule BEFORE you stop. Otherwise you'll be terminated mid-task with no way to resume.
+
+`will_continue_work` tells the system whether you need another turn:
 
 ```
-true  → "I need another turn" — safe default
-false → "Done forever" — final, no second chances
+true  → "I need another turn" — use when work remains or report not yet sent
+false → "I'm done" — use ONLY after delivering final output to user
+```
+
+**The logic:**
+```
+if final_report_sent:
+    will_continue_work = false  # Safe to stop
+else:
+    will_continue_work = true   # Must send report before stopping
 ```
 
 **Rules:**
 
 Use `true` when:
-- You just fetched data and haven't seen the results yet
+- You just fetched data and haven't reported it yet
 - You have more URLs to scrape in your queue
 - You need to run another query to answer the question
 - You're uncertain whether you're done
+- You haven't sent your findings to the user yet
 
 Use `false` only when ALL are true:
 - All kanban cards are done (or deferred with schedule)
-- You're delivering final findings to the user
+- You've already delivered final findings to the user in this response
 - There's nothing more to fetch, analyze, or compute
 
 Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
 Example wrap-up (single response with tools):
-- sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');", will_continue_work=false)
-- send_chat_message(body="All done. Sharing results.")
+```
+sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');",
+             will_continue_work=false)  # false because final message is in same response
 
-**Final kanban updates = `will_continue_work=false`**: If you've finished the work, presented results to the user, and are only updating kanban to mark cards done, set `will_continue_work=false`. Don't continue just to do housekeeping—wrap it all up in one turn.
+send_chat_message(body="All done. Here's what I found: ...",
+                  will_continue_work=false)  # false because this IS the final report
+```
 
-WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
-WRONG: send_chat_message(body="Done!") without sqlite_batch UPDATE in same response → card stays open.
-WRONG: `UPDATE ... SET status='done' WHERE status IN ('todo','doing')` → blindly marks incomplete work done.
-WRONG: After delivering results, send another message like "I've completed the research..." → redundant.
+## The Terminal Condition
 
-**When to mark done:**
+You stop when: **all kanban cards are done** + **you sent a message**. Both conditions together trigger termination.
+
+This means your final response must contain both:
+1. The complete report (your actual findings, not "let me send...")
+2. The sqlite_batch marking cards done
+
+If you only do one, something breaks:
+- Report without marking done → you stop, but cards are orphaned
+- Mark done without report → you stop, but user got nothing useful
+
+**Micro trajectories:**
+
+```
+[Wrong: report only]
+You: "Here's what I found about the Gobii team: Andrew is the founder..."
+     (no sqlite_batch to mark cards done)
+→ Result: You stopped. Cards still open. Work appears incomplete.
+
+[Wrong: mark done only]
+You: sqlite_batch(UPDATE status='done') + "Great, let me compile the findings..."
+→ Result: You stopped. User received "let me compile..." Cards closed but no actual report delivered.
+
+[Wrong: announce instead of deliver]
+You: sqlite_batch(UPDATE status='done') + "I have all the data! Here's what I'll send you..."
+→ Result: You stopped. That announcement was your final output. No report was ever sent.
+
+[Right: both together]
+You: sqlite_batch(UPDATE status='done') + "Here's the complete Gobii team analysis:
+
+**Team Members:**
+- Andrew Christianson (Founder) - Ex-NSA, created RA.Aid...
+- Will Bonde (Growth) - 20 years enterprise software...
+
+**Company Background:**
+- Founded 2024, browser-native AI agents...
+[full detailed report continues]"
+→ Result: You stopped. User received complete report. Cards closed. Success.
+```
+
+The message you write IS what the user receives. There's no "compile" step after.
+
+**Forbidden phrases in final messages:**
+These announce intent instead of delivering results. Each one terminates you before delivery:
+- "Let me compile the findings..."
+- "Let me send you the report..."
+- "I'll summarize what I found..."
+- "Here's what I'll share with you..."
+- Any future-tense promise about what you're about to do
+
+If you catch yourself writing these → stop → write the actual content instead.
+
+**When to mark a card done:**
 - After tool call succeeds and you've verified the result (next turn, not same turn as the call)
 - After you've processed/delivered the output
 - Never optimistically before seeing results
-
-**The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
+- On your final turn: mark done in the same response as delivering the report
 
 ---
 
-## Task Completion (Micro Trajectory)
+## Task Completion (Multi-turn Example)
 
-Only mark a task done after you've verified its completion. This trajectory shows the correct pattern:
+Only mark a task done after you've verified its completion:
 
 ```
 [Turn N-1: do the work]
@@ -666,9 +712,11 @@ sqlite_batch(sql="
 → All data processed
 sqlite_batch(sql="
   UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
-", will_continue_work=false)
+", will_continue_work=false)  # false: final report is in this same response
 
-send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...")
+send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...",
+                  will_continue_work=false)  # false: THIS is the final report
+// Kanban complete + final report sent → terminated until next trigger/message
 ```
 
 **The pattern:**
@@ -676,6 +724,7 @@ send_chat_message(body="Found 12 competitors with pricing data. Here's the summa
 2. See the result - verify success
 3. Only then mark that specific card done
 4. Repeat for each task
+5. Final turn: mark last card done + send report, both with `will_continue_work=false`
 
 **WRONG patterns:**
 ```sql
@@ -691,35 +740,49 @@ UPDATE __kanban_cards SET status='done' WHERE status IN ('todo','doing');
 -- WRONG: Assume work "counts" without explicit UPDATE after verification
 scrape_as_markdown(url="...") + will_continue_work=false
 -- ^ Orphans the card even if scrape succeeds
+
+-- WRONG: UPDATE status, then INSERT the same cards again
+UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';
+INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'done'), ('Step 2', 'doing');
+-- ^ Creates duplicates! Cards persist across turns. Only INSERT *new* cards.
 ```
 
 ---
 
 ## CSV Parsing
 
-Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines):
+Always inspect before parsing—check the `path_from_hint` in `__tool_results` to understand the data format.
+Use `csv_parse()` for robust CSV parsing (handles quoted fields, embedded commas, newlines).
+
+**Key point**: `csv_parse` returns objects keyed by column names from the header row.
+Use `csv_headers()` first to discover the exact column names, then extract using those names.
 
 ```sql
--- csv_parse(text)        → JSON array of objects (first row = headers)
--- csv_parse(text, 0)     → JSON array of arrays (no header)
+-- csv_headers(text)      → JSON array of column names: ["col1", "col2", ...]
+-- csv_parse(text)        → JSON array of objects: [{col1: val, col2: val}, ...]
+-- csv_parse(text, 0)     → JSON array of arrays (no header): [[val1, val2], ...]
 -- csv_column(text, N)    → JSON array of values from column N (0-indexed)
 
--- Example: Parse CSV and query it
-SELECT r.value->>'name', r.value->>'price'
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+-- Step 1: Discover column names (do this first!)
+SELECT csv_headers(result_text) FROM __tool_results WHERE result_id='{id}';
+-- → ["SepalLength","SepalWidth","PetalLength","PetalWidth","Name"]
+
+-- Step 2: Extract using exact column names from step 1
+SELECT r.value->>'$.SepalLength', r.value->>'$.Name'
+FROM __tool_results t, json_each(csv_parse(t.result_text)) r
 WHERE t.result_id = '{id}';
 
--- Example: Create table from CSV
-CREATE TABLE products AS
+-- WRONG: r.value->>'$.0' ← numeric indices don't work with csv_parse
+-- RIGHT: r.value->>'$.SepalLength' ← use actual column name from header
+
+-- Create table from CSV
+CREATE TABLE measurements AS
 SELECT
-  r.value->>'name' as name,
-  CAST(r.value->>'price' AS REAL) as price,
-  r.value->>'category' as category
-FROM __tool_results t, json_each(csv_parse(json_extract(t.result_json, '$.content'))) r
+  CAST(r.value->>'$.SepalLength' AS REAL) as sepal_length,
+  CAST(r.value->>'$.SepalWidth' AS REAL) as sepal_width,
+  r.value->>'$.Name' as species
+FROM __tool_results t, json_each(csv_parse(t.result_text)) r
 WHERE t.result_id = '{id}';
-
--- Example: Get all values from column 2 (0-indexed)
-SELECT v.value FROM json_each(csv_column('{csv_text}', 2)) v;
 ```
 
 The `csv_parse` function uses Python's csv module internally—it handles edge cases you'd otherwise get wrong.
@@ -730,6 +793,7 @@ The `csv_parse` function uses Python's csv module internally—it handles edge c
 
 | Function | Returns | Use |
 |----------|---------|-----|
+| `csv_headers(text)` | JSON array | Get column names: ["col1", "col2", ...] |
 | `csv_parse(text)` | JSON array | Parse CSV to [{col: val}, ...] |
 | `csv_parse(text, 0)` | JSON array | Parse CSV without header |
 | `parse_number(text)` | Float | "$1,234.56", "€1.234,56", "1.2M" → number |
@@ -1226,7 +1290,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo = work remains. Mark each done before stopping, or set a schedule if blocked.",
+            "Cards in doing/todo = work remains. When ready: write the actual report (not 'let me compile...') + mark done together.",
             weight=1,
             non_shrinkable=True,
         )
@@ -1786,7 +1850,7 @@ def build_prompt_context(
         is_first_run=is_first_run,
         peer_dm_context=peer_dm_context,
         proactive_context=proactive_context,
-        implied_send_active=implied_send_active,
+        implied_send_context=implied_send_context,
         continuation_notice=continuation_notice,
     )
 
@@ -1877,71 +1941,8 @@ def build_prompt_context(
     _build_webhooks_block(agent, important_group, span)
     _build_mcp_servers_block(agent, important_group, span)
 
-    # Implied send status and formatting guidance
-    implied_send_status = None
-    if implied_send_context:
-        channel = implied_send_context["channel"]
-        display_name = implied_send_context["display_name"]
-        tool_example = implied_send_context["tool_example"]
-
-        if channel == "web":
-            # Active web session - simplest case
-            implied_send_status = (
-                f"## Implied Send → {display_name}\n\n"
-                f"Your text auto-sends to the active web chat user.\n"
-                f"You'll continue working after text-only replies (2 max before auto-stop).\n"
-                f"**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
-                f"If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n"
-                f"To stop explicitly: include `sleep_until_next_trigger` with your final message.\n\n"
-                "**To reach someone else**, use explicit tools:\n"
-                f"- `{tool_example}` ← what implied send does for you\n"
-                "- Other contacts: `send_email()`, `send_sms()`\n"
-                "- Peer agents: `send_agent_message()`\n\n"
-                "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly."
-            )
-
     # Dynamic formatting guidance based on current medium context
     formatting_guidance = _get_formatting_guidance(agent, implied_send_active)
-
-    if implied_send_active:
-        response_patterns = (
-            "Your response structure signals your intent:\n\n"
-            "Empty response (no text, no tools)\n"
-            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
-            "  Use when: schedule fired but nothing to report\n\n"
-            "Message only (no tools)\n"
-            "  → Message sends, you get another turn (up to 2 in a row before auto-stop)\n"
-            "  To signal more work: end message with \"Continuing...\" (triggers extra pass)\n"
-            "  To signal done: include \"Work complete.\" in your message (auto-sleeps after send)\n"
-            "  To stop explicitly: add `sleep_until_next_trigger` with your final message\n\n"
-            "Message + tools\n"
-            "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
-            "  Use when: acknowledging the user while taking action\n"
-            "  Example: 'Got it, looking into that now!' + http_request(...)\n\n"
-            "Tools only (no message)\n"
-            "  → 'Working quietly' → tools execute, no message sent\n"
-            "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "To signal completion: include 'Work complete.' in your final message, or use `sleep_until_next_trigger`."
-        )
-    else:
-        response_patterns = (
-            "Your response structure signals your intent:\n\n"
-            "Empty response (no text, no tools)\n"
-            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
-            "  Use when: schedule fired but nothing to report\n\n"
-            "Message only (no tools)\n"
-            "  → Not delivered. Use explicit send tools when you need to communicate.\n"
-            "  Use when: never (avoid text-only replies)\n\n"
-            "Message + tools\n"
-            "  → Tools execute; if you need to communicate, include an explicit send tool\n"
-            "  Example: send_chat_message(...) + http_request(...)\n\n"
-            "Tools only (no message)\n"
-            "  → 'Working quietly' → tools execute, no message sent\n"
-            "  Use when: background work, scheduled tasks with nothing to announce\n"
-            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
-            "Note: Without an active web chat session, text-only output is never delivered."
-        )
 
 
     # Secrets block
@@ -1954,9 +1955,7 @@ def build_prompt_context(
     important_group.section_text(
         "secrets_note",
         (
-            "Request credentials only when you'll use them immediately—API keys for http_request, or login credentials for spawn_web_task. "
-            "For MCP tools (Sheets, Slack, etc.), just call the tool; if it needs auth, it'll return a link to share with the user. "
-            "Never ask for passwords or 2FA codes for OAuth services."
+            "Request credentials only when you'll use them immediately—API keys for http_request, or login credentials for spawn_web_task."
         ),
         weight=1,
         non_shrinkable=True
@@ -1981,23 +1980,10 @@ def build_prompt_context(
     _get_unified_history_prompt(agent, unified_history_group)
 
     runtime_group = prompt.group("runtime_context", weight=6)
-    if implied_send_status:
-        runtime_group.section_text(
-            "implied_send_status",
-            implied_send_status,
-            weight=3,
-            non_shrinkable=True,
-        )
     runtime_group.section_text(
         "formatting_guidance",
         formatting_guidance,
         weight=3,
-        non_shrinkable=True,
-    )
-    runtime_group.section_text(
-        "response_patterns",
-        response_patterns,
-        weight=4,
         non_shrinkable=True,
     )
 
@@ -2077,7 +2063,7 @@ def build_prompt_context(
         "Mark done: UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
         "WRONG: Mark done before seeing successful tool result → task might have failed. "
-        "WRONG: INSERT with status='done' → creates duplicate. "
+        "WRONG: INSERT existing cards (any status) → creates duplicates. Cards persist—only INSERT *new* cards, UPDATE existing ones. "
         "WRONG: `UPDATE ... WHERE status IN ('todo','doing')` → blindly marks incomplete work done. "
         "WRONG: Guessing friendly_id instead of copying from kanban_snapshot → 0 rows affected."
     )
@@ -2580,9 +2566,8 @@ def _get_work_completion_prompt(
                 "work_complete",
                 (
                     f"✅ All work complete: {done_count} card(s) done, nothing remaining.\n"
-                    "System will auto-stop after you send a final update—this is your last chance to communicate.\n"
-                    "If you need to send a final summary, include it now (then `sleep_until_next_trigger`).\n"
-                    "If you close all cards without a user-facing message, you'll be prompted to send it next turn."
+                    "Already sent your results? Just `sleep_until_next_trigger` to finish.\n"
+                    "Still need to share findings? Include them now (one message is enough), then sleep."
                 ),
                 9,  # Highest weight - must stop
             )
@@ -2628,10 +2613,8 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Before stopping, please either:\n"
-                "• Complete tasks: `UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
-                "• Or set a schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-                "Avoid using sleep_until_next_trigger until one of these is done."
+                "Time to wrap up. Your next message must contain THE ACTUAL FINDINGS—not 'let me compile...' or 'let me send...'\n"
+                "Those phrases terminate you before delivery. Write the report itself, right now, in this response."
             ),
             8,  # High weight
         )
@@ -2657,7 +2640,7 @@ def _get_work_completion_prompt(
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}). Credits low, schedule set.\n"
                 "Save current progress to cards. Your schedule will bring you back.\n"
-                "End with \"Continuing...\" if you want one more turn before auto-stop."
+                "End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)."
             ),
             4,
         )
@@ -2668,9 +2651,9 @@ def _get_work_completion_prompt(
             "work_in_progress",
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
-                "Continue working. Mark done when complete: "
-                "`UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
-                "End with \"Continuing...\" to signal more work coming."
+                "Continue working. When ready to finish: write the actual report + mark done in one response.\n"
+                "Never 'let me compile...'—that terminates you before delivery. The report goes in your message.\n"
+                "Still working? End with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)."
             ),
             4,
         )
@@ -3117,13 +3100,13 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
-    # MAX_NO_TOOL_STREAK=2, so warn that auto-stop is imminent
+    # MAX_NO_TOOL_STREAK=1, so any no-tool response triggers auto-stop warning
     urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
-            "(1) More work? Include a tool call, or end message with \"Continuing...\" "
+            "(1) More work? Include a tool call, or end message with \"CONTINUE_WORK_SIGNAL\" (stripped) "
             "(2) Replying + taking action? Text + tool calls. "
-            "(3) Done? Include \"Work complete.\" in your message, or use sleep_until_next_trigger."
+            "(3) Done? Text-only replies stop by default. No special phrase needed."
         )
     else:
         patterns = (
@@ -3234,42 +3217,75 @@ def _get_system_instruction(
     is_first_run: bool = False,
     peer_dm_context: dict | None = None,
     proactive_context: dict | None = None,
-    implied_send_active: bool = False,
+    implied_send_context: dict | None = None,
     continuation_notice: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
+    implied_send_active = implied_send_context is not None
+
     if implied_send_active:
-        send_guidance = (
-            "In an active web chat session, your text goes directly to that one user—but only them. "
-            "To reach anyone else (other contacts, peer agents, different channels), use explicit tools: "
-            "send_email, send_sms, send_agent_message, send_chat_message. "
+        display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
+        tool_example = implied_send_context.get("tool_example") if implied_send_context else "send_chat_message(...)"
+        delivery_context = (
+            f"## Implied Send → {display_name}\n\n"
+            "Your text goes directly to the user—no buffer, no 'compile' step. Whatever you write is what they see.\n"
+            "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
+            "**Stopping is permanent**: When all cards are done and you send a message, you're terminated until next scheduled trigger or incoming message. Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report.\n"
+            "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
+            "**To reach someone else**, use explicit tools:\n"
+            f"- `{tool_example}` ← what implied send does for you\n"
+            "- Other contacts: `send_email()`, `send_sms()`\n"
+            "- Peer agents: `send_agent_message()`\n\n"
+            "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
-        response_delivery_note = (
-            "Text output auto-sends only to an active web chat user—nobody else. "
-            "For all other recipients (email contacts, SMS, peer agents), use explicit send tools. "
+        response_structure = (
+            "Your response structure signals your intent:\n\n"
+            "Empty response (no text, no tools)\n"
+            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
+            "  Use when: schedule fired but nothing to report\n\n"
+            "Message only (no tools)\n"
+            "  → Message sends, then you stop (if kanban complete)\n"
+            "  'Let me send the report' = you never send it. Include actual content, not promises.\n"
+            "  To continue: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n\n"
+            "Message + tools\n"
+            "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
+            "  Use when: acknowledging the user while taking action\n"
+            "  Example: 'Got it, looking into that now!' + http_request(...)\n\n"
+            "Tools only (no message)\n"
+            "  → 'Working quietly' → tools execute, no message sent\n"
+            "  Use when: background work, scheduled tasks with nothing to announce\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n"
         )
-        web_chat_delivery_note = (
-            "For the active web chat user, just write your message—it auto-sends to them only. "
-            "For everyone else (other contacts, peer agents, different channels), you must use explicit send tools. "
-        )
-        message_only_note = "Message-only responses mean you're done—verify kanban is clear first. Empty responses trigger auto-sleep. "
+        tool_calls_note = "Tool calls are actions you take. You can combine text + tools in one response. "
+        stop_explicit_note = ""
     else:
-        send_guidance = (
+        delivery_context = (
+            "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
-            "To reach anyone (contacts, peer agents, web chat), use send_email, send_sms, "
-            "send_agent_message, or send_chat_message. "
-        )
-        response_delivery_note = (
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
-        )
-        web_chat_delivery_note = (
             "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
+            "Focus on tool calls—text alone is not delivered.\n\n"
         )
-        message_only_note = (
-            "Text-only responses are not delivered without an active web chat session. "
-            "Empty responses trigger auto-sleep. "
+        response_structure = (
+            "Your response structure signals your intent:\n\n"
+            "Empty response (no text, no tools)\n"
+            "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
+            "  Use when: schedule fired but nothing to report\n\n"
+            "Message only (no tools)\n"
+            "  → Not delivered. Use explicit send tools when you need to communicate.\n"
+            "  Use when: never (avoid text-only replies)\n\n"
+            "Message + tools\n"
+            "  → Tools execute; if you need to communicate, include an explicit send tool\n"
+            "  Example: send_chat_message(...) + http_request(...)\n\n"
+            "Tools only (no message)\n"
+            "  → 'Working quietly' → tools execute, no message sent\n"
+            "  Use when: background work, scheduled tasks with nothing to announce\n"
+            "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
+            "Note: Without an active web chat session, text-only output is never delivered."
         )
+        tool_calls_note = "Tool calls are actions you take. "
+        stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
     # Key: be eager to update charter and schedule whenever user hints at preferences or timing
@@ -3277,6 +3293,11 @@ def _get_system_instruction(
     reply = "'Message'" if implied_send_active else "send_email('Message')"
     reply_short = "reply" if implied_send_active else "send_email(reply)"
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
+    text_only_guidance = (
+        "- Text-only replies stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n\n"
+        if implied_send_active
+        else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
+    )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**Stop** — request fully handled AND kanban clear (no todo/doing cards):\n"
@@ -3286,18 +3307,18 @@ def _get_system_instruction(
         f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1') + {reply.replace('Message', 'Updated!')} — done.\n"
         "- Cron fires, nothing new → (empty response) — done.\n\n"
         "**Continue** — still have work:\n"
-        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → {reply_short} — now done.\n"
-        "- 'research competitors' → sqlite_batch(UPDATE charter + INSERT kanban cards, will_continue_work=true) + search_tools → keep working.\n"
-        "- 'track HN daily' → sqlite_batch(UPDATE charter+schedule, will_continue_work=true) + http_request → report digest — done.\n"
+        f"- 'what's bitcoin?' → http_request (has API) → {reply_short} — done.\n"
+        "- 'what's on HN?' → http_request (has API) → report — done.\n"
+        "- 'research competitors' → search_tools → keep working.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
-        "- Text-only replies continue (2 max before auto-stop). To stop: `sleep_until_next_trigger`.\n\n"
+        f"{text_only_guidance}"
         "**Mid-conversation updates** — update eagerly when user hints:\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
-        "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule.\n"
-        "**Auto-stop on completion:** When all kanban cards are done and you send a message with `will_continue_work=false`, the system auto-stops. "
-        "If you use `will_continue_work=true`, you'll get another turn even if kanban is complete. "
+        "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule. Running low on credits? Set a schedule NOW or you'll be terminated with no way to resume.\n"
+        "**Stopping is permanent:** When all kanban cards are done and you send your final report, you're terminated until next scheduled trigger or incoming message. "
+        "Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report. "
         "If you mark the last card done without sending output, you'll be prompted to send it.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
@@ -3305,34 +3326,28 @@ def _get_system_instruction(
     if implied_send_active:
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
-            "- Text-only replies auto-send and continue by default (up to 2 before auto-stop)\n"
-            "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
+            "- Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)\n"
+            "- Stopping is permanent: all cards done + final report sent = terminated until next trigger/message\n"
+            "- Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending final report\n"
             "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
-            "- To stop early: use `sleep_until_next_trigger`\n"
         )
     else:
         will_continue_guidance = (
-            "**The will_continue_work flag:** "
-            "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
-            "Set false only after verifying no todo/doing cards remain. "
-            "When all kanban cards are done: `will_continue_work=false` on your message = auto-stop, `will_continue_work=true` = continue.\n"
+            "**Stopping is permanent.** "
+            "All cards done + final report sent = terminated until next scheduled trigger or incoming message. "
+            "Open todo/doing cards = you continue (system enforces this). "
+            "Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report.\n"
         )
 
     delivery_instructions = (
-        f"{send_guidance}"
-        f"{'You can combine text + tools when text auto-sends.' if implied_send_active else 'Focus on tool calls—text alone is not delivered.'}\n\n"
+        f"{delivery_context}"
+        f"{response_structure}\n\n"
         f"{will_continue_guidance}"
+        f"{tool_calls_note}"
+        f"{stop_explicit_note}"
         "Fetching data is just step one—reporting it to the user completes the task. "
-        f"{message_only_note}"
-        "How responses work: "
-        f"{response_delivery_note}"
-        "Tool calls are actions you take. "
-        f"{'You can combine text + tools in one response. ' if implied_send_active else ''}"
-        "Empty response = auto-stop. Text-only = continue (2 max). To stop explicitly: `sleep_until_next_trigger`."
-        f"{'Common patterns (text auto-sends to active web chat): ' if implied_send_active else 'Common patterns: '}"
+        "Never say 'let me send the report'—include the actual report. Announcements terminate you before delivery.\n\n"
         f"{stop_continue_examples}"
-        "Processing cycles cost money—but incomplete work costs more. Finish what you started.\n"
-        f"{web_chat_delivery_note}"
     )
 
     base_prompt = (
@@ -3421,12 +3436,13 @@ def _get_system_instruction(
         "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
-        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` (never INSERT with status='done'—that creates duplicates)\n"
+        "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
+        "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` Never INSERT to change status—that creates duplicates.\n"
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Share before marking done.** If work is complete but not yet shared with the user, share it first—then mark cards done. Marking done triggers auto-stop after the final message; share your findings in the same response.\n"
-        "- **Keep a 'doing' card while working.** System auto-stops after the final message when todo=0 and doing=0. Close out atomically: mark last card done + deliver final results + `will_continue_work=false`, all in one response.\n\n"
+        "- **Share before marking done.** Never say 'let me send the report'—that message terminates you and the report is never sent. Include the actual findings in your message, not a promise to send them.\n"
+        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. Close out atomically: send complete report + mark last card done, all in one response.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
@@ -3449,8 +3465,7 @@ def _get_system_instruction(
         "Your outputs should feel crafted, not generated. Complete, not partial. Linked, not isolated. Beautiful, not just functional. "
 
         "Use the right tools. "
-        "`search_tools` is your gateway—it discovers and enables other tools. Always start there when unsure. "
-        "Structured data beats raw scraping. One extractor call beats 10 minutes of manual work. "
+        "APIs > extractors > scraping. Many sources have free APIs—try them first. "
         "Know your tools—they're your superpower. "
 
         "Follow every lead. "
@@ -3785,9 +3800,9 @@ def _get_system_instruction(
         "# example.com/about              → scrape_as_markdown (HTML page)\n"
         "\n"
         "# Priority\n"
-        "http_request > scrape    # for raw/structured data\n"
-        "extractor > scrape       # for known platforms\n"
-        "scrape = last_resort     # for HTML when no better option\n"
+        "api | feed | data → http_request  # check for public APIs first\n"
+        "extractor > scrape                # for known platforms\n"
+        "scrape = last_resort              # for HTML when no better option\n"
         "\n"
         "# Discovery (always available)\n"
         "need(X)                      → search_tools(X) → have(tools) | ∅\n"
@@ -3807,7 +3822,8 @@ def _get_system_instruction(
         "For MCP tools (Google Sheets, Slack, etc.), just call the tool. If it needs auth, it'll return a connect link—share that with the user and wait. "
         "Never ask for passwords or 2FA codes for OAuth services. When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
-        "`search_tools` unlocks integrations—call it to enable tools for Instagram, LinkedIn, Reddit, and more. "
+        "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
+        "Always start there when unsure. "
 
         f"{delivery_instructions}"
 
@@ -3822,9 +3838,9 @@ def _get_system_instruction(
         "- Cards in todo/doing remain\n"
         "- More tool calls needed\n\n"
 
-        "will_continue_work=false only when: all cards done (or deferred with schedule). "
-        "WRONG: seeing a todo card, doing work you *think* addresses it, then setting false without marking it done → orphans the card. "
-        "RIGHT: UPDATE card to done FIRST, then set false.\n\n"
+        "When all cards are done (or deferred with schedule), your final report terminates you—permanently, until next trigger or incoming message. "
+        "WRONG: seeing a todo card, doing work you *think* addresses it, then sending a message without marking it done → orphans the card. "
+        "RIGHT: UPDATE card to done FIRST, then send your final report with `will_continue_work=false`.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
         "Kanban (__kanban_cards) is always there—if you have work, you should have cards. No cards = no memory of what you're doing. "
 
@@ -4025,17 +4041,18 @@ def _get_system_instruction(
 
                     "### R5: Continuation Logic\n"
                     "```\n"
-                    "WHEN task_exists => will_continue_work = true, THEN search_tools('{domain keywords}')\n"
-                    "WHEN no_task     => will_continue_work = false, THEN stop\n"
+                    "WHEN task_exists AND known_api => http_request(api_url), will_continue_work=true\n"
+                    "WHEN task_exists              => search_tools('{domain}'), will_continue_work=true\n"
+                    "WHEN no_task                  => will_continue_work=false, stop\n"
                     "```\n\n"
 
                     "### Execution Template\n"
                     "```\n"
                     "IF has_task:\n"
                     "  send_{channel}(greeting)\n"
-                    "  sqlite_batch(sql=\"UPDATE __agent_config SET charter='{R2}', schedule='{R3}' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('{first_step}', 'doing'), ('{next_step}', 'todo'), ...;\", will_continue_work=true)\n"
-                    "  search_tools('{domain} {data_type} API', will_continue_work=true)\n"
-                    "  # Next cycle: fetch → store → report → update cards\n"
+                    "  sqlite_batch(sql=\"UPDATE ...\", will_continue_work=true)\n"
+                    "  # Public API available? → http_request directly\n"
+                    "  # Otherwise → search_tools('{domain}')\n"
                     "\n"
                     "ELSE:\n"
                     "  send_{channel}('Hey! I'm {name} 👋 What can I help with?')\n"

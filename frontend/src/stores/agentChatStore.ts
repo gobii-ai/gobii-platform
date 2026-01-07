@@ -697,7 +697,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return {
           streaming: next,
           hasUnseenActivity,
-          streamingThinkingCollapsed: false,
+          // Start collapsed - shows compact preview with a few lines scrolling by
+          streamingThinkingCollapsed: true,
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
           awaitingResponse,

@@ -141,7 +141,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MAX_NO_TOOL_STREAK = 2  # Auto-sleep after this many consecutive responses without tool calls
+MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation signal present
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
@@ -161,12 +161,12 @@ MESSAGE_TOOL_BODY_KEYS = {
 }
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
-CANONICAL_CONTINUATION_PHRASE = "Continuing..."
+CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
 
 # Flexible detection: canonical phrase + natural language variations.
 # Case-insensitive matching against message text or thinking content.
 CONTINUATION_PHRASES = (
-    "continuing...",  # Canonical - exact match
+    CANONICAL_CONTINUATION_PHRASE.lower(),  # Canonical - exact match
     "continuing with",
     "let me ",
     "i'll ",
@@ -186,6 +186,80 @@ def _has_continuation_signal(text: str) -> bool:
         return False
     lower_text = text.lower()
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
+
+
+def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
+    if not text:
+        return text, False
+    phrase = CANONICAL_CONTINUATION_PHRASE
+    lower_text = text.lower()
+    lower_phrase = phrase.lower()
+    if lower_phrase not in lower_text:
+        return text, False
+    result: list[str] = []
+    start = 0
+    found = False
+    while True:
+        idx = lower_text.find(lower_phrase, start)
+        if idx == -1:
+            result.append(text[start:])
+            break
+        found = True
+        result.append(text[start:idx])
+        start = idx + len(phrase)
+    return "".join(result), found
+
+
+def _strip_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
+    cleaned, found = _remove_canonical_continuation_phrase(text)
+    if found:
+        cleaned = cleaned.strip()
+    return cleaned, found
+
+
+class _CanonicalContinuationStreamFilter:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._phrase = CANONICAL_CONTINUATION_PHRASE
+        self._lower_phrase = self._phrase.lower()
+        self._phrase_len = len(self._phrase)
+
+    def ingest(self, text: Optional[str]) -> Optional[str]:
+        if not text:
+            return None
+        self._buffer += text
+        cleaned, _ = _remove_canonical_continuation_phrase(self._buffer)
+        self._buffer = cleaned
+        tail_len = self._suffix_prefix_len()
+        if len(self._buffer) <= tail_len:
+            return None
+        if tail_len > 0:
+            emit = self._buffer[:-tail_len]
+            self._buffer = self._buffer[-tail_len:]
+        else:
+            emit = self._buffer
+            self._buffer = ""
+        return emit or None
+
+    def flush(self) -> Optional[str]:
+        if not self._buffer:
+            return None
+        cleaned, _ = _remove_canonical_continuation_phrase(self._buffer)
+        self._buffer = ""
+        cleaned = cleaned.rstrip()
+        return cleaned or None
+
+    def _suffix_prefix_len(self) -> int:
+        if not self._buffer or self._phrase_len <= 1:
+            return 0
+        max_len = min(len(self._buffer), self._phrase_len - 1)
+        if max_len <= 0:
+            return 0
+        buffer_lower = self._buffer.lower()
+        for i in range(max_len, 0, -1):
+            if buffer_lower.endswith(self._lower_phrase[:i]):
+                return i
+        return 0
 
 
 # Canonical phrase the agent should use to signal completion (work is done).
@@ -394,6 +468,22 @@ def _normalize_persistent_agent_id(persistent_agent_id: Union[str, UUID]) -> Opt
         return str(UUID(str(persistent_agent_id)))
     except (TypeError, ValueError, AttributeError):
         return None
+
+
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return None
 
 
 def _extract_message_content(message: Any) -> str:
@@ -924,6 +1014,7 @@ def _stream_completion_with_broadcast(
     if stream_broadcaster:
         stream_broadcaster.start()
 
+    content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
     accumulator = StreamAccumulator()
     try:
         stream = run_completion(
@@ -938,9 +1029,15 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
-                stream_broadcaster.push_delta(reasoning_delta, content_delta)
+                filtered_delta = (
+                    content_filter.ingest(content_delta) if content_filter else content_delta
+                )
+                stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster:
+            trailing = content_filter.flush() if content_filter else None
+            if trailing:
+                stream_broadcaster.push_delta(None, trailing)
             stream_broadcaster.finish()
 
     return accumulator.build_response(model=model, provider=provider)
@@ -2756,7 +2853,10 @@ def _run_agent_loop(
                 return True, kanban_apply.snapshot
 
             msg_content = _extract_message_content(msg)
-            message_text = (msg_content or "").strip()
+            raw_message_text = (msg_content or "").strip()
+            message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
+                raw_message_text
+            )
 
             raw_tool_calls = _normalize_tool_calls(msg)
             raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
@@ -2768,12 +2868,11 @@ def _run_agent_loop(
 
             implied_send = False
             tool_calls = list(raw_tool_calls)
+            implied_stop_after_send = False  # Track if implied send should force stop
             if message_text and not has_explicit_send:
-                # Check for explicit completion signal in message or thinking content.
-                # Agent can signal "I'm done" by including phrases like "Work complete."
-                has_completion = _has_completion_signal(message_text) or _has_completion_signal(thinking_content or "")
-                # Default: assume continuation unless agent explicitly sleeps OR signals completion.
-                implied_will_continue = not has_explicit_sleep and not has_completion
+                # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
+                # This is safer—agent won't keep running unexpectedly.
+                implied_will_continue = has_canonical_continuation and not has_explicit_sleep
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,
@@ -2781,6 +2880,7 @@ def _run_agent_loop(
                 )
                 if implied_call:
                     implied_send = True
+                    implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
                     tool_calls = [implied_call] + tool_calls
                     logger.info(
                         "Agent %s: treating message content as implied %s send.",
@@ -2849,7 +2949,7 @@ def _run_agent_loop(
 
                 # Check for continuation signals like "let me", "I'll", "I'm going to"
                 # in message or thinking content - gives agent one extra pass.
-                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
+                has_continuation = _has_continuation_signal(raw_message_text) or _has_continuation_signal(thinking_content or "")
                 effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
 
                 if reasoning_only_streak >= effective_limit:
@@ -3065,6 +3165,24 @@ def _run_agent_loop(
                         # Abort remaining tool calls this iteration; retry next loop
                         followup_required = True
                         break
+                    call_id = getattr(call, "id", None)
+                    if not call_id and isinstance(call, dict):
+                        call_id = call.get("id")
+                    if tool_name in MESSAGE_TOOL_NAMES:
+                        body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                        if body_key and isinstance(tool_params.get(body_key), str):
+                            cleaned_body, found_phrase = _strip_canonical_continuation_phrase(
+                                tool_params[body_key]
+                            )
+                            if found_phrase:
+                                tool_params[body_key] = cleaned_body
+                                tool_params["will_continue_work"] = True
+                        if (
+                            tool_name == "send_chat_message"
+                            and call_id != "implied_send"
+                            and "will_continue_work" not in tool_params
+                        ):
+                            tool_params["will_continue_work"] = True
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
@@ -3175,8 +3293,10 @@ def _run_agent_loop(
                         followup_required = True
 
                     # Track if any tool explicitly requested continuation
-                    if isinstance(tool_params, dict) and tool_params.get("will_continue_work") is True:
-                        any_explicit_continuation = True
+                    if isinstance(tool_params, dict):
+                        will_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+                        if will_continue is True:
+                            any_explicit_continuation = True
 
                     executed_calls += 1
 
@@ -3238,6 +3358,19 @@ def _run_agent_loop(
 
             if all_calls_sleep:
                 logger.info("Agent %s is sleeping.", agent.id)
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                return cumulative_token_usage
+            # Implied send without continuation phrase = agent is done, force stop
+            elif (
+                implied_stop_after_send
+                and message_delivery_ok
+                and not followup_required
+                and not any_explicit_continuation
+            ):
+                logger.info(
+                    "Agent %s: implied send without continuation phrase; auto-sleeping.",
+                    agent.id,
+                )
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             elif (
