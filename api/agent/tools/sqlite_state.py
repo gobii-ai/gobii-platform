@@ -966,7 +966,7 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
         finally:
             if os.path.exists(db_path):
                 try:
-                    conn = open_guarded_sqlite_connection(db_path)
+                    conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
                     try:
                         _drop_ephemeral_tables(conn)
                         conn.execute("VACUUM;")

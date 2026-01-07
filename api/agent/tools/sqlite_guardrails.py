@@ -1250,8 +1250,12 @@ def open_guarded_sqlite_connection(
     db_path: str,
     *,
     timeout_seconds: float = 30.0,
+    allow_attach: bool = False,
 ) -> sqlite3.Connection:
-    """Open a SQLite connection with guardrails against host file access."""
+    """Open a SQLite connection with guardrails against host file access.
+
+    allow_attach should only be used for internal maintenance where VACUUM is required.
+    """
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("PRAGMA temp_store = MEMORY;")
@@ -1265,11 +1269,23 @@ def open_guarded_sqlite_connection(
     _register_safe_functions(conn)
     if hasattr(conn, "setlimit") and hasattr(sqlite3, "SQLITE_LIMIT_ATTACHED"):
         try:
-            conn.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)
+            if not allow_attach:
+                conn.setlimit(sqlite3.SQLITE_LIMIT_ATTACHED, 0)
         except Exception:
             logger.debug("Failed to set SQLite attached DB limit", exc_info=True)
+    def authorizer(
+        action_code: int,
+        param1: Optional[str],
+        param2: Optional[str],
+        db_name: Optional[str],
+        trigger_name: Optional[str],
+    ) -> int:
+        if allow_attach and action_code in {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH}:
+            return sqlite3.SQLITE_OK
+        return _sqlite_authorizer(action_code, param1, param2, db_name, trigger_name)
+
     try:
-        conn.set_authorizer(_sqlite_authorizer)
+        conn.set_authorizer(authorizer)
     except Exception as exc:
         conn.close()
         raise RuntimeError("Failed to enable SQLite guardrails") from exc
