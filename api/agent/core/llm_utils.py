@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from django.conf import settings
 import litellm
 
-from .llm_streaming import StreamAccumulator
+from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
     "supports_tool_choice",
@@ -19,6 +19,7 @@ _HINT_KEYS = (
 )
 
 logger = logging.getLogger(__name__)
+
 
 class EmptyLiteLLMResponseError(RuntimeError):
     """Raised when LiteLLM returns a response without content, reasoning, or tools."""
@@ -91,7 +92,7 @@ def _coerce_tool_calls(raw_tool_calls: Any) -> list[Any]:
     if isinstance(raw_tool_calls, str):
         try:
             raw_tool_calls = json.loads(raw_tool_calls)
-        except Exception:
+        except json.JSONDecodeError:
             return [raw_tool_calls]
     if isinstance(raw_tool_calls, dict):
         return [raw_tool_calls]
@@ -140,11 +141,7 @@ def is_empty_litellm_response(response: Any) -> bool:
     content_text = _extract_message_content(message)
     if content_text.strip():
         return False
-    try:
-        from .token_usage import extract_reasoning_content
-    except Exception:
-        extract_reasoning_content = None
-    reasoning_text = extract_reasoning_content(response) if extract_reasoning_content else None
+    reasoning_text = extract_reasoning_content(response)
     if isinstance(reasoning_text, str) and reasoning_text.strip():
         return False
     if _message_has_tool_calls(message):
@@ -164,47 +161,6 @@ def raise_if_empty_litellm_response(
             model=model,
             provider=provider,
         )
-
-
-def stream_completion_with_broadcast(
-    *,
-    model: str,
-    messages: list[dict[str, Any]],
-    params: dict[str, Any],
-    tools: list[dict[str, Any]] | None,
-    provider: str | None,
-    stream_broadcaster: Any,
-    content_filter: Any = None,
-) -> Any:
-    if stream_broadcaster:
-        stream_broadcaster.start()
-
-    accumulator = StreamAccumulator()
-    try:
-        stream = run_completion(
-            model=model,
-            messages=messages,
-            params=params,
-            tools=tools,
-            drop_params=True,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        for chunk in stream:
-            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
-            if stream_broadcaster:
-                filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
-                stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
-    finally:
-        if stream_broadcaster:
-            trailing = content_filter.flush() if content_filter else None
-            if trailing:
-                stream_broadcaster.push_delta(None, trailing)
-            stream_broadcaster.finish()
-
-    response = accumulator.build_response(model=model, provider=provider)
-    raise_if_empty_litellm_response(response, model=model, provider=provider)
-    return response
 
 
 def run_completion(
@@ -283,11 +239,17 @@ def run_completion(
     max_attempts = max(1, int(getattr(settings, "LITELLM_MAX_RETRIES", 2)))
     backoff_seconds = float(getattr(settings, "LITELLM_RETRY_BACKOFF_SECONDS", 1.0))
 
+    provider_hint = kwargs.get("custom_llm_provider")
+    if not isinstance(provider_hint, str):
+        provider_hint = kwargs.get("provider")
+    if not isinstance(provider_hint, str):
+        provider_hint = None
+
     for attempt in range(1, max_attempts + 1):
         try:
             response = litellm.completion(**kwargs)
             if not kwargs.get("stream"):
-                raise_if_empty_litellm_response(response, model=model)
+                raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
             return response
         except _RETRYABLE_ERRORS as exc:
             if attempt >= max_attempts:
@@ -307,5 +269,4 @@ __all__ = [
     "is_empty_litellm_response",
     "raise_if_empty_litellm_response",
     "run_completion",
-    "stream_completion_with_broadcast",
 ]

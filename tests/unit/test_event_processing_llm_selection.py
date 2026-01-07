@@ -14,6 +14,7 @@ from api.agent.core.event_processing import (
     _get_recent_preferred_config,
 )
 from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentCompletion
+from tests.utils.token_usage import make_completion_response
 
 
 @tag("batch_event_llm")
@@ -44,7 +45,7 @@ class TestEventProcessingLLMSelection(TestCase):
         
         # Setup mocks
         failover_configs = [("google", "vertex_ai/gemini-2.5-pro", {"temperature": 0.1})]
-        mock_completion.return_value = Mock()
+        mock_completion.return_value = make_completion_response()
         
         messages = [{"role": "user", "content": "Test message"}]
         tools = []
