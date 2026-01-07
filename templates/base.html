@@ -547,6 +547,10 @@
     </script>
   {% endif %}
 
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
+
+  {% endif %}
+
   <!-- block for head_extras -->
   {% block head_extras %}{% endblock %}
 
