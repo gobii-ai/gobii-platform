@@ -161,12 +161,12 @@ MESSAGE_TOOL_BODY_KEYS = {
 }
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
-CANONICAL_CONTINUATION_PHRASE = "Continuing..."
+CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
 
 # Flexible detection: canonical phrase + natural language variations.
 # Case-insensitive matching against message text or thinking content.
 CONTINUATION_PHRASES = (
-    "continuing...",  # Canonical - exact match
+    CANONICAL_CONTINUATION_PHRASE.lower(),  # Canonical - exact match
     "continuing with",
     "let me ",
     "i'll ",
@@ -186,6 +186,80 @@ def _has_continuation_signal(text: str) -> bool:
         return False
     lower_text = text.lower()
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
+
+
+def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
+    if not text:
+        return text, False
+    phrase = CANONICAL_CONTINUATION_PHRASE
+    lower_text = text.lower()
+    lower_phrase = phrase.lower()
+    if lower_phrase not in lower_text:
+        return text, False
+    result: list[str] = []
+    start = 0
+    found = False
+    while True:
+        idx = lower_text.find(lower_phrase, start)
+        if idx == -1:
+            result.append(text[start:])
+            break
+        found = True
+        result.append(text[start:idx])
+        start = idx + len(phrase)
+    return "".join(result), found
+
+
+def _strip_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
+    cleaned, found = _remove_canonical_continuation_phrase(text)
+    if found:
+        cleaned = cleaned.strip()
+    return cleaned, found
+
+
+class _CanonicalContinuationStreamFilter:
+    def __init__(self) -> None:
+        self._buffer = ""
+        self._phrase = CANONICAL_CONTINUATION_PHRASE
+        self._lower_phrase = self._phrase.lower()
+        self._phrase_len = len(self._phrase)
+
+    def ingest(self, text: Optional[str]) -> Optional[str]:
+        if not text:
+            return None
+        self._buffer += text
+        cleaned, _ = _remove_canonical_continuation_phrase(self._buffer)
+        self._buffer = cleaned
+        tail_len = self._suffix_prefix_len()
+        if len(self._buffer) <= tail_len:
+            return None
+        if tail_len > 0:
+            emit = self._buffer[:-tail_len]
+            self._buffer = self._buffer[-tail_len:]
+        else:
+            emit = self._buffer
+            self._buffer = ""
+        return emit or None
+
+    def flush(self) -> Optional[str]:
+        if not self._buffer:
+            return None
+        cleaned, _ = _remove_canonical_continuation_phrase(self._buffer)
+        self._buffer = ""
+        cleaned = cleaned.rstrip()
+        return cleaned or None
+
+    def _suffix_prefix_len(self) -> int:
+        if not self._buffer or self._phrase_len <= 1:
+            return 0
+        max_len = min(len(self._buffer), self._phrase_len - 1)
+        if max_len <= 0:
+            return 0
+        buffer_lower = self._buffer.lower()
+        for i in range(max_len, 0, -1):
+            if buffer_lower.endswith(self._lower_phrase[:i]):
+                return i
+        return 0
 
 
 # Canonical phrase the agent should use to signal completion (work is done).
@@ -924,6 +998,7 @@ def _stream_completion_with_broadcast(
     if stream_broadcaster:
         stream_broadcaster.start()
 
+    content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
     accumulator = StreamAccumulator()
     try:
         stream = run_completion(
@@ -938,9 +1013,15 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
-                stream_broadcaster.push_delta(reasoning_delta, content_delta)
+                filtered_delta = (
+                    content_filter.ingest(content_delta) if content_filter else content_delta
+                )
+                stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster:
+            trailing = content_filter.flush() if content_filter else None
+            if trailing:
+                stream_broadcaster.push_delta(None, trailing)
             stream_broadcaster.finish()
 
     return accumulator.build_response(model=model, provider=provider)
@@ -2756,7 +2837,10 @@ def _run_agent_loop(
                 return True, kanban_apply.snapshot
 
             msg_content = _extract_message_content(msg)
-            message_text = (msg_content or "").strip()
+            raw_message_text = (msg_content or "").strip()
+            message_text, has_canonical_continuation = _strip_canonical_continuation_phrase(
+                raw_message_text
+            )
 
             raw_tool_calls = _normalize_tool_calls(msg)
             raw_tool_names = [_get_tool_call_name(call) for call in raw_tool_calls]
@@ -2770,10 +2854,9 @@ def _run_agent_loop(
             tool_calls = list(raw_tool_calls)
             implied_stop_after_send = False  # Track if implied send should force stop
             if message_text and not has_explicit_send:
-                # Default: STOP. Agent must explicitly request continuation with "Continuing..."
+                # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                 # This is safer—agent won't keep running unexpectedly.
-                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
-                implied_will_continue = has_continuation and not has_explicit_sleep
+                implied_will_continue = has_canonical_continuation and not has_explicit_sleep
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,
@@ -2850,7 +2933,7 @@ def _run_agent_loop(
 
                 # Check for continuation signals like "let me", "I'll", "I'm going to"
                 # in message or thinking content - gives agent one extra pass.
-                has_continuation = _has_continuation_signal(message_text) or _has_continuation_signal(thinking_content or "")
+                has_continuation = _has_continuation_signal(raw_message_text) or _has_continuation_signal(thinking_content or "")
                 effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
 
                 if reasoning_only_streak >= effective_limit:

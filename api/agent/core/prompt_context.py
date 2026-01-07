@@ -2579,7 +2579,7 @@ def _get_work_completion_prompt(
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}). Credits low, schedule set.\n"
                 "Save current progress to cards. Your schedule will bring you back.\n"
-                "End with \"Continuing...\" if you want one more turn before auto-stop."
+                "End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)."
             ),
             4,
         )
@@ -2592,7 +2592,7 @@ def _get_work_completion_prompt(
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
                 "Continue working. Mark done when complete: "
                 "`UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
-                "End with \"Continuing...\" to signal more work coming."
+                "End with \"CONTINUE_WORK_SIGNAL\" on its own line to signal more work coming (stripped from output)."
             ),
             4,
         )
@@ -3043,7 +3043,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
     urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
-            "(1) More work? Include a tool call, or end message with \"Continuing...\" "
+            "(1) More work? Include a tool call, or end message with \"CONTINUE_WORK_SIGNAL\" (stripped) "
             "(2) Replying + taking action? Text + tool calls. "
             "(3) Done? Text-only replies stop by default. No special phrase needed."
         )
@@ -3169,7 +3169,7 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your text auto-sends to the active web chat user.\n"
-            "Text-only replies auto-send and stop by default. End with \"Continuing...\" to request another turn.\n"
+            "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "**Kanban + will_continue_work**: When all cards are done, `will_continue_work=false` stops you; `will_continue_work=true` continues.\n"
             "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
             "**To reach someone else**, use explicit tools:\n"
@@ -3185,7 +3185,7 @@ def _get_system_instruction(
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
             "  → Message sends, then stops by default\n"
-            "  To continue working: end message with \"Continuing...\" (requests another turn)\n"
+            "  To continue working: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n"
             "  Default behavior: message sends, then auto-stops\n\n"
             "Message + tools\n"
             "  → 'Here's my reply, and I have more work' → message sends, tools execute\n"
@@ -3233,7 +3233,7 @@ def _get_system_instruction(
     reply_short = "reply" if implied_send_active else "send_email(reply)"
     fetched_note = "haven't reported" if implied_send_active else "haven't sent it"
     text_only_guidance = (
-        "- Text-only replies stop by default. End with \"Continuing...\" to request another turn.\n\n"
+        "- Text-only replies stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n\n"
         if implied_send_active
         else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
     )
@@ -3265,7 +3265,7 @@ def _get_system_instruction(
     if implied_send_active:
         will_continue_guidance = (
             "**How stopping works (implied send mode):**\n"
-            "- Text-only replies auto-send and stop by default. End with \"Continuing...\" to request another turn\n"
+            "- Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)\n"
             "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
             "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
         )

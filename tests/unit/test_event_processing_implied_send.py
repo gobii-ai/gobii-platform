@@ -274,6 +274,76 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(mock_send_email.called)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_requires_canonical_continuation_phrase(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion("Let me analyze this and send a summary.")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertNotIn("will_continue_work", params)
+        self.assertEqual(mock_completion.call_count, 1)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_strips_canonical_continuation_phrase(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion(f"Here is the summary.\n{ep.CANONICAL_CONTINUATION_PHRASE}")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertEqual(params.get("body"), "Here is the summary.")
+        self.assertTrue(params.get("will_continue_work"))
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
@@ -570,7 +640,7 @@ class CompletionSignalTests(TestCase):
     def test_has_completion_signal_false_for_continuation(self):
         self.assertFalse(ep._has_completion_signal("Let me check that."))
         self.assertFalse(ep._has_completion_signal("I'll get that for you."))
-        self.assertFalse(ep._has_completion_signal("Continuing..."))
+        self.assertFalse(ep._has_completion_signal(ep.CANONICAL_CONTINUATION_PHRASE))
 
     def test_has_completion_signal_empty(self):
         self.assertFalse(ep._has_completion_signal(""))
