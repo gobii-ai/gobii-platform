@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
+import { useTypewriter } from '../../hooks/useTypewriter'
 
 type ThinkingBubbleProps = {
   reasoning: string
@@ -10,7 +11,18 @@ type ThinkingBubbleProps = {
 
 export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: ThinkingBubbleProps) {
   const prevStreamingRef = useRef(isStreaming)
-  const hasContent = reasoning.trim().length > 0
+
+  // Typewriter effect for thinking content
+  const { displayedContent, isWaiting } = useTypewriter(reasoning, isStreaming, {
+    charsPerFrame: 4,
+    frameIntervalMs: 10,
+    waitingThresholdMs: 200,
+    // Disable typewriter when collapsed to avoid wasted computation
+    disabled: collapsed,
+  })
+
+  const hasContent = displayedContent.trim().length > 0
+  const hasTargetContent = reasoning.trim().length > 0
 
   useEffect(() => {
     if (prevStreamingRef.current && !isStreaming && !collapsed) {
@@ -19,13 +31,18 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
     prevStreamingRef.current = isStreaming
   }, [isStreaming, collapsed, onToggle])
 
-  if (!hasContent && !isStreaming) {
+  if (!hasTargetContent && !isStreaming) {
     return null
   }
 
   return (
     <article className="timeline-event chat-event is-agent thinking-event" data-collapsed={collapsed ? 'true' : 'false'}>
-      <div className="thinking-bubble" data-collapsed={collapsed ? 'true' : 'false'} data-streaming={isStreaming ? 'true' : 'false'}>
+      <div
+        className="thinking-bubble"
+        data-collapsed={collapsed ? 'true' : 'false'}
+        data-streaming={isStreaming ? 'true' : 'false'}
+        data-waiting={isWaiting ? 'true' : 'false'}
+      >
         <button
           type="button"
           className="thinking-bubble-header"
@@ -52,7 +69,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
         </button>
         {!collapsed && hasContent && (
           <div className="thinking-bubble-content">
-            <MarkdownViewer content={reasoning} className="thinking-bubble-markdown" enableHighlight={false} />
+            <MarkdownViewer content={displayedContent} className="thinking-bubble-markdown" enableHighlight={false} />
           </div>
         )}
       </div>
