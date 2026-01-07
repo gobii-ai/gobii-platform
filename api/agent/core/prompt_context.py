@@ -1250,7 +1250,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo = work remains. Mark each done before stopping, or set a schedule if blocked.",
+            "Cards in doing/todo = work remains. Deliver findings FIRST, then mark done in same response, or set schedule if blocked.",
             weight=1,
             non_shrinkable=True,
         )
@@ -2573,10 +2573,11 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Before stopping, please either:\n"
-                "• Complete tasks: `UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
-                "• Or set a schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-                "Avoid using sleep_until_next_trigger until one of these is done."
+                "Before stopping:\n"
+                "• FIRST: Send your findings to the user (actual content, not 'let me send...')\n"
+                "• THEN: Mark cards done in the same response\n"
+                "• Or set a schedule if work isn't ready: `UPDATE __agent_config SET schedule='...'`\n"
+                "Marking cards done without delivering findings = terminated before delivery."
             ),
             8,  # High weight
         )
@@ -2613,8 +2614,7 @@ def _get_work_completion_prompt(
             "work_in_progress",
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
-                "Continue working. Mark done when complete: "
-                "`UPDATE __kanban_cards SET status='done' WHERE friendly_id='...';`\n"
+                "Continue working. When ready: deliver findings to user, then mark done in same response.\n"
                 "End with \"CONTINUE_WORK_SIGNAL\" on its own line to signal more work coming (stripped from output)."
             ),
             4,
