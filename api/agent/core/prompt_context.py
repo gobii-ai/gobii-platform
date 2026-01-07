@@ -609,7 +609,7 @@ Mark each card done only after verifying the work is actually complete. If the t
 
 Example wrap-up (single response with tools):
 - sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');", will_continue_work=false)
-- send_chat_message(body="All done. Sharing results.")
+- send_chat_message(body="All done. Sharing results.", will_continue_work=false)
 
 **Final kanban updates = `will_continue_work=false`**: If you've finished the work, presented results to the user, and are only updating kanban to mark cards done, set `will_continue_work=false`. Don't continue just to do housekeeping—wrap it all up in one turn.
 
@@ -623,7 +623,7 @@ WRONG: After delivering results, send another message like "I've completed the r
 - After you've processed/delivered the output
 - Never optimistically before seeing results
 
-**The loop continues only when you explicitly ask for another turn.** Use `will_continue_work=true` on a tool call to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
+**The loop continues when you request another turn.** For `send_chat_message`, omitting `will_continue_work` defaults to continue; set `will_continue_work=false` when you're done. For other tools, use `will_continue_work=true` to keep going. Open todo/doing cards = work remains. Mark them done before stopping, or set a schedule to return.
 
 ---
 
@@ -654,7 +654,7 @@ sqlite_batch(sql="
   UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
 ", will_continue_work=false)
 
-send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...")
+send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...", will_continue_work=false)
 ```
 
 **The pattern:**
@@ -3267,6 +3267,7 @@ def _get_system_instruction(
             "**How stopping works (implied send mode):**\n"
             "- Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)\n"
             "- When all kanban cards are done: `will_continue_work=false` = stop, `will_continue_work=true` = continue\n"
+            "- Explicit `send_chat_message` defaults to continue unless you set `will_continue_work=false`\n"
             "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
         )
     else:
@@ -3274,6 +3275,7 @@ def _get_system_instruction(
             "**The will_continue_work flag:** "
             "Set true when you've fetched data that still needs reporting, or multi-step work is in progress. "
             "Set false only after verifying no todo/doing cards remain. "
+            "For `send_chat_message`, omitting `will_continue_work` defaults to continue; set `will_continue_work=false` to stop. "
             "When all kanban cards are done: `will_continue_work=false` on your message = auto-stop, `will_continue_work=true` = continue.\n"
         )
 

@@ -517,7 +517,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_send_chat,
         _mock_credit,
     ):
-        """When kanban is complete and a final message is sent (no will_continue_work), agent stops."""
+        """When kanban is complete and a final message is sent (will_continue_work=false), agent stops."""
         mock_build_prompt.return_value = (
             [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
             1000,
@@ -546,8 +546,8 @@ class TestBatchToolCallsWithSleep(TestCase):
             tc.function.arguments = args
             return tc
 
-        # No will_continue_work flag - this is a final message
-        tc_message = mk_tc('send_chat_message', '{"body": "Done."}')
+        # Explicit will_continue_work=false marks a final message
+        tc_message = mk_tc('send_chat_message', '{"body": "Done.", "will_continue_work": false}')
 
         msg = MagicMock()
         msg.tool_calls = [tc_message]

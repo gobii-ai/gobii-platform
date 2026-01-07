@@ -3165,6 +3165,9 @@ def _run_agent_loop(
                         # Abort remaining tool calls this iteration; retry next loop
                         followup_required = True
                         break
+                    call_id = getattr(call, "id", None)
+                    if not call_id and isinstance(call, dict):
+                        call_id = call.get("id")
                     if tool_name in MESSAGE_TOOL_NAMES:
                         body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
                         if body_key and isinstance(tool_params.get(body_key), str):
@@ -3174,6 +3177,12 @@ def _run_agent_loop(
                             if found_phrase:
                                 tool_params[body_key] = cleaned_body
                                 tool_params["will_continue_work"] = True
+                        if (
+                            tool_name == "send_chat_message"
+                            and call_id != "implied_send"
+                            and "will_continue_work" not in tool_params
+                        ):
+                            tool_params["will_continue_work"] = True
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
