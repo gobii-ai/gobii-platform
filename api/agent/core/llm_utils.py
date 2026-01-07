@@ -1,6 +1,5 @@
 """Shared helpers for constructing LiteLLM completion calls."""
-from __future__ import annotations
-
+import json
 import logging
 import time
 from typing import Any, Iterable
@@ -8,6 +7,7 @@ from typing import Any, Iterable
 from django.conf import settings
 import litellm
 
+from .llm_streaming import StreamAccumulator
 _HINT_KEYS = (
     "supports_temperature",
     "supports_tool_choice",
@@ -20,12 +20,191 @@ _HINT_KEYS = (
 
 logger = logging.getLogger(__name__)
 
+class EmptyLiteLLMResponseError(RuntimeError):
+    """Raised when LiteLLM returns a response without content, reasoning, or tools."""
+
+    def __init__(self, message: str, *, model: str | None = None, provider: str | None = None) -> None:
+        details = []
+        if provider:
+            details.append(f"provider={provider}")
+        if model:
+            details.append(f"model={model}")
+        if details:
+            message = f"{message} ({', '.join(details)})"
+        super().__init__(message)
+        self.model = model
+        self.provider = provider
+
+
 _RETRYABLE_ERRORS = (
     litellm.Timeout,
     litellm.APIConnectionError,
     litellm.ServiceUnavailableError,
     litellm.RateLimitError,
+    EmptyLiteLLMResponseError,
 )
+
+
+def _first_message_from_response(response: Any) -> Any:
+    if response is None:
+        return None
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not choices:
+        return None
+    first_choice = choices[0]
+    if isinstance(first_choice, dict):
+        return first_choice.get("message")
+    return getattr(first_choice, "message", None)
+
+
+def _extract_message_content(message: Any) -> str:
+    if message is None:
+        return ""
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            if isinstance(part, dict):
+                part_type = part.get("type")
+                if isinstance(part_type, str) and part_type.lower() in {"reasoning", "thinking"}:
+                    continue
+                text = part.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return "\n".join(parts)
+    return ""
+
+
+def _coerce_tool_calls(raw_tool_calls: Any) -> list[Any]:
+    if raw_tool_calls is None:
+        return []
+    if isinstance(raw_tool_calls, str):
+        try:
+            raw_tool_calls = json.loads(raw_tool_calls)
+        except Exception:
+            return [raw_tool_calls]
+    if isinstance(raw_tool_calls, dict):
+        return [raw_tool_calls]
+    if isinstance(raw_tool_calls, list):
+        return list(raw_tool_calls)
+    try:
+        return list(raw_tool_calls)
+    except TypeError:
+        return [raw_tool_calls]
+
+
+def _message_has_tool_calls(message: Any) -> bool:
+    if message is None:
+        return False
+    if isinstance(message, dict):
+        raw_tool_calls = message.get("tool_calls")
+    else:
+        raw_tool_calls = getattr(message, "tool_calls", None)
+    tool_calls = _coerce_tool_calls(raw_tool_calls)
+    if tool_calls:
+        return True
+    if isinstance(message, dict):
+        function_call = message.get("function_call")
+    else:
+        function_call = getattr(message, "function_call", None)
+    if function_call:
+        return True
+    if isinstance(message, dict):
+        content = message.get("content")
+    else:
+        content = getattr(message, "content", None)
+    if isinstance(content, list):
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            part_type = part.get("type")
+            if isinstance(part_type, str) and part_type.lower() in {"tool_use", "tool_call"}:
+                return True
+    return False
+
+
+def is_empty_litellm_response(response: Any) -> bool:
+    message = _first_message_from_response(response)
+    if message is None:
+        return True
+    content_text = _extract_message_content(message)
+    if content_text.strip():
+        return False
+    try:
+        from .token_usage import extract_reasoning_content
+    except Exception:
+        extract_reasoning_content = None
+    reasoning_text = extract_reasoning_content(response) if extract_reasoning_content else None
+    if isinstance(reasoning_text, str) and reasoning_text.strip():
+        return False
+    if _message_has_tool_calls(message):
+        return False
+    return True
+
+
+def raise_if_empty_litellm_response(
+    response: Any,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+) -> None:
+    if is_empty_litellm_response(response):
+        raise EmptyLiteLLMResponseError(
+            "LiteLLM returned an empty response",
+            model=model,
+            provider=provider,
+        )
+
+
+def stream_completion_with_broadcast(
+    *,
+    model: str,
+    messages: list[dict[str, Any]],
+    params: dict[str, Any],
+    tools: list[dict[str, Any]] | None,
+    provider: str | None,
+    stream_broadcaster: Any,
+    content_filter: Any = None,
+) -> Any:
+    if stream_broadcaster:
+        stream_broadcaster.start()
+
+    accumulator = StreamAccumulator()
+    try:
+        stream = run_completion(
+            model=model,
+            messages=messages,
+            params=params,
+            tools=tools,
+            drop_params=True,
+            stream=True,
+            stream_options={"include_usage": True},
+        )
+        for chunk in stream:
+            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
+            if stream_broadcaster:
+                filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
+                stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
+    finally:
+        if stream_broadcaster:
+            trailing = content_filter.flush() if content_filter else None
+            if trailing:
+                stream_broadcaster.push_delta(None, trailing)
+            stream_broadcaster.finish()
+
+    response = accumulator.build_response(model=model, provider=provider)
+    raise_if_empty_litellm_response(response, model=model, provider=provider)
+    return response
 
 
 def run_completion(
@@ -44,6 +223,7 @@ def run_completion(
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
     - Allows callers to control ``drop_params`` while keeping consistent defaults.
+    - Enforces non-empty responses when not streaming.
     """
     params = dict(params or {})
 
@@ -105,7 +285,10 @@ def run_completion(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            return litellm.completion(**kwargs)
+            response = litellm.completion(**kwargs)
+            if not kwargs.get("stream"):
+                raise_if_empty_litellm_response(response, model=model)
+            return response
         except _RETRYABLE_ERRORS as exc:
             if attempt >= max_attempts:
                 raise
@@ -119,4 +302,10 @@ def run_completion(
                 time.sleep(backoff_seconds * (2 ** (attempt - 1)))
 
 
-__all__ = ["run_completion"]
+__all__ = [
+    "EmptyLiteLLMResponseError",
+    "is_empty_litellm_response",
+    "raise_if_empty_litellm_response",
+    "run_completion",
+    "stream_completion_with_broadcast",
+]

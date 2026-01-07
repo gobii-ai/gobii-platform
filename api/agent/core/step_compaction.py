@@ -444,7 +444,11 @@ def llm_summarise_steps(
             if safety_identifier:
                 params["safety_identifier"] = str(safety_identifier)
 
-        resp = run_completion(model=model, messages=prompt, params=params)
+        resp = run_completion(
+            model=model,
+            messages=prompt,
+            params=params,
+        )
         token_usage, usage = log_agent_completion(
             agent,
             completion_type=PersistentAgentCompletion.CompletionType.STEP_COMPACTION,

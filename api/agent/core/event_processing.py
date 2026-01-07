@@ -56,8 +56,11 @@ from .processing_flags import (
     is_agent_pending,
     set_processing_heartbeat,
 )
-from .llm_utils import run_completion
-from .llm_streaming import StreamAccumulator
+from .llm_utils import (
+    EmptyLiteLLMResponseError,
+    run_completion,
+    stream_completion_with_broadcast,
+)
 from .token_usage import (
     coerce_int as _coerce_int,
     completion_kwargs_from_usage,
@@ -1002,47 +1005,6 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
 
-def _stream_completion_with_broadcast(
-    *,
-    model: str,
-    messages: List[dict],
-    params: dict,
-    tools: Optional[List[dict]],
-    provider: Optional[str],
-    stream_broadcaster: Optional[WebStreamBroadcaster],
-) -> Any:
-    if stream_broadcaster:
-        stream_broadcaster.start()
-
-    content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
-    accumulator = StreamAccumulator()
-    try:
-        stream = run_completion(
-            model=model,
-            messages=messages,
-            params=params,
-            tools=tools,
-            drop_params=True,
-            stream=True,
-            stream_options={"include_usage": True},
-        )
-        for chunk in stream:
-            reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
-            if stream_broadcaster:
-                filtered_delta = (
-                    content_filter.ingest(content_delta) if content_filter else content_delta
-                )
-                stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
-    finally:
-        if stream_broadcaster:
-            trailing = content_filter.flush() if content_filter else None
-            if trailing:
-                stream_broadcaster.push_delta(None, trailing)
-            stream_broadcaster.finish()
-
-    return accumulator.build_response(model=model, provider=provider)
-
-
 _GEMINI_CACHE_MANAGER = GeminiCachedContentManager()
 _GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
@@ -1157,13 +1119,15 @@ def _completion_with_failover(
 
                 if active_stream_broadcaster:
                     try:
-                        response = _stream_completion_with_broadcast(
+                        content_filter = _CanonicalContinuationStreamFilter()
+                        response = stream_completion_with_broadcast(
                             model=model,
                             messages=request_messages,
                             params=params,
                             tools=request_tools_payload,
                             provider=provider,
                             stream_broadcaster=active_stream_broadcaster,
+                            content_filter=content_filter,
                         )
                     except Exception:
                         logger.warning(
