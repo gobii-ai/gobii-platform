@@ -147,7 +147,7 @@ def prepare_tool_results_for_prompt(
         if result_id != record.step_id and _UUID_RESULT_ID_RE.match(str(record.step_id)):
             legacy_result_id = record.step_id
 
-        meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id)
+        meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id, record.tool_name)
         stored_in_db = record.tool_name not in EXCLUDED_TOOL_NAMES
         # Only show rich analysis for tools that fetch external data with unknown structure
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
@@ -379,6 +379,7 @@ def _ensure_tool_results_columns(conn) -> None:
 def _summarize_result(
     result_text: str,
     result_id: str,
+    tool_name: str = "",
 ) -> Tuple[Dict[str, object], Optional[str], Optional[str], Optional[ResultAnalysis]]:
     """Summarize a tool result and perform rich analysis.
 
@@ -437,6 +438,21 @@ def _summarize_result(
     # Additionally store result_json when applicable for json_extract() etc.
     result_json = truncated_text if is_json and not is_truncated else None
     result_text_store = truncated_text  # Always set for robust querying
+
+    # For http_request results, extract the content field directly into result_text
+    # so agents can read it without needing json_extract(result_json, '$.content')
+    if tool_name == "http_request" and is_json and not is_truncated:
+        try:
+            parsed = json.loads(truncated_text)
+            if isinstance(parsed, dict) and "content" in parsed:
+                content = parsed["content"]
+                if isinstance(content, str):
+                    result_text_store = content
+                elif content is not None:
+                    # Content is structured data (dict/list) - serialize it
+                    result_text_store = json.dumps(content, ensure_ascii=False)
+        except Exception:
+            pass  # Keep original on any error
 
     meta = {
         "bytes": full_bytes,
