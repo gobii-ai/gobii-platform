@@ -1,9 +1,11 @@
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import SimpleTestCase, override_settings, tag
 import litellm
 
 from api.agent.core.llm_utils import run_completion
+from tests.utils.token_usage import make_completion_response
 
 
 class RunCompletionReasoningTests(SimpleTestCase):
@@ -64,7 +66,7 @@ class RunCompletionReasoningTests(SimpleTestCase):
     @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_retries_on_retryable_error(self, mock_completion):
-        response = Mock()
+        response = make_completion_response()
         mock_completion.side_effect = [litellm.Timeout("timeout", model="mock-model", llm_provider="mock"), response]
 
         result = run_completion(
@@ -90,3 +92,21 @@ class RunCompletionReasoningTests(SimpleTestCase):
             )
 
         self.assertEqual(mock_completion.call_count, 1)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_retries_on_empty_response(self, mock_completion):
+        empty_message = SimpleNamespace(content="")
+        empty_response = SimpleNamespace(choices=[SimpleNamespace(message=empty_message)])
+        non_empty_response = make_completion_response(content="Hello")
+        mock_completion.side_effect = [empty_response, non_empty_response]
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+        )
+
+        self.assertIs(result, non_empty_response)
+        self.assertEqual(mock_completion.call_count, 2)

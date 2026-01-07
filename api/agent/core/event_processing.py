@@ -56,7 +56,10 @@ from .processing_flags import (
     is_agent_pending,
     set_processing_heartbeat,
 )
-from .llm_utils import run_completion
+from .llm_utils import (
+    raise_if_empty_litellm_response,
+    run_completion,
+)
 from .llm_streaming import StreamAccumulator
 from .token_usage import (
     coerce_int as _coerce_int,
@@ -1029,9 +1032,7 @@ def _stream_completion_with_broadcast(
         for chunk in stream:
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
-                filtered_delta = (
-                    content_filter.ingest(content_delta) if content_filter else content_delta
-                )
+                filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
                 stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
         if stream_broadcaster:
@@ -1040,7 +1041,9 @@ def _stream_completion_with_broadcast(
                 stream_broadcaster.push_delta(None, trailing)
             stream_broadcaster.finish()
 
-    return accumulator.build_response(model=model, provider=provider)
+    response = accumulator.build_response(model=model, provider=provider)
+    raise_if_empty_litellm_response(response, model=model, provider=provider)
+    return response
 
 
 _GEMINI_CACHE_MANAGER = GeminiCachedContentManager()

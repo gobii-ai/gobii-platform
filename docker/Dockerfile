@@ -29,7 +29,7 @@ RUN --mount=type=cache,target=/var/cache/apt \
         google-chrome-stable \
         fonts-liberation fonts-noto fonts-unifont \
         libasound2 libatk-bridge2.0-0 libatk1.0-0 libcups2 libdbus-1-3 \
-        libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libu2f-udev \
+        libdrm2 libgbm1 libglib2.0-0 libnspr4 libnss3 libu2f-udev ffmpeg \
         libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 xdg-utils nodejs && \
     rm -rf /var/lib/apt/lists/*
 
