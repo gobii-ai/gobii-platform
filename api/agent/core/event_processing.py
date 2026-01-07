@@ -470,6 +470,22 @@ def _normalize_persistent_agent_id(persistent_agent_id: Union[str, UUID]) -> Opt
         return None
 
 
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return None
+
+
 def _extract_message_content(message: Any) -> str:
     """Return normalized assistant message content, if any."""
     if message is None:
@@ -3259,8 +3275,10 @@ def _run_agent_loop(
                         followup_required = True
 
                     # Track if any tool explicitly requested continuation
-                    if isinstance(tool_params, dict) and tool_params.get("will_continue_work") is True:
-                        any_explicit_continuation = True
+                    if isinstance(tool_params, dict):
+                        will_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+                        if will_continue is True:
+                            any_explicit_continuation = True
 
                     executed_calls += 1
 
@@ -3325,7 +3343,12 @@ def _run_agent_loop(
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
             # Implied send without continuation phrase = agent is done, force stop
-            elif implied_stop_after_send and message_delivery_ok:
+            elif (
+                implied_stop_after_send
+                and message_delivery_ok
+                and not followup_required
+                and not any_explicit_continuation
+            ):
                 logger.info(
                     "Agent %s: implied send without continuation phrase; auto-sleeping.",
                     agent.id,

@@ -344,6 +344,77 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "ok"})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_with_tool_followup_continues_without_canonical_phrase(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_enabled_tool,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_dummy"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "dummy_tool"
+        tool_call.function.arguments = "{}"
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = "Got it, I'll dig in and report back."
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+
+        followup_msg = MagicMock()
+        followup_msg.tool_calls = None
+        followup_msg.function_call = None
+        followup_msg.content = None
+        followup_choice = MagicMock()
+        followup_choice.message = followup_msg
+        followup_resp = MagicMock()
+        followup_resp.choices = [followup_choice]
+
+        mock_completion.side_effect = [
+            (
+                resp,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+            (
+                followup_resp,
+                {
+                    "prompt_tokens": 4,
+                    "completion_tokens": 2,
+                    "total_tokens": 6,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
