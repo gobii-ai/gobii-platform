@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
-import { AgentChatBanner } from '../components/agentChat/AgentChatBanner'
-import type { ConnectionStatusTone } from '../components/agentChat/ConnectionStatusIndicator'
+import { AgentChatBanner, type ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
