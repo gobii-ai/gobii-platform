@@ -626,11 +626,11 @@ send_chat_message(body="All done. Here's what I found: ...",
                   will_continue_work=false)  # false because this IS the final report
 ```
 
-**Kanban complete + ANY message = immediate termination.** When all cards are done, your next message is your LAST message. There is no "let me send the report" - that message IS your only chance to send the report.
+**Kanban complete + message = you stop.** When all cards are done, your next message is your last. There's no "let me send the report"—that message is your only chance to send it.
 
-**DO the thing, don't ANNOUNCE the thing.** If you say "Let me compile the findings..." you will be terminated before you can compile anything. Your announcement was your final output. Include the actual report in your message, not a promise to send it.
+**Do the thing, don't announce the thing.** If you say "Let me compile the findings..." you'll stop before you can compile anything. Your announcement becomes your final output. Include the actual report in your message, not a promise to send it.
 
-WRONG: Mark all cards done → "I have the data! Let me send you the report..." → TERMINATED (report never sent)
+Wrong: Mark all cards done → "I have the data! Let me send you the report..." → stopped (report never sent)
 WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
 WRONG: send_chat_message(body="Done!") without sqlite_batch UPDATE in same response → card stays open.
 WRONG: `UPDATE ... SET status='done' WHERE status IN ('todo','doing')` → blindly marks incomplete work done.
@@ -1250,7 +1250,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo = work remains. Deliver findings FIRST, then mark done in same response, or set schedule if blocked.",
+            "Cards in doing/todo = work remains. When ready: deliver your complete report + mark done in one response.",
             weight=1,
             non_shrinkable=True,
         )
@@ -2573,11 +2573,8 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Before stopping:\n"
-                "• FIRST: Send your findings to the user (actual content, not 'let me send...')\n"
-                "• THEN: Mark cards done in the same response\n"
-                "• Or set a schedule if work isn't ready: `UPDATE __agent_config SET schedule='...'`\n"
-                "Marking cards done without delivering findings = terminated before delivery."
+                "Time to wrap up: send your complete report now—the full deliverable with all the details, not just a summary.\n"
+                "One response: complete report + mark cards done together. This is your moment to deliver."
             ),
             8,  # High weight
         )
@@ -2614,8 +2611,8 @@ def _get_work_completion_prompt(
             "work_in_progress",
             (
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
-                "Continue working. When ready: deliver findings to user, then mark done in same response.\n"
-                "End with \"CONTINUE_WORK_SIGNAL\" on its own line to signal more work coming (stripped from output)."
+                "Continue working. When ready to finish: deliver your complete report + mark done in one response.\n"
+                "Still working? End with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)."
             ),
             4,
         )
@@ -3207,7 +3204,7 @@ def _get_system_instruction(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → Message sends, then TERMINATES (if kanban complete)\n"
+            "  → Message sends, then you stop (if kanban complete)\n"
             "  'Let me send the report' = you never send it. Include actual content, not promises.\n"
             "  To continue: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n\n"
             "Message + tools\n"
