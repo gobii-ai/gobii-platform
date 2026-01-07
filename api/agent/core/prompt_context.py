@@ -628,7 +628,7 @@ send_chat_message(body="All done. Here's what I found: ...",
 
 **Kanban complete + message = you stop.** When all cards are done, your next message is your last. There's no "let me send the report"—that message is your only chance to send it.
 
-**Do the thing, don't announce the thing.** If you say "Let me compile the findings..." you'll stop before you can compile anything. Your announcement becomes your final output. Include the actual report in your message, not a promise to send it.
+**Deliver, don't announce.** When you send a message (whether via implied send or explicit tool), include the actual report—not "let me compile the findings..." There's no step after your message where you get to compile anything. Your message content IS the deliverable.
 
 Wrong: Mark all cards done → "I have the data! Let me send you the report..." → stopped (report never sent)
 WRONG: Mark card done in the same response as the tool call that does the work → you haven't seen the result yet.
@@ -2573,8 +2573,8 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Time to wrap up: send your complete report now—the full deliverable with all the details, not just a summary.\n"
-                "One response: complete report + mark cards done together. This is your moment to deliver."
+                "Time to wrap up. Send the actual report content, not 'let me compile...' Your message IS the deliverable.\n"
+                "One response: complete report + mark cards done together."
             ),
             8,  # High weight
         )
@@ -3188,7 +3188,7 @@ def _get_system_instruction(
         tool_example = implied_send_context.get("tool_example") if implied_send_context else "send_chat_message(...)"
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
-            "Your text auto-sends to the active web chat user.\n"
+            "Your text goes directly to the user—no buffer, no 'compile' step. Whatever you write is what they see.\n"
             "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "**Stopping is permanent**: When all cards are done and you send a message, you're terminated until next scheduled trigger or incoming message. Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report.\n"
             "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
