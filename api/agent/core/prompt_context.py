@@ -3732,6 +3732,12 @@ def _get_system_instruction(
         "```\n\n"
 
         "```\n"
+        "# File exports\n"
+        "Use create_file for text-based formats.\n"
+        "If exporting CSV or PDF, use create_csv or create_pdf instead.\n"
+        "```\n\n"
+
+        "```\n"
         "# Whitespace (critical for rendering)\n"
         "header          → \\n## Title\\n\\n     # blank before AND after\n"
         "table           → \\n| ... |\\n\\n       # blank before AND after\n"
