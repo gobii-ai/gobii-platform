@@ -547,6 +547,11 @@
     </script>
   {% endif %}
 
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
+  <script>(function(w,r){w._rwq=r;w[r]=w[r]||function(){(w[r].q=w[r].q||[]).push(arguments)}})(window,'rewardful');</script>
+  <script async src='https://r.wdfl.co/rw.js' data-rewardful='{{ settings.REWARDFUL_ID }}'></script>
+  {% endif %}
+
   <!-- block for head_extras -->
   {% block head_extras %}{% endblock %}
 
@@ -623,6 +628,17 @@
   <noscript>
   <img height="1" width="1" style="display:none;" alt="" src="https://px.ads.linkedin.com/collect/?pid={{ settings.LINKEDIN_PARTNER_ID }}&fmt=gif" />
   </noscript>
+  {% endif %}
+
+  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
+  <script>
+
+    rewardful('ready', function() {
+      if(Rewardful.referral) {
+        document.cookie = "rewardful-referral=" + Rewardful.referral + "; path=/; max-age=" + (60 * 60 * 24 * 30);
+      }
+    });
+  </script>
   {% endif %}
 
   {# Allow pages to inject additional scripts after the global includes. #}
