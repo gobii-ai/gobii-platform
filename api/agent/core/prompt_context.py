@@ -3237,6 +3237,8 @@ def _get_system_instruction(
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
+            "For file attachments, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
+            "do not paste file paths into the message body unless you want them shown as text.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
@@ -3265,6 +3267,8 @@ def _get_system_instruction(
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
             "Use send_chat_message for web chat, and send_email/send_sms/send_agent_message for other channels. "
+            "To attach files, pass $[/path] in the attachments param of send_chat_message/send_email/send_sms; "
+            "do not paste file paths into message text unless you want them shown. "
             "Focus on tool calls—text alone is not delivered.\n\n"
         )
         response_structure = (

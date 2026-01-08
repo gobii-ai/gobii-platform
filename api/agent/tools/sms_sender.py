@@ -70,7 +70,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables to include as download links.",
+                        "description": "Optional list of filespace paths or $[/path] variables to include as download links. Pass attachments here; do not include file paths in the SMS body unless you want them shown as text.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
