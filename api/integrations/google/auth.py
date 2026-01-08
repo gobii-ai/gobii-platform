@@ -66,11 +66,31 @@ def scope_list_for_tier(scope_tier: str | None) -> list[str]:
     return _unique_scopes(GOOGLE_SCOPE_TIERS.get(tier, GOOGLE_SCOPE_TIERS["minimal"]))
 
 
+# Google returns full URIs for some scopes we request as shorthand
+SCOPE_ALIASES = {
+    "email": "https://www.googleapis.com/auth/userinfo.email",
+    "profile": "https://www.googleapis.com/auth/userinfo.profile",
+}
+
+
+def _normalize_scope(scope: str) -> str:
+    """Normalize a scope to its canonical form for comparison."""
+    scope = scope.strip()
+    # Check if this is a shorthand that maps to a full URI
+    if scope in SCOPE_ALIASES:
+        return SCOPE_ALIASES[scope]
+    # Check if this is a full URI that maps from a shorthand
+    for shorthand, full_uri in SCOPE_ALIASES.items():
+        if scope == full_uri:
+            return full_uri
+    return scope
+
+
 def scopes_satisfy(required: Sequence[str], granted: Sequence[str]) -> bool:
     if not required:
         return True
-    granted_set = {s.strip() for s in granted or [] if s}
-    return all(scope in granted_set for scope in required)
+    granted_normalized = {_normalize_scope(s) for s in granted or [] if s}
+    return all(_normalize_scope(scope) in granted_normalized for scope in required)
 
 
 def build_connect_url(agent_id: str, scope_tier: str | None = None) -> str:
@@ -82,6 +102,9 @@ def build_connect_url(agent_id: str, scope_tier: str | None = None) -> str:
             base = reverse("google_workspace_connect", kwargs={"agent_id": agent_id})
         except Exception:
             base = f"/console/google/connect/{agent_id}/"
+    else:
+        # Append agent_id to configured base URL
+        base = base.rstrip("/") + f"/{agent_id}/"
     if scope_tier:
         separator = "&" if "?" in base else "?"
         base = f"{base}{separator}scope_tier={scope_tier}"
@@ -204,7 +227,10 @@ def _build_google_credentials(bundle: BoundGoogleCredential):
 
     scopes = bundle.scopes or scope_list_for_tier(bundle.scope_tier)
     expiry = bundle.credential.expires_at
-    # google-auth expects a naive or aware datetime; we pass aware if we have it.
+    # google-auth internally uses naive UTC datetimes, so convert if aware
+    if expiry is not None and expiry.tzinfo is not None:
+        from datetime import timezone as dt_timezone
+        expiry = expiry.astimezone(dt_timezone.utc).replace(tzinfo=None)
     credentials = Credentials(
         token=bundle.credential.access_token or None,
         refresh_token=bundle.credential.refresh_token or None,
