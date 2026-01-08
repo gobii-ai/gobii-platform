@@ -68,7 +68,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables to include.",
+                        "description": "Optional list of filespace paths or $[/path] variables to include. Pass attachments here; do not paste file paths into the chat body unless you want them shown as text.",
                     },
                     "will_continue_work": {
                         "type": "boolean",

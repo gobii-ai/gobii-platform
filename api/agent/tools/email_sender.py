@@ -67,7 +67,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables from the default filespace.",
+                        "description": "Optional list of filespace paths or $[/path] variables from the default filespace. Pass attachments here; do not paste file paths into the email body unless you want them shown as text.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
