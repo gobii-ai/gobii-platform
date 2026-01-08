@@ -9,6 +9,9 @@
         {% endif %}
         <li><a href="{% url 'agents' %}" class="text-slate-700 hover:text-blue-600">My Agents</a></li>
         <li><a href="https://github.com/gobii-ai/gobii-platform" class="text-slate-700 hover:text-blue-600" title="Self-Host Gobii">Self-Host</a></li>
+        {% if settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_AFFILIATE_LINK %}
+          <li><a href="{{ settings.REWARDFUL_AFFILIATE_LINK }}" class="text-slate-700 hover:text-blue-600" title="Gobii Affiliate Program" target="_blank" rel="noopener">Affiliate Program</a></li>
+        {% endif %}
       </ul>
     </div>
     {% if settings.GOBII_PROPRIETARY_MODE %}
