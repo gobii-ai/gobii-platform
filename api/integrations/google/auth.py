@@ -23,8 +23,8 @@ GOOGLE_SCOPE_TIERS: dict[str, list[str]] = {
     "minimal": [
         # "https://www.googleapis.com/auth/documents",
         # "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive.appdata",
-        "https://www.googleapis.com/auth/drive.appfolder",
+        # "https://www.googleapis.com/auth/drive.appdata",
+        # "https://www.googleapis.com/auth/drive.appfolder",
         "https://www.googleapis.com/auth/drive.file",
         "openid",
         "email",
