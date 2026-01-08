@@ -438,12 +438,12 @@ class HomeAgentSpawnView(TemplateView):
                 )
             
             if request.user.is_authenticated:
-                # User is already logged in, go directly to contact form
-                return redirect('agent_create_contact')
+                # User is already logged in, go directly to agent creation
+                return redirect('agent_quick_spawn')
             else:
-                # User needs to log in first, then continue to contact form
+                # User needs to log in first, then continue to agent creation
                 return redirect_to_login(
-                    next=reverse('agent_create_contact'),
+                    next=reverse('agent_quick_spawn'),
                     login_url=_login_url_with_utms(request),
                 )
         
@@ -543,9 +543,9 @@ class PretrainedWorkerHireView(View):
                 source=AnalyticsSource.WEB,
                 properties=analytics_properties,
             )
-            return redirect('agent_create_contact')
+            return redirect('agent_quick_spawn')
 
-        next_url = reverse('agent_create_contact')
+        next_url = reverse('agent_quick_spawn')
         if flow == "pro":
             request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = next_url
             request.session.modified = True

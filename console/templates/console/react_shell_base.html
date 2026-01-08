@@ -14,7 +14,7 @@
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
   {% block head_extra %}{% endblock %}
 </head>
-<body class="min-h-screen bg-slate-100">
+<body class="{{ body_class|default:'min-h-screen bg-slate-100' }}">
   <main class="min-h-screen">
     {% block react_shell_content %}{% endblock %}
   </main>
