@@ -1115,4 +1115,4 @@ FBP_COOKIE_NAME = "_fbp"
 FBP_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
 
 # Rewardful
-REWARDFUL_ID=env.int("REWARDFUL_ID", default=False)
+REWARDFUL_ID=env.str("REWARDFUL_ID", default="")
