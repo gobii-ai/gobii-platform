@@ -8,6 +8,7 @@ from django.test import TestCase, tag, override_settings
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.tools.agent_variables import clear_variables, set_agent_variable
 from api.agent.tools.create_csv import execute_create_csv
+from api.agent.tools.create_file import execute_create_file
 from api.agent.tools.create_pdf import execute_create_pdf
 from api.models import AgentFsNode, BrowserUseAgent, PersistentAgent
 
@@ -96,6 +97,48 @@ class FileExportToolTests(TestCase):
         first_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report.csv")
         second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).csv")
         self.assertNotEqual(first_node.id, second_node.id)
+
+    def test_create_file_writes_file(self):
+        result = execute_create_file(
+            self.agent,
+            {"content": "hello\n", "file_path": "/exports/note.txt", "mime_type": "text/plain"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/exports/note.txt]")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/note.txt")
+        self.assertEqual(node.mime_type, "text/plain")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"hello\n")
+
+    def test_create_file_infers_extension(self):
+        result = execute_create_file(
+            self.agent,
+            {"content": "hello\n", "file_path": "/exports/note", "mime_type": "text/plain"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/exports/note.txt]")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/note.txt")
+        self.assertEqual(node.mime_type, "text/plain")
+
+    def test_create_file_blocks_csv_exports(self):
+        result = execute_create_file(
+            self.agent,
+            {"content": "a,b\n1,2\n", "file_path": "/exports/report.csv", "mime_type": "text/csv"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("create_csv", result["message"])
+
+    def test_create_file_blocks_pdf_exports(self):
+        result = execute_create_file(
+            self.agent,
+            {"content": "<html></html>", "file_path": "/exports/report.pdf", "mime_type": "application/pdf"},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("create_pdf", result["message"])
 
     def test_create_pdf_blocks_external_assets(self):
         result = execute_create_pdf(

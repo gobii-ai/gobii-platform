@@ -214,6 +214,12 @@ AUTOTOOL_HEURISTICS: list[dict] = [
         ],
     },
     {
+        "keywords": ["text file", "plain text", "txt", "json", "xml", "html", "markdown", "md"],
+        "tools": [
+            "create_file",
+        ],
+    },
+    {
         "keywords": ["pdf"],
         "tools": [
             "create_pdf",
