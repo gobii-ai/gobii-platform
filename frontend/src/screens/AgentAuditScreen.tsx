@@ -30,6 +30,21 @@ function eventKeyFor(event: AuditEvent): string {
   return `${event.kind}:${id}`
 }
 
+function getTargetMessageId(
+  messages: AuditMessageEvent[],
+  direction: 'prev' | 'next',
+  activeId: string | null,
+): string | null {
+  if (!messages.length) return null
+  const activeIndex = activeId ? messages.findIndex((event) => event.id === activeId) : -1
+  if (activeIndex === -1) {
+    return direction === 'next' ? messages[0]?.id ?? null : messages[messages.length - 1]?.id ?? null
+  }
+  const targetIndex = direction === 'next' ? activeIndex + 1 : activeIndex - 1
+  if (targetIndex < 0 || targetIndex >= messages.length) return null
+  return messages[targetIndex]?.id ?? null
+}
+
 const DEFAULT_FILTERS = {
   messages: true,
   toolCalls: true,
@@ -515,6 +530,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const [messageSubmitting, setMessageSubmitting] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
+  const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
@@ -531,22 +547,27 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
 
-  const filteredEvents = useMemo(() => {
-    return events.filter((event) => {
-      const typeFilter = EVENT_TYPE_FILTERS.find((filter) => filter.matches(event))
-      if (typeFilter && !filters[typeFilter.key]) {
-        return false
-      }
-      if (event.kind === 'completion') {
-        const key = (event.completion_type || '').toLowerCase()
-        const completionFilter = COMPLETION_TYPE_FILTERS.find((filter) => filter.matches(key))
-        if (completionFilter && !filters[completionFilter.key]) {
+  const filterEvents = useCallback(
+    (eventsToFilter: AuditEvent[]) => {
+      return eventsToFilter.filter((event) => {
+        const typeFilter = EVENT_TYPE_FILTERS.find((filter) => filter.matches(event))
+        if (typeFilter && !filters[typeFilter.key]) {
           return false
         }
-      }
-      return true
-    })
-  }, [events, filters])
+        if (event.kind === 'completion') {
+          const key = (event.completion_type || '').toLowerCase()
+          const completionFilter = COMPLETION_TYPE_FILTERS.find((filter) => filter.matches(key))
+          if (completionFilter && !filters[completionFilter.key]) {
+            return false
+          }
+        }
+        return true
+      })
+    },
+    [filters],
+  )
+
+  const filteredEvents = useMemo(() => filterEvents(events), [events, filterEvents])
 
   const messageEvents = useMemo(
     () => filteredEvents.filter((event) => event.kind === 'message') as AuditMessageEvent[],
@@ -558,9 +579,14 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     [messageEvents, activeMessageId],
   )
   const messageEventIds = useMemo(() => messageEvents.map((event) => event.id), [messageEvents])
-  const canNavigatePrevMessage = messageEvents.length > 0 && (activeMessageIndex === -1 || activeMessageIndex > 0)
-  const canNavigateNextMessage =
-    messageEvents.length > 0 && (activeMessageIndex === -1 || activeMessageIndex < messageEvents.length - 1)
+  const messageFilterEnabled = filters.messages
+  const canNavigatePrevMessage =
+    messageFilterEnabled && messageEvents.length > 0 && (activeMessageIndex === -1 || activeMessageIndex > 0)
+  const canNavigateNextMessage = messageFilterEnabled
+    ? messageEvents.length > 0
+      ? activeMessageIndex === -1 || activeMessageIndex < messageEvents.length - 1 || hasMore
+      : hasMore
+    : false
   const hasFilteredEvents = filteredEvents.length > 0
 
   useEffect(() => {
@@ -669,27 +695,50 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     [filteredEvents],
   )
 
-  const handleNavigateMessage = useCallback(
-    (direction: 'prev' | 'next') => {
-      if (!messageEvents.length) return
-      let targetIndex = 0
-      if (activeMessageIndex === -1) {
-        targetIndex = direction === 'next' ? 0 : messageEvents.length - 1
-      } else {
-        targetIndex =
-          direction === 'next'
-            ? Math.min(activeMessageIndex + 1, messageEvents.length - 1)
-            : Math.max(activeMessageIndex - 1, 0)
+  const scrollToMessage = useCallback((messageId: string) => {
+    const target = messageNodeMap.current.get(messageId)
+    if (!target) return false
+    const offset = (bannerRef.current?.offsetHeight ?? 0) + 24
+    const top = target.getBoundingClientRect().top + window.scrollY - offset
+    window.scrollTo({ top, behavior: 'smooth' })
+    return true
+  }, [])
+
+  const scrollToMessageAndActivate = useCallback(
+    (messageId: string) => {
+      if (!scrollToMessage(messageId)) {
+        return false
       }
-      const targetId = messageEvents[targetIndex]?.id
-      if (!targetId) return
-      const target = messageNodeMap.current.get(targetId)
-      if (!target) return
-      const offset = (bannerRef.current?.offsetHeight ?? 0) + 24
-      const top = target.getBoundingClientRect().top + window.scrollY - offset
-      window.scrollTo({ top, behavior: 'smooth' })
+      setActiveMessageId(messageId)
+      return true
     },
-    [activeMessageIndex, messageEvents],
+    [scrollToMessage],
+  )
+
+  const handleNavigateMessage = useCallback(
+    async (direction: 'prev' | 'next') => {
+      if (!messageFilterEnabled) return
+      let targetId = getTargetMessageId(messageEvents, direction, activeMessageId)
+      if (!targetId && direction === 'next' && hasMore && !loadingRef.current) {
+        await loadMore()
+        const latestEvents = useAgentAuditStore.getState().events
+        const nextMessages = filterEvents(latestEvents).filter((event) => event.kind === 'message') as AuditMessageEvent[]
+        targetId = getTargetMessageId(nextMessages, direction, activeMessageId)
+      }
+      if (!targetId) return
+      if (!scrollToMessageAndActivate(targetId)) {
+        pendingMessageScrollId.current = targetId
+      }
+    },
+    [
+      activeMessageId,
+      filterEvents,
+      hasMore,
+      loadMore,
+      messageEvents,
+      messageFilterEnabled,
+      scrollToMessageAndActivate,
+    ],
   )
 
   const registerMessageRef = useCallback(
@@ -766,6 +815,14 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     nodes.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
   }, [messageEventIds])
+
+  useEffect(() => {
+    const pendingId = pendingMessageScrollId.current
+    if (!pendingId) return
+    if (scrollToMessageAndActivate(pendingId)) {
+      pendingMessageScrollId.current = null
+    }
+  }, [messageEventIds, scrollToMessageAndActivate])
 
   useEffect(() => {
     loadingRef.current = loading
