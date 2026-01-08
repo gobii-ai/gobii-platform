@@ -1116,3 +1116,4 @@ FBP_MAX_AGE = 90 * 24 * 60 * 60  # 90 days
 
 # Rewardful
 REWARDFUL_ID=env.str("REWARDFUL_ID", default="")
+REWARDFUL_AFFILIATE_LINK=env.str("REWARDFUL_AFFILIATE_LINK", default="")
