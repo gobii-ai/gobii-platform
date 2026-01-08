@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 
 type EventHeaderProps = {
   left: ReactNode
@@ -9,7 +10,7 @@ type EventHeaderProps = {
 }
 
 const collapseButtonClassName =
-  'rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800'
+  'inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:text-slate-900'
 
 export function EventHeader({ left, right, collapsed = false, onToggle, className }: EventHeaderProps) {
   const classes = ['flex items-start justify-between gap-3', className].filter(Boolean).join(' ')
@@ -20,8 +21,13 @@ export function EventHeader({ left, right, collapsed = false, onToggle, classNam
       <div className="flex items-center gap-2">
         {right}
         {onToggle ? (
-          <button type="button" onClick={onToggle} className={collapseButtonClassName}>
-            {collapsed ? 'Expand' : 'Collapse'}
+          <button
+            type="button"
+            onClick={onToggle}
+            className={collapseButtonClassName}
+            aria-label={collapsed ? 'Expand event' : 'Collapse event'}
+          >
+            {collapsed ? <ChevronDown className="h-4 w-4" aria-hidden /> : <ChevronUp className="h-4 w-4" aria-hidden />}
           </button>
         ) : null}
       </div>
