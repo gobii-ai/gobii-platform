@@ -22,7 +22,7 @@ def get_secure_credentials_request_tool() -> dict:
             "name": "secure_credentials_request",
             "description": (
                 "Request secure credentials from the user ONLY when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
-                "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
+                "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g. Slack); "
                 "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
                 "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
                 "IT WILL RETURN URL(S). ALWAYS MESSAGE THE USER WITH THE CORRECT ONE: "
