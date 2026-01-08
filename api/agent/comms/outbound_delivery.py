@@ -1,8 +1,10 @@
 import logging
 import os
+from email.utils import formataddr
 
 from django.core.mail import get_connection
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from waffle import switch_is_active
 from anymail.message import AnymailMessage
@@ -14,6 +16,7 @@ from api.models import (
     CommsChannel,
     DeliveryStatus,
     OutboundMessageAttempt,
+    PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
 )
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
@@ -250,6 +253,57 @@ def _prepare_email_content(message: PersistentAgentMessage, body_raw: str) -> tu
     html_snippet, plaintext_body = convert_body_to_html_and_plaintext(body_raw)
     agent = getattr(message, "owner_agent", None)
     return append_footer_if_needed(agent, html_snippet, plaintext_body)
+
+
+def _should_suppress_display_name(from_endpoint) -> bool:
+    if from_endpoint is None:
+        return False
+    try:
+        account = from_endpoint.agentemailaccount
+    except AgentEmailAccount.DoesNotExist:
+        account = None
+    if account is None:
+        return False
+    if account.is_outbound_enabled or account.is_inbound_enabled:
+        return True
+    if any([
+        account.smtp_host,
+        account.imap_host,
+        account.smtp_username,
+        account.imap_username,
+        account.smtp_port,
+        account.imap_port,
+    ]):
+        return True
+    if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
+        return True
+    if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+        return True
+    try:
+        account.oauth_credential
+    except ObjectDoesNotExist:
+        return False
+    return True
+
+
+def _build_from_header(message: PersistentAgentMessage) -> str:
+    from_endpoint = getattr(message, "from_endpoint", None)
+    from_address = (getattr(from_endpoint, "address", None) or "").strip()
+    if not from_address:
+        return ""
+    if _should_suppress_display_name(from_endpoint):
+        return from_address
+    display_name = ""
+    if from_endpoint is not None:
+        try:
+            email_meta = from_endpoint.email_meta
+        except PersistentAgentEmailEndpoint.DoesNotExist:
+            email_meta = None
+        display_name = (getattr(email_meta, "display_name", "") or "").strip()
+    display_name = display_name.replace("\r", "").replace("\n", "").strip()
+    if display_name:
+        return formataddr((display_name, from_address))
+    return from_address
 
 
 def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage) -> int:
@@ -553,7 +607,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         # Log simulated content details for parity with non-prod simulation branch
         logger.info(
             "--- SIMULATED EMAIL ---\nFrom: %s\nTo: %s\nSubject: %s\n\n=== ORIGINAL RAW BODY ===\n%s\n\n=== CONVERTED HTML VERSION ===\n%s\n\n=== CONVERTED PLAINTEXT VERSION ===\n%s\n-----------------------",
-            message.from_endpoint.address,
+            _build_from_header(message),
             message.to_endpoint.address,
             subject,
             message.body,
@@ -623,7 +677,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
             "=== CONVERTED HTML VERSION ===\n%s\n\n"
             "=== CONVERTED PLAINTEXT VERSION ===\n%s\n"
             "-----------------------",
-            message.from_endpoint.address,
+            _build_from_header(message),
             message.to_endpoint.address,
             subject,
             message.body,
@@ -668,6 +722,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
 
     try:
         from_address = message.from_endpoint.address
+        from_header = _build_from_header(message)
         to_address = message.to_endpoint.address
         subject = message.raw_payload.get("subject", "")
         body_raw = message.body
@@ -758,7 +813,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
         msg = AnymailMessage(
             subject=subject,
             body=plaintext_body,
-            from_email=from_address,
+            from_email=from_header,
             to=[to_address],
             cc=cc_addresses if cc_addresses else None,
             connection=_get_postmark_connection(),
