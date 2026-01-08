@@ -21,8 +21,11 @@ logger = logging.getLogger(__name__)
 # Canonical scope tiers (Iteration 1: minimal + search-enabled; full reserved for later)
 GOOGLE_SCOPE_TIERS: dict[str, list[str]] = {
     "minimal": [
-        "https://www.googleapis.com/auth/documents",
-        "https://www.googleapis.com/auth/spreadsheets",
+        # "https://www.googleapis.com/auth/documents",
+        # "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.appdata",
+        "https://www.googleapis.com/auth/drive.appfolder",
+        "https://www.googleapis.com/auth/drive.file",
         "openid",
         "email",
         "profile",
@@ -138,6 +141,7 @@ def resolve_binding(
                 "Please enable GOOGLE_WORKSPACE_TOOLS_ENABLED and configure OAuth."
             ),
         }
+
 
     try:
         binding = agent.google_workspace_binding  # type: ignore[attr-defined]
