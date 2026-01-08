@@ -924,19 +924,23 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             raise
 
         # 2️⃣  Kick off Checkout with the *existing* customer
-        session = stripe.checkout.Session.create(
-            customer=customer.id,                       # <-- key line
-            api_key=stripe.api_key,
-            success_url=success_url,
-            cancel_url=request.build_absolute_uri(reverse("pages:home")),
-            mode="subscription",
-            allow_promotion_codes=True,
-            subscription_data={
+        checkout_kwargs = {
+            "customer": customer.id,
+            "api_key": stripe.api_key,
+            "success_url": success_url,
+            "cancel_url": request.build_absolute_uri(reverse("pages:home")),
+            "mode": "subscription",
+            "allow_promotion_codes": True,
+            "subscription_data": {
                 "metadata": metadata,
             },
-            line_items=line_items,
-            idempotency_key=f"checkout-startup-{customer.id}-{event_id}",
-        )
+            "line_items": line_items,
+            "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
+        }
+        rewardful_referral = request.COOKIES.get("rewardful-referral", "")
+        if rewardful_referral:
+            checkout_kwargs["client_reference_id"] = rewardful_referral
+        session = stripe.checkout.Session.create(**checkout_kwargs)
 
         _emit_checkout_initiated_event(
             request=request,
@@ -1056,19 +1060,23 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                     "Failed to upgrade subscription for customer %s; falling back to checkout", customer.id,
                 )
 
-        session = stripe.checkout.Session.create(
-            customer=customer.id,
-            api_key=stripe.api_key,
-            success_url=success_url,
-            cancel_url=request.build_absolute_uri(reverse("pages:home")),
-            mode="subscription",
-            allow_promotion_codes=True,
-            subscription_data={
+        checkout_kwargs = {
+            "customer": customer.id,
+            "api_key": stripe.api_key,
+            "success_url": success_url,
+            "cancel_url": request.build_absolute_uri(reverse("pages:home")),
+            "mode": "subscription",
+            "allow_promotion_codes": True,
+            "subscription_data": {
                 "metadata": metadata,
             },
-            line_items=line_items,
-            idempotency_key=f"checkout-scale-{customer.id}-{event_id}",
-        )
+            "line_items": line_items,
+            "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
+        }
+        rewardful_referral = request.COOKIES.get("rewardful-referral", "")
+        if rewardful_referral:
+            checkout_kwargs["client_reference_id"] = rewardful_referral
+        session = stripe.checkout.Session.create(**checkout_kwargs)
 
         _emit_checkout_initiated_event(
             request=request,
