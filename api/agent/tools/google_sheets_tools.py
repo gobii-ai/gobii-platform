@@ -3,11 +3,17 @@ from typing import Any, Callable, Dict, Tuple
 from api.integrations.google.auth import resolve_binding
 from api.integrations.google.sheets import (
     append_values,
+    clear_range,
     create_spreadsheet,
     create_worksheet,
+    delete_rows,
     describe_current_user,
+    find_rows,
+    get_spreadsheet_info,
     get_values,
+    list_worksheets,
     update_cell,
+    update_values,
 )
 from api.models import PersistentAgent
 
@@ -167,6 +173,151 @@ def _def_get_current_user() -> Dict[str, Any]:
     }
 
 
+def _def_get_spreadsheet_info() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_get_spreadsheet_info",
+            "description": (
+                "Get metadata about a spreadsheet including title and list of all sheets/tabs. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                },
+                "required": ["spreadsheet_id"],
+            },
+        },
+    }
+
+
+def _def_list_worksheets() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_list_worksheets",
+            "description": (
+                "List all worksheets/tabs in a spreadsheet. Returns sheet IDs, titles, and dimensions. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                },
+                "required": ["spreadsheet_id"],
+            },
+        },
+    }
+
+
+def _def_clear_range() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_clear_range",
+            "description": (
+                "Clear all values in a range (keeps formatting). Use this to reset data before writing new values. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                    "range": {"type": "string", "description": "A1 notation range to clear (e.g., Sheet1!A1:D10)."},
+                },
+                "required": ["spreadsheet_id", "range"],
+            },
+        },
+    }
+
+
+def _def_find_rows() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_find_rows",
+            "description": (
+                "Find rows where a specific column matches a value. Returns matching row numbers and data. "
+                "Useful for searching spreadsheets like 'find all rows where Name = John'. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                    "range": {"type": "string", "description": "A1 notation range to search (e.g., Sheet1 or Sheet1!A:Z)."},
+                    "search_column": {"type": "string", "description": "Column to search in. Can be letter (A, B, C) or 0-indexed number."},
+                    "search_value": {"type": "string", "description": "Value to search for (case-insensitive)."},
+                },
+                "required": ["spreadsheet_id", "search_value"],
+            },
+        },
+    }
+
+
+def _def_delete_rows() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_delete_rows",
+            "description": (
+                "Delete one or more rows from a sheet. Requires the numeric sheet_id (from list_worksheets), not sheet name. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                    "sheet_id": {"type": "integer", "description": "Numeric sheet ID (get from list_worksheets, not sheet name)."},
+                    "start_row": {"type": "integer", "description": "Starting row index (0-indexed, so row 1 = 0)."},
+                    "end_row": {"type": "integer", "description": "Ending row index, exclusive (optional, defaults to start_row + 1 for single row)."},
+                },
+                "required": ["spreadsheet_id", "sheet_id", "start_row"],
+            },
+        },
+    }
+
+
+def _def_update_values() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_sheets_update_values",
+            "description": (
+                "Update multiple cells in a range at once. More efficient than update_cell for bulk updates. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string", "description": "The spreadsheet ID."},
+                    "range": {"type": "string", "description": "A1 notation range to update (e.g., Sheet1!A1:C3)."},
+                    "values": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": "2D array of values to write, e.g. [['A1', 'B1'], ['A2', 'B2']].",
+                    },
+                    "value_input_option": {
+                        "type": "string",
+                        "enum": ["RAW", "USER_ENTERED"],
+                        "description": "How to interpret values (RAW = literal, USER_ENTERED = parse formulas/dates).",
+                    },
+                },
+                "required": ["spreadsheet_id", "range", "values"],
+            },
+        },
+    }
+
+
 PLACEHOLDER_TOOL_NAMES = [
     "google_sheets_add_column",
     "google_sheets_add_conditional_format_rule",
@@ -176,16 +327,12 @@ PLACEHOLDER_TOOL_NAMES = [
     "google_sheets_clear_cell",
     "google_sheets_clear_rows",
     "google_sheets_copy_worksheet",
-    "google_sheets_delete_rows",
     "google_sheets_delete_worksheet",
-    "google_sheets_find_row",
     "google_sheets_get_cell",
     "google_sheets_get_sheet",
-    "google_sheets_get_spreadsheet_by_id",
     "google_sheets_insert_anchored_note",
     "google_sheets_insert_comment",
     "google_sheets_insert_dimension",
-    "google_sheets_list_worksheets",
     "google_sheets_move_dimension",
     "google_sheets_set_data_validation",
     "google_sheets_update_conditional_format_rule",
@@ -203,6 +350,12 @@ SHEETS_TOOL_DEFINITIONS: Dict[str, Callable[[], Dict[str, Any]]] = {
     "google_sheets_get_values_in_range": _def_get_values,
     "google_sheets_update_cell": _def_update_cell,
     "google_sheets_get_current_user": _def_get_current_user,
+    "google_sheets_get_spreadsheet_info": _def_get_spreadsheet_info,
+    "google_sheets_list_worksheets": _def_list_worksheets,
+    "google_sheets_clear_range": _def_clear_range,
+    "google_sheets_find_rows": _def_find_rows,
+    "google_sheets_delete_rows": _def_delete_rows,
+    "google_sheets_update_values": _def_update_values,
 }
 
 # Add placeholders
@@ -254,6 +407,48 @@ def _execute_get_current_user(agent: PersistentAgent, params: Dict[str, Any]) ->
     return describe_current_user(bundle)
 
 
+def _execute_get_spreadsheet_info(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return get_spreadsheet_info(bundle, params)
+
+
+def _execute_list_worksheets(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return list_worksheets(bundle, params)
+
+
+def _execute_clear_range(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return clear_range(bundle, params)
+
+
+def _execute_find_rows(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return find_rows(bundle, params)
+
+
+def _execute_delete_rows(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return delete_rows(bundle, params)
+
+
+def _execute_update_values(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent)
+    if action:
+        return action
+    return update_values(bundle, params)
+
+
 def _execute_placeholder(agent: PersistentAgent, params: Dict[str, Any], *, tool_name: str) -> Dict[str, Any]:
     return {
         "status": "error",
@@ -268,6 +463,12 @@ SHEETS_TOOL_EXECUTORS: Dict[str, Callable[[PersistentAgent, Dict[str, Any]], Dic
     "google_sheets_get_values_in_range": _execute_get_values,
     "google_sheets_update_cell": _execute_update_cell,
     "google_sheets_get_current_user": _execute_get_current_user,
+    "google_sheets_get_spreadsheet_info": _execute_get_spreadsheet_info,
+    "google_sheets_list_worksheets": _execute_list_worksheets,
+    "google_sheets_clear_range": _execute_clear_range,
+    "google_sheets_find_rows": _execute_find_rows,
+    "google_sheets_delete_rows": _execute_delete_rows,
+    "google_sheets_update_values": _execute_update_values,
 }
 
 # Register placeholder executors

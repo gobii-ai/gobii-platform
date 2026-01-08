@@ -99,13 +99,23 @@ GOOGLE_BUILTIN_DEFAULT_TOOLS = {
     "google_docs_create_document",
     "google_docs_find_document",
     "google_docs_get_current_user",
-    # Sheets (implemented subset in Iteration 1)
+    "google_docs_get_document_content",
+    "google_docs_append_text",
+    "google_docs_replace_all_text",
+    "google_docs_insert_table",
+    # Sheets
     "google_sheets_create_spreadsheet",
     "google_sheets_create_worksheet",
     "google_sheets_append_values",
     "google_sheets_get_values_in_range",
     "google_sheets_update_cell",
     "google_sheets_get_current_user",
+    "google_sheets_get_spreadsheet_info",
+    "google_sheets_list_worksheets",
+    "google_sheets_clear_range",
+    "google_sheets_find_rows",
+    "google_sheets_delete_rows",
+    "google_sheets_update_values",
 }
 
 
@@ -281,6 +291,10 @@ GOOGLE_DOC_TOOL_NAMES = [
     "google_docs_create_document",
     "google_docs_find_document",
     "google_docs_get_current_user",
+    "google_docs_get_document_content",
+    "google_docs_append_text",
+    "google_docs_replace_all_text",
+    "google_docs_insert_table",
 ]
 
 GOOGLE_SHEET_TOOL_NAMES = [
@@ -291,6 +305,7 @@ GOOGLE_SHEET_TOOL_NAMES = [
     "google_sheets_add_single_row",
     "google_sheets_append_values",
     "google_sheets_clear_cell",
+    "google_sheets_clear_range",
     "google_sheets_clear_rows",
     "google_sheets_copy_worksheet",
     "google_sheets_create_spreadsheet",
@@ -298,10 +313,12 @@ GOOGLE_SHEET_TOOL_NAMES = [
     "google_sheets_delete_rows",
     "google_sheets_delete_worksheet",
     "google_sheets_find_row",
+    "google_sheets_find_rows",
     "google_sheets_get_cell",
     "google_sheets_get_current_user",
     "google_sheets_get_sheet",
     "google_sheets_get_spreadsheet_by_id",
+    "google_sheets_get_spreadsheet_info",
     "google_sheets_get_values_in_range",
     "google_sheets_insert_anchored_note",
     "google_sheets_insert_comment",
@@ -314,6 +331,7 @@ GOOGLE_SHEET_TOOL_NAMES = [
     "google_sheets_update_formatting",
     "google_sheets_update_multiple_rows",
     "google_sheets_update_row",
+    "google_sheets_update_values",
     "google_sheets_upsert_row",
 ]
 

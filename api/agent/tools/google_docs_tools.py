@@ -1,7 +1,15 @@
 from typing import Any, Callable, Dict, Tuple
 
 from api.integrations.google.auth import resolve_binding
-from api.integrations.google.docs import create_document, describe_current_user, find_document
+from api.integrations.google.docs import (
+    append_text,
+    create_document,
+    describe_current_user,
+    find_document,
+    get_document_content,
+    insert_table,
+    replace_all_text,
+)
 from api.models import PersistentAgent
 
 
@@ -70,10 +78,110 @@ def _definition_get_current_user() -> Dict[str, Any]:
     }
 
 
+def _definition_get_document_content() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_docs_get_document_content",
+            "description": (
+                "Read the text content of an existing Google Doc. Returns the document title and plain text. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "The Google Doc document ID."},
+                },
+                "required": ["document_id"],
+            },
+        },
+    }
+
+
+def _definition_append_text() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_docs_append_text",
+            "description": (
+                "Append text to the end of an existing Google Doc. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "The Google Doc document ID."},
+                    "text": {"type": "string", "description": "The text to append to the document."},
+                },
+                "required": ["document_id", "text"],
+            },
+        },
+    }
+
+
+def _definition_replace_all_text() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_docs_replace_all_text",
+            "description": (
+                "Find and replace all occurrences of text in a Google Doc. "
+                "Useful for templates with placeholders like '[Month Value]' or '{{name}}'. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "The Google Doc document ID."},
+                    "find_text": {"type": "string", "description": "The text to find (e.g., '[Month Value]')."},
+                    "replace_text": {"type": "string", "description": "The text to replace it with."},
+                    "match_case": {"type": "boolean", "description": "Whether to match case (default: true)."},
+                },
+                "required": ["document_id", "find_text", "replace_text"],
+            },
+        },
+    }
+
+
+def _definition_insert_table() -> Dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": "google_docs_insert_table",
+            "description": (
+                "Insert a table at the end of a Google Doc. Optionally populate cells with initial data. "
+                "If authorization is needed, this tool will return status=action_required with connect_url; "
+                "always send that link to the user."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "document_id": {"type": "string", "description": "The Google Doc document ID."},
+                    "rows": {"type": "integer", "description": "Number of rows (default: 3)."},
+                    "columns": {"type": "integer", "description": "Number of columns (default: 3)."},
+                    "data": {
+                        "type": "array",
+                        "items": {"type": "array", "items": {"type": "string"}},
+                        "description": "Optional 2D array of cell values, e.g. [['Header1', 'Header2'], ['Row1Col1', 'Row1Col2']].",
+                    },
+                },
+                "required": ["document_id"],
+            },
+        },
+    }
+
+
 DOCS_TOOL_DEFINITIONS: Dict[str, Callable[[], Dict[str, Any]]] = {
     "google_docs_create_document": _definition_create_document,
     "google_docs_find_document": _definition_find_document,
     "google_docs_get_current_user": _definition_get_current_user,
+    "google_docs_get_document_content": _definition_get_document_content,
+    "google_docs_append_text": _definition_append_text,
+    "google_docs_replace_all_text": _definition_replace_all_text,
+    "google_docs_insert_table": _definition_insert_table,
 }
 
 
@@ -98,10 +206,42 @@ def _execute_get_current_user(agent: PersistentAgent, params: Dict[str, Any]) ->
     return describe_current_user(bundle)
 
 
+def _execute_get_document_content(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent, scope_tier="minimal")
+    if action:
+        return action
+    return get_document_content(bundle, params)
+
+
+def _execute_append_text(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent, scope_tier="minimal")
+    if action:
+        return action
+    return append_text(bundle, params)
+
+
+def _execute_replace_all_text(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent, scope_tier="minimal")
+    if action:
+        return action
+    return replace_all_text(bundle, params)
+
+
+def _execute_insert_table(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+    bundle, action = _resolve_or_action(agent, scope_tier="minimal")
+    if action:
+        return action
+    return insert_table(bundle, params)
+
+
 DOCS_TOOL_EXECUTORS: Dict[str, Callable[[PersistentAgent, Dict[str, Any]], Dict[str, Any]]] = {
     "google_docs_create_document": _execute_create_document,
     "google_docs_find_document": _execute_find_document,
     "google_docs_get_current_user": _execute_get_current_user,
+    "google_docs_get_document_content": _execute_get_document_content,
+    "google_docs_append_text": _execute_append_text,
+    "google_docs_replace_all_text": _execute_replace_all_text,
+    "google_docs_insert_table": _execute_insert_table,
 }
 
 

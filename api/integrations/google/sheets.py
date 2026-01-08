@@ -192,3 +192,246 @@ def describe_current_user(bound_bundle) -> Dict[str, Any]:
         "scope_tier": bound_bundle.scope_tier,
         "scopes": credential.scopes_list(),
     }
+
+
+def get_spreadsheet_info(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get metadata about a spreadsheet including title and list of sheets."""
+    credentials, err = ensure_fresh_credentials(bound_bundle)
+    if err:
+        return err
+    service, err = _build_sheets_service(credentials)
+    if err:
+        return err
+
+    spreadsheet_id = params.get("spreadsheet_id")
+    if not spreadsheet_id:
+        return {"status": "error", "message": "spreadsheet_id is required"}
+
+    try:
+        resp = service.spreadsheets().get(
+            spreadsheetId=spreadsheet_id,
+            fields="spreadsheetId,properties/title,sheets/properties",
+        ).execute()
+
+        sheets_list = []
+        for sheet in resp.get("sheets", []):
+            props = sheet.get("properties", {})
+            sheets_list.append({
+                "sheet_id": props.get("sheetId"),
+                "title": props.get("title"),
+                "index": props.get("index"),
+                "row_count": props.get("gridProperties", {}).get("rowCount"),
+                "column_count": props.get("gridProperties", {}).get("columnCount"),
+            })
+
+        return {
+            "status": "ok",
+            "spreadsheet_id": resp.get("spreadsheetId"),
+            "title": resp.get("properties", {}).get("title"),
+            "sheets": sheets_list,
+            "url": SHEETS_URL_TEMPLATE.format(sheet_id=spreadsheet_id),
+        }
+    except Exception as exc:
+        logger.error("Sheets get_spreadsheet_info failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def list_worksheets(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """List all worksheets/tabs in a spreadsheet."""
+    # This is essentially the same as get_spreadsheet_info but returns just sheets
+    result = get_spreadsheet_info(bound_bundle, params)
+    if result.get("status") != "ok":
+        return result
+    return {
+        "status": "ok",
+        "spreadsheet_id": result.get("spreadsheet_id"),
+        "sheets": result.get("sheets", []),
+    }
+
+
+def clear_range(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Clear values in a range (keeps formatting)."""
+    credentials, err = ensure_fresh_credentials(bound_bundle)
+    if err:
+        return err
+    service, err = _build_sheets_service(credentials)
+    if err:
+        return err
+
+    spreadsheet_id = params.get("spreadsheet_id")
+    range_ = params.get("range")
+
+    if not spreadsheet_id:
+        return {"status": "error", "message": "spreadsheet_id is required"}
+    if not range_:
+        return {"status": "error", "message": "range is required"}
+
+    try:
+        resp = service.spreadsheets().values().clear(
+            spreadsheetId=spreadsheet_id,
+            range=range_,
+        ).execute()
+        return {
+            "status": "ok",
+            "cleared_range": resp.get("clearedRange"),
+            "message": f"Cleared range {resp.get('clearedRange')}",
+        }
+    except Exception as exc:
+        logger.error("Sheets clear_range failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def find_rows(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Find rows where a column matches a value."""
+    credentials, err = ensure_fresh_credentials(bound_bundle)
+    if err:
+        return err
+    service, err = _build_sheets_service(credentials)
+    if err:
+        return err
+
+    spreadsheet_id = params.get("spreadsheet_id")
+    range_ = params.get("range") or "Sheet1"
+    search_column = params.get("search_column", 0)  # 0-indexed column number or letter
+    search_value = params.get("search_value")
+
+    if not spreadsheet_id:
+        return {"status": "error", "message": "spreadsheet_id is required"}
+    if search_value is None:
+        return {"status": "error", "message": "search_value is required"}
+
+    # Convert column letter to index if needed
+    if isinstance(search_column, str) and search_column.isalpha():
+        search_column = sum((ord(c.upper()) - ord('A') + 1) * (26 ** i)
+                           for i, c in enumerate(reversed(search_column))) - 1
+    try:
+        search_column = int(search_column)
+    except (TypeError, ValueError):
+        search_column = 0
+
+    try:
+        resp = service.spreadsheets().values().get(
+            spreadsheetId=spreadsheet_id,
+            range=range_,
+        ).execute()
+
+        values = resp.get("values", [])
+        matching_rows = []
+
+        for row_idx, row in enumerate(values):
+            if search_column < len(row):
+                cell_value = row[search_column]
+                # Case-insensitive string comparison
+                if str(cell_value).lower() == str(search_value).lower():
+                    matching_rows.append({
+                        "row_index": row_idx,
+                        "row_number": row_idx + 1,  # 1-indexed for user
+                        "values": row,
+                    })
+
+        return {
+            "status": "ok",
+            "matches_found": len(matching_rows),
+            "rows": matching_rows,
+        }
+    except Exception as exc:
+        logger.error("Sheets find_rows failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def delete_rows(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Delete rows from a sheet."""
+    credentials, err = ensure_fresh_credentials(bound_bundle)
+    if err:
+        return err
+    service, err = _build_sheets_service(credentials)
+    if err:
+        return err
+
+    spreadsheet_id = params.get("spreadsheet_id")
+    sheet_id = params.get("sheet_id")  # Numeric sheet ID (not name)
+    start_row = params.get("start_row")  # 0-indexed
+    end_row = params.get("end_row")  # 0-indexed, exclusive
+
+    if not spreadsheet_id:
+        return {"status": "error", "message": "spreadsheet_id is required"}
+    if sheet_id is None:
+        return {"status": "error", "message": "sheet_id is required (numeric ID, not sheet name)"}
+    if start_row is None:
+        return {"status": "error", "message": "start_row is required (0-indexed)"}
+
+    try:
+        start_row = int(start_row)
+        end_row = int(end_row) if end_row is not None else start_row + 1
+        sheet_id = int(sheet_id)
+    except (TypeError, ValueError):
+        return {"status": "error", "message": "start_row, end_row, and sheet_id must be integers"}
+
+    requests = [
+        {
+            "deleteDimension": {
+                "range": {
+                    "sheetId": sheet_id,
+                    "dimension": "ROWS",
+                    "startIndex": start_row,
+                    "endIndex": end_row,
+                }
+            }
+        }
+    ]
+
+    try:
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": requests},
+        ).execute()
+
+        rows_deleted = end_row - start_row
+        return {
+            "status": "ok",
+            "message": f"Deleted {rows_deleted} row(s) starting at row {start_row + 1}",
+            "rows_deleted": rows_deleted,
+        }
+    except Exception as exc:
+        logger.error("Sheets delete_rows failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
+
+
+def update_values(bound_bundle, params: Dict[str, Any]) -> Dict[str, Any]:
+    """Update multiple cells in a range at once."""
+    credentials, err = ensure_fresh_credentials(bound_bundle)
+    if err:
+        return err
+    service, err = _build_sheets_service(credentials)
+    if err:
+        return err
+
+    spreadsheet_id = params.get("spreadsheet_id")
+    range_ = params.get("range")
+    values = params.get("values")  # 2D array
+    value_input_option = params.get("value_input_option") or "USER_ENTERED"
+
+    if not spreadsheet_id:
+        return {"status": "error", "message": "spreadsheet_id is required"}
+    if not range_:
+        return {"status": "error", "message": "range is required"}
+    if not values:
+        return {"status": "error", "message": "values is required"}
+
+    try:
+        resp = service.spreadsheets().values().update(
+            spreadsheetId=spreadsheet_id,
+            range=range_,
+            valueInputOption=value_input_option,
+            body={"values": values},
+        ).execute()
+        return {
+            "status": "ok",
+            "updated_range": resp.get("updatedRange"),
+            "updated_rows": resp.get("updatedRows"),
+            "updated_columns": resp.get("updatedColumns"),
+            "updated_cells": resp.get("updatedCells"),
+        }
+    except Exception as exc:
+        logger.error("Sheets update_values failed: %s", exc)
+        return {"status": "error", "message": str(exc)}
