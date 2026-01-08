@@ -3732,14 +3732,6 @@ def _get_system_instruction(
         "```\n\n"
 
         "```\n"
-        "# File exports (text only)\n"
-        "Use create_file for plain text/JSON/markdown and other text formats.\n"
-        "Params: content (raw text), file_path, mime_type.\n"
-        "If exporting CSV or PDF, use create_csv or create_pdf instead.\n"
-        "Example: create_file {content: \"...\", file_path: \"/exports/notes.txt\", mime_type: \"text/plain\"}\n"
-        "```\n\n"
-
-        "```\n"
         "# Whitespace (critical for rendering)\n"
         "header          → \\n## Title\\n\\n     # blank before AND after\n"
         "table           → \\n| ... |\\n\\n       # blank before AND after\n"
