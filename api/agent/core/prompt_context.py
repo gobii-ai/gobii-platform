@@ -1290,7 +1290,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo = work remains. When ready: write the actual report (not 'let me compile...') + mark done together.",
+            "Cards in doing/todo means that work remains. When ready: write the actual report (not 'let me compile...') + mark done together.",
             weight=1,
             non_shrinkable=True,
         )
