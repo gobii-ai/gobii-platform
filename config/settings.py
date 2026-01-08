@@ -258,6 +258,7 @@ if GOBII_PROPRIETARY_MODE:
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "middleware.app_shell.AppShellMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",

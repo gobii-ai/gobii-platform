@@ -5,6 +5,14 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Create your own Gobii digital worker to automate prospecting, research, and repetitive web browsing tasks around the clock so you can focus on strategy.">
+  {% if immersive_app_assets %}
+    {% for href in immersive_app_assets.styles %}
+      <link rel="preload" as="style" href="{{ href }}">
+    {% endfor %}
+    {% for src in immersive_app_assets.scripts %}
+      <link rel="modulepreload" href="{{ src }}">
+    {% endfor %}
+  {% endif %}
   <style>
     .game-of-life-panel {
       position: relative;
@@ -340,6 +348,8 @@
       <div class="max-w-4xl mx-auto">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
             {% csrf_token %}
+            <input type="hidden" name="return_to" id="agent-return-to" value="">
+            <input type="hidden" name="embed" value="1">
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
@@ -844,12 +854,14 @@
         const closeButton = document.getElementById('immersive-close');
         const form = document.getElementById('create-agent-form');
         const textarea = document.getElementById('id_charter');
+        const returnToInput = document.getElementById('agent-return-to');
 
         if (!overlay || !frame || !closeButton || !form || !textarea) {
           return;
         }
 
-        const baseUrl = window.location.href.split('#')[0];
+        const returnToPath = `${window.location.pathname}${window.location.search}` || '/';
+        const immersiveUrl = `/app?return_to=${encodeURIComponent(returnToPath)}`;
         let isOpen = false;
 
         const setState = (state) => {
@@ -864,9 +876,7 @@
           isOpen = true;
           setState('loading');
           document.body.classList.add('immersive-open');
-          if (window.location.hash !== '#immersive') {
-            window.history.pushState({ immersive: true }, '', `${baseUrl}#immersive`);
-          }
+          window.history.pushState({ immersive: true }, '', immersiveUrl);
         };
 
         const closeOverlay = (preserveHistory) => {
@@ -877,8 +887,8 @@
           setState('closed');
           document.body.classList.remove('immersive-open');
           frame.src = 'about:blank';
-          if (!preserveHistory && window.location.hash === '#immersive') {
-            window.history.replaceState({}, '', baseUrl);
+          if (!preserveHistory) {
+            window.history.replaceState({}, '', returnToPath);
           }
         };
 
@@ -898,6 +908,19 @@
             setState('ready');
           }
         });
+        window.addEventListener('message', (event) => {
+          if (!isOpen) {
+            return;
+          }
+          if (event.origin !== window.location.origin) {
+            return;
+          }
+          const data = event.data || {};
+          if (data.type !== 'gobii-immersive-path' || typeof data.path !== 'string') {
+            return;
+          }
+          window.history.replaceState({ immersive: true }, '', data.path);
+        });
 
         form.addEventListener('submit', () => {
           const trimmed = textarea.value.trim();
@@ -905,14 +928,13 @@
             form.removeAttribute('target');
             return;
           }
+          if (returnToInput) {
+            returnToInput.value = returnToPath;
+          }
           setState('loading');
           form.setAttribute('target', 'immersive-frame');
           openOverlay();
         });
-
-        if (window.location.hash === '#immersive') {
-          window.history.replaceState({}, '', baseUrl);
-        }
       });
     </script>
 </div> <!-- New closing div for the main wrapper -->

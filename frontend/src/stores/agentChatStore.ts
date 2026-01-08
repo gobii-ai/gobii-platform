@@ -217,7 +217,16 @@ export type AgentChatState = {
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   agentColorHex: string | null
-  initialize: (agentId: string, options?: { agentColorHex?: string | null }) => Promise<void>
+  agentName: string | null
+  agentAvatarUrl: string | null
+  initialize: (
+    agentId: string,
+    options?: {
+      agentColorHex?: string | null
+      agentName?: string | null
+      agentAvatarUrl?: string | null
+    },
+  ) => Promise<void>
   refreshProcessing: () => Promise<void>
   refreshLatest: () => Promise<void>
   loadOlder: () => Promise<void>
@@ -259,9 +268,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
   agentColorHex: null,
+  agentName: null,
+  agentAvatarUrl: null,
 
   async initialize(agentId, options) {
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
+    const providedName = options?.agentName ?? null
+    const providedAvatarUrl = options?.agentAvatarUrl ?? null
     set({
       loading: true,
       agentId,
@@ -275,6 +288,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       thinkingCollapsedByCursor: {},
       awaitingResponse: false,
       agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
+      agentName: providedName ?? get().agentName ?? null,
+      agentAvatarUrl: providedAvatarUrl ?? get().agentAvatarUrl ?? null,
     })
 
     try {
@@ -288,6 +303,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const agentColorHex = snapshot.agent_color_hex
         ? normalizeHexColor(snapshot.agent_color_hex)
         : providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX
+      const agentName = snapshot.agent_name ?? providedName ?? get().agentName ?? null
+      const agentAvatarUrl = snapshot.agent_avatar_url ?? providedAvatarUrl ?? get().agentAvatarUrl ?? null
 
       set({
         events,
@@ -302,6 +319,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         autoScrollPinSuppressedUntil: null,
         pendingEvents: [],
         agentColorHex,
+        agentName,
+        agentAvatarUrl,
         awaitingResponse: false,
       })
     } catch (error) {

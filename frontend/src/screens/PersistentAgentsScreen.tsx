@@ -407,8 +407,6 @@ function AgentCard({ agent }: AgentCardProps) {
               {chatValue && (
                 <a
                   href={chatValue}
-                  target="_blank"
-                  rel="noopener noreferrer"
                   className="inline-flex min-w-[6.5rem] flex-1 items-center justify-center gap-x-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
                 >
                   <MessageSquare className="h-4 w-4" aria-hidden="true" />

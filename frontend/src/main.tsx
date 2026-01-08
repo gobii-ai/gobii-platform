@@ -19,6 +19,7 @@ const EvalsScreen = lazy(async () => ({ default: (await import('./screens/EvalsS
 const EvalsDetailScreen = lazy(async () => ({ default: (await import('./screens/EvalsDetailScreen')).EvalsDetailScreen }))
 const AgentAuditScreen = lazy(async () => ({ default: (await import('./screens/AgentAuditScreen')).AgentAuditScreen }))
 const AgentFilesScreen = lazy(async () => ({ default: (await import('./screens/AgentFilesScreen')).AgentFilesScreen }))
+const ImmersiveApp = lazy(async () => ({ default: (await import('./screens/ImmersiveApp')).ImmersiveApp }))
 
 const LoadingFallback = () => (
   <div className="app-loading" role="status" aria-live="polite" aria-label="Loading">
@@ -143,6 +144,9 @@ switch (appName) {
       throw new Error('Agent identifier is required for audit screen')
     }
     screen = <AgentAuditScreen agentId={agentId} agentName={agentName} agentColor={agentColor} />
+    break
+  case 'immersive-app':
+    screen = <ImmersiveApp />
     break
   default:
     throw new Error(`Unsupported console React app: ${appName}`)

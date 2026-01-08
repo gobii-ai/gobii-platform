@@ -105,6 +105,7 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
 )
+from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
@@ -1944,7 +1945,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'primaryEmail': primary_email,
             'primarySms': primary_sms,
             'detailUrl': reverse('agent_detail', kwargs={'pk': agent.id}),
-            'chatUrl': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+            'chatUrl': build_immersive_chat_url(self.request, agent.id, return_to=self.request.get_full_path()),
             'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
             'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
             'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
@@ -2325,8 +2326,17 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             messages.error(request, "We ran into a problem creating your agent. Please try again.")
             return redirect('agents')
 
-        chat_url = reverse('agent_chat_shell', kwargs={'pk': result.agent.id})
-        return redirect(f"{chat_url}?immersive=1")
+        session_return_to = request.session.pop(IMMERSIVE_RETURN_TO_SESSION_KEY, None)
+        if session_return_to is not None:
+            request.session.modified = True
+        embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
+        app_url = build_immersive_chat_url(
+            request,
+            result.agent.id,
+            return_to=request.GET.get("return_to") or session_return_to,
+            embed=embed,
+        )
+        return redirect(app_url)
 
 
 class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
@@ -3235,7 +3245,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'urls': {
                 'detail': request.path,
                 'list': reverse('agents'),
-                'chat': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+                'chat': build_immersive_chat_url(request, agent.id, return_to=request.get_full_path()),
                 'secrets': reverse('agent_secrets', args=[agent.id]),
                 'emailSettings': reverse('agent_email_settings', args=[agent.id]),
                 'manageFiles': reverse('agent_files', args=[agent.id]),

@@ -112,6 +112,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
 
   const initialize = useAgentChatStore((state) => state.initialize)
   const agentColorHex = useAgentChatStore((state) => state.agentColorHex)
+  const storedAgentName = useAgentChatStore((state) => state.agentName)
+  const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const loadOlder = useAgentChatStore((state) => state.loadOlder)
   const loadNewer = useAgentChatStore((state) => state.loadNewer)
   const jumpToLatest = useAgentChatStore((state) => state.jumpToLatest)
@@ -158,8 +160,12 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   }, [autoScrollPinSuppressedUntil])
 
   useEffect(() => {
-    initialize(agentId, { agentColorHex: agentColor })
-  }, [agentId, initialize, agentColor])
+    initialize(agentId, {
+      agentColorHex: agentColor,
+      agentName,
+      agentAvatarUrl,
+    })
+  }, [agentId, agentAvatarUrl, agentColor, agentName, initialize])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
@@ -329,7 +335,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
     }
   }, [scrollToBottom, events, processingActive, streaming])
 
-  const agentFirstName = useMemo(() => deriveFirstName(agentName), [agentName])
+  const resolvedAgentName = storedAgentName ?? agentName ?? null
+  const resolvedAvatarUrl = storedAgentAvatarUrl ?? agentAvatarUrl ?? null
+  const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const connectionIndicator = useMemo(
     () =>
@@ -416,8 +424,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
         agentColorHex={agentColorHex || agentColor || undefined}
         header={
           <AgentChatBanner
-            agentName={agentName || 'Agent'}
-            agentAvatarUrl={agentAvatarUrl}
+            agentName={resolvedAgentName || 'Agent'}
+            agentAvatarUrl={resolvedAvatarUrl}
             agentColorHex={agentColorHex || agentColor || undefined}
             connectionStatus={connectionIndicator.status}
             connectionLabel={connectionIndicator.label}

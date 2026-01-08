@@ -33,6 +33,7 @@ from util.subscription_helper import (
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
+from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, normalize_return_to
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -289,6 +290,13 @@ class HomePage(TemplateView):
             initial=initial
         )
 
+        if not settings.VITE_USE_DEV_SERVER:
+            try:
+                from config.vite import ViteManifestError, get_vite_asset
+                context["immersive_app_assets"] = get_vite_asset("src/main.tsx")
+            except ViteManifestError:
+                context["immersive_app_assets"] = None
+
         if self.request.user.is_authenticated:
             from console.context_helpers import build_console_context
 
@@ -419,6 +427,11 @@ class HomeAgentSpawnView(TemplateView):
         form = PersistentAgentCharterForm(request.POST)
         
         if form.is_valid():
+            return_to = normalize_return_to(request, request.POST.get("return_to"))
+            embed = (request.POST.get("embed") or "").lower() in {"1", "true", "yes", "on"}
+            if return_to:
+                request.session[IMMERSIVE_RETURN_TO_SESSION_KEY] = return_to
+
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
             # Store charter in session for later use
@@ -437,15 +450,23 @@ class HomeAgentSpawnView(TemplateView):
                     }
                 )
             
+            next_url = reverse('agent_quick_spawn')
+            redirect_params = {}
+            if return_to:
+                redirect_params["return_to"] = return_to
+            if embed:
+                redirect_params["embed"] = "1"
+            if redirect_params:
+                next_url = f"{next_url}?{urlencode(redirect_params)}"
+
             if request.user.is_authenticated:
                 # User is already logged in, go directly to agent creation
-                return redirect('agent_quick_spawn')
-            else:
-                # User needs to log in first, then continue to agent creation
-                return redirect_to_login(
-                    next=reverse('agent_quick_spawn'),
-                    login_url=_login_url_with_utms(request),
-                )
+                return redirect(next_url)
+            # User needs to log in first, then continue to agent creation
+            return redirect_to_login(
+                next=next_url,
+                login_url=_login_url_with_utms(request),
+            )
         
         # If form is invalid, re-render home page with errors
         context = self.get_context_data(**kwargs)

@@ -119,6 +119,18 @@ MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
 MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
 
 
+class ConsoleSessionAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(
+            {
+                "user_id": str(request.user.id),
+                "email": request.user.email,
+            }
+        )
+
+
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
     if not path:
         return None, None
@@ -1159,6 +1171,8 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "processing_active": window.processing_active,
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
             "agent_color_hex": agent.get_display_color(),
+            "agent_name": agent.name,
+            "agent_avatar_url": agent.get_avatar_url(),
         }
         return JsonResponse(payload)
 

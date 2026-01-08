@@ -1113,8 +1113,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           <div className="flex flex-wrap items-center gap-2">
             <a
               href={initialData.urls.chat}
-              target="_blank"
-              rel="noopener noreferrer"
               className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-blue-50 transition-colors"
             >
               <MessageSquare className="w-4 h-4" aria-hidden="true" />
