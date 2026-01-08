@@ -261,29 +261,27 @@ def _should_suppress_display_name(from_endpoint) -> bool:
     try:
         account = from_endpoint.agentemailaccount
     except AgentEmailAccount.DoesNotExist:
-        account = None
-    if account is None:
         return False
-    if account.is_outbound_enabled or account.is_inbound_enabled:
-        return True
-    if any([
-        account.smtp_host,
-        account.imap_host,
-        account.smtp_username,
-        account.imap_username,
-        account.smtp_port,
-        account.imap_port,
-    ]):
-        return True
-    if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
-        return True
-    if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
+    if (
+        account.is_outbound_enabled
+        or account.is_inbound_enabled
+        or account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2
+        or account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2
+        or any([
+            account.smtp_host,
+            account.imap_host,
+            account.smtp_username,
+            account.imap_username,
+            account.smtp_port,
+            account.imap_port,
+        ])
+    ):
         return True
     try:
         account.oauth_credential
+        return True
     except ObjectDoesNotExist:
         return False
-    return True
 
 
 def _build_from_header(message: PersistentAgentMessage) -> str:
@@ -297,9 +295,9 @@ def _build_from_header(message: PersistentAgentMessage) -> str:
     if from_endpoint is not None:
         try:
             email_meta = from_endpoint.email_meta
+            display_name = (getattr(email_meta, "display_name", "") or "").strip()
         except PersistentAgentEmailEndpoint.DoesNotExist:
-            email_meta = None
-        display_name = (getattr(email_meta, "display_name", "") or "").strip()
+            pass
     display_name = display_name.replace("\r", "").replace("\n", "").strip()
     if display_name:
         return formataddr((display_name, from_address))
