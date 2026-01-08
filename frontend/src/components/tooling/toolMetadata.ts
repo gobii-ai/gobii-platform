@@ -404,6 +404,17 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'create_file',
+    label: 'File export',
+    icon: FileText,
+    iconBgClass: 'bg-slate-100',
+    iconColorClass: 'text-slate-600',
+    detailKind: 'fileExport',
+    derive(entry, parameters) {
+      return deriveFileExport(entry, parameters, 'File export')
+    },
+  },
+  {
     name: 'create_pdf',
     label: 'PDF export',
     icon: FileText,

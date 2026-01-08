@@ -21,6 +21,7 @@ from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
 from .read_file import get_read_file_tool, execute_read_file
+from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
@@ -69,6 +70,7 @@ def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
 READ_FILE_TOOL_NAME = "read_file"
+CREATE_FILE_TOOL_NAME = "create_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
@@ -119,6 +121,10 @@ BUILTIN_TOOL_REGISTRY = {
     READ_FILE_TOOL_NAME: {
         "definition": get_read_file_tool,
         "executor": execute_read_file,
+    },
+    CREATE_FILE_TOOL_NAME: {
+        "definition": get_create_file_tool,
+        "executor": execute_create_file,
     },
     CREATE_CSV_TOOL_NAME: {
         "definition": get_create_csv_tool,
