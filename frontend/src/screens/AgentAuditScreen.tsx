@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Cpu, Filter, Megaphone, MessageCircle, RefreshCcw, Stethoscope, StepForward, Wrench, type LucideIcon } from 'lucide-react'
+import {
+  ChevronDown,
+  ChevronUp,
+  ChevronsDown,
+  ChevronsUp,
+  Copy,
+  Cpu,
+  Filter,
+  Megaphone,
+  MessageCircle,
+  RefreshCcw,
+  Stethoscope,
+  StepForward,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
@@ -935,6 +950,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               onClick={() => handleNavigateMessage('prev')}
               disabled={!canNavigatePrevMessage}
             >
+              <ChevronUp className="h-4 w-4" aria-hidden />
               Prev message
             </button>
             <button
@@ -943,6 +959,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               onClick={() => handleNavigateMessage('next')}
               disabled={!canNavigateNextMessage}
             >
+              <ChevronDown className="h-4 w-4" aria-hidden />
               Next message
             </button>
             <button
@@ -951,6 +968,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               onClick={() => handleSetAllCollapsed(false)}
               disabled={!hasFilteredEvents}
             >
+              <ChevronsDown className="h-4 w-4" aria-hidden />
               Expand all
             </button>
             <button
@@ -959,9 +977,9 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               onClick={() => handleSetAllCollapsed(true)}
               disabled={!hasFilteredEvents}
             >
+              <ChevronsUp className="h-4 w-4" aria-hidden />
               Collapse all
             </button>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">{agentId}</div>
             <button
               type="button"
               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
@@ -972,7 +990,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               aria-label="Copy agent id"
             >
               <Copy className="h-4 w-4" aria-hidden />
-              Copy
+              Copy agent id
             </button>
           </div>
         </div>
