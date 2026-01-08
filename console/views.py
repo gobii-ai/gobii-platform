@@ -10116,9 +10116,9 @@ def google_workspace_connect(request, agent_id):
 
     scope_tier = request.GET.get("scope_tier") or getattr(settings, "GOOGLE_WORKSPACE_DEFAULT_SCOPE_TIER", "minimal")
     try:
-        start_url = reverse("google_workspace_oauth_start", kwargs={"agent_id": agent_id})
+        start_url = reverse("api:google_workspace_oauth_start", kwargs={"agent_id": agent_id})
     except NoReverseMatch:
-        start_url = f"/api/google/workspace/oauth/start/{agent_id}/"
+        start_url = f"/api/v1/google/workspace/oauth/start/{agent_id}/"
 
     if scope_tier:
         separator = "&" if "?" in start_url else "?"
