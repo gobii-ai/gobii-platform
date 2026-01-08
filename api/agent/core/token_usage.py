@@ -268,24 +268,20 @@ def extract_request_duration_ms(response: Any) -> Optional[int]:
     if response is None:
         return None
 
+    duration_ms = None
+    model_extra = None
+
     if isinstance(response, dict):
-        if "request_duration_ms" in response:
-            duration_ms = response.get("request_duration_ms")
-        else:
-            duration_ms = response.get("_gobii_request_duration_ms")
+        duration_ms = response.get("request_duration_ms") or response.get("_gobii_request_duration_ms")
         model_extra = response.get("model_extra")
     else:
-        if hasattr(response, "request_duration_ms"):
-            duration_ms = getattr(response, "request_duration_ms", None)
-        else:
-            duration_ms = getattr(response, "_gobii_request_duration_ms", None)
+        duration_ms = getattr(response, "request_duration_ms", None) or getattr(
+            response, "_gobii_request_duration_ms", None
+        )
         model_extra = getattr(response, "model_extra", None)
 
     if duration_ms is None and isinstance(model_extra, dict):
-        if "request_duration_ms" in model_extra:
-            duration_ms = model_extra.get("request_duration_ms")
-        else:
-            duration_ms = model_extra.get("duration_ms")
+        duration_ms = model_extra.get("request_duration_ms") or model_extra.get("duration_ms")
 
     return _coerce_duration_ms(duration_ms)
 
