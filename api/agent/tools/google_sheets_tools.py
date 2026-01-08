@@ -89,7 +89,7 @@ def _def_append_values() -> Dict[str, Any]:
                 "properties": {
                     "spreadsheet_id": {"type": "string", "description": "Spreadsheet ID."},
                     "range": {"type": "string", "description": "A1 notation range (e.g., Sheet1!A1:C1)."},
-                    "values": {"type": "array", "items": {"type": "array"}, "description": "2D list of values to append."},
+                    "values": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}, "description": "2D list of values to append (each cell as a string)."},
                     "value_input_option": {
                         "type": "string",
                         "enum": ["RAW", "USER_ENTERED"],
@@ -277,8 +277,8 @@ for placeholder_name in PLACEHOLDER_TOOL_NAMES:
     )
 
 
-def get_sheets_tool_definition(tool_name: str) -> Callable[[], Dict[str, Any]]:
-    return SHEETS_TOOL_DEFINITIONS[tool_name]
+def get_sheets_tool_definition(tool_name: str) -> Dict[str, Any]:
+    return SHEETS_TOOL_DEFINITIONS[tool_name]()
 
 
 def execute_sheets_tool(agent: PersistentAgent, params: Dict[str, Any], *, tool_name: str) -> Dict[str, Any]:
