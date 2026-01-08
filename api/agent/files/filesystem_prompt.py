@@ -77,7 +77,7 @@ def get_agent_filesystem_prompt(agent: PersistentAgent) -> str:
         return "No files available in the agent filesystem. Tool results live in SQLite __tool_results."
 
     header = (
-        "Files in agent filespace (use read_file for contents; attach via send_* attachments with $[/path]):"
+        "Files in agent filespace (use read_file for contents; for attachments, pass $[/path] via the attachments param on send_* tools):"
     )
     lines: List[str] = [header]
     total_bytes = len(header.encode("utf-8"))
