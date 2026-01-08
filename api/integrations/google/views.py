@@ -66,12 +66,13 @@ def _build_oauth_url(
 
 
 @login_required
-def start_oauth(request: HttpRequest, agent_id: str):
+def start_oauth(request: HttpRequest, agent_id):
     if not getattr(settings, "GOOGLE_WORKSPACE_TOOLS_ENABLED", False):
         return JsonResponse({"error": "Google Workspace tools are disabled"}, status=400)
 
+    agent_id_str = str(agent_id)
     try:
-        agent = PersistentAgent.objects.get(id=agent_id)
+        agent = PersistentAgent.objects.get(id=agent_id_str)
     except PersistentAgent.DoesNotExist:
         return JsonResponse({"error": "Agent not found"}, status=404)
 
@@ -87,7 +88,7 @@ def start_oauth(request: HttpRequest, agent_id: str):
     scopes = scope_list_for_tier(scope_tier)
 
     redirect_uri = _build_redirect_uri(request)
-    state = _build_state(agent_id, scope_tier)
+    state = _build_state(agent_id_str, scope_tier)
     oauth_url = _build_oauth_url(client_id, redirect_uri, scopes, state)
     return HttpResponseRedirect(oauth_url)
 
