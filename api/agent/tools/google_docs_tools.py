@@ -105,8 +105,8 @@ DOCS_TOOL_EXECUTORS: Dict[str, Callable[[PersistentAgent, Dict[str, Any]], Dict[
 }
 
 
-def get_docs_tool_definition(tool_name: str) -> Callable[[], Dict[str, Any]]:
-    return DOCS_TOOL_DEFINITIONS[tool_name]
+def get_docs_tool_definition(tool_name: str) -> Dict[str, Any]:
+    return DOCS_TOOL_DEFINITIONS[tool_name]()
 
 
 def execute_docs_tool(agent: PersistentAgent, params: Dict[str, Any], *, tool_name: str) -> Dict[str, Any]:
