@@ -41,8 +41,8 @@ type PromptState = {
 }
 
 function eventKeyFor(event: AuditEvent): string {
-  const id = (event as { id?: string; run_id?: string }).id ?? (event as { run_id?: string }).run_id ?? 'unknown'
-  return `${event.kind}:${id}`
+  const id = 'id' in event ? event.id : event.run_id
+  return `${event.kind}:${id ?? 'unknown'}`
 }
 
 function getTargetMessageId(
