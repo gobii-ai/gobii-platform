@@ -89,6 +89,9 @@ def strip_markdown_for_sms(value: str | None) -> str:
 
 # Pattern for excessive newlines
 _EXCESSIVE_NEWLINES_RE = re.compile(r"\n{3,}")
+_TABLE_SEPARATOR_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$"
+)
 
 
 def normalize_whitespace(value: str | None) -> str:
@@ -107,6 +110,80 @@ def normalize_whitespace(value: str | None) -> str:
     # Strip trailing whitespace from each line
     lines = [line.rstrip() for line in text.split("\n")]
     return "\n".join(lines)
+
+
+def _normalize_markdown_tables(value: str) -> str:
+    """Collapse blank lines inside markdown tables to keep rows contiguous."""
+    if not value:
+        return value
+
+    lines = value.split("\n")
+    normalized: list[str] = []
+    in_code_block = False
+    in_table = False
+    i = 0
+
+    def is_table_separator(line: str) -> bool:
+        return bool(_TABLE_SEPARATOR_RE.match(line))
+
+    def is_table_row(line: str) -> bool:
+        stripped = line.strip()
+        if not stripped:
+            return False
+        return "|" in stripped
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        if stripped.startswith("```"):
+            in_code_block = not in_code_block
+            normalized.append(line)
+            i += 1
+            continue
+
+        if in_code_block:
+            normalized.append(line)
+            i += 1
+            continue
+
+        if not in_table:
+            if is_table_row(line):
+                j = i + 1
+                while j < len(lines) and not lines[j].strip():
+                    j += 1
+                if j < len(lines) and is_table_separator(lines[j]):
+                    normalized.append(line)
+                    normalized.append(lines[j])
+                    in_table = True
+                    i = j + 1
+                    continue
+            normalized.append(line)
+            i += 1
+            continue
+
+        if not stripped:
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            if j < len(lines) and is_table_row(lines[j]):
+                i = j
+                continue
+            in_table = False
+            normalized.append(line)
+            i += 1
+            continue
+
+        if is_table_row(line):
+            normalized.append(line)
+            i += 1
+            continue
+
+        in_table = False
+        normalized.append(line)
+        i += 1
+
+    return "\n".join(normalized)
 
 
 # Pattern for JSON-style unicode escape sequences (\uXXXX)
@@ -445,7 +522,10 @@ def normalize_llm_output(value: str | None) -> str:
     # Step 4: Normalize whitespace
     text = normalize_whitespace(text)
 
-    # Step 5: Strip redundant quotes from blockquotes
+    # Step 5: Keep markdown tables contiguous (no blank lines between rows)
+    text = _normalize_markdown_tables(text)
+
+    # Step 6: Strip redundant quotes from blockquotes
     text = strip_redundant_blockquote_quotes(text)
 
     return text

@@ -322,6 +322,27 @@ class NormalizeLlmOutputTests(TestCase):
         result = normalize_llm_output(text)
         self.assertEqual(result, "Great job! 👍")
 
+    def test_normalize_collapses_blank_lines_inside_markdown_tables(self):
+        """Blank lines inside markdown tables should be removed to keep rows contiguous."""
+        text = (
+            "Here's what I found:\n\n"
+            "| Source | Key Insight | URL |\n\n"
+            "|---|---|---|\n\n"
+            "| Gobii.ai | Digital workers | https://gobii.ai/ |\n\n"
+            "| About | Empowering AI agents | https://gobii.ai/about/ |\n\n"
+            "Next paragraph."
+        )
+        result = normalize_llm_output(text)
+        expected = (
+            "Here's what I found:\n\n"
+            "| Source | Key Insight | URL |\n"
+            "|---|---|---|\n"
+            "| Gobii.ai | Digital workers | https://gobii.ai/ |\n"
+            "| About | Empowering AI agents | https://gobii.ai/about/ |\n\n"
+            "Next paragraph."
+        )
+        self.assertEqual(result, expected)
+
 
 @tag("batch_text_sanitization")
 class StripMarkdownForSmsTests(TestCase):
