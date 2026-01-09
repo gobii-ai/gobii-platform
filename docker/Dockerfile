@@ -39,7 +39,7 @@ RUN pip install --upgrade pip
 COPY pyproject.toml poetry.lock* ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir .
+    pip install .
 
 # Preinstall Bright Data MCP globally so containers do not fetch it on-the-fly.
 # Local dev (outside Docker) still uses npx to install on demand.
@@ -67,17 +67,14 @@ COPY frontend/package.json frontend/package-lock.json ./frontend/
 RUN --mount=type=cache,target=/root/.npm \
     npm ci --prefix frontend
 
-COPY . .
-
-# Write git commit SHA for runtime traceability (passed from CI)
-ARG GIT_COMMIT=unknown
-RUN echo "${GIT_COMMIT}" > .git-commit
-
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir --editable .
-
+COPY frontend ./frontend
 RUN --mount=type=cache,target=/root/.npm \
     npm run build --prefix frontend
+
+COPY . .
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --editable .
 
 ENV USE_EPHEMERAL_XVFB=true
 
@@ -118,6 +115,10 @@ ENV STATIC_ROOT=/app/staticfiles \
     NPM_CONFIG_CACHE=/tmp/.npm
 
 COPY --from=builder /app /app
+
+# Write git commit SHA for runtime traceability (passed from CI)
+ARG GIT_COMMIT=unknown
+RUN echo "${GIT_COMMIT}" > /app/.git-commit
 
 # Create npm cache directory with proper permissions
 RUN mkdir -p /tmp/.npm && chown -R appuser:appgroup /tmp/.npm

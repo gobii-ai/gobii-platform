@@ -101,7 +101,6 @@ export const ChatSidebar = memo(function ChatSidebar({
   )
 
   const hasAgents = agents.length > 0
-  const activeAgent = agents.find((a) => a.id === activeAgentId)
 
   // Mobile FAB and drawer
   if (isMobile) {
