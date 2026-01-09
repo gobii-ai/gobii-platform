@@ -58,12 +58,18 @@ export type TierEndpoint = {
   extraction_label?: string | null
 }
 
+export type IntelligenceTier = {
+  key: string
+  display_name: string
+  rank: number
+  credit_multiplier: string
+}
+
 export type PersistentTier = {
   id: string
   order: number
   description: string
-  is_premium: boolean
-  is_max: boolean
+  intelligence_tier: IntelligenceTier
   endpoints: TierEndpoint[]
 }
 
@@ -79,7 +85,7 @@ export type BrowserTier = {
   id: string
   order: number
   description: string
-  is_premium: boolean
+  intelligence_tier: IntelligenceTier
   endpoints: TierEndpoint[]
 }
 
@@ -112,6 +118,7 @@ export type EndpointChoices = {
 
 export type LlmOverviewResponse = {
   stats: LlmStats
+  intelligence_tiers: IntelligenceTier[]
   providers: Provider[]
   persistent: { ranges: TokenRange[] }
   browser: BrowserPolicy | null
@@ -184,7 +191,7 @@ export function deleteTokenRange(rangeId: string) {
   return jsonRequest(`${base}/persistent/ranges/${rangeId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createPersistentTier(rangeId: string, payload: { is_premium?: boolean; is_max?: boolean; description?: string }) {
+export function createPersistentTier(rangeId: string, payload: { intelligence_tier: string; description?: string }) {
   return jsonRequest(`${base}/persistent/ranges/${rangeId}/tiers/`, withCsrf(payload))
 }
 
@@ -208,7 +215,7 @@ export function deletePersistentTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/persistent/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createBrowserTier(payload: { is_premium: boolean; description?: string }) {
+export function createBrowserTier(payload: { intelligence_tier: string; description?: string }) {
   return jsonRequest(`${base}/browser/tiers/`, withCsrf(payload))
 }
 
@@ -325,9 +332,7 @@ export type ProfilePersistentTier = {
   id: string
   order: number
   description: string
-  is_premium: boolean
-  is_max: boolean
-  credit_multiplier: string | null
+  intelligence_tier: IntelligenceTier
   endpoints: TierEndpoint[]
 }
 
@@ -343,7 +348,7 @@ export type ProfileBrowserTier = {
   id: string
   order: number
   description: string
-  is_premium: boolean
+  intelligence_tier: IntelligenceTier
   endpoints: TierEndpoint[]
 }
 
@@ -428,7 +433,7 @@ export function deleteProfileTokenRange(rangeId: string) {
   return jsonRequest(`${profileBase}/token-ranges/${rangeId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createProfilePersistentTier(rangeId: string, payload: { is_premium?: boolean; is_max?: boolean; description?: string; credit_multiplier?: string }) {
+export function createProfilePersistentTier(rangeId: string, payload: { intelligence_tier: string; description?: string }) {
   return jsonRequest(`${profileBase}/token-ranges/${rangeId}/tiers/`, withCsrf(payload))
 }
 
@@ -452,7 +457,7 @@ export function deleteProfilePersistentTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${profileBase}/persistent-tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
-export function createProfileBrowserTier(profileId: string, payload: { is_premium?: boolean; description?: string }) {
+export function createProfileBrowserTier(profileId: string, payload: { intelligence_tier: string; description?: string }) {
   return jsonRequest(`${profileBase}/${profileId}/browser-tiers/`, withCsrf(payload))
 }
 
