@@ -801,9 +801,9 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   }, [filteredEvents, setSelectedDay])
 
   useEffect(() => {
-    const nodes = messageEventIds
-      .map((messageId) => messageNodeMap.current.get(messageId))
-      .filter((node): node is HTMLElement => Boolean(node))
+  const nodes = messageEventIds
+    .map((messageId) => messageNodeMap.current.get(messageId))
+    .filter((node): node is HTMLDivElement => Boolean(node))
     if (!nodes.length) {
       setActiveMessageId(null)
       return
