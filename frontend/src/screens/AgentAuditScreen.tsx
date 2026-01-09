@@ -1218,7 +1218,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           </div>
 
           <div
-            className="lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
+            className="hidden lg:block lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
             style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
           >
             <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />
