@@ -10,6 +10,7 @@ import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
+import type { AgentRosterEntry } from '../../types/agentRoster'
 import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -19,6 +20,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
+  agentRoster?: AgentRosterEntry[]
+  activeAgentId?: string | null
+  switchingAgentId?: string | null
+  rosterLoading?: boolean
+  rosterError?: string | null
+  onSelectAgent?: (agent: AgentRosterEntry) => void
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
   onLoadOlder?: () => void
@@ -51,6 +58,12 @@ export function AgentChatLayout({
   connectionStatus,
   connectionLabel,
   connectionDetail,
+  agentRoster,
+  activeAgentId,
+  switchingAgentId,
+  rosterLoading,
+  rosterError,
+  onSelectAgent,
   kanbanSnapshot,
   footer,
   hasMoreOlder,
@@ -105,7 +118,16 @@ export function AgentChatLayout({
 
   return (
     <>
-      <ChatSidebar defaultCollapsed={true} onToggle={handleSidebarToggle} />
+      <ChatSidebar
+        defaultCollapsed={true}
+        onToggle={handleSidebarToggle}
+        agents={agentRoster}
+        activeAgentId={activeAgentId}
+        switchingAgentId={switchingAgentId}
+        loading={rosterLoading}
+        errorMessage={rosterError}
+        onSelectAgent={onSelectAgent}
+      />
       {showBanner && (
         <AgentChatBanner
           agentName={agentName || 'Agent'}

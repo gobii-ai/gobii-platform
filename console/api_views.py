@@ -83,7 +83,7 @@ from api.services.web_sessions import (
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-from console.agent_chat.access import resolve_agent
+from console.agent_chat.access import agent_queryset_for, resolve_agent
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
@@ -1135,6 +1135,29 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
         payload.update(extra)
 
     return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentChatRosterAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        agents = (
+            agent_queryset_for(request.user, request.session)
+            .select_related("agent_color")
+            .order_by("name")
+        )
+        payload = [
+            {
+                "id": str(agent.id),
+                "name": agent.name or "",
+                "avatar_url": agent.get_avatar_url(),
+                "display_color_hex": agent.get_display_color(),
+                "is_active": bool(agent.is_active),
+            }
+            for agent in agents
+        ]
+        return JsonResponse({"agents": payload})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

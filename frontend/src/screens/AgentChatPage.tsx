@@ -1,16 +1,28 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
+import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
   return first || 'Agent'
+}
+
+function buildAgentChatPath(pathname: string, agentId: string): string {
+  if (pathname.startsWith('/app')) {
+    return `/app/agents/${agentId}`
+  }
+  if (pathname.includes('/console/agents/')) {
+    return `/console/agents/${agentId}/chat/`
+  }
+  return `/app/agents/${agentId}`
 }
 
 function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
@@ -28,6 +40,13 @@ type ConnectionIndicator = {
   status: ConnectionStatusTone
   label: string
   detail?: string | null
+}
+
+type AgentSwitchMeta = {
+  agentId: string
+  agentName?: string | null
+  agentColorHex?: string | null
+  agentAvatarUrl?: string | null
 }
 
 function deriveConnectionIndicator({
@@ -111,7 +130,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     bottomSentinelRef.current = node
   }, [])
 
+  const [activeAgentId, setActiveAgentId] = useState(agentId)
+  const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+
+  useEffect(() => {
+    setActiveAgentId(agentId)
+  }, [agentId])
+
   const initialize = useAgentChatStore((state) => state.initialize)
+  const storeAgentId = useAgentChatStore((state) => state.agentId)
   const agentColorHex = useAgentChatStore((state) => state.agentColorHex)
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
@@ -144,8 +172,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = loading && events.length === 0
 
-  const socketSnapshot = useAgentChatSocket(agentId)
-  const { status: sessionStatus, error: sessionError } = useAgentWebSession(agentId)
+  const socketSnapshot = useAgentChatSocket(activeAgentId)
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
+  const rosterQuery = useAgentRoster()
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -161,12 +190,15 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [autoScrollPinSuppressedUntil])
 
   useEffect(() => {
-    initialize(agentId, {
-      agentColorHex: agentColor,
-      agentName,
-      agentAvatarUrl,
+    const pendingMeta = pendingAgentMetaRef.current
+    const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
+    pendingAgentMetaRef.current = null
+    initialize(activeAgentId, {
+      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
+      agentName: resolvedPendingMeta?.agentName ?? agentName,
+      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
     })
-  }, [agentId, agentAvatarUrl, agentColor, agentName, initialize])
+  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
@@ -336,8 +368,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     }
   }, [scrollToBottom, events, processingActive, streaming])
 
-  const resolvedAgentName = storedAgentName ?? agentName ?? null
-  const resolvedAvatarUrl = storedAgentAvatarUrl ?? agentAvatarUrl ?? null
+  const rosterAgents = useMemo(() => rosterQuery.data ?? [], [rosterQuery.data])
+  const activeRosterMeta = useMemo(
+    () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
+    [activeAgentId, rosterAgents],
+  )
+  const isStoreSynced = storeAgentId === activeAgentId
+  const resolvedAgentName = (isStoreSynced ? storedAgentName : activeRosterMeta?.name) ?? agentName ?? null
+  const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
+  const resolvedAgentColorHex =
+    (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const connectionIndicator = useMemo(
@@ -349,6 +389,64 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         sessionError,
       }),
     [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
+  )
+
+  const rosterErrorMessage = rosterQuery.isError
+    ? rosterQuery.error instanceof Error
+      ? rosterQuery.error.message
+      : 'Unable to load agents right now.'
+    : null
+  const fallbackAgent = useMemo<AgentRosterEntry | null>(() => {
+    if (!activeAgentId) {
+      return null
+    }
+    return {
+      id: activeAgentId,
+      name: resolvedAgentName || 'Agent',
+      avatarUrl: resolvedAvatarUrl,
+      displayColorHex: resolvedAgentColorHex ?? null,
+      isActive: true,
+    }
+  }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
+  const sidebarAgents = useMemo(() => {
+    if (!activeAgentId) {
+      return rosterAgents
+    }
+    const hasActive = rosterAgents.some((agent) => agent.id === activeAgentId)
+    if (hasActive || !fallbackAgent) {
+      return rosterAgents
+    }
+    return [fallbackAgent, ...rosterAgents]
+  }, [activeAgentId, fallbackAgent, rosterAgents])
+
+  useEffect(() => {
+    if (!switchingAgentId) {
+      return
+    }
+    if (!loading) {
+      setSwitchingAgentId(null)
+    }
+  }, [loading, switchingAgentId])
+
+  const handleSelectAgent = useCallback(
+    (agent: AgentRosterEntry) => {
+      if (agent.id === activeAgentId) {
+        return
+      }
+      pendingAgentMetaRef.current = {
+        agentId: agent.id,
+        agentName: agent.name,
+        agentColorHex: agent.displayColorHex,
+        agentAvatarUrl: agent.avatarUrl,
+      }
+      setSwitchingAgentId(agent.id)
+      setActiveAgentId(agent.id)
+      const nextPath = buildAgentChatPath(window.location.pathname, agent.id)
+      const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+      window.history.pushState({ agentId: agent.id }, '', nextUrl)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    },
+    [activeAgentId],
   )
 
 
@@ -422,13 +520,19 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       ) : null}
       <AgentChatLayout
         agentFirstName={agentFirstName}
-        agentColorHex={agentColorHex || agentColor || undefined}
+        agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
         agentName={resolvedAgentName || 'Agent'}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
         kanbanSnapshot={latestKanbanSnapshot}
+        agentRoster={sidebarAgents}
+        activeAgentId={activeAgentId}
+        switchingAgentId={switchingAgentId}
+        rosterLoading={rosterQuery.isLoading}
+        rosterError={rosterErrorMessage}
+        onSelectAgent={handleSelectAgent}
         onClose={onClose}
         events={events}
         hasMoreOlder={hasMoreOlder}
