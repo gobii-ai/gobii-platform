@@ -45,10 +45,6 @@ export function BurnRateInsight({ insight, onDismiss }: BurnRateInsightProps) {
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35 }}
     >
-      {/* Decorative background shapes */}
-      <div className="insight-bg-shape insight-bg-shape--1" />
-      <div className="insight-bg-shape insight-bg-shape--2" />
-
       {/* Main gauge */}
       <motion.div
         className="insight-gauge-wrapper"
