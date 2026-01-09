@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ChevronUp,
-  ChevronsDown,
-  ChevronsUp,
   Copy,
   Cpu,
   Filter,
+  ListChevronsDownUp,
+  ListChevronsUpDown,
   Megaphone,
   MessageCircle,
   RefreshCcw,
@@ -944,32 +944,41 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                 </div>
               ) : null}
             </div>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
-              onClick={() => handleNavigateMessage('prev')}
-              disabled={!canNavigatePrevMessage}
+            <div
+              className="inline-flex items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+              role="group"
+              aria-label="Message navigation"
             >
-              <ChevronUp className="h-4 w-4" aria-hidden />
-              Prev message
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
-              onClick={() => handleNavigateMessage('next')}
-              disabled={!canNavigateNextMessage}
-            >
-              <ChevronDown className="h-4 w-4" aria-hidden />
-              Next message
-            </button>
+              <span className="inline-flex items-center px-3 py-2 text-sm font-semibold text-slate-700">
+                Message
+              </span>
+              <button
+                type="button"
+                className="inline-flex items-center border-l border-slate-200 px-3 py-2 text-slate-700 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                onClick={() => handleNavigateMessage('prev')}
+                disabled={!canNavigatePrevMessage}
+                aria-label="Previous message"
+              >
+                <ChevronUp className="h-4 w-4" aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center border-l border-slate-200 px-3 py-2 text-slate-700 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                onClick={() => handleNavigateMessage('next')}
+                disabled={!canNavigateNextMessage}
+                aria-label="Next message"
+              >
+                <ChevronDown className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
               onClick={() => handleSetAllCollapsed(false)}
               disabled={!hasFilteredEvents}
             >
-              <ChevronsDown className="h-4 w-4" aria-hidden />
-              Expand all
+              <ListChevronsUpDown className="h-4 w-4" aria-hidden />
+              Expand
             </button>
             <button
               type="button"
@@ -977,8 +986,8 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               onClick={() => handleSetAllCollapsed(true)}
               disabled={!hasFilteredEvents}
             >
-              <ChevronsUp className="h-4 w-4" aria-hidden />
-              Collapse all
+              <ListChevronsDownUp className="h-4 w-4" aria-hidden />
+              Collapse
             </button>
             <button
               type="button"
