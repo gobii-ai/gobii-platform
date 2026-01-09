@@ -11,6 +11,7 @@ from api.agent.tools.tool_manager import (
     is_sqlite_enabled_for_agent,
 )
 from constants.plans import PlanNames
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 @tag("enable_database")
@@ -38,7 +39,7 @@ class EnableDatabaseToolTests(TestCase):
             charter="test enable database",
             browser_use_agent=cls.browser_agent,
             created_at=timezone.now(),
-            preferred_llm_tier=AgentLLMTier.MAX.value,
+            preferred_llm_tier=get_intelligence_tier("max"),
         )
 
     def test_enable_database_creates_enabled_row(self):
@@ -119,14 +120,14 @@ class SqliteToolAvailabilityTests(TestCase):
         cls.paid_browser = BrowserUseAgent.objects.create(user=cls.paid_user, name="PaidBrowser")
         cls.vip_browser = BrowserUseAgent.objects.create(user=cls.vip_user, name="VipBrowser")
 
-    def _create_agent(self, user, browser, name, tier):
+    def _create_agent(self, user, browser, name, tier_key: str):
         return PersistentAgent.objects.create(
             user=user,
             name=name,
             charter="test",
             browser_use_agent=browser,
             created_at=timezone.now(),
-            preferred_llm_tier=tier,
+            preferred_llm_tier=get_intelligence_tier(tier_key),
         )
 
     def test_sqlite_enabled_for_all_agents(self):

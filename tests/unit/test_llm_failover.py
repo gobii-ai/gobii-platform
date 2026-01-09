@@ -22,7 +22,7 @@ from api.agent.core.llm_config import (
 )
 from console.api_views import _build_completion_params
 from api.openrouter import DEFAULT_API_BASE
-from tests.utils.llm_seed import seed_persistent_basic, clear_llm_db
+from tests.utils.llm_seed import clear_llm_db, get_intelligence_tier, seed_persistent_basic
 
 
 @tag("batch_event_llm")
@@ -61,11 +61,19 @@ class TestLLMFailover(TestCase):
         )
 
         token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
-        standard_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1)
+        standard_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
         PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)
 
         if include_premium:
-            premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_premium=True)
+            premium_tier = PersistentLLMTier.objects.create(
+                token_range=token_range,
+                order=1,
+                intelligence_tier=get_intelligence_tier("premium"),
+            )
             PersistentTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
 
         return {
@@ -409,9 +417,21 @@ class TestLLMFailover(TestCase):
         )
 
         token_range = PersistentTokenRange.objects.create(name='default', min_tokens=0, max_tokens=None)
-        max_tier = PersistentLLMTier.objects.create(token_range=token_range, order=1, is_max=True)
-        premium_tier = PersistentLLMTier.objects.create(token_range=token_range, order=2, is_premium=True)
-        standard_tier = PersistentLLMTier.objects.create(token_range=token_range, order=3)
+        max_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("max"),
+        )
+        premium_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=2,
+            intelligence_tier=get_intelligence_tier("premium"),
+        )
+        standard_tier = PersistentLLMTier.objects.create(
+            token_range=token_range,
+            order=3,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
         PersistentTierEndpoint.objects.create(tier=max_tier, endpoint=max_endpoint, weight=1.0)
         PersistentTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
         PersistentTierEndpoint.objects.create(tier=standard_tier, endpoint=standard_endpoint, weight=1.0)

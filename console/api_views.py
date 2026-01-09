@@ -42,6 +42,7 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerModelEndpoint,
     FileHandlerTierEndpoint,
+    IntelligenceTier,
     LLMProvider,
     MCPServerConfig,
     MCPServerOAuthCredential,
@@ -628,12 +629,30 @@ def _validate_reasoning_override(endpoint, value) -> str | None:
     return reasoning_override
 
 
-def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool, is_max: bool = False) -> int:
+def _resolve_intelligence_tier_from_payload(payload) -> "IntelligenceTier":
+    tier_key = (payload.get("intelligence_tier") or "").strip()
+    if not tier_key:
+        is_premium = _coerce_bool(payload.get("is_premium", False))
+        is_max = _coerce_bool(payload.get("is_max", False))
+        if is_premium and is_max:
+            raise ValueError("Tier cannot be both premium and max.")
+        if is_max:
+            tier_key = "max"
+        elif is_premium:
+            tier_key = "premium"
+        else:
+            tier_key = "standard"
+    tier = IntelligenceTier.objects.filter(key=tier_key).first()
+    if tier is None:
+        raise ValueError("Unsupported intelligence tier selection.")
+    return tier
+
+
+def _next_order_for_range(token_range: PersistentTokenRange, intelligence_tier: "IntelligenceTier") -> int:
     last = (
         PersistentLLMTier.objects.filter(
             token_range=token_range,
-            is_premium=is_premium,
-            is_max=is_max,
+            intelligence_tier=intelligence_tier,
         )
         .order_by("-order")
         .first()
@@ -641,9 +660,9 @@ def _next_order_for_range(token_range: PersistentTokenRange, *, is_premium: bool
     return (last.order if last else 0) + 1
 
 
-def _next_order_for_browser(policy: BrowserLLMPolicy, *, is_premium: bool) -> int:
+def _next_order_for_browser(policy: BrowserLLMPolicy, intelligence_tier: "IntelligenceTier") -> int:
     last = (
-        BrowserLLMTier.objects.filter(policy=policy, is_premium=is_premium)
+        BrowserLLMTier.objects.filter(policy=policy, intelligence_tier=intelligence_tier)
         .order_by("-order")
         .first()
     )
@@ -2225,19 +2244,18 @@ class PersistentTierListCreateAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        is_premium = _coerce_bool(payload.get("is_premium", False))
-        is_max = _coerce_bool(payload.get("is_max", False))
-        if is_premium and is_max:
-            return HttpResponseBadRequest("Tier cannot be both premium and max")
+        try:
+            intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
         description = (payload.get("description") or "").strip()
-        order = _next_order_for_range(token_range, is_premium=is_premium, is_max=is_max)
+        order = _next_order_for_range(token_range, intelligence_tier)
 
         tier = PersistentLLMTier.objects.create(
             token_range=token_range,
             order=order,
             description=description,
-            is_premium=is_premium,
-            is_max=is_max,
+            intelligence_tier=intelligence_tier,
         )
         invalidate_llm_bootstrap_cache()
         return _json_ok(tier_id=str(tier.id))
@@ -2261,8 +2279,7 @@ class PersistentTierDetailAPIView(SystemAdminAPIView):
                 return HttpResponseBadRequest("direction must be 'up' or 'down'")
             sibling_qs = PersistentLLMTier.objects.filter(
                 token_range=tier.token_range,
-                is_premium=tier.is_premium,
-                is_max=tier.is_max,
+                intelligence_tier=tier.intelligence_tier,
             )
             changed = _swap_orders(sibling_qs, tier, direction)
             if not changed:
@@ -2531,14 +2548,17 @@ class BrowserTierListCreateAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        is_premium = _coerce_bool(payload.get("is_premium", False))
+        try:
+            intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
         description = (payload.get("description") or "").strip()
-        order = _next_order_for_browser(policy, is_premium=is_premium)
+        order = _next_order_for_browser(policy, intelligence_tier)
         tier = BrowserLLMTier.objects.create(
             policy=policy,
             order=order,
             description=description,
-            is_premium=is_premium,
+            intelligence_tier=intelligence_tier,
         )
         return _json_ok(tier_id=str(tier.id))
 
@@ -2559,7 +2579,7 @@ class BrowserTierDetailAPIView(SystemAdminAPIView):
             direction = (payload.get("move") or "").lower()
             if direction not in {"up", "down"}:
                 return HttpResponseBadRequest("direction must be 'up' or 'down'")
-            sibling_qs = BrowserLLMTier.objects.filter(policy=tier.policy, is_premium=tier.is_premium)
+            sibling_qs = BrowserLLMTier.objects.filter(policy=tier.policy, intelligence_tier=tier.intelligence_tier)
             changed = _swap_orders(sibling_qs, tier, direction)
             if not changed:
                 return HttpResponseBadRequest("Unable to move tier in that direction")
@@ -3075,9 +3095,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                         token_range=new_range,
                         order=src_tier.order,
                         description=src_tier.description,
-                        is_premium=src_tier.is_premium,
-                        is_max=src_tier.is_max,
-                        credit_multiplier=src_tier.credit_multiplier,
+                        intelligence_tier=src_tier.intelligence_tier,
                     )
                     for src_te in src_tier.tier_endpoints.all():
                         ProfilePersistentTierEndpoint.objects.create(
@@ -3093,7 +3111,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                     profile=clone,
                     order=src_tier.order,
                     description=src_tier.description,
-                    is_premium=src_tier.is_premium,
+                    intelligence_tier=src_tier.intelligence_tier,
                 )
                 for src_te in src_tier.tier_endpoints.all():
                     ProfileBrowserTierEndpoint.objects.create(
@@ -3197,20 +3215,22 @@ class ProfilePersistentTierListCreateAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
         from api.models import ProfileTokenRange, ProfilePersistentTier
         token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
-        tiers = ProfilePersistentTier.objects.filter(token_range=token_range).order_by("is_premium", "is_max", "order")
+        tiers = ProfilePersistentTier.objects.filter(token_range=token_range).order_by("intelligence_tier__rank", "order")
         payload = [{
             "id": str(t.id),
             "order": t.order,
             "description": t.description,
-            "is_premium": t.is_premium,
-            "is_max": t.is_max,
-            "credit_multiplier": str(t.credit_multiplier) if t.credit_multiplier else None,
+            "intelligence_tier": {
+                "key": t.intelligence_tier.key,
+                "display_name": t.intelligence_tier.display_name,
+                "rank": t.intelligence_tier.rank,
+                "credit_multiplier": str(t.intelligence_tier.credit_multiplier),
+            },
         } for t in tiers]
         return JsonResponse({"tiers": payload})
 
     def post(self, request: HttpRequest, range_id: str, *args: Any, **kwargs: Any):
         from api.models import ProfileTokenRange, ProfilePersistentTier
-        from decimal import Decimal, InvalidOperation
         token_range = get_object_or_404(ProfileTokenRange, pk=range_id)
         try:
             payload = _parse_json_body(request)
@@ -3218,21 +3238,16 @@ class ProfilePersistentTierListCreateAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
 
         order = payload.get("order", 0)
-        is_premium = _coerce_bool(payload.get("is_premium", False))
-        is_max = _coerce_bool(payload.get("is_max", False))
-
+        try:
+            intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
         create_kwargs: dict[str, Any] = {
             "token_range": token_range,
             "order": order,
             "description": (payload.get("description") or "").strip(),
-            "is_premium": is_premium,
-            "is_max": is_max,
+            "intelligence_tier": intelligence_tier,
         }
-        if payload.get("credit_multiplier"):
-            try:
-                create_kwargs["credit_multiplier"] = Decimal(str(payload.get("credit_multiplier")))
-            except InvalidOperation:
-                return HttpResponseBadRequest("credit_multiplier must be a valid decimal")
 
         tier = ProfilePersistentTier.objects.create(**create_kwargs)
         return _json_ok(tier_id=str(tier.id))
@@ -3244,7 +3259,6 @@ class ProfilePersistentTierDetailAPIView(SystemAdminAPIView):
 
     def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
         from api.models import ProfilePersistentTier
-        from decimal import Decimal, InvalidOperation
         tier = get_object_or_404(ProfilePersistentTier, pk=tier_id)
         try:
             payload = _parse_json_body(request)
@@ -3257,8 +3271,7 @@ class ProfilePersistentTierDetailAPIView(SystemAdminAPIView):
                 return HttpResponseBadRequest("direction must be 'up' or 'down'")
             siblings = ProfilePersistentTier.objects.filter(
                 token_range=tier.token_range,
-                is_premium=tier.is_premium,
-                is_max=tier.is_max,
+                intelligence_tier=tier.intelligence_tier,
             )
             changed = _swap_orders(siblings, tier, direction)
             if not changed:
@@ -3268,18 +3281,11 @@ class ProfilePersistentTierDetailAPIView(SystemAdminAPIView):
             tier.order = payload.get("order", 0)
         if "description" in payload:
             tier.description = (payload.get("description") or "").strip()
-        if "is_premium" in payload:
-            tier.is_premium = _coerce_bool(payload.get("is_premium"))
-        if "is_max" in payload:
-            tier.is_max = _coerce_bool(payload.get("is_max"))
-        if "credit_multiplier" in payload:
-            if payload.get("credit_multiplier"):
-                try:
-                    tier.credit_multiplier = Decimal(str(payload.get("credit_multiplier")))
-                except InvalidOperation:
-                    return HttpResponseBadRequest("credit_multiplier must be a valid decimal")
-            else:
-                tier.credit_multiplier = None
+        if "intelligence_tier" in payload or "is_premium" in payload or "is_max" in payload:
+            try:
+                tier.intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
 
         tier.save()
         return _json_ok(tier_id=str(tier.id))
@@ -3389,12 +3395,17 @@ class ProfileBrowserTierListCreateAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, profile_id: str, *args: Any, **kwargs: Any):
         from api.models import LLMRoutingProfile, ProfileBrowserTier
         profile = get_object_or_404(LLMRoutingProfile, pk=profile_id)
-        tiers = ProfileBrowserTier.objects.filter(profile=profile).order_by("is_premium", "order")
+        tiers = ProfileBrowserTier.objects.filter(profile=profile).order_by("intelligence_tier__rank", "order")
         payload = [{
             "id": str(t.id),
             "order": t.order,
             "description": t.description,
-            "is_premium": t.is_premium,
+            "intelligence_tier": {
+                "key": t.intelligence_tier.key,
+                "display_name": t.intelligence_tier.display_name,
+                "rank": t.intelligence_tier.rank,
+                "credit_multiplier": str(t.intelligence_tier.credit_multiplier),
+            },
         } for t in tiers]
         return JsonResponse({"tiers": payload})
 
@@ -3412,19 +3423,22 @@ class ProfileBrowserTierListCreateAPIView(SystemAdminAPIView):
         except (TypeError, ValueError):
             return HttpResponseBadRequest("order must be an integer")
 
-        is_premium = _coerce_bool(payload.get("is_premium", False))
+        try:
+            intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
         if order is None or order <= 0:
             max_order = (
-                ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium)
+                ProfileBrowserTier.objects.filter(profile=profile, intelligence_tier=intelligence_tier)
                 .aggregate(max_order=Max("order"))
                 .get("max_order")
                 or 0
             )
             order = max_order + 1
-        elif ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium, order=order).exists():
+        elif ProfileBrowserTier.objects.filter(profile=profile, intelligence_tier=intelligence_tier, order=order).exists():
             # Append to the end if the requested order is already taken to avoid unique constraint errors
             max_order = (
-                ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium)
+                ProfileBrowserTier.objects.filter(profile=profile, intelligence_tier=intelligence_tier)
                 .aggregate(max_order=Max("order"))
                 .get("max_order")
                 or 0
@@ -3435,7 +3449,7 @@ class ProfileBrowserTierListCreateAPIView(SystemAdminAPIView):
             profile=profile,
             order=order,
             description=(payload.get("description") or "").strip(),
-            is_premium=is_premium,
+            intelligence_tier=intelligence_tier,
         )
         return _json_ok(tier_id=str(tier.id))
 
@@ -3458,7 +3472,7 @@ class ProfileBrowserTierDetailAPIView(SystemAdminAPIView):
                 return HttpResponseBadRequest("direction must be 'up' or 'down'")
             siblings = ProfileBrowserTier.objects.filter(
                 profile=tier.profile,
-                is_premium=tier.is_premium,
+                intelligence_tier=tier.intelligence_tier,
             )
             changed = _swap_orders(siblings, tier, direction)
             if not changed:
@@ -3468,8 +3482,11 @@ class ProfileBrowserTierDetailAPIView(SystemAdminAPIView):
             tier.order = payload.get("order", 0)
         if "description" in payload:
             tier.description = (payload.get("description") or "").strip()
-        if "is_premium" in payload:
-            tier.is_premium = _coerce_bool(payload.get("is_premium"))
+        if "intelligence_tier" in payload or "is_premium" in payload or "is_max" in payload:
+            try:
+                tier.intelligence_tier = _resolve_intelligence_tier_from_payload(payload)
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
         tier.save()
         return _json_ok(tier_id=str(tier.id))
 

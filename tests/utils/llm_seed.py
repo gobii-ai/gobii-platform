@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.apps import apps
 
 
@@ -15,6 +17,21 @@ def clear_llm_db():
     LLMProvider.objects.all().delete()
 
 
+def get_intelligence_tier(key: str):
+    IntelligenceTier = apps.get_model('api', 'IntelligenceTier')
+    defaults = {
+        "standard": {"display_name": "Standard", "rank": 0, "credit_multiplier": Decimal("1.00")},
+        "premium": {"display_name": "Premium", "rank": 1, "credit_multiplier": Decimal("2.00")},
+        "max": {"display_name": "Max", "rank": 2, "credit_multiplier": Decimal("5.00")},
+        "ultra": {"display_name": "Ultra", "rank": 3, "credit_multiplier": Decimal("20.00")},
+        "ultra_max": {"display_name": "Ultra Max", "rank": 4, "credit_multiplier": Decimal("50.00")},
+    }
+    if key not in defaults:
+        return IntelligenceTier.objects.get(key=key)
+    tier, _created = IntelligenceTier.objects.get_or_create(key=key, defaults=defaults[key])
+    return tier
+
+
 def seed_persistent_basic(include_openrouter=False):
     """Seed a minimal persistent LLM config used by unit tests.
 
@@ -28,6 +45,8 @@ def seed_persistent_basic(include_openrouter=False):
     PersistentTierEndpoint = apps.get_model('api', 'PersistentTierEndpoint')
 
     clear_llm_db()
+
+    standard_tier = get_intelligence_tier("standard")
 
     prov_a = LLMProvider.objects.create(key='anthropic', display_name='Anthropic', enabled=True, env_var_name='ANTHROPIC_API_KEY', browser_backend='ANTHROPIC')
     prov_g = LLMProvider.objects.create(key='google', display_name='Google', enabled=True, env_var_name='GOOGLE_API_KEY', browser_backend='GOOGLE')
@@ -58,29 +77,29 @@ def seed_persistent_basic(include_openrouter=False):
         )
 
     small = PersistentTokenRange.objects.create(name='small', min_tokens=0, max_tokens=7500)
-    t1 = PersistentLLMTier.objects.create(token_range=small, order=1)
+    t1 = PersistentLLMTier.objects.create(token_range=small, order=1, intelligence_tier=standard_tier)
     # Default: prefer anthropic, then google
     PersistentTierEndpoint.objects.create(tier=t1, endpoint=ep_a, weight=0.75)
     PersistentTierEndpoint.objects.create(tier=t1, endpoint=ep_g, weight=0.25)
     if include_openrouter and ep_o:
-        t2 = PersistentLLMTier.objects.create(token_range=small, order=2)
+        t2 = PersistentLLMTier.objects.create(token_range=small, order=2, intelligence_tier=standard_tier)
         PersistentTierEndpoint.objects.create(tier=t2, endpoint=ep_o, weight=1.0)
 
     # Medium range: mix openrouter+google+anthropic
     medium = PersistentTokenRange.objects.create(name='medium', min_tokens=7500, max_tokens=20000)
-    m1 = PersistentLLMTier.objects.create(token_range=medium, order=1)
+    m1 = PersistentLLMTier.objects.create(token_range=medium, order=1, intelligence_tier=standard_tier)
     if include_openrouter and ep_o:
         PersistentTierEndpoint.objects.create(tier=m1, endpoint=ep_o, weight=0.70)
     PersistentTierEndpoint.objects.create(tier=m1, endpoint=ep_g, weight=0.10)
     PersistentTierEndpoint.objects.create(tier=m1, endpoint=ep_a, weight=0.20)
-    m2 = PersistentLLMTier.objects.create(token_range=medium, order=2)
+    m2 = PersistentLLMTier.objects.create(token_range=medium, order=2, intelligence_tier=standard_tier)
     PersistentTierEndpoint.objects.create(tier=m2, endpoint=ep_a, weight=1.0)
 
     # Large range: prefer openrouter+google; fallback anthropic
     large = PersistentTokenRange.objects.create(name='large', min_tokens=20000, max_tokens=None)
-    l1 = PersistentLLMTier.objects.create(token_range=large, order=1)
+    l1 = PersistentLLMTier.objects.create(token_range=large, order=1, intelligence_tier=standard_tier)
     if include_openrouter and ep_o:
         PersistentTierEndpoint.objects.create(tier=l1, endpoint=ep_o, weight=0.70)
     PersistentTierEndpoint.objects.create(tier=l1, endpoint=ep_g, weight=0.30)
-    l2 = PersistentLLMTier.objects.create(token_range=large, order=2)
+    l2 = PersistentLLMTier.objects.create(token_range=large, order=2, intelligence_tier=standard_tier)
     PersistentTierEndpoint.objects.create(tier=l2, endpoint=ep_a, weight=1.0)

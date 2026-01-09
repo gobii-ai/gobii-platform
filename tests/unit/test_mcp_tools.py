@@ -24,6 +24,7 @@ from api.models import (
     UserBilling,
 )
 from api.agent.core.llm_config import AgentLLMTier
+from tests.utils.llm_seed import get_intelligence_tier
 from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
     MCPToolManager,
@@ -1146,7 +1147,7 @@ class MCPToolFunctionsTests(TestCase):
         billing, _ = UserBilling.objects.get_or_create(user=self.user)
         billing.subscription = PlanNames.STARTUP
         billing.save(update_fields=["subscription"])
-        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
+        self.agent.preferred_llm_tier = get_intelligence_tier("max")
         self.agent.save(update_fields=["preferred_llm_tier"])
 
         enable_tools(self.agent, ["sqlite_batch"])
@@ -1434,7 +1435,7 @@ class MCPToolIntegrationTests(TestCase):
         billing, _ = UserBilling.objects.get_or_create(user=self.user)
         billing.subscription = PlanNames.STARTUP
         billing.save(update_fields=["subscription"])
-        self.agent.preferred_llm_tier = AgentLLMTier.MAX.value
+        self.agent.preferred_llm_tier = get_intelligence_tier("max")
         self.agent.save(update_fields=["preferred_llm_tier"])
 
         mock_sqlite = MagicMock(return_value={"status": "ok"})

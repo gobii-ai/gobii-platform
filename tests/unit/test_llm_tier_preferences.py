@@ -15,6 +15,7 @@ from api.models import (
     TaskCreditConfig,
 )
 from constants.plans import PlanNames
+from tests.utils.llm_seed import get_intelligence_tier
 from util.tool_costs import clear_tool_credit_cost_cache
 
 
@@ -36,7 +37,7 @@ class AgentTierPreferenceTests(TestCase):
             name="Tier Tester",
             charter="Validate tier defaults",
             browser_use_agent=self.browser_agent,
-            preferred_llm_tier=AgentLLMTier.STANDARD.value,
+            preferred_llm_tier=get_intelligence_tier("standard"),
         )
 
     def test_first_loop_always_uses_premium(self):
@@ -71,7 +72,7 @@ class BrowserUseTaskTierMultiplierTests(TestCase):
             name="Browser Agent",
             charter="Use browser",
             browser_use_agent=self.browser_agent,
-            preferred_llm_tier=AgentLLMTier.PREMIUM.value,
+            preferred_llm_tier=get_intelligence_tier("premium"),
         )
         self.credit = TaskCredit.objects.create(
             user=self.user,

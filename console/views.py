@@ -65,6 +65,7 @@ from api.models import (
     PersistentAgentEmailEndpoint,
     PersistentAgentWebhook,
     PersistentAgentMessage,
+    IntelligenceTier,
     AgentEmailAccount,
     AgentPeerLink,
     AgentCommPeerState,
@@ -259,27 +260,35 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
         else:
             disabled_reason = "Intelligence levels are managed by deployment settings."
 
-    multipliers = get_llm_tier_multipliers()
-    options = [
-        {
-            "key": AgentLLMTier.STANDARD.value,
-            "label": "Standard",
-            "description": "Balanced routing that uses 1× credits.",
-            "multiplier": float(multipliers.get("standard", 1)),
-        },
-        {
-            "key": AgentLLMTier.PREMIUM.value,
-            "label": "Smarter",
-            "description": "Premium routing with improved reasoning.",
-            "multiplier": float(multipliers.get("premium", 1)),
-        },
-        {
-            "key": AgentLLMTier.MAX.value,
-            "label": "Smartest",
-            "description": f"Top-tier models with the best reasoning.",
-            "multiplier": float(multipliers.get("max", 5)),
-        },
-    ]
+    tier_descriptions = {
+        AgentLLMTier.STANDARD.value: "Balanced routing that uses 1× credits.",
+        AgentLLMTier.PREMIUM.value: "Premium routing with improved reasoning.",
+        AgentLLMTier.MAX.value: "Top-tier models with the best reasoning.",
+        AgentLLMTier.ULTRA.value: "Ultra-tier models for advanced reasoning.",
+        AgentLLMTier.ULTRA_MAX.value: "Highest tier for maximum reasoning depth.",
+    }
+    tiers = list(IntelligenceTier.objects.order_by("credit_multiplier", "rank"))
+    if tiers:
+        options = [
+            {
+                "key": tier.key,
+                "label": tier.display_name,
+                "description": tier_descriptions.get(tier.key, ""),
+                "multiplier": float(tier.credit_multiplier),
+            }
+            for tier in tiers
+        ]
+    else:
+        multipliers = get_llm_tier_multipliers()
+        options = [
+            {
+                "key": tier.value,
+                "label": tier.value.replace("_", " ").title(),
+                "description": tier_descriptions.get(tier.value, ""),
+                "multiplier": float(multipliers.get(tier.value, 1)),
+            }
+            for tier in sorted(TIER_ORDER.keys(), key=lambda entry: TIER_ORDER[entry])
+        ]
 
     return {
         "options": options,
@@ -3263,7 +3272,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'createdAtDisplay': _datetime_display(agent.created_at, "F j, Y \a\t g:i A"),
                 'pendingTransfer': pending_transfer_payload,
                 'whitelistPolicy': agent.whitelist_policy,
-                'preferredLlmTier': getattr(agent, 'preferred_llm_tier', AgentLLMTier.STANDARD.value),
+                'preferredLlmTier': getattr(getattr(agent, 'preferred_llm_tier', None), 'key', AgentLLMTier.STANDARD.value),
                 'agentColorHex': agent.get_display_color().upper(),
                 'organization': (
                     {
@@ -3912,7 +3921,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         prev_is_active = agent.is_active
         prev_daily_limit = agent.daily_credit_limit
         prev_hard_limit = agent.get_daily_credit_hard_limit()
-        prev_preferred_tier = agent.preferred_llm_tier
+        prev_preferred_tier = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         prev_agent_color_hex = agent.get_display_color().upper()
         prev_whitelist_policy = agent.whitelist_policy
 
@@ -3932,7 +3941,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             and owner is not None
             and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
         )
-        current_preferred_tier_value = getattr(agent, 'preferred_llm_tier', AgentLLMTier.STANDARD.value)
+        current_preferred_tier_value = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         try:
             AgentLLMTier(current_preferred_tier_value)
         except ValueError:
@@ -3955,7 +3964,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
                 return _general_error("That intelligence level isn't available for this plan.")
 
-        resolved_preferred_tier_value = requested_preferred_tier.value
+        resolved_preferred_tier = IntelligenceTier.objects.filter(key=requested_preferred_tier.value).first()
+        if resolved_preferred_tier is None:
+            return _general_error("Select a valid intelligence level.")
 
         if dedicated_proxy_id:
             if owner is None:
@@ -4032,8 +4043,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     agent.daily_credit_limit = new_daily_limit
                     agent_fields_to_update.append('daily_credit_limit')
 
-                if agent.preferred_llm_tier != resolved_preferred_tier_value:
-                    agent.preferred_llm_tier = resolved_preferred_tier_value
+                if agent.preferred_llm_tier_id != resolved_preferred_tier.id:
+                    agent.preferred_llm_tier = resolved_preferred_tier
                     agent_fields_to_update.append('preferred_llm_tier')
 
                 if avatar_file:
@@ -4112,7 +4123,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         'daily_credit_limit': soft_value,
                         'daily_credit_soft_target': soft_value,
                         'daily_credit_hard_limit': float(hard_limit_value) if hard_limit_value is not None else None,
-                        'preferred_llm_tier': resolved_preferred_tier_value,
+                        'preferred_llm_tier': resolved_preferred_tier.key,
                         'agent_color_hex': agent.get_display_color().upper(),
                         'updated_fields': changed_fields_for_analytics,
                     },

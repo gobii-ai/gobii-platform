@@ -12,7 +12,7 @@ from agents.services import PretrainedWorkerTemplateService, AgentService
 from api.agent.core.llm_config import default_preferred_tier_for_owner
 from api.agent.short_description import maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.models import BrowserUseAgent, PersistentAgent
+from api.models import BrowserUseAgent, IntelligenceTier, PersistentAgent
 from config import settings
 from constants.plans import PlanNamesChoices
 
@@ -69,7 +69,7 @@ class PersistentAgentProvisioningService:
         whitelist_policy: str | None = None,
         preferred_contact_endpoint=None,
         template_code: str | None = None,
-        preferred_llm_tier: str | None = None,
+        preferred_llm_tier: IntelligenceTier | None = None,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
@@ -103,7 +103,12 @@ class PersistentAgentProvisioningService:
                 if hasattr(browser_agent, "_agent_creation_organization"):
                     delattr(browser_agent, "_agent_creation_organization")
 
-            computed_tier = preferred_llm_tier or default_preferred_tier_for_owner(organization or user).value
+            if preferred_llm_tier is None:
+                default_key = default_preferred_tier_for_owner(organization or user).value
+                preferred_llm_tier = IntelligenceTier.objects.filter(key=default_key).first()
+            if preferred_llm_tier is None:
+                raise PersistentAgentProvisioningError("Unsupported intelligence tier selection.")
+            computed_tier = preferred_llm_tier
 
             persistent_agent = PersistentAgent(
                 user=user,

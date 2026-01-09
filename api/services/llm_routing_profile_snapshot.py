@@ -80,9 +80,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
                     token_range=cloned_range,
                     order=tier.order,
                     description=tier.description,
-                    is_premium=tier.is_premium,
-                    is_max=tier.is_max,
-                    credit_multiplier=tier.credit_multiplier,
+                    intelligence_tier=tier.intelligence_tier,
                 )
 
                 # Clone tier endpoints
@@ -100,7 +98,7 @@ def create_eval_profile_snapshot(source_profile, suite_run_id: str):
                 profile=cloned_profile,
                 order=browser_tier.order,
                 description=browser_tier.description,
-                is_premium=browser_tier.is_premium,
+                intelligence_tier=browser_tier.intelligence_tier,
             )
 
             # Clone browser tier endpoints

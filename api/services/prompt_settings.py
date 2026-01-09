@@ -8,9 +8,13 @@ from django.conf import settings
 DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET = 120000
 DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET = 120000
 DEFAULT_MAX_PROMPT_TOKEN_BUDGET = 120000
+DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET = DEFAULT_MAX_PROMPT_TOKEN_BUDGET
+DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET = DEFAULT_MAX_PROMPT_TOKEN_BUDGET
 DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT = 15
 DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT = 20
 DEFAULT_MAX_MESSAGE_HISTORY_LIMIT = 20
+DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT = DEFAULT_MAX_MESSAGE_HISTORY_LIMIT
+DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT = DEFAULT_MAX_MESSAGE_HISTORY_LIMIT
 # With tiered preview system, we can track more history efficiently:
 # - Position 0: 4KB preview (active result)
 # - Position 1-2: 1KB previews (recent context)
@@ -19,13 +23,17 @@ DEFAULT_MAX_MESSAGE_HISTORY_LIMIT = 20
 DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT = 40
 DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT = 50
 DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT = 60
+DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT = DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT
+DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT = DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT
 DEFAULT_STANDARD_ENABLED_TOOL_LIMIT = 40
 DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT = 40
 DEFAULT_MAX_ENABLED_TOOL_LIMIT = 40
+DEFAULT_ULTRA_ENABLED_TOOL_LIMIT = DEFAULT_MAX_ENABLED_TOOL_LIMIT
+DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT = DEFAULT_MAX_ENABLED_TOOL_LIMIT
 DEFAULT_UNIFIED_HISTORY_LIMIT = getattr(settings, "PA_RAW_MSG_LIMIT", 20) + getattr(settings, "PA_RAW_STEP_LIMIT", 100)
 DEFAULT_UNIFIED_HISTORY_HYSTERESIS = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
 
-_CACHE_KEY = "prompt_settings:v3"
+_CACHE_KEY = "prompt_settings:v4"
 _CACHE_TTL_SECONDS = 300
 
 
@@ -34,21 +42,33 @@ class PromptSettings:
     standard_prompt_token_budget: int
     premium_prompt_token_budget: int
     max_prompt_token_budget: int
+    ultra_prompt_token_budget: int
+    ultra_max_prompt_token_budget: int
     standard_message_history_limit: int
     premium_message_history_limit: int
     max_message_history_limit: int
+    ultra_message_history_limit: int
+    ultra_max_message_history_limit: int
     standard_tool_call_history_limit: int
     premium_tool_call_history_limit: int
     max_tool_call_history_limit: int
+    ultra_tool_call_history_limit: int
+    ultra_max_tool_call_history_limit: int
     standard_enabled_tool_limit: int
     premium_enabled_tool_limit: int
     max_enabled_tool_limit: int
+    ultra_enabled_tool_limit: int
+    ultra_max_enabled_tool_limit: int
     standard_unified_history_limit: int
     premium_unified_history_limit: int
     max_unified_history_limit: int
+    ultra_unified_history_limit: int
+    ultra_max_unified_history_limit: int
     standard_unified_history_hysteresis: int
     premium_unified_history_hysteresis: int
     max_unified_history_hysteresis: int
+    ultra_unified_history_hysteresis: int
+    ultra_max_unified_history_hysteresis: int
 
 
 def _serialise(config) -> dict:
@@ -56,21 +76,33 @@ def _serialise(config) -> dict:
         "standard_prompt_token_budget": config.standard_prompt_token_budget,
         "premium_prompt_token_budget": config.premium_prompt_token_budget,
         "max_prompt_token_budget": config.max_prompt_token_budget,
+        "ultra_prompt_token_budget": config.ultra_prompt_token_budget,
+        "ultra_max_prompt_token_budget": config.ultra_max_prompt_token_budget,
         "standard_message_history_limit": config.standard_message_history_limit,
         "premium_message_history_limit": config.premium_message_history_limit,
         "max_message_history_limit": config.max_message_history_limit,
+        "ultra_message_history_limit": config.ultra_message_history_limit,
+        "ultra_max_message_history_limit": config.ultra_max_message_history_limit,
         "standard_tool_call_history_limit": config.standard_tool_call_history_limit,
         "premium_tool_call_history_limit": config.premium_tool_call_history_limit,
         "max_tool_call_history_limit": config.max_tool_call_history_limit,
+        "ultra_tool_call_history_limit": config.ultra_tool_call_history_limit,
+        "ultra_max_tool_call_history_limit": config.ultra_max_tool_call_history_limit,
         "standard_enabled_tool_limit": config.standard_enabled_tool_limit,
         "premium_enabled_tool_limit": config.premium_enabled_tool_limit,
         "max_enabled_tool_limit": config.max_enabled_tool_limit,
+        "ultra_enabled_tool_limit": config.ultra_enabled_tool_limit,
+        "ultra_max_enabled_tool_limit": config.ultra_max_enabled_tool_limit,
         "standard_unified_history_limit": config.standard_unified_history_limit,
         "premium_unified_history_limit": config.premium_unified_history_limit,
         "max_unified_history_limit": config.max_unified_history_limit,
+        "ultra_unified_history_limit": config.ultra_unified_history_limit,
+        "ultra_max_unified_history_limit": config.ultra_max_unified_history_limit,
         "standard_unified_history_hysteresis": config.standard_unified_history_hysteresis,
         "premium_unified_history_hysteresis": config.premium_unified_history_hysteresis,
         "max_unified_history_hysteresis": config.max_unified_history_hysteresis,
+        "ultra_unified_history_hysteresis": config.ultra_unified_history_hysteresis,
+        "ultra_max_unified_history_hysteresis": config.ultra_max_unified_history_hysteresis,
     }
 
 
@@ -92,21 +124,33 @@ def get_prompt_settings() -> PromptSettings:
             standard_prompt_token_budget=DEFAULT_STANDARD_PROMPT_TOKEN_BUDGET,
             premium_prompt_token_budget=DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
             max_prompt_token_budget=DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
+            ultra_prompt_token_budget=DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET,
+            ultra_max_prompt_token_budget=DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET,
             standard_message_history_limit=DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
             premium_message_history_limit=DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
             max_message_history_limit=DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
+            ultra_message_history_limit=DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT,
+            ultra_max_message_history_limit=DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT,
             standard_tool_call_history_limit=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
             premium_tool_call_history_limit=DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
             max_tool_call_history_limit=DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
+            ultra_tool_call_history_limit=DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
+            ultra_max_tool_call_history_limit=DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
             standard_enabled_tool_limit=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
             premium_enabled_tool_limit=DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
             max_enabled_tool_limit=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+            ultra_enabled_tool_limit=DEFAULT_ULTRA_ENABLED_TOOL_LIMIT,
+            ultra_max_enabled_tool_limit=DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT,
             standard_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
             premium_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
             max_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
+            ultra_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
+            ultra_max_unified_history_limit=DEFAULT_UNIFIED_HISTORY_LIMIT,
             standard_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
             premium_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
             max_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+            ultra_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+            ultra_max_unified_history_hysteresis=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
         )
 
     data = _serialise(config)

@@ -18,6 +18,7 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
     FileHandlerModelEndpoint,
+    IntelligenceTier,
     LLMProvider,
     LLMRoutingProfile,
     PersistentLLMTier,
@@ -188,7 +189,10 @@ def build_llm_overview() -> dict[str, Any]:
         .prefetch_related(
             Prefetch(
                 "tiers",
-                queryset=PersistentLLMTier.objects.order_by("is_premium", "is_max", "order").prefetch_related(
+                queryset=PersistentLLMTier.objects.select_related("intelligence_tier").order_by(
+                    "intelligence_tier__rank",
+                    "order",
+                ).prefetch_related(
                     Prefetch(
                         "tier_endpoints",
                         queryset=PersistentTierEndpoint.objects.select_related("endpoint__provider").order_by("endpoint__litellm_model"),
@@ -222,8 +226,12 @@ def build_llm_overview() -> dict[str, Any]:
                     "id": str(tier.id),
                     "order": tier.order,
                     "description": tier.description,
-                    "is_premium": tier.is_premium,
-                    "is_max": tier.is_max,
+                    "intelligence_tier": {
+                        "key": tier.intelligence_tier.key,
+                        "display_name": tier.intelligence_tier.display_name,
+                        "rank": tier.intelligence_tier.rank,
+                        "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
+                    },
                     "endpoints": tier_endpoints,
                 }
             )
@@ -242,7 +250,10 @@ def build_llm_overview() -> dict[str, Any]:
         .prefetch_related(
             Prefetch(
                 "tiers",
-                queryset=BrowserLLMTier.objects.order_by("is_premium", "order").prefetch_related(
+                queryset=BrowserLLMTier.objects.select_related("intelligence_tier").order_by(
+                    "intelligence_tier__rank",
+                    "order",
+                ).prefetch_related(
             Prefetch(
                 "tier_endpoints",
                 queryset=BrowserTierEndpoint.objects.select_related(
@@ -285,7 +296,12 @@ def build_llm_overview() -> dict[str, Any]:
                     "id": str(tier.id),
                     "order": tier.order,
                     "description": tier.description,
-                    "is_premium": tier.is_premium,
+                    "intelligence_tier": {
+                        "key": tier.intelligence_tier.key,
+                        "display_name": tier.intelligence_tier.display_name,
+                        "rank": tier.intelligence_tier.rank,
+                        "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
+                    },
                     "endpoints": tier_endpoints,
                 }
             )
@@ -359,11 +375,21 @@ def build_llm_overview() -> dict[str, Any]:
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
         "persistent_endpoints": PersistentModelEndpoint.objects.filter(enabled=True).count(),
         "browser_endpoints": BrowserModelEndpoint.objects.filter(enabled=True).count(),
-        "premium_persistent_tiers": PersistentLLMTier.objects.filter(is_premium=True).count(),
+        "premium_persistent_tiers": PersistentLLMTier.objects.filter(intelligence_tier__key="premium").count(),
     }
+    intelligence_tiers = [
+        {
+            "key": tier.key,
+            "display_name": tier.display_name,
+            "rank": tier.rank,
+            "credit_multiplier": str(tier.credit_multiplier),
+        }
+        for tier in IntelligenceTier.objects.order_by("rank")
+    ]
 
     return {
         "stats": stats,
+        "intelligence_tiers": intelligence_tiers,
         "providers": provider_payload,
         "persistent": {"ranges": persistent_payload},
         "browser": browser_payload,
@@ -426,9 +452,12 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
                 "id": str(tier.id),
                 "order": tier.order,
                 "description": tier.description,
-                "is_premium": tier.is_premium,
-                "is_max": tier.is_max,
-                "credit_multiplier": str(tier.credit_multiplier) if tier.credit_multiplier else None,
+                "intelligence_tier": {
+                    "key": tier.intelligence_tier.key,
+                    "display_name": tier.intelligence_tier.display_name,
+                    "rank": tier.intelligence_tier.rank,
+                    "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
+                },
                 "endpoints": tier_endpoints,
             })
         persistent_ranges.append({
@@ -464,7 +493,12 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
             "id": str(tier.id),
             "order": tier.order,
             "description": tier.description,
-            "is_premium": tier.is_premium,
+            "intelligence_tier": {
+                "key": tier.intelligence_tier.key,
+                "display_name": tier.intelligence_tier.display_name,
+                "rank": tier.intelligence_tier.rank,
+                "credit_multiplier": str(tier.intelligence_tier.credit_multiplier),
+            },
             "endpoints": tier_endpoints,
         })
 
@@ -538,7 +572,9 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
     )
     persistent_tier_prefetch = Prefetch(
         "tiers",
-        queryset=ProfilePersistentTier.objects.prefetch_related(persistent_tier_endpoint_prefetch).order_by("is_premium", "is_max", "order"),
+        queryset=ProfilePersistentTier.objects.select_related("intelligence_tier").prefetch_related(
+            persistent_tier_endpoint_prefetch
+        ).order_by("intelligence_tier__rank", "order"),
     )
     persistent_range_prefetch = Prefetch(
         "persistent_token_ranges",
@@ -555,7 +591,9 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
     )
     browser_tier_prefetch = Prefetch(
         "browser_tiers",
-        queryset=ProfileBrowserTier.objects.prefetch_related(browser_tier_endpoint_prefetch).order_by("is_premium", "order"),
+        queryset=ProfileBrowserTier.objects.select_related("intelligence_tier").prefetch_related(
+            browser_tier_endpoint_prefetch
+        ).order_by("intelligence_tier__rank", "order"),
     )
 
     # Prefetch for embeddings: embeddings_tiers -> tier_endpoints -> endpoint.provider
