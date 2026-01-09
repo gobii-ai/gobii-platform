@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, type CSSProperties } from 'react'
-import { ChevronLeft, ChevronRight, Users, X, Check } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, X, Check } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry } from '../../types/agentRoster'
@@ -108,7 +108,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               }
             />
           ) : (
-            <Users className="h-5 w-5" />
+            <PanelLeft className="h-5 w-5" />
           )}
           {hasAgents && agents.length > 1 ? (
             <span className="agent-fab-badge">{agents.length}</span>
@@ -211,9 +211,9 @@ export const ChatSidebar = memo(function ChatSidebar({
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
           {collapsed ? (
-            <ChevronRight className="h-4 w-4" />
+            <PanelLeft className="h-4 w-4" />
           ) : (
-            <ChevronLeft className="h-4 w-4" />
+            <PanelLeftClose className="h-4 w-4" />
           )}
         </button>
 
