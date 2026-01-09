@@ -1212,6 +1212,56 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class AgentQuickCreateAPIView(LoginRequiredMixin, View):
+    """API endpoint to create an agent from an initial message and return the agent ID."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from console.agent_creation import create_persistent_agent_from_charter
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        initial_message = (body.get("message") or "").strip()
+        if not initial_message:
+            return JsonResponse({"error": "Message is required"}, status=400)
+
+        contact_email = (request.user.email or "").strip()
+        if not contact_email:
+            return JsonResponse({"error": "Please add an email address to continue"}, status=400)
+
+        try:
+            result = create_persistent_agent_from_charter(
+                request,
+                initial_message=initial_message,
+                contact_email=contact_email,
+                email_enabled=True,
+                sms_enabled=False,
+                preferred_contact_method="email",
+            )
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, "message_dict"):
+                for field_errors in exc.message_dict.values():
+                    error_messages.extend(field_errors)
+            error_messages.extend(getattr(exc, "messages", []))
+            if not error_messages:
+                error_messages.append("We couldn't create that agent. Please try again.")
+            return JsonResponse({"error": error_messages[0]}, status=400)
+        except Exception:
+            logger.exception("Error creating persistent agent via API")
+            return JsonResponse({"error": "We ran into a problem creating your agent. Please try again."}, status=500)
+
+        return JsonResponse({
+            "agent_id": str(result.agent.id),
+            "agent_name": result.agent.name,
+        })
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 

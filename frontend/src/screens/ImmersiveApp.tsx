@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { jsonFetch } from '../api/http'
 import { AgentChatPage } from './AgentChatPage'
 import '../styles/immersiveApp.css'
@@ -8,7 +8,7 @@ const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 
 type AppRoute =
   | { kind: 'command-center' }
-  | { kind: 'agent-chat'; agentId: string }
+  | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
 type LocationSnapshot = {
@@ -58,6 +58,10 @@ function parseRoute(pathname: string): AppRoute {
   }
 
   const parts = path.split('/').filter(Boolean)
+  if (parts[0] === 'agents' && parts[1] === 'new') {
+    return { kind: 'agent-chat', agentId: null }
+  }
+
   if (parts[0] === 'agents' && parts[1]) {
     return { kind: 'agent-chat', agentId: parts[1] }
   }
@@ -146,6 +150,11 @@ function NotFound() {
   )
 }
 
+function navigateTo(path: string) {
+  window.history.pushState({}, '', path)
+  window.dispatchEvent(new PopStateEvent('popstate'))
+}
+
 export function ImmersiveApp() {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
@@ -185,11 +194,24 @@ export function ImmersiveApp() {
 
   const handleClose = () => window.location.assign(returnTo)
 
+  const handleNavigateToNewAgent = useCallback(() => {
+    navigateTo('/app/agents/new')
+  }, [])
+
+  const handleAgentCreated = useCallback((agentId: string) => {
+    navigateTo(`/app/agents/${agentId}`)
+  }, [])
+
   return (
     <div className="immersive-shell">
       <div className="immersive-shell__content">
         {route.kind === 'agent-chat' ? (
-          <AgentChatPage agentId={route.agentId} onClose={!embed ? handleClose : undefined} />
+          <AgentChatPage
+            agentId={route.agentId}
+            onClose={!embed ? handleClose : undefined}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+          />
         ) : null}
         {route.kind === 'command-center' ? <CommandCenter /> : null}
         {route.kind === 'not-found' ? <NotFound /> : null}

@@ -26,6 +26,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   rosterLoading?: boolean
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onCreateAgent?: () => void
+  autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
   onLoadOlder?: () => void
@@ -70,6 +72,8 @@ export function AgentChatLayout({
   rosterLoading,
   rosterError,
   onSelectAgent,
+  onCreateAgent,
+  autoFocusComposer = false,
   kanbanSnapshot,
   footer,
   hasMoreOlder,
@@ -139,6 +143,7 @@ export function AgentChatLayout({
         loading={rosterLoading}
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
+        onCreateAgent={onCreateAgent}
       />
       {showBanner && (
         <AgentChatBanner
@@ -246,6 +251,7 @@ export function AgentChatLayout({
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}
               processingTasks={processingWebTasks}
+              autoFocus={autoFocusComposer}
               insights={insights}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}

@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo } from 'react'
-import { PanelLeft, PanelLeftClose, Menu, X } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Menu, X, Plus } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
@@ -15,6 +15,7 @@ type ChatSidebarProps = {
   defaultCollapsed?: boolean
   onToggle?: (collapsed: boolean) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onCreateAgent?: () => void
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -26,6 +27,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   defaultCollapsed = true,
   onToggle,
   onSelectAgent,
+  onCreateAgent,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const [isMobile, setIsMobile] = useState(false)
@@ -100,6 +102,13 @@ export const ChatSidebar = memo(function ChatSidebar({
     [isMobile, onSelectAgent],
   )
 
+  const handleCreateAgent = useCallback(() => {
+    onCreateAgent?.()
+    if (isMobile) {
+      setDrawerOpen(false)
+    }
+  }, [isMobile, onCreateAgent])
+
   const hasAgents = agents.length > 0
 
   // Mobile FAB and drawer
@@ -151,6 +160,19 @@ export const ChatSidebar = memo(function ChatSidebar({
             />
           ) : null}
           <div className="agent-drawer-list" role="list">
+            {onCreateAgent ? (
+              <button
+                type="button"
+                className="chat-sidebar-create-btn chat-sidebar-create-btn--drawer"
+                onClick={handleCreateAgent}
+                aria-label="New agent"
+              >
+                <span className="chat-sidebar-create-btn-icon">
+                  <Plus className="h-4 w-4" />
+                </span>
+                <span className="chat-sidebar-create-btn-label">New Agent</span>
+              </button>
+            ) : null}
             <AgentEmptyState
               variant="drawer"
               hasAgents={hasAgents}
@@ -219,6 +241,22 @@ export const ChatSidebar = memo(function ChatSidebar({
           ) : null}
 
           <div className="chat-sidebar-agent-list" role="list">
+            {onCreateAgent ? (
+              <button
+                type="button"
+                className="chat-sidebar-create-btn"
+                onClick={handleCreateAgent}
+                aria-label="New agent"
+                data-collapsed={collapsed}
+              >
+                <span className="chat-sidebar-create-btn-icon">
+                  <Plus className="h-4 w-4" />
+                </span>
+                {!collapsed ? (
+                  <span className="chat-sidebar-create-btn-label">New Agent</span>
+                ) : null}
+              </button>
+            ) : null}
             <AgentEmptyState
               variant="sidebar"
               hasAgents={hasAgents}

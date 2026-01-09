@@ -9,6 +9,7 @@ import type { InsightEvent } from '../../types/insight'
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
+  autoFocus?: boolean
   // Working panel props
   agentFirstName?: string
   isProcessing?: boolean
@@ -24,6 +25,7 @@ type AgentComposerProps = {
 export function AgentComposer({
   onSubmit,
   disabled = false,
+  autoFocus = false,
   agentFirstName = 'Agent',
   isProcessing = false,
   processingTasks = [],
@@ -95,6 +97,16 @@ export function AgentComposer({
   useEffect(() => {
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
+
+  // Auto-focus the textarea when autoFocus prop is true
+  useEffect(() => {
+    if (!autoFocus) return
+    // Use a small delay to ensure the DOM is ready after navigation
+    const timer = setTimeout(() => {
+      textareaRef.current?.focus()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [autoFocus])
 
   useEffect(() => {
     const node = shellRef.current

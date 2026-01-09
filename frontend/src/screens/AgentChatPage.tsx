@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
+import { createAgent } from '../api/agents'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
@@ -110,17 +111,20 @@ function deriveConnectionIndicator({
 }
 
 export type AgentChatPageProps = {
-  agentId: string
+  agentId: string | null
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
   onClose?: () => void
+  onCreateAgent?: () => void
+  onAgentCreated?: (agentId: string) => void
 }
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
+  const isNewAgent = agentId === null
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
@@ -181,7 +185,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
-  const initialLoading = loading && events.length === 0
+  const initialLoading = !isNewAgent && loading && events.length === 0
 
   const socketSnapshot = useAgentChatSocket(activeAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
@@ -201,6 +205,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [autoScrollPinSuppressedUntil])
 
   useEffect(() => {
+    // Skip initialization for new agent (null agentId)
+    if (!activeAgentId) return
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     pendingAgentMetaRef.current = null
@@ -394,21 +400,26 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const connectionIndicator = useMemo(
-    () =>
-      deriveConnectionIndicator({
+    () => {
+      // For new agent, show ready state since there's no socket/session yet
+      if (isNewAgent) {
+        return { status: 'connected' as const, label: 'Ready', detail: 'Describe your new agent to get started.' }
+      }
+      return deriveConnectionIndicator({
         socketStatus: socketSnapshot.status,
         socketError: socketSnapshot.lastError,
         sessionStatus,
         sessionError,
-      }),
-    [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
+      })
+    },
+    [isNewAgent, sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
 
   // Update document title when agent changes
   useEffect(() => {
-    const name = resolvedAgentName || 'Agent'
+    const name = isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')
     document.title = `${name} · Gobii`
-  }, [resolvedAgentName])
+  }, [isNewAgent, resolvedAgentName])
 
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
@@ -469,6 +480,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     [activeAgentId],
   )
 
+  const handleCreateAgent = useCallback(() => {
+    // Use the prop callback if provided (for client-side navigation in ImmersiveApp)
+    if (onCreateAgent) {
+      onCreateAgent()
+      return
+    }
+    // Fall back to full page navigation for console mode
+    window.location.assign('/console/agents/create/quick/')
+  }, [onCreateAgent])
+
 
   const handleJumpToLatest = async () => {
     await jumpToLatest()
@@ -477,6 +498,16 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }
 
   const handleSend = async (body: string, attachments: File[] = []) => {
+    // If this is a new agent, create it first then navigate to it
+    if (isNewAgent) {
+      try {
+        const result = await createAgent(body)
+        onAgentCreated?.(result.agent_id)
+      } catch (err) {
+        console.error('Failed to create agent:', err)
+      }
+      return
+    }
     await sendMessage(body, attachments)
     if (!autoScrollPinned) return
     scrollToBottom()
@@ -556,10 +587,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout
-        agentFirstName={agentFirstName}
+        agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
-        agentName={resolvedAgentName || 'Agent'}
+        agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
@@ -570,32 +601,34 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         rosterLoading={rosterQuery.isLoading}
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
+        onCreateAgent={handleCreateAgent}
         onClose={onClose}
-        events={events}
-        hasMoreOlder={hasMoreOlder}
-        hasMoreNewer={hasMoreNewer}
-        oldestCursor={events.length ? events[0].cursor : null}
-        newestCursor={events.length ? events[events.length - 1].cursor : null}
-        processingActive={processingActive}
-        awaitingResponse={awaitingResponse}
-        processingWebTasks={processingWebTasks}
-        streaming={streaming}
-        thinkingCollapsedByCursor={thinkingCollapsedByCursor}
+        events={isNewAgent ? [] : events}
+        hasMoreOlder={isNewAgent ? false : hasMoreOlder}
+        hasMoreNewer={isNewAgent ? false : hasMoreNewer}
+        oldestCursor={isNewAgent ? null : (events.length ? events[0].cursor : null)}
+        newestCursor={isNewAgent ? null : (events.length ? events[events.length - 1].cursor : null)}
+        processingActive={isNewAgent ? false : processingActive}
+        awaitingResponse={isNewAgent ? false : awaitingResponse}
+        processingWebTasks={isNewAgent ? [] : processingWebTasks}
+        streaming={isNewAgent ? null : streaming}
+        thinkingCollapsedByCursor={isNewAgent ? {} : thinkingCollapsedByCursor}
         onToggleThinking={handleToggleThinking}
         streamingThinkingCollapsed={streamingThinkingCollapsed}
         onToggleStreamingThinking={handleToggleStreamingThinking}
-        onLoadOlder={hasMoreOlder ? loadOlder : undefined}
-        onLoadNewer={hasMoreNewer ? loadNewer : undefined}
+        onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}
+        onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
+        autoFocusComposer={isNewAgent}
         autoScrollPinned={autoScrollPinned}
-        hasUnseenActivity={hasUnseenActivity}
+        hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}
         timelineRef={captureTimelineRef}
         bottomSentinelRef={captureBottomSentinelRef}
-        loadingOlder={loadingOlder}
-        loadingNewer={loadingNewer}
+        loadingOlder={isNewAgent ? false : loadingOlder}
+        loadingNewer={isNewAgent ? false : loadingNewer}
         initialLoading={initialLoading}
-        insights={availableInsights}
+        insights={isNewAgent ? [] : availableInsights}
         currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
         onInsightIndexChange={setCurrentInsightIndex}
