@@ -6,6 +6,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-cookie-name" content="{{ settings.CSRF_COOKIE_NAME|default:'csrftoken' }}">
+  {% include "partials/_csrf_helpers.html" %}
   <title>{% block page_title %}Gobii Console{% endblock %}</title>
   <link rel="icon" type="image/png" sizes="32x32" href="{% static 'images/favicon-32x32.png' %}" />
   <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}" />

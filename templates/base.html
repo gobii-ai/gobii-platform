@@ -7,6 +7,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="csrf-cookie-name" content="{{ settings.CSRF_COOKIE_NAME|default:'csrftoken' }}">
+  {% include "partials/_csrf_helpers.html" %}
 
   {% if default_charter and not agent_charter_saved %}
     {# a default charter has been specified, so change title #}
