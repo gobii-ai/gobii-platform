@@ -44,8 +44,16 @@ class StreamAccumulator:
     tool_calls: dict[int, dict] = field(default_factory=dict)
     usage: Any = None
     finish_reason: Optional[str] = None
+    response_id: Optional[str] = None
 
     def ingest_chunk(self, chunk: Any) -> tuple[Optional[str], Optional[str]]:
+        chunk_id = _read_attr(chunk, "response_id") or _read_attr(chunk, "id")
+        if chunk_id and not self.response_id:
+            try:
+                self.response_id = str(chunk_id)
+            except Exception:
+                self.response_id = None
+
         choices = _read_attr(chunk, "choices") or []
         if not choices:
             self._capture_usage(chunk)
@@ -101,6 +109,8 @@ class StreamAccumulator:
             usage=self.usage,
             model=model,
             provider=provider,
+            id=self.response_id,
+            response_id=self.response_id,
             model_extra={"usage": self.usage} if self.usage is not None else None,
         )
         return response

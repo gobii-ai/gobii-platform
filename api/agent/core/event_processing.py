@@ -1019,6 +1019,7 @@ def _stream_completion_with_broadcast(
 
     content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
     accumulator = StreamAccumulator()
+    start_time = time.monotonic()
     try:
         stream = run_completion(
             model=model,
@@ -1042,6 +1043,7 @@ def _stream_completion_with_broadcast(
             stream_broadcaster.finish()
 
     response = accumulator.build_response(model=model, provider=provider)
+    response.request_duration_ms = int(round((time.monotonic() - start_time) * 1000))
     raise_if_empty_litellm_response(response, model=model, provider=provider)
     return response
 
@@ -2677,11 +2679,12 @@ def _run_agent_loop(
                         getattr(step, "id", None),
                     )
 
-            def _token_usage_fields(token_usage: Optional[dict]) -> dict:
+            def _token_usage_fields(token_usage: Optional[dict], response: Any) -> dict:
                 """Return sanitized token usage values for step creation."""
                 return completion_kwargs_from_usage(
                     token_usage,
                     completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+                    response=response,
                 )
             
             # Use the fitted token count from promptree for LLM selection
@@ -2766,7 +2769,7 @@ def _run_agent_loop(
 
             thinking_content = extract_reasoning_content(response)
             msg = response.choices[0].message
-            token_usage_fields = _token_usage_fields(token_usage)
+            token_usage_fields = _token_usage_fields(token_usage, response)
             completion: Optional[PersistentAgentCompletion] = None
 
             def _ensure_completion() -> PersistentAgentCompletion:

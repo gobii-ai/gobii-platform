@@ -7456,6 +7456,17 @@ class PersistentAgentCompletion(models.Model):
         default=CompletionType.ORCHESTRATOR,
         help_text="Origin of the completion (orchestrator loop, compaction, tag generation, etc.).",
     )
+    response_id = models.CharField(
+        max_length=256,
+        null=True,
+        blank=True,
+        help_text="Provider response identifier when available.",
+    )
+    request_duration_ms = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Time in milliseconds spent waiting for the completion response.",
+    )
 
     prompt_tokens = models.IntegerField(null=True, blank=True)
     completion_tokens = models.IntegerField(null=True, blank=True)

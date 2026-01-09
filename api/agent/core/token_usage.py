@@ -215,8 +215,112 @@ def extract_token_usage(
     return token_usage, usage
 
 
-def completion_kwargs_from_usage(token_usage: Optional[dict], *, completion_type: str) -> dict:
+def _coerce_response_id(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        if value.__class__.__module__ == "unittest.mock":
+            return None
+    except Exception:
+        pass
+    try:
+        return str(value)
+    except Exception:
+        return None
+
+
+def extract_response_id(response: Any) -> Optional[str]:
+    if response is None:
+        return None
+
+    if isinstance(response, dict):
+        model_extra = response.get("model_extra")
+        candidates = [response.get("response_id"), response.get("id")]
+    else:
+        model_extra = getattr(response, "model_extra", None)
+        candidates = [getattr(response, "response_id", None), getattr(response, "id", None)]
+
+    if isinstance(model_extra, dict):
+        candidates.extend([model_extra.get("response_id"), model_extra.get("id")])
+
+    for candidate in candidates:
+        coerced = _coerce_response_id(candidate)
+        if coerced:
+            return coerced
+    return None
+
+
+def _coerce_duration_ms(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        if value.__class__.__module__ == "unittest.mock":
+            return None
+    except Exception:
+        pass
+    try:
+        return int(round(float(value)))
+    except Exception:
+        return None
+
+
+def extract_request_duration_ms(response: Any) -> Optional[int]:
+    if response is None:
+        return None
+
+    duration_ms = None
+    model_extra = None
+
+    if isinstance(response, dict):
+        duration_ms = response.get("request_duration_ms") or response.get("_gobii_request_duration_ms")
+        model_extra = response.get("model_extra")
+    else:
+        duration_ms = getattr(response, "request_duration_ms", None) or getattr(
+            response, "_gobii_request_duration_ms", None
+        )
+        model_extra = getattr(response, "model_extra", None)
+
+    if duration_ms is None and isinstance(model_extra, dict):
+        duration_ms = model_extra.get("request_duration_ms") or model_extra.get("duration_ms")
+
+    return _coerce_duration_ms(duration_ms)
+
+
+def completion_metadata_from_response(
+    response: Any,
+    *,
+    response_id: Optional[str] = None,
+    request_duration_ms: Optional[int] = None,
+) -> dict:
+    resolved_response_id = response_id or extract_response_id(response)
+    resolved_duration_ms = (
+        request_duration_ms if request_duration_ms is not None else extract_request_duration_ms(response)
+    )
+
+    metadata: dict[str, Any] = {}
+    if resolved_response_id is not None:
+        metadata["response_id"] = resolved_response_id
+    if resolved_duration_ms is not None:
+        metadata["request_duration_ms"] = resolved_duration_ms
+    return metadata
+
+
+def completion_kwargs_from_usage(
+    token_usage: Optional[dict],
+    *,
+    completion_type: str,
+    response: Any = None,
+    response_id: Optional[str] = None,
+    request_duration_ms: Optional[int] = None,
+) -> dict:
     base = {"completion_type": completion_type}
+    metadata = completion_metadata_from_response(
+        response,
+        response_id=response_id,
+        request_duration_ms=request_duration_ms,
+    )
+    if metadata:
+        base.update(metadata)
     if not token_usage:
         return base
     return {
@@ -353,6 +457,8 @@ def log_agent_completion(
     response: Any = None,
     model: Optional[str] = None,
     provider: Optional[str] = None,
+    response_id: Optional[str] = None,
+    request_duration_ms: Optional[int] = None,
 ) -> Tuple[Optional[dict], Optional[Any]]:
     """
     Persist an agent completion, optionally deriving token usage and thinking content from a LiteLLM response.
@@ -392,7 +498,13 @@ def log_agent_completion(
             agent=agent,
             eval_run_id=resolved_eval_run_id,
             thinking_content=thinking_content,
-            **completion_kwargs_from_usage(derived_token_usage, completion_type=completion_type),
+            **completion_kwargs_from_usage(
+                derived_token_usage,
+                completion_type=completion_type,
+                response=response,
+                response_id=response_id,
+                request_duration_ms=request_duration_ms,
+            ),
         )
     except Exception as exc:
         logger.warning(
@@ -409,7 +521,10 @@ def log_agent_completion(
 __all__ = [
     "coerce_int",
     "compute_cost_breakdown",
+    "completion_metadata_from_response",
     "completion_kwargs_from_usage",
+    "extract_request_duration_ms",
+    "extract_response_id",
     "extract_reasoning_content",
     "extract_token_usage",
     "usage_attribute",

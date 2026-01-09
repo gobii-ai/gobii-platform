@@ -46,6 +46,20 @@ _RETRYABLE_ERRORS = (
 )
 
 
+def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
+    if response is None or duration_ms is None:
+        return
+    if isinstance(response, dict):
+        response["request_duration_ms"] = duration_ms
+        return
+    try:
+        setattr(response, "request_duration_ms", duration_ms)
+    except Exception:
+        model_extra = getattr(response, "model_extra", None)
+        if isinstance(model_extra, dict):
+            model_extra["request_duration_ms"] = duration_ms
+
+
 def _first_message_from_response(response: Any) -> Any:
     if response is None:
         return None
@@ -247,9 +261,16 @@ def run_completion(
 
     for attempt in range(1, max_attempts + 1):
         try:
-            response = litellm.completion(**kwargs)
+            duration_ms = None
+            if not kwargs.get("stream"):
+                start_time = time.monotonic()
+                response = litellm.completion(**kwargs)
+                duration_ms = int(round((time.monotonic() - start_time) * 1000))
+            else:
+                response = litellm.completion(**kwargs)
             if not kwargs.get("stream"):
                 raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
+                _attach_response_duration(response, duration_ms)
             return response
         except _RETRYABLE_ERRORS as exc:
             if attempt >= max_attempts:

@@ -174,6 +174,22 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(step.completion.llm_model, "claude-3-opus")
         self.assertEqual(step.completion.total_tokens, 300)
 
+    def test_completion_logs_response_metadata(self):
+        """Completion logging should persist response identifiers and durations."""
+        response = make_completion_response(provider="openrouter")
+        response.id = "resp_123"
+        response.request_duration_ms = 321
+
+        log_agent_completion(
+            self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.TAG,
+            response=response,
+        )
+
+        completion = PersistentAgentCompletion.objects.filter(agent=self.agent).latest("created_at")
+        self.assertEqual(completion.response_id, "resp_123")
+        self.assertEqual(completion.request_duration_ms, 321)
+
     @patch("api.agent.core.event_processing.litellm.get_model_info")
     def test_cost_fields_populated_from_litellm(self, mock_get_model_info):
         """_completion_with_failover should include cost breakdown when pricing exists."""
