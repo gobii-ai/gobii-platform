@@ -1,5 +1,5 @@
 import { type MouseEvent, useEffect, useRef, useState, useCallback } from 'react'
-import { ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { InsightEventCard } from './insights'
@@ -68,8 +68,8 @@ export function WorkingPanel({
   currentInsightIndex = 0,
   onDismissInsight,
   onInsightIndexChange,
-  onPauseChange,
-  isPaused = false,
+  onPauseChange: _onPauseChange,
+  isPaused: _isPaused = false,
 }: WorkingPanelProps) {
   const activeTasks = Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []
   const [currentTime, setCurrentTime] = useState(() => Date.now())
@@ -101,10 +101,6 @@ export function WorkingPanel({
     const newIndex = (currentInsightIndex + 1) % totalInsights
     onInsightIndexChange?.(newIndex)
   }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleTogglePause = useCallback(() => {
-    onPauseChange?.(!isPaused)
-  }, [isPaused, onPauseChange])
 
   const handleDotClick = useCallback((index: number) => {
     onInsightIndexChange?.(index)
@@ -252,28 +248,18 @@ export function WorkingPanel({
         </span>
       </div>
 
-      {/* Insight section - "while you wait" */}
+      {/* Insight section */}
       {totalInsights > 0 ? (
         <div className="working-panel-insight">
-          <span className="working-panel-insight-label">While you wait</span>
           <div className="working-panel-insight-content" key={currentInsight?.insightId}>
             {currentInsight ? (
               <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
             ) : null}
           </div>
 
-          {/* Carousel controls */}
+          {/* Inline carousel controls */}
           {hasMultipleInsights ? (
-            <div className="working-panel-carousel">
-              <button
-                type="button"
-                className="working-panel-carousel-btn"
-                onClick={handlePrev}
-                aria-label="Previous insight"
-              >
-                <ChevronLeft className="working-panel-carousel-icon" />
-              </button>
-
+            <div className="working-panel-carousel-inline">
               <div className="working-panel-carousel-dots">
                 {insights.map((_, index) => (
                   <button
@@ -286,28 +272,21 @@ export function WorkingPanel({
                   />
                 ))}
               </div>
-
               <button
                 type="button"
-                className="working-panel-carousel-btn working-panel-carousel-pause"
-                onClick={handleTogglePause}
-                aria-label={isPaused ? 'Resume auto-play' : 'Pause auto-play'}
-                data-paused={isPaused ? 'true' : 'false'}
+                className="working-panel-carousel-nav"
+                onClick={handlePrev}
+                aria-label="Previous"
               >
-                {isPaused ? (
-                  <Play className="working-panel-carousel-icon" />
-                ) : (
-                  <Pause className="working-panel-carousel-icon" />
-                )}
+                <ChevronLeft size={14} />
               </button>
-
               <button
                 type="button"
-                className="working-panel-carousel-btn"
+                className="working-panel-carousel-nav"
                 onClick={handleNext}
-                aria-label="Next insight"
+                aria-label="Next"
               >
-                <ChevronRight className="working-panel-carousel-icon" />
+                <ChevronRight size={14} />
               </button>
             </div>
           ) : null}

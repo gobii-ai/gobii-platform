@@ -1,6 +1,6 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
+import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import type { ProcessingWebTask } from '../../types/agentChat'
@@ -33,8 +33,8 @@ export function AgentComposer({
   currentInsightIndex = 0,
   onDismissInsight,
   onInsightIndexChange,
-  onPauseChange,
-  isInsightsPaused = false,
+  onPauseChange: _onPauseChange,
+  isInsightsPaused: _isInsightsPaused = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -66,10 +66,6 @@ export function AgentComposer({
     const newIndex = (currentInsightIndex + 1) % totalInsights
     onInsightIndexChange?.(newIndex)
   }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleTogglePause = useCallback(() => {
-    onPauseChange?.(!isInsightsPaused)
-  }, [isInsightsPaused, onPauseChange])
 
   const handleDotClick = useCallback((index: number) => {
     onInsightIndexChange?.(index)
@@ -307,25 +303,15 @@ export function AgentComposer({
             {/* Expanded content */}
             {isWorkingExpanded && hasInsights ? (
               <div className="composer-working-content">
-                <span className="composer-working-label">While you wait</span>
                 <div className="composer-working-insight" key={currentInsight?.insightId}>
                   {currentInsight ? (
                     <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
                   ) : null}
                 </div>
 
-                {/* Carousel controls */}
+                {/* Inline carousel controls */}
                 {hasMultipleInsights ? (
-                  <div className="composer-working-carousel">
-                    <button
-                      type="button"
-                      className="composer-carousel-btn"
-                      onClick={handlePrevInsight}
-                      aria-label="Previous insight"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </button>
-
+                  <div className="composer-carousel-inline">
                     <div className="composer-carousel-dots">
                       {insights.map((_, index) => (
                         <button
@@ -338,28 +324,21 @@ export function AgentComposer({
                         />
                       ))}
                     </div>
-
                     <button
                       type="button"
-                      className="composer-carousel-btn composer-carousel-pause"
-                      onClick={handleTogglePause}
-                      aria-label={isInsightsPaused ? 'Resume auto-play' : 'Pause auto-play'}
-                      data-paused={isInsightsPaused ? 'true' : 'false'}
+                      className="composer-carousel-nav"
+                      onClick={handlePrevInsight}
+                      aria-label="Previous"
                     >
-                      {isInsightsPaused ? (
-                        <Play className="h-3.5 w-3.5" />
-                      ) : (
-                        <Pause className="h-3.5 w-3.5" />
-                      )}
+                      <ChevronLeft size={14} />
                     </button>
-
                     <button
                       type="button"
-                      className="composer-carousel-btn"
+                      className="composer-carousel-nav"
                       onClick={handleNextInsight}
-                      aria-label="Next insight"
+                      aria-label="Next"
                     >
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight size={14} />
                     </button>
                   </div>
                 ) : null}
