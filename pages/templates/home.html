@@ -346,10 +346,10 @@
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
       <div class="max-w-4xl mx-auto">
-          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}">
+          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}">
             {% csrf_token %}
             <input type="hidden" name="return_to" id="agent-return-to" value="">
-            <input type="hidden" name="embed" value="1">
+            <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
@@ -807,7 +807,7 @@
     </script>
 
     <div id="immersive-overlay" class="immersive-overlay" data-state="closed" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Immersive agent workspace">
-      <button id="immersive-close" class="immersive-close" type="button" aria-label="Close immersive view">
+      <button id="immersive-close" class="immersive-close" type="button" aria-label="Close immersive view" hidden>
         <span aria-hidden="true">&times;</span>
       </button>
       <div class="immersive-status" role="status" aria-live="polite">
@@ -855,6 +855,7 @@
         const form = document.getElementById('create-agent-form');
         const textarea = document.getElementById('id_charter');
         const returnToInput = document.getElementById('agent-return-to');
+        const embedInput = document.getElementById('agent-embed');
 
         if (!overlay || !frame || !closeButton || !form || !textarea) {
           return;
@@ -863,6 +864,23 @@
         const returnToPath = `${window.location.pathname}${window.location.search}` || '/';
         const immersiveUrl = `/app?return_to=${encodeURIComponent(returnToPath)}`;
         let isOpen = false;
+        const isAuthenticated = form.dataset.authenticated === 'true';
+
+        const setCloseVisible = (visible) => {
+          closeButton.hidden = !visible;
+        };
+
+        const isAppFrame = () => {
+          try {
+            const frameLocation = frame.contentWindow?.location;
+            if (!frameLocation) {
+              return false;
+            }
+            return frameLocation.pathname.startsWith('/app');
+          } catch {
+            return false;
+          }
+        };
 
         const setState = (state) => {
           overlay.dataset.state = state;
@@ -875,6 +893,7 @@
           }
           isOpen = true;
           setState('loading');
+          setCloseVisible(false);
           document.body.classList.add('immersive-open');
           window.history.pushState({ immersive: true }, '', immersiveUrl);
         };
@@ -885,6 +904,7 @@
           }
           isOpen = false;
           setState('closed');
+          setCloseVisible(false);
           document.body.classList.remove('immersive-open');
           frame.src = 'about:blank';
           if (!preserveHistory) {
@@ -892,6 +912,7 @@
           }
         };
 
+        setCloseVisible(false);
         closeButton.addEventListener('click', () => closeOverlay(false));
         document.addEventListener('keydown', (event) => {
           if (event.key === 'Escape' && isOpen) {
@@ -906,6 +927,9 @@
         frame.addEventListener('load', () => {
           if (isOpen) {
             setState('ready');
+            if (isAppFrame()) {
+              setCloseVisible(true);
+            }
           }
         });
         window.addEventListener('message', (event) => {
@@ -919,6 +943,7 @@
           if (data.type !== 'gobii-immersive-path' || typeof data.path !== 'string') {
             return;
           }
+          setCloseVisible(true);
           window.history.replaceState({ immersive: true }, '', data.path);
         });
 
@@ -931,7 +956,13 @@
           if (returnToInput) {
             returnToInput.value = returnToPath;
           }
-          setState('loading');
+          if (embedInput) {
+            embedInput.value = isAuthenticated ? '1' : '0';
+          }
+          if (!isAuthenticated) {
+            form.removeAttribute('target');
+            return;
+          }
           form.setAttribute('target', 'immersive-frame');
           openOverlay();
         });

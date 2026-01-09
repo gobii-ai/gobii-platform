@@ -1,11 +1,15 @@
+import hashlib
+
 from django.conf import settings
-from django.http import HttpResponse, HttpResponseNotAllowed
+from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified
 from django.templatetags.static import static
 
 from config.vite import ViteManifestError, get_vite_asset
 
 APP_PATH_PREFIX = "/app"
-APP_SHELL_CACHE_CONTROL = "public, max-age=300, s-maxage=3600, stale-while-revalidate=300"
+APP_SHELL_CACHE_CONTROL = (
+    "public, max-age=300, s-maxage=3600, stale-while-revalidate=300, stale-if-error=86400"
+)
 
 
 def _format_vite_tags() -> str:
@@ -63,6 +67,7 @@ class AppShellMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
         self._cached_shell = None
+        self._cached_etag = None
 
     def __call__(self, request):
         if not self._should_handle(request.path):
@@ -73,11 +78,33 @@ class AppShellMiddleware:
 
         if self._cached_shell is None or settings.DEBUG:
             self._cached_shell = _build_shell_html()
+            digest = hashlib.sha256(self._cached_shell.encode("utf-8")).hexdigest()
+            self._cached_etag = f"\"{digest}\""
+
+        request_etag = request.headers.get("If-None-Match")
+        if self._etag_matches(request_etag):
+            response = HttpResponseNotModified()
+            response["ETag"] = self._cached_etag
+            response["Cache-Control"] = APP_SHELL_CACHE_CONTROL
+            return response
 
         response = HttpResponse(self._cached_shell, content_type="text/html; charset=utf-8")
         response["Cache-Control"] = APP_SHELL_CACHE_CONTROL
+        if self._cached_etag:
+            response["ETag"] = self._cached_etag
         return response
 
     @staticmethod
     def _should_handle(path: str) -> bool:
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
+
+    def _etag_matches(self, request_etag: str | None) -> bool:
+        if not request_etag or not self._cached_etag:
+            return False
+        candidates = [tag.strip() for tag in request_etag.split(",") if tag.strip()]
+        for tag in candidates:
+            if tag == self._cached_etag:
+                return True
+            if tag.startswith("W/") and tag[2:] == self._cached_etag:
+                return True
+        return False
