@@ -1246,7 +1246,8 @@
 }
 
 .composer-working-insight {
-  min-height: 4rem;
+  height: 5.5rem;
+  overflow: hidden;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
@@ -4274,9 +4275,10 @@
 .working-panel-insight {
   padding: 1rem 1.25rem;
   /* Fixed height container to prevent layout shifts during rotation */
-  min-height: 120px;
+  height: 140px;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .working-panel-insight-label {
@@ -4570,7 +4572,7 @@
 
   .working-panel-insight {
     padding: 0.75rem 1rem;
-    min-height: 100px;
+    height: 120px;
   }
 
   .working-panel-carousel {
@@ -4593,7 +4595,7 @@
   }
 
   .working-panel-insight {
-    min-height: 90px;
+    height: 110px;
   }
 
   .working-panel-carousel-btn {

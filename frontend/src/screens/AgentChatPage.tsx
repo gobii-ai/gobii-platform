@@ -183,7 +183,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
-  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const initialLoading = !isNewAgent && loading && events.length === 0
 
@@ -198,11 +197,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
-
-  const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
-  useEffect(() => {
-    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
-  }, [autoScrollPinSuppressedUntil])
 
   useEffect(() => {
     // Skip initialization for new agent (null agentId)
@@ -276,36 +270,27 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       }
     }
 
-    // Check if user has scrolled back to bottom (for re-sticking)
+    // Track scroll direction - only restick when user scrolls DOWN to bottom
+    let lastScrollTop = scroller?.scrollTop ?? window.scrollY
     let scrollTicking = false
-    const checkAndRestick = () => {
-      const distanceToBottom = getDistanceToBottom()
-      const currentlyPinned = autoScrollPinnedRef.current
-      const suppressedUntil = autoScrollPinSuppressedUntilRef.current
-      const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
-
-      if (!currentlyPinned && !suppressionActive && distanceToBottom <= restickThreshold) {
-        setAutoScrollPinned(true)
-      }
-    }
 
     const handleScroll = () => {
       if (scrollTicking) return
       scrollTicking = true
       requestAnimationFrame(() => {
         scrollTicking = false
-        checkAndRestick()
-      })
-    }
+        const target = scroller || document.documentElement || document.body
+        const currentScrollTop = target.scrollTop
+        const scrolledDown = currentScrollTop > lastScrollTop
+        lastScrollTop = currentScrollTop
 
-    // Handle viewport resize (keyboard show/hide, browser chrome changes on mobile)
-    let resizeTicking = false
-    const handleViewportResize = () => {
-      if (resizeTicking) return
-      resizeTicking = true
-      requestAnimationFrame(() => {
-        resizeTicking = false
-        checkAndRestick()
+        // Only restick if user actively scrolled down to the bottom
+        if (!autoScrollPinnedRef.current && scrolledDown) {
+          const distanceToBottom = getDistanceToBottom()
+          if (distanceToBottom <= restickThreshold) {
+            setAutoScrollPinned(true)
+          }
+        }
       })
     }
 
@@ -315,44 +300,33 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('scroll', handleScroll, { passive: true })
 
-    // Listen to visualViewport resize for mobile browser chrome changes
-    const vv = window.visualViewport
-    if (vv) {
-      vv.addEventListener('resize', handleViewportResize)
-      vv.addEventListener('scroll', handleViewportResize)
-    }
-    window.addEventListener('resize', handleViewportResize)
-
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
-      if (vv) {
-        vv.removeEventListener('resize', handleViewportResize)
-        vv.removeEventListener('scroll', handleViewportResize)
-      }
-      window.removeEventListener('resize', handleViewportResize)
     }
   }, [getScrollContainer, setAutoScrollPinned])
+
+  // Unpin auto-scroll when processing ends so user's reading position is preserved
+  const prevProcessingRef = useRef(processingActive)
+  useEffect(() => {
+    const wasProcessing = prevProcessingRef.current
+    prevProcessingRef.current = processingActive
+    if (wasProcessing && !processingActive) {
+      setAutoScrollPinned(false)
+    }
+  }, [processingActive, setAutoScrollPinned])
 
   // Capture scroll decision BEFORE content changes to avoid race with scroll handler
   const prevEventsRef = useRef(events)
   const prevStreamingRef = useRef(streaming)
-  const prevProcessingActiveRef = useRef(processingActive)
 
-  // Before render, capture whether we should scroll (based on current scroll position)
-  if (
-    events !== prevEventsRef.current ||
-    streaming !== prevStreamingRef.current ||
-    processingActive !== prevProcessingActiveRef.current
-  ) {
-    // Content is about to change - capture scroll decision NOW before DOM updates
+  if (events !== prevEventsRef.current || streaming !== prevStreamingRef.current) {
     shouldScrollOnNextUpdateRef.current = autoScrollPinnedRef.current
     prevEventsRef.current = events
     prevStreamingRef.current = streaming
-    prevProcessingActiveRef.current = processingActive
   }
 
   const pendingScrollFrameRef = useRef<number | null>(null)
@@ -401,11 +375,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [])
 
   useLayoutEffect(() => {
-    // Use the captured decision from before the DOM update
     if (shouldScrollOnNextUpdateRef.current) {
       scrollToBottom()
     }
-  }, [scrollToBottom, events, processingActive, streaming])
+  }, [scrollToBottom, events, streaming])
 
   const rosterAgents = useMemo(() => rosterQuery.data ?? [], [rosterQuery.data])
   const activeRosterMeta = useMemo(
