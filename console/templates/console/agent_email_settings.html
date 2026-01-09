@@ -17,7 +17,15 @@
         {% if endpoint and account %}
           <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
           <div>Last OK: {{ account.connection_last_ok_at|default:"—" }}</div>
-          <div class="text-red-600">{{ account.connection_error }}</div>
+          {% if account.connection_error %}
+            <div class="text-red-600">
+              {% if account.connection_error|length > 200 %}
+                {{ account.connection_error|slice:":200" }}...
+              {% else %}
+                {{ account.connection_error }}
+              {% endif %}
+            </div>
+          {% endif %}
         {% elif endpoint and not is_default_endpoint %}
           <div>Endpoint: <span class="font-mono">{{ endpoint.address }}</span></div>
           <div class="text-gray-500">Custom address set, configure SMTP/IMAP below.</div>
