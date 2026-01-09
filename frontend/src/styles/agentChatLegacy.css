@@ -2942,18 +2942,23 @@
 }
 
 .response-skeleton-bubble {
-  min-width: 280px;
-  max-width: 420px;
+  width: 100%;
+  max-width: 100%;
 }
 
-.response-skeleton-content {
+.response-skeleton-row {
   display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.response-skeleton-row .chat-author {
+  flex-shrink: 0;
+  margin-bottom: 0;
 }
 
 .response-skeleton-line {
+  flex: 1;
   height: 0.875rem;
   border-radius: 4px;
   background:
@@ -2969,10 +2974,6 @@
   background-repeat: no-repeat;
   animation: skeletonShimmer 1.4s ease-in-out infinite;
 }
-
-.response-skeleton-line:nth-child(2) { animation-delay: 0.1s; }
-.response-skeleton-line:nth-child(3) { animation-delay: 0.2s; }
-.response-skeleton-line:nth-child(4) { animation-delay: 0.3s; }
 
 @keyframes skeletonShimmer {
   0% {
