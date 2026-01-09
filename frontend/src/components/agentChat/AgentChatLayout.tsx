@@ -5,6 +5,7 @@ import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
 import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
+import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import type { AgentTimelineProps } from './types'
@@ -117,6 +118,14 @@ export function AgentChatLayout({
   // Only show streaming reasoning while actually streaming - once done, the historical event takes over
   const showStreamingReasoning = hasStreamingReasoning && isStreaming
 
+  // Show skeleton when awaiting response but no streaming content yet
+  const showResponseSkeleton = Boolean(
+    (awaitingResponse || processingActive) &&
+    !hasStreamingReasoning &&
+    !hasStreamingContent &&
+    !hasMoreNewer
+  )
+
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
@@ -200,6 +209,10 @@ export function AgentChatLayout({
                     onToggleThinking={onToggleThinking}
                   />
                 </div>
+
+                {showResponseSkeleton ? (
+                  <ResponseSkeleton agentFirstName={agentFirstName} />
+                ) : null}
 
                 {(showStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
