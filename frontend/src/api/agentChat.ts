@@ -12,6 +12,8 @@ export type TimelineResponse = {
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
   agent_color_hex?: string | null
+  agent_name?: string | null
+  agent_avatar_url?: string | null
 }
 
 export type AgentWebSessionSnapshot = {

@@ -4,10 +4,11 @@
 {% block page_title %}Chat - {{ agent.name|default:'Agent' }} · Gobii{% endblock %}
 
 {% block react_shell_content %}
-<div class="py-12 px-6">
+<div class="{% if immersive %}min-h-screen{% else %}py-12 px-6{% endif %}">
   <div id="gobii-frontend-root"
-       class="mx-auto max-w-5xl"
+       class="{% if immersive %}w-full{% else %}mx-auto max-w-5xl{% endif %}"
        data-app="agent-chat"
+       data-immersive="{% if immersive %}true{% else %}false{% endif %}"
        data-agent-id="{{ agent.id }}"
        data-agent-name="{{ agent.name|default:'' }}"
        data-agent-color="{{ agent.get_display_color|default_if_none:'' }}"

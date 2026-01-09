@@ -217,7 +217,16 @@ export type AgentChatState = {
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
   agentColorHex: string | null
-  initialize: (agentId: string, options?: { agentColorHex?: string | null }) => Promise<void>
+  agentName: string | null
+  agentAvatarUrl: string | null
+  initialize: (
+    agentId: string,
+    options?: {
+      agentColorHex?: string | null
+      agentName?: string | null
+      agentAvatarUrl?: string | null
+    },
+  ) => Promise<void>
   refreshProcessing: () => Promise<void>
   refreshLatest: () => Promise<void>
   loadOlder: () => Promise<void>
@@ -259,12 +268,32 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
   agentColorHex: null,
+  agentName: null,
+  agentAvatarUrl: null,
 
   async initialize(agentId, options) {
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
+    const providedName = options?.agentName ?? null
+    const providedAvatarUrl = options?.agentAvatarUrl ?? null
+    const reuseExisting = get().agentId === agentId
+    const fallbackColor = reuseExisting ? get().agentColorHex : DEFAULT_CHAT_COLOR_HEX
+    const fallbackName = reuseExisting ? get().agentName : null
+    const fallbackAvatarUrl = reuseExisting ? get().agentAvatarUrl : null
     set({
       loading: true,
       agentId,
+      events: [],
+      oldestCursor: null,
+      newestCursor: null,
+      hasMoreOlder: false,
+      hasMoreNewer: false,
+      hasUnseenActivity: false,
+      processingActive: false,
+      processingWebTasks: [],
+      loadingOlder: false,
+      loadingNewer: false,
+      refreshingLatest: false,
+      pendingEvents: [],
       error: null,
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
@@ -274,11 +303,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingThinkingCollapsed: false,
       thinkingCollapsedByCursor: {},
       awaitingResponse: false,
-      agentColorHex: providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX,
+      agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
+      agentName: providedName ?? fallbackName ?? null,
+      agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
     })
 
+    const currentAgentId = agentId
     try {
       const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
+      if (get().agentId !== currentAgentId) {
+        return
+      }
       const events = prepareTimelineEvents(snapshot.events)
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
@@ -288,6 +323,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const agentColorHex = snapshot.agent_color_hex
         ? normalizeHexColor(snapshot.agent_color_hex)
         : providedColor ?? get().agentColorHex ?? DEFAULT_CHAT_COLOR_HEX
+      const agentName = snapshot.agent_name ?? providedName ?? get().agentName ?? null
+      const agentAvatarUrl = snapshot.agent_avatar_url ?? providedAvatarUrl ?? get().agentAvatarUrl ?? null
 
       set({
         events,
@@ -302,9 +339,14 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         autoScrollPinSuppressedUntil: null,
         pendingEvents: [],
         agentColorHex,
+        agentName,
+        agentAvatarUrl,
         awaitingResponse: false,
       })
     } catch (error) {
+      if (get().agentId !== currentAgentId) {
+        return
+      }
       console.error('Failed to initialize agent chat:', error)
       set({
         loading: false,

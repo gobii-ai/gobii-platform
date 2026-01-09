@@ -1,0 +1,44 @@
+.immersive-shell {
+  min-height: 100vh;
+  background: #ffffff;
+  color: #0f172a;
+  position: relative;
+}
+
+.immersive-shell__content {
+  min-height: 100vh;
+}
+
+.immersive-command {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 4rem 2.5rem;
+  text-align: left;
+  max-width: 40rem;
+  margin: 0 auto;
+}
+
+.immersive-command__eyebrow {
+  font-size: 0.7rem;
+  letter-spacing: 0.35em;
+  text-transform: uppercase;
+  color: rgba(30, 64, 175, 0.7);
+  margin: 0;
+}
+
+.immersive-command__title {
+  margin: 0;
+  font-size: clamp(1.8rem, 1.4rem + 1.6vw, 2.6rem);
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.immersive-command__subtitle {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.6;
+  color: rgba(30, 41, 59, 0.75);
+}

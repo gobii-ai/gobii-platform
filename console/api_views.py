@@ -83,7 +83,7 @@ from api.services.web_sessions import (
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-from console.agent_chat.access import resolve_agent
+from console.agent_chat.access import agent_queryset_for, resolve_agent
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
@@ -117,6 +117,18 @@ logger = logging.getLogger(__name__)
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
 MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
+
+
+class ConsoleSessionAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(
+            {
+                "user_id": str(request.user.id),
+                "email": request.user.email,
+            }
+        )
 
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
@@ -1126,6 +1138,30 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
 
 
 @method_decorator(csrf_exempt, name="dispatch")
+class AgentChatRosterAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        agents = (
+            agent_queryset_for(request.user, request.session)
+            .select_related("agent_color")
+            .order_by("name")
+        )
+        payload = [
+            {
+                "id": str(agent.id),
+                "name": agent.name or "",
+                "avatar_url": agent.get_avatar_url(),
+                "display_color_hex": agent.get_display_color(),
+                "is_active": bool(agent.is_active),
+                "short_description": agent.short_description or "",
+            }
+            for agent in agents
+        ]
+        return JsonResponse({"agents": payload})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
 class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
@@ -1159,6 +1195,8 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "processing_active": window.processing_active,
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
             "agent_color_hex": agent.get_display_color(),
+            "agent_name": agent.name,
+            "agent_avatar_url": agent.get_avatar_url(),
         }
         return JsonResponse(payload)
 

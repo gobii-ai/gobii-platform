@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check } from 'lucide-react'
+import { Check, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { normalizeHexColor } from '../../util/color'
@@ -16,6 +16,8 @@ type AgentChatBannerProps = {
   connectionDetail?: string | null
   kanbanSnapshot?: KanbanBoardSnapshot | null
   processingActive?: boolean
+  onClose?: () => void
+  sidebarCollapsed?: boolean
 }
 
 function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
@@ -39,6 +41,8 @@ export function AgentChatBanner({
   connectionLabel = 'Connecting',
   kanbanSnapshot,
   processingActive = false,
+  onClose,
+  sidebarCollapsed = true,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
@@ -92,70 +96,82 @@ export function AgentChatBanner({
   const isAllComplete = hasKanban && doneTasks === totalTasks
   const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
 
+  const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
+
   return (
-    <div className="fixed inset-x-0 top-0 z-30">
-      <div className="mx-auto w-full max-w-5xl px-4 pb-2 pt-3 sm:px-6 lg:px-10" ref={bannerRef}>
-        <div
-          className={`banner ${hasKanban ? 'banner--with-progress' : ''} ${isAllComplete ? 'banner--complete' : ''} ${justCompleted ? 'banner--celebrating' : ''}`}
-          style={{ '--banner-accent': accentColor } as React.CSSProperties}
-        >
-          {/* Left: Avatar + Info */}
-          <div className="banner-left">
-            <AgentAvatarBadge
-              name={trimmedName}
-              avatarUrl={agentAvatarUrl}
-              className="banner-avatar"
-              imageClassName="h-full w-full object-cover"
-              textClassName="flex h-full w-full items-center justify-center text-sm font-semibold text-white"
-              style={{ borderColor: accentColor }}
-              fallbackStyle={{ background: `linear-gradient(135deg, ${accentColor}, color-mix(in srgb, ${accentColor} 60%, #1e1b4b))` }}
-            />
-            <div className="banner-info">
-              <div className="banner-top-row">
-                <span className="banner-name">{trimmedName}</span>
-                <ConnectionBadge status={connectionStatus} label={connectionLabel} />
+    <div className={shellClass} ref={bannerRef}>
+      <div
+        className={`banner ${hasKanban ? 'banner--with-progress' : ''} ${isAllComplete ? 'banner--complete' : ''} ${justCompleted ? 'banner--celebrating' : ''}`}
+        style={{ '--banner-accent': accentColor } as React.CSSProperties}
+      >
+        {/* Left: Avatar + Info */}
+        <div className="banner-left">
+          <AgentAvatarBadge
+            name={trimmedName}
+            avatarUrl={agentAvatarUrl}
+            className="banner-avatar"
+            imageClassName="banner-avatar-image"
+            textClassName="banner-avatar-text"
+          />
+          <div className="banner-info">
+            <div className="banner-top-row">
+              <span className="banner-name">{trimmedName}</span>
+              <ConnectionBadge status={connectionStatus} label={connectionLabel} />
+            </div>
+            {hasKanban && currentTask ? (
+              <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>
+                <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
+                <span className="banner-task-title">{currentTask}</span>
               </div>
-              {hasKanban && currentTask ? (
-                <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>
-                  <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
-                  <span className="banner-task-title">{currentTask}</span>
-                </div>
-              ) : hasKanban && isAllComplete ? (
-                <div className="banner-task banner-task--complete">
-                  <Check size={12} className="banner-task-check" strokeWidth={2.5} />
-                  <span className="banner-task-title">All tasks complete</span>
-                </div>
-              ) : null}
+            ) : hasKanban && isAllComplete ? (
+              <div className="banner-task banner-task--complete">
+                <Check size={12} className="banner-task-check" strokeWidth={2.5} />
+                <span className="banner-task-title">All tasks complete</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+
+        {/* Center: Progress */}
+        {hasKanban ? (
+          <div className={`banner-center ${animate ? 'banner-center--animate' : ''}`}>
+            <div className="banner-progress-wrapper">
+              <div className="banner-progress-bar">
+                <div
+                  className={`banner-progress-fill ${isAllComplete ? 'banner-progress-fill--complete' : ''} ${justCompleted ? 'banner-progress-fill--pop' : ''}`}
+                  style={{
+                    width: `${percentage}%`,
+                    background: isAllComplete
+                      ? 'linear-gradient(90deg, #10b981, #34d399)'
+                      : `linear-gradient(90deg, ${accentColor}, color-mix(in srgb, ${accentColor} 70%, #a855f7))`,
+                  }}
+                />
+              </div>
+              <div className="banner-progress-count">
+                <span className={`banner-progress-done ${justCompleted ? 'banner-progress-done--pop' : ''}`}>{doneTasks}</span>
+                <span className="banner-progress-sep">/</span>
+                <span className="banner-progress-total">{totalTasks}</span>
+              </div>
             </div>
           </div>
+        ) : null}
 
-          {/* Right: Progress */}
-          {hasKanban ? (
-            <div className={`banner-right ${animate ? 'banner-right--animate' : ''}`}>
-              <div className="banner-progress-wrapper">
-                <div className="banner-progress-bar">
-                  <div
-                    className={`banner-progress-fill ${isAllComplete ? 'banner-progress-fill--complete' : ''} ${justCompleted ? 'banner-progress-fill--pop' : ''}`}
-                    style={{
-                      width: `${percentage}%`,
-                      background: isAllComplete
-                        ? 'linear-gradient(90deg, #10b981, #34d399)'
-                        : `linear-gradient(90deg, ${accentColor}, color-mix(in srgb, ${accentColor} 70%, #a855f7))`,
-                    }}
-                  />
-                </div>
-                <div className="banner-progress-count">
-                  <span className={`banner-progress-done ${justCompleted ? 'banner-progress-done--pop' : ''}`}>{doneTasks}</span>
-                  <span className="banner-progress-sep">/</span>
-                  <span className="banner-progress-total">{totalTasks}</span>
-                </div>
-              </div>
-            </div>
-          ) : null}
+        {/* Right: Close button */}
+        {onClose ? (
+          <div className="banner-right">
+            <button
+              type="button"
+              className="banner-close"
+              onClick={onClose}
+              aria-label="Close"
+            >
+              <X size={16} strokeWidth={1.75} />
+            </button>
+          </div>
+        ) : null}
 
-          {/* Celebration shimmer */}
-          {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
-        </div>
+        {/* Celebration shimmer */}
+        {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
       </div>
     </div>
   )

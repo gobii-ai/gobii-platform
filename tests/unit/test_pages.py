@@ -147,7 +147,7 @@ class HomePageTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
-        self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
+        self.assertEqual(params.get("next"), [reverse("agent_quick_spawn")])
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
 @tag("batch_pages")
@@ -308,7 +308,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
-        self.assertEqual(params.get("next"), [reverse("agent_create_contact")])
+        self.assertEqual(params.get("next"), [reverse("agent_quick_spawn")])
         self.assertEqual(params.get("utm_medium"), ["ads"])
 
     @tag("batch_pages")
@@ -335,7 +335,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         session = self.client.session
         self.assertEqual(
             session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
-            reverse("agent_create_contact"),
+            reverse("agent_quick_spawn"),
         )
 
 
@@ -398,7 +398,7 @@ class CheckoutRedirectTests(TestCase):
         self.client.force_login(user)
 
         session = self.client.session
-        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("agent_create_contact")
+        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("agent_quick_spawn")
         session.save()
 
         mock_stripe_settings.return_value = SimpleNamespace(
@@ -415,7 +415,7 @@ class CheckoutRedirectTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         parsed = urlparse(resp["Location"])
-        self.assertEqual(parsed.path, reverse("agent_create_contact"))
+        self.assertEqual(parsed.path, reverse("agent_quick_spawn"))
 
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
@@ -429,7 +429,7 @@ class AuthLinkTests(TestCase):
         session["utm_querystring"] = "utm_source=newsletter"
         session.save()
 
-        next_url = reverse("agent_create_contact")
+        next_url = reverse("agent_quick_spawn")
         response = self.client.get(reverse("account_signup"), {"next": next_url})
         self.assertEqual(response.status_code, 200)
 
@@ -453,7 +453,7 @@ class AuthLinkTests(TestCase):
         session["utm_querystring"] = "utm_campaign=fall"
         session.save()
 
-        next_url = reverse("agent_create_contact")
+        next_url = reverse("agent_quick_spawn")
         response = self.client.get(reverse("account_login"), {"next": next_url})
         self.assertEqual(response.status_code, 200)
 

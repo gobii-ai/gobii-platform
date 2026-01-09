@@ -105,6 +105,7 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
 )
+from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
@@ -344,13 +345,9 @@ from constants.stripe import (
 )
 from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
-from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.agent.tasks import process_agent_events_task
-from api.services.persistent_agents import (
-    PersistentAgentProvisioningError,
-    PersistentAgentProvisioningService,
-)
 from api.services import mcp_servers as mcp_server_service
+from console.agent_creation import create_persistent_agent_from_charter
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -1948,7 +1945,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'primaryEmail': primary_email,
             'primarySms': primary_sms,
             'detailUrl': reverse('agent_detail', kwargs={'pk': agent.id}),
-            'chatUrl': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+            'chatUrl': build_immersive_chat_url(self.request, agent.id, return_to=self.request.get_full_path()),
             'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
             'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
             'iconBorderHex': getattr(agent, 'icon_border_hex', '') or '',
@@ -2221,9 +2218,6 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
     @tracer.start_as_current_span("CONSOLE Agent Create Contact - Create Agent")
     def post(self, request, *args, **kwargs):
         """Handle step 2: create the agent with contact preferences."""
-        
-        # Import here to avoid circular import during Django startup
-        from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
 
         resp = self._handle_phone_post()
         if resp:  # phone add/verify/delete handled
@@ -2232,319 +2226,117 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         form = PersistentAgentContactForm(request.POST)
         phone = self._current_phone()  # helper from PhoneNumberMixin
 
-        if form.is_valid():
-            if form.cleaned_data['preferred_contact_method'] == 'sms' and (
-                    not phone or not phone.is_verified):
+        form_is_valid = form.is_valid()
+        if form_is_valid and form.cleaned_data['preferred_contact_method'] == 'sms':
+            if not phone or not phone.is_verified:
                 form.add_error(None, "Please verify a phone number before selecting SMS.")
 
-        if not form.is_valid():
+        if form.errors:
             return self.render_to_response(self.get_context_data(form=form))
 
         # Check if we have charter data from step 1
         if 'agent_charter' not in request.session:
             messages.error(request, "Please start by describing what your agent should do.")
             return redirect('agents')
-        
-        form = PersistentAgentContactForm(request.POST)
 
-        if form.is_valid():
-            initial_user_message = request.session.get('agent_charter')
-            user_contact_email = form.cleaned_data['contact_endpoint_email']
-            user_contact_sms = None
-            sms_enabled = form.cleaned_data.get('sms_enabled', False)
-            email_enabled = form.cleaned_data.get('email_enabled', False)
-            preferred_contact_method = form.cleaned_data['preferred_contact_method']
+        initial_user_message = request.session.get('agent_charter')
+        user_contact_email = form.cleaned_data.get('contact_endpoint_email') or ''
+        sms_enabled = form.cleaned_data.get('sms_enabled', False)
+        email_enabled = form.cleaned_data.get('email_enabled', False)
+        preferred_contact_method = form.cleaned_data['preferred_contact_method']
 
-            sms_preferred = preferred_contact_method == "sms"
-
-            template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-            selected_template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
-            applied_schedule = None
-
-            try:
-                with transaction.atomic():
-                    resolved_context = build_console_context(request)
-                    organization = None
-                    if resolved_context.current_context.type == 'organization':
-                        membership = resolved_context.current_membership
-                        if membership is None:
-                            messages.error(
-                                request,
-                                "You no longer have access to that organization. Creating a personal agent instead.",
-                            )
-                        elif not resolved_context.can_manage_org_agents:
-                            form.add_error(
-                                None,
-                                "You need to be an organization owner or admin to create agents for this organization.",
-                            )
-                            return self.render_to_response(self.get_context_data(form=form))
-                        else:
-                            organization = membership.org
-
-                        if organization is not None:
-                            billing = getattr(organization, "billing", None)
-                            seats_purchased = getattr(billing, "purchased_seats", 0) if billing else 0
-                            if seats_purchased <= 0:
-                                billing_url = f"{reverse('billing')}?org_id={organization.id}"
-                                request.session['context_type'] = 'organization'
-                                request.session['context_id'] = str(organization.id)
-                                request.session['context_name'] = organization.name
-                                request.session.modified = True
-
-                                message_text = format_html(
-                                    "Looks like your organization doesn't have any seats yet. <a class=\"underline font-medium\" href=\"{}\">Add seats in Billing</a> to create organization-owned agents.",
-                                    billing_url,
-                                )
-                                messages.error(request, message_text)
-                                form.add_error(None, message_text)
-                                return self.render_to_response(self.get_context_data(form=form))
-
-                    template_code = selected_template.code if selected_template else None
-                    try:
-                        provisioning = PersistentAgentProvisioningService.provision(
-                            user=request.user,
-                            organization=organization,
-                            template_code=template_code,
-                        )
-                    except PersistentAgentProvisioningError as exc:
-                        error_payload = exc.args[0] if exc.args else "Unable to create agent."
-                        raise ValidationError(error_payload) from exc
-
-                    persistent_agent = provisioning.agent
-                    browser_agent = provisioning.browser_agent
-                    agent_name = persistent_agent.name
-                    applied_schedule = provisioning.applied_schedule
-                    
-                    # Generate a unique email for the agent itself
-                    user_contact = None
-                    user_email_comms_endpoint = None
-                    user_sms_comms_endpoint = None
-
-                    if sms_enabled:
-                        user_primary_sms = get_user_primary_sms_number(user=request.user)
-                        user_contact_sms = user_primary_sms.phone_number if user_primary_sms else None
-
-                        if user_primary_sms is None:
-                            messages.error(
-                                request,
-                                "You must have a verified phone number to create an agent with SMS contact."
-                            )
-                            return redirect('agents')
-
-                        agent_sms = find_unused_number()
-
-                        agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                            owner_agent=persistent_agent,
-                            channel=CommsChannel.SMS,
-                            address=agent_sms.phone_number,
-                            is_primary=preferred_contact_method == "sms",
-                        )
-                        PersistentAgentSmsEndpoint.objects.create(
-                            endpoint=agent_comms_endpoint,
-                            supports_mms=True,  # SMS endpoints support messages
-                            carrier_name=agent_sms.provider
-                        )
-
-                        user_sms_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
-                            channel=CommsChannel.SMS,
-                            address=user_primary_sms.phone_number,
-                            defaults={'owner_agent': None},
-                        )
-
-                        user_contact = user_primary_sms.phone_number
-
-                    if email_enabled:
-                        from django.conf import settings as dj_settings
-                        # Create agent-owned email endpoint only when enabled (Gobii proprietary mode)
-                        if getattr(dj_settings, 'ENABLE_DEFAULT_AGENT_EMAIL', False):
-                            # Generate a unique email for the agent
-                            agent_email = self._generate_unique_agent_email(agent_name)
-
-                            # Create the agent's OWN primary email endpoint (for receiving)
-                            agent_comms_endpoint = PersistentAgentCommsEndpoint.objects.create(
-                                owner_agent=persistent_agent,
-                                channel=CommsChannel.EMAIL,
-                                address=agent_email,
-                                is_primary=preferred_contact_method == "email",
-                            )
-                            PersistentAgentEmailEndpoint.objects.create(
-                                endpoint=agent_comms_endpoint,
-                                display_name=agent_name,
-                                verified=True,  # System-generated, so considered verified
-                            )
-
-                        # Always create the EXTERNAL endpoint for the user's contact address
-                        user_email_comms_endpoint, created = PersistentAgentCommsEndpoint.objects.get_or_create(
-                            channel=CommsChannel.EMAIL,
-                            address=user_contact_email,
-                            defaults={'owner_agent': None},
-                        )
-
-                        user_contact = user_contact_email
-                    
-                    # Store the preferred contact endpoint on the agent
-                    persistent_agent.preferred_contact_endpoint = user_sms_comms_endpoint if sms_preferred else user_email_comms_endpoint
-                    persistent_agent.save(update_fields=["preferred_contact_endpoint"])
-
-                    # Send regulatory SMS if SMS is enabled
-                    if sms_enabled:
-                        try:
-                            sms.send_sms(
-                                to_number=user_primary_sms.phone_number,
-                                from_number=agent_sms.phone_number,
-                                body="Gobii: You’ve enabled SMS communication with Gobii. Reply HELP for help, STOP to opt-out."
-                            )
-                        except Exception as e:
-                            logger.error("Error sending initial SMS to user after agent creation: %s", str(e))
-
-                    conversation = _get_or_create_conversation(
-                        channel=CommsChannel.SMS.value if sms_preferred else CommsChannel.EMAIL.value,
-                        address=user_contact,
-                        owner_agent=persistent_agent
-                    )
-
-                    # Set up conversation participants
-                    if user_sms_comms_endpoint:
-                        _ensure_participant(conversation, user_sms_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
-
-                    if user_email_comms_endpoint:
-                        _ensure_participant(conversation, user_email_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
-
-                    # Add agent participant if an agent-owned endpoint exists
-                    try:
-                        if 'agent_comms_endpoint' in locals() and agent_comms_endpoint is not None:
-                            _ensure_participant(conversation, agent_comms_endpoint, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
-                    except Exception:
-                        pass
-
-                    # Create the initial message from user to agent
-                    PersistentAgentMessage.objects.create(
-                        is_outbound=False,  # Message from user to agent
-                        from_endpoint=user_sms_comms_endpoint if sms_preferred else user_email_comms_endpoint,
-                        conversation=conversation,
-                        body=initial_user_message,
-                        owner_agent=persistent_agent,
-                    )
-
-                    if selected_template and selected_template.default_tools:
-                        for tool_name in selected_template.default_tools:
-                            try:
-                                mark_tool_enabled_without_discovery(persistent_agent, tool_name)
-                            except Exception as exc:
-                                logger.warning(
-                                    "Failed to enable MCP tool '%s' for agent %s: %s",
-                                    tool_name,
-                                    persistent_agent.id,
-                                    exc,
-                                )
-
-                    # Trigger the first event processing run after commit
-                    transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
-                    
-                    # Clear session data
-                    if 'agent_charter' in request.session:
-                        del request.session['agent_charter']
-                    if 'agent_charter_source' in request.session:
-                        del request.session['agent_charter_source']
-                    if PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY in request.session:
-                        del request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY]
-
-                    base_props = {
-                        'agent_id': str(persistent_agent.id),
-                        'agent_name': agent_name,
-                        'contact_email': user_contact_email if user_contact_email else '',
-                        'contact_sms': user_contact_sms if user_contact_sms else '',
-                        'initial_message': initial_user_message,
-                        'charter': initial_user_message if initial_user_message else '',
-                        'preferred_contact_method': preferred_contact_method,
-                        'template_code': selected_template.code if selected_template else '',
-                        'template_schedule_applied': applied_schedule or '',
-                    }
-                    props = Analytics.with_org_properties(base_props, organization=organization)
-                    transaction.on_commit(lambda: Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_CREATED,
-                        source=AnalyticsSource.WEB,
-                        properties=props.copy(),
-                    ))
-                    if props.get('organization'):
-                        transaction.on_commit(lambda: Analytics.track_event(
-                            user_id=request.user.id,
-                            event=AnalyticsEvent.ORGANIZATION_PERSISTENT_AGENT_CREATED,
-                            source=AnalyticsSource.WEB,
-                            properties=props.copy(),
-                        ))
-                        transaction.on_commit(lambda: Analytics.track_event(
-                            user_id=request.user.id,
-                            event=AnalyticsEvent.ORGANIZATION_AGENT_CREATED,
-                            source=AnalyticsSource.WEB,
-                            properties=props.copy(),
-                        ))
-
-                    return redirect('agent_welcome', pk=persistent_agent.id)
-                    
-            except ValidationError as exc:
-                error_messages = []
-                if hasattr(exc, 'message_dict'):
-                    for field_errors in exc.message_dict.values():
-                        error_messages.extend(field_errors)
-                error_messages.extend(getattr(exc, 'messages', []))
-                if not error_messages:
-                    error_messages.append("We couldn't create that agent. Please check your organization settings and try again.")
-                for message_text in error_messages:
-                    form.add_error(None, message_text)
-            except Exception as e:
-                logger.exception("Error creating persistent agent: %s", e)
-                messages.error(
-                    request,
-                    "We ran into a problem creating your agent. Please try again."
+        try:
+            result = create_persistent_agent_from_charter(
+                request,
+                initial_message=initial_user_message,
+                contact_email=user_contact_email,
+                email_enabled=email_enabled,
+                sms_enabled=sms_enabled,
+                preferred_contact_method=preferred_contact_method,
+            )
+            return redirect('agent_welcome', pk=result.agent.id)
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, 'message_dict'):
+                for field_errors in exc.message_dict.values():
+                    error_messages.extend(field_errors)
+            error_messages.extend(getattr(exc, 'messages', []))
+            if not error_messages:
+                error_messages.append(
+                    "We couldn't create that agent. Please check your organization settings and try again."
                 )
+            for message_text in error_messages:
+                form.add_error(None, message_text)
+                messages.error(request, message_text)
+        except Exception:
+            logger.exception("Error creating persistent agent")
+            messages.error(
+                request,
+                "We ran into a problem creating your agent. Please try again.",
+            )
 
         # If form is invalid or has errors, re-render with them
         context = self.get_context_data(form=form)
         context['form'] = form
         return self.render_to_response(context)
 
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact - Generate Unique Email")
-    def _generate_unique_agent_email(self, agent_name: str, max_attempts=100) -> str:
-        """
-        Generate a unique, user-friendly email address from the agent's name.
-        e.g., "Atlas Core" -> "atlas.core@<default-domain>"
-        """
-        import re
-        from django.utils.crypto import get_random_string
 
-        # Sanitize the agent name into a username format
-        base_username = agent_name.lower().strip()
-        base_username = re.sub(r'\s+', '.', base_username)  # Replace spaces with dots
-        base_username = re.sub(r'[^\w.]', '', base_username)  # Remove non-alphanumeric chars except dots
-        from django.conf import settings as dj_settings
-        domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'agents.localhost')
+class AgentQuickSpawnView(LoginRequiredMixin, View):
+    """Create an agent from the saved charter and jump straight into chat."""
 
-        # First attempt
-        email_address = f"{base_username}@{domain}"
-        if not PersistentAgentCommsEndpoint.objects.filter(
-            channel=CommsChannel.EMAIL, address__iexact=email_address
-        ).exists():
-            return email_address
+    @tracer.start_as_current_span("CONSOLE Agent Quick Spawn")
+    def get(self, request, *args, **kwargs):
+        return self._handle(request)
 
-        # If it exists, append a number
-        for i in range(2, max_attempts):
-            email_address = f"{base_username}{i}@{domain}"
-            if not PersistentAgentCommsEndpoint.objects.filter(
-                channel=CommsChannel.EMAIL, address__iexact=email_address
-            ).exists():
-                return email_address
-        
-        # Final fallback with random string
-        random_suffix = get_random_string(4)
-        email_address = f"{base_username}-{random_suffix}@{domain}"
-        if not PersistentAgentCommsEndpoint.objects.filter(
-            channel=CommsChannel.EMAIL, address__iexact=email_address
-        ).exists():
-            return email_address
+    def post(self, request, *args, **kwargs):
+        return self._handle(request)
 
-        raise ValueError("Unable to generate a unique email address for the agent.")
+    def _handle(self, request):
+        if 'agent_charter' not in request.session:
+            messages.error(request, "Please start by describing what your agent should do.")
+            return redirect('agents')
+
+        contact_email = (request.user.email or "").strip()
+        if not contact_email:
+            messages.error(request, "Please add an email address to continue.")
+            return redirect('agents')
+
+        try:
+            result = create_persistent_agent_from_charter(
+                request,
+                initial_message=request.session.get('agent_charter'),
+                contact_email=contact_email,
+                email_enabled=True,
+                sms_enabled=False,
+                preferred_contact_method='email',
+            )
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, 'message_dict'):
+                for field_errors in exc.message_dict.values():
+                    error_messages.extend(field_errors)
+            error_messages.extend(getattr(exc, 'messages', []))
+            if not error_messages:
+                error_messages.append("We couldn't create that agent. Please try again.")
+            for message_text in error_messages:
+                messages.error(request, message_text)
+            return redirect('agents')
+        except Exception:
+            logger.exception("Error creating persistent agent")
+            messages.error(request, "We ran into a problem creating your agent. Please try again.")
+            return redirect('agents')
+
+        session_return_to = request.session.pop(IMMERSIVE_RETURN_TO_SESSION_KEY, None)
+        if session_return_to is not None:
+            request.session.modified = True
+        embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
+        app_url = build_immersive_chat_url(
+            request,
+            result.agent.id,
+            return_to=request.GET.get("return_to") or session_return_to,
+            embed=embed,
+        )
+        return redirect(app_url)
 
 
 class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
@@ -3453,7 +3245,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'urls': {
                 'detail': request.path,
                 'list': reverse('agents'),
-                'chat': reverse('agent_chat_shell', kwargs={'pk': agent.id}),
+                'chat': build_immersive_chat_url(request, agent.id, return_to=request.get_full_path()),
                 'secrets': reverse('agent_secrets', args=[agent.id]),
                 'emailSettings': reverse('agent_email_settings', args=[agent.id]),
                 'manageFiles': reverse('agent_files', args=[agent.id]),
@@ -4850,6 +4642,14 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
 
 class PersistentAgentChatShellView(AgentDetailView):
     template_name = "console/persistent_agent_chat_shell.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
+        context["immersive"] = immersive
+        if immersive:
+            context["body_class"] = "min-h-screen bg-white"
+        return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
         return HttpResponseNotAllowed(['GET'])
