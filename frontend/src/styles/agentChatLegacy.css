@@ -1257,23 +1257,35 @@
 }
 
 .composer-working-insight .insight-card {
-  background: #fff;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 0.625rem;
-  padding: 0.75rem;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  border-radius: 0;
+  padding: 0;
+  gap: 0.875rem;
 }
 
-.composer-working-insight .insight-card:hover {
-  border-color: rgba(165, 180, 252, 0.5);
-}
-
+/* Hide dismiss button in composer insight */
 .composer-working-insight .insight-dismiss {
-  opacity: 0.5;
+  display: none;
 }
 
-.composer-working-insight .insight-dismiss:hover {
-  opacity: 1;
+/* Enhanced styling for composer insights */
+.composer-working-insight .insight-icon {
+  width: 2.25rem;
+  height: 2.25rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.06) 100%);
+  border-radius: 8px;
+}
+
+.composer-working-insight .insight-card--burn-rate .insight-icon {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.06) 100%);
+}
+
+.composer-working-insight .insight-hero-number {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .composer-working-carousel {
@@ -4303,29 +4315,72 @@
 
 /* Override insight card styles when inside working panel */
 .working-panel-insight .insight-card {
-  border: none;
-  box-shadow: none;
-  background: transparent;
+  border: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
   padding: 0;
   border-radius: 0;
-  /* Smooth transition for content changes */
-  animation: insight-content-fade 250ms ease-out;
+  gap: 1rem;
+  animation: insight-content-fade 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 @keyframes insight-content-fade {
   from {
     opacity: 0;
-    transform: translateY(4px);
+    transform: translateY(6px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
+/* Hide dismiss button inside working panel */
 .working-panel-insight .insight-dismiss {
-  top: -0.25rem;
-  right: -0.25rem;
+  display: none;
+}
+
+/* Enhanced typography for working panel insights */
+.working-panel-insight .insight-icon {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%);
+  border-radius: 10px;
+}
+
+.working-panel-insight .insight-card--burn-rate .insight-icon {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(99, 102, 241, 0.08) 100%);
+}
+
+.working-panel-insight .insight-icon-svg {
+  width: 1.375rem;
+  height: 1.375rem;
+}
+
+.working-panel-insight .insight-hero-number {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.working-panel-insight .insight-headline {
+  font-size: 0.8125rem;
+  color: #64748b;
+}
+
+.working-panel-insight .insight-period {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+.working-panel-insight .insight-supporting {
+  font-size: 0.8125rem;
+  color: #64748b;
 }
 
 /* Carousel controls */
@@ -4334,9 +4389,8 @@
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  margin-top: 0.875rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid rgba(229, 231, 235, 0.5);
+  margin-top: auto;
+  padding-top: 0.5rem;
 }
 
 .working-panel-carousel-btn {
