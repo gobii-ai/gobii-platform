@@ -191,28 +191,26 @@
 
     .immersive-close {
       position: absolute;
-      top: 1.5rem;
-      right: 1.5rem;
+      top: 1rem;
+      right: 1rem;
       z-index: 3;
-      width: 2.75rem;
-      height: 2.75rem;
+      width: 1.75rem;
+      height: 1.75rem;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.25);
-      background: rgba(15, 23, 42, 0.6);
-      color: #e2e8f0;
-      font-size: 1.25rem;
-      font-weight: 600;
-      line-height: 1;
-      box-shadow: 0 12px 24px rgba(2, 6, 23, 0.45);
-      transition: transform 0.2s ease, border-color 0.2s ease;
+      border-radius: 0.5rem;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
     }
 
     .immersive-close:hover {
-      transform: translateY(-1px);
-      border-color: rgba(99, 102, 241, 0.6);
+      background: rgba(15, 23, 42, 0.06);
+      color: #475569;
+      transform: scale(1.05);
     }
 
     .immersive-frame {
@@ -808,7 +806,10 @@
 
     <div id="immersive-overlay" class="immersive-overlay" data-state="closed" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Immersive agent workspace">
       <button id="immersive-close" class="immersive-close" type="button" aria-label="Close immersive view" hidden>
-        <span aria-hidden="true">&times;</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
       </button>
       <div class="immersive-status" role="status" aria-live="polite">
         <div class="immersive-status__inner">
