@@ -36,6 +36,12 @@ from api.services.prompt_settings import (
     DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
     DEFAULT_MAX_PROMPT_TOKEN_BUDGET,
     DEFAULT_MAX_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET,
+    DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
+    DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT,
+    DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET,
+    DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
     DEFAULT_PREMIUM_MESSAGE_HISTORY_LIMIT,
     DEFAULT_PREMIUM_PROMPT_TOKEN_BUDGET,
     DEFAULT_PREMIUM_TOOL_CALL_HISTORY_LIMIT,
@@ -45,6 +51,8 @@ from api.services.prompt_settings import (
     DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
     DEFAULT_PREMIUM_ENABLED_TOOL_LIMIT,
     DEFAULT_MAX_ENABLED_TOOL_LIMIT,
+    DEFAULT_ULTRA_ENABLED_TOOL_LIMIT,
+    DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT,
     DEFAULT_UNIFIED_HISTORY_LIMIT,
     DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
 )
@@ -94,12 +102,50 @@ tracer = trace.get_tracer('gobii.utils')
 def generate_ulid() -> str:
     """Return a 26-character, time-ordered ULID string."""
     return str(ulid.new())
-LLM_TIER_CHOICES = (
-    ("standard", "Standard"),
-    ("premium", "Premium"),
-    ("max", "Max"),
-)
-DEFAULT_LLM_TIER = "standard"
+
+DEFAULT_INTELLIGENCE_TIER_KEY = "standard"
+
+
+class IntelligenceTier(models.Model):
+    """Configurable intelligence tier for LLM routing and credit multipliers."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=32, unique=True)
+    display_name = models.CharField(max_length=64)
+    rank = models.PositiveSmallIntegerField(
+        unique=True,
+        help_text="Higher rank means higher intelligence tier.",
+    )
+    credit_multiplier = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("1.00"),
+        validators=[MinValueValidator(Decimal("0.01"))],
+        help_text="Multiplier applied to credit consumption for this intelligence tier.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["rank", "key"]
+
+    def __str__(self):
+        return f"{self.display_name} ({self.key})"
+
+    def save(self, *args, **kwargs):
+        result = super().save(*args, **kwargs)
+        _invalidate_tier_multiplier_cache()
+        return result
+
+    def delete(self, *args, **kwargs):
+        result = super().delete(*args, **kwargs)
+        _invalidate_tier_multiplier_cache()
+        return result
+
+
+def _get_default_intelligence_tier_id() -> uuid.UUID | None:
+    tier = IntelligenceTier.objects.filter(key=DEFAULT_INTELLIGENCE_TIER_KEY).only("id").first()
+    return tier.id if tier else None
 
 
 def _apply_tier_multiplier(agent, amount):
@@ -1190,6 +1236,16 @@ class PromptConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Token budget applied when rendering prompts for max tier agents.",
     )
+    ultra_prompt_token_budget = models.PositiveIntegerField(
+        default=DEFAULT_ULTRA_PROMPT_TOKEN_BUDGET,
+        validators=[MinValueValidator(1)],
+        help_text="Token budget applied when rendering prompts for ultra tier agents.",
+    )
+    ultra_max_prompt_token_budget = models.PositiveIntegerField(
+        default=DEFAULT_ULTRA_MAX_PROMPT_TOKEN_BUDGET,
+        validators=[MinValueValidator(1)],
+        help_text="Token budget applied when rendering prompts for ultra max tier agents.",
+    )
     standard_message_history_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_MESSAGE_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
@@ -1204,6 +1260,16 @@ class PromptConfig(models.Model):
         default=DEFAULT_MAX_MESSAGE_HISTORY_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of recent messages included for max tier agents.",
+    )
+    ultra_message_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_MESSAGE_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent messages included for ultra tier agents.",
+    )
+    ultra_max_message_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_MAX_MESSAGE_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent messages included for ultra max tier agents.",
     )
     standard_tool_call_history_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_TOOL_CALL_HISTORY_LIMIT,
@@ -1220,6 +1286,16 @@ class PromptConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Number of recent tool calls included for max tier agents.",
     )
+    ultra_tool_call_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_TOOL_CALL_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent tool calls included for ultra tier agents.",
+    )
+    ultra_max_tool_call_history_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_MAX_TOOL_CALL_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of recent tool calls included for ultra max tier agents.",
+    )
     standard_enabled_tool_limit = models.PositiveSmallIntegerField(
         default=DEFAULT_STANDARD_ENABLED_TOOL_LIMIT,
         validators=[MinValueValidator(1)],
@@ -1234,6 +1310,16 @@ class PromptConfig(models.Model):
         default=DEFAULT_MAX_ENABLED_TOOL_LIMIT,
         validators=[MinValueValidator(1)],
         help_text="Number of concurrently enabled tools allowed for max tier agents.",
+    )
+    ultra_enabled_tool_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_ENABLED_TOOL_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of concurrently enabled tools allowed for ultra tier agents.",
+    )
+    ultra_max_enabled_tool_limit = models.PositiveSmallIntegerField(
+        default=DEFAULT_ULTRA_MAX_ENABLED_TOOL_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Number of concurrently enabled tools allowed for ultra max tier agents.",
     )
     standard_unified_history_limit = models.PositiveIntegerField(
         default=DEFAULT_UNIFIED_HISTORY_LIMIT,
@@ -1250,6 +1336,16 @@ class PromptConfig(models.Model):
         validators=[MinValueValidator(1)],
         help_text="Unified history event limit for max tier agents.",
     )
+    ultra_unified_history_limit = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history event limit for ultra tier agents.",
+    )
+    ultra_max_unified_history_limit = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_LIMIT,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history event limit for ultra max tier agents.",
+    )
     standard_unified_history_hysteresis = models.PositiveIntegerField(
         default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
         validators=[MinValueValidator(1)],
@@ -1264,6 +1360,16 @@ class PromptConfig(models.Model):
         default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
         validators=[MinValueValidator(1)],
         help_text="Unified history hysteresis for max tier agents.",
+    )
+    ultra_unified_history_hysteresis = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history hysteresis for ultra tier agents.",
+    )
+    ultra_max_unified_history_hysteresis = models.PositiveIntegerField(
+        default=DEFAULT_UNIFIED_HISTORY_HYSTERESIS,
+        validators=[MinValueValidator(1)],
+        help_text="Unified history hysteresis for ultra max tier agents.",
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2276,42 +2382,20 @@ class PersistentLLMTier(models.Model):
     token_range = models.ForeignKey(PersistentTokenRange, on_delete=models.CASCADE, related_name="tiers")
     order = models.PositiveIntegerField(help_text="1-based order within the range")
     description = models.CharField(max_length=256, blank=True)
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for premium routing.",
-        db_index=True,
-    )
-    is_max = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for max-tier routing.",
-        db_index=True,
-    )
-    credit_multiplier = models.DecimalField(
-        max_digits=6,
-        decimal_places=2,
-        default=Decimal("1.00"),
-        validators=[MinValueValidator(Decimal("0.01"))],
-        help_text="Multiplier applied to credit consumption for this tier.",
+    intelligence_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="persistent_tiers",
+        default=_get_default_intelligence_tier_id,
     )
 
     class Meta:
-        ordering = ["token_range__min_tokens", "order"]
-        unique_together = (("token_range", "order", "is_premium", "is_max"),)
-        constraints = [
-            models.CheckConstraint(
-                check=~Q(is_max=True, is_premium=True),
-                name="persistentllmtier_max_excludes_premium",
-            )
-        ]
+        ordering = ["token_range__min_tokens", "intelligence_tier__rank", "order"]
+        unique_together = (("token_range", "order", "intelligence_tier"),)
 
     def __str__(self):
-        if self.is_max:
-            tier_type = "max"
-        elif self.is_premium:
-            tier_type = "premium"
-        else:
-            tier_type = "standard"
-        return f"{self.token_range.name} {tier_type} tier {self.order}"
+        tier_key = getattr(self.intelligence_tier, "key", "standard")
+        return f"{self.token_range.name} {tier_key} tier {self.order}"
 
     def save(self, *args, **kwargs):
         result = super().save(*args, **kwargs)
@@ -2339,36 +2423,13 @@ class PersistentTierEndpoint(models.Model):
         default=None,
         help_text="Optional reasoning effort override applied when the endpoint supports reasoning.",
     )
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Matches the premium status of the associated tier.",
-        editable=False,
-        db_index=True,
-    )
-    is_max = models.BooleanField(
-        default=False,
-        help_text="Matches the max-tier status of the associated tier.",
-        editable=False,
-        db_index=True,
-    )
-
     class Meta:
         ordering = ["tier__order", "endpoint__key"]
         unique_together = (("tier", "endpoint"),)
 
     def __str__(self):
-        if self.tier.is_max:
-            tier_type = "max"
-        elif self.tier.is_premium:
-            tier_type = "premium"
-        else:
-            tier_type = "standard"
-        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
-
-    def save(self, *args, **kwargs):
-        self.is_premium = bool(self.tier.is_premium)
-        self.is_max = bool(self.tier.is_max)
-        super().save(*args, **kwargs)
+        tier_key = getattr(self.tier.intelligence_tier, "key", "standard")
+        return f"{self.tier} → {self.endpoint.key} [{tier_key}] (w={self.weight})"
 
 
 class EmbeddingsModelEndpoint(models.Model):
@@ -2611,19 +2672,20 @@ class BrowserLLMTier(models.Model):
     policy = models.ForeignKey(BrowserLLMPolicy, on_delete=models.CASCADE, related_name="tiers")
     order = models.PositiveIntegerField(help_text="1-based order within the policy")
     description = models.CharField(max_length=256, blank=True)
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for premium browser routing.",
-        db_index=True,
+    intelligence_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="browser_tiers",
+        default=_get_default_intelligence_tier_id,
     )
 
     class Meta:
-        ordering = ["policy__name", "order"]
-        unique_together = (("policy", "order", "is_premium"),)
+        ordering = ["policy__name", "intelligence_tier__rank", "order"]
+        unique_together = (("policy", "order", "intelligence_tier"),)
 
     def __str__(self):
-        tier_type = "premium" if bool(self.is_premium) else "standard"
-        return f"{self.policy.name} {tier_type} tier {self.order}"
+        tier_key = getattr(self.intelligence_tier, "key", "standard")
+        return f"{self.policy.name} {tier_key} tier {self.order}"
 
 
 class BrowserTierEndpoint(models.Model):
@@ -2641,24 +2703,14 @@ class BrowserTierEndpoint(models.Model):
         help_text="Optional paired endpoint used for page extraction LLM calls.",
     )
     weight = models.FloatField(help_text="Relative weight within the tier; > 0")
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Matches the premium status of the associated browser tier.",
-        editable=False,
-        db_index=True,
-    )
 
     class Meta:
         ordering = ["tier__order", "endpoint__key"]
         unique_together = (("tier", "endpoint"),)
 
     def __str__(self):
-        tier_type = "premium" if self.tier.is_premium else "standard"
-        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
-
-    def save(self, *args, **kwargs):
-        self.is_premium = bool(self.tier.is_premium)
-        super().save(*args, **kwargs)
+        tier_key = getattr(self.tier.intelligence_tier, "key", "standard")
+        return f"{self.tier} → {self.endpoint.key} [{tier_key}] (w={self.weight})"
 
 
 # --------------------------------------------------------------------------- #
@@ -2787,45 +2839,23 @@ class ProfilePersistentTier(models.Model):
     )
     order = models.PositiveIntegerField(help_text="1-based order within the range")
     description = models.CharField(max_length=256, blank=True)
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for premium routing.",
-        db_index=True,
-    )
-    is_max = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for max-tier routing.",
-        db_index=True,
-    )
-    credit_multiplier = models.DecimalField(
-        max_digits=6,
-        decimal_places=2,
-        default=Decimal("1.00"),
-        validators=[MinValueValidator(Decimal("0.01"))],
-        help_text="Multiplier applied to credit consumption for this tier.",
+    intelligence_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="profile_persistent_tiers",
+        default=_get_default_intelligence_tier_id,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["token_range__profile", "token_range__min_tokens", "order"]
-        unique_together = [("token_range", "order", "is_premium", "is_max")]
-        constraints = [
-            models.CheckConstraint(
-                check=~Q(is_max=True, is_premium=True),
-                name="profilepersistenttier_max_excludes_premium",
-            )
-        ]
+        ordering = ["token_range__profile", "token_range__min_tokens", "intelligence_tier__rank", "order"]
+        unique_together = [("token_range", "order", "intelligence_tier")]
 
     def __str__(self):
-        if self.is_max:
-            tier_type = "max"
-        elif self.is_premium:
-            tier_type = "premium"
-        else:
-            tier_type = "standard"
-        return f"{self.token_range} {tier_type} tier {self.order}"
+        tier_key = getattr(self.intelligence_tier, "key", "standard")
+        return f"{self.token_range} {tier_key} tier {self.order}"
 
 
 class ProfilePersistentTierEndpoint(models.Model):
@@ -2851,18 +2881,6 @@ class ProfilePersistentTierEndpoint(models.Model):
         default=None,
         help_text="Optional reasoning effort override applied when the endpoint supports reasoning.",
     )
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Matches the premium status of the associated tier.",
-        editable=False,
-        db_index=True,
-    )
-    is_max = models.BooleanField(
-        default=False,
-        help_text="Matches the max-tier status of the associated tier.",
-        editable=False,
-        db_index=True,
-    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2872,18 +2890,8 @@ class ProfilePersistentTierEndpoint(models.Model):
         unique_together = [("tier", "endpoint")]
 
     def __str__(self):
-        if self.tier.is_max:
-            tier_type = "max"
-        elif self.tier.is_premium:
-            tier_type = "premium"
-        else:
-            tier_type = "standard"
-        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
-
-    def save(self, *args, **kwargs):
-        self.is_premium = bool(self.tier.is_premium)
-        self.is_max = bool(self.tier.is_max)
-        super().save(*args, **kwargs)
+        tier_key = getattr(self.tier.intelligence_tier, "key", "standard")
+        return f"{self.tier} → {self.endpoint.key} [{tier_key}] (w={self.weight})"
 
 
 class ProfileBrowserTier(models.Model):
@@ -2897,22 +2905,23 @@ class ProfileBrowserTier(models.Model):
     )
     order = models.PositiveIntegerField(help_text="1-based order within the profile")
     description = models.CharField(max_length=256, blank=True)
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Marks tiers reserved for premium browser routing.",
-        db_index=True,
+    intelligence_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="profile_browser_tiers",
+        default=_get_default_intelligence_tier_id,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        ordering = ["profile", "order"]
-        unique_together = [("profile", "order", "is_premium")]
+        ordering = ["profile", "intelligence_tier__rank", "order"]
+        unique_together = [("profile", "order", "intelligence_tier")]
 
     def __str__(self):
-        tier_type = "premium" if self.is_premium else "standard"
-        return f"{self.profile.name} browser {tier_type} tier {self.order}"
+        tier_key = getattr(self.intelligence_tier, "key", "standard")
+        return f"{self.profile.name} browser {tier_key} tier {self.order}"
 
 
 class ProfileBrowserTierEndpoint(models.Model):
@@ -2938,12 +2947,6 @@ class ProfileBrowserTierEndpoint(models.Model):
         help_text="Optional paired endpoint used for page extraction LLM calls.",
     )
     weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
-    is_premium = models.BooleanField(
-        default=False,
-        help_text="Matches the premium status of the associated tier.",
-        editable=False,
-        db_index=True,
-    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -2953,12 +2956,8 @@ class ProfileBrowserTierEndpoint(models.Model):
         unique_together = [("tier", "endpoint")]
 
     def __str__(self):
-        tier_type = "premium" if self.tier.is_premium else "standard"
-        return f"{self.tier} → {self.endpoint.key} [{tier_type}] (w={self.weight})"
-
-    def save(self, *args, **kwargs):
-        self.is_premium = bool(self.tier.is_premium)
-        super().save(*args, **kwargs)
+        tier_key = getattr(self.tier.intelligence_tier, "key", "standard")
+        return f"{self.tier} → {self.endpoint.key} [{tier_key}] (w={self.weight})"
 
 
 class ProfileEmbeddingsTier(models.Model):
@@ -4390,10 +4389,11 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="SHA256 of the charter currently pending mini description generation.",
     )
-    preferred_llm_tier = models.CharField(
-        max_length=16,
-        choices=LLM_TIER_CHOICES,
-        default=DEFAULT_LLM_TIER,
+    preferred_llm_tier = models.ForeignKey(
+        IntelligenceTier,
+        on_delete=models.PROTECT,
+        related_name="preferred_by_agents",
+        default=_get_default_intelligence_tier_id,
         help_text="Preferred intelligence tier controlling LLM routing for this agent.",
     )
     agent_color = models.ForeignKey(

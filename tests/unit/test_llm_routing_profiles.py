@@ -1,6 +1,5 @@
 """Tests for LLM routing profile functionality."""
 
-from decimal import Decimal
 from django.test import TestCase, TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 
@@ -18,6 +17,7 @@ from api.models import (
     ProfileEmbeddingsTier,
     ProfileEmbeddingsTierEndpoint,
 )
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 User = get_user_model()
@@ -110,9 +110,7 @@ class LLMRoutingProfileModelTests(TestCase):
             token_range=token_range,
             order=1,
             description="Primary tier",
-            is_premium=False,
-            is_max=False,
-            credit_multiplier=Decimal("1.0"),
+            intelligence_tier=get_intelligence_tier("standard"),
         )
         tier_endpoint = ProfilePersistentTierEndpoint.objects.create(
             tier=tier,
@@ -133,7 +131,7 @@ class LLMRoutingProfileModelTests(TestCase):
             profile=profile,
             order=1,
             description="Browser tier",
-            is_premium=False,
+            intelligence_tier=get_intelligence_tier("standard"),
         )
         tier_endpoint = ProfileBrowserTierEndpoint.objects.create(
             tier=tier,
@@ -265,7 +263,7 @@ class LLMRoutingProfileSerializerTests(TestCase):
             token_range=token_range,
             order=1,
             description="Primary",
-            credit_multiplier=Decimal("1.5"),
+            intelligence_tier=get_intelligence_tier("standard"),
         )
         ProfilePersistentTierEndpoint.objects.create(
             tier=tier,
@@ -278,6 +276,7 @@ class LLMRoutingProfileSerializerTests(TestCase):
             profile=profile,
             order=1,
             description="Browser primary",
+            intelligence_tier=get_intelligence_tier("standard"),
         )
         ProfileBrowserTierEndpoint.objects.create(
             tier=browser_tier,

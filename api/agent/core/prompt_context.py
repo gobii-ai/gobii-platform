@@ -146,6 +146,8 @@ def tool_call_history_limit(agent: PersistentAgent) -> int:
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
     limit_map = {
+        AgentLLMTier.ULTRA_MAX: settings.ultra_max_tool_call_history_limit,
+        AgentLLMTier.ULTRA: settings.ultra_tool_call_history_limit,
         AgentLLMTier.MAX: settings.max_tool_call_history_limit,
         AgentLLMTier.PREMIUM: settings.premium_tool_call_history_limit,
     }
@@ -158,6 +160,8 @@ def message_history_limit(agent: PersistentAgent) -> int:
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
     limit_map = {
+        AgentLLMTier.ULTRA_MAX: settings.ultra_max_message_history_limit,
+        AgentLLMTier.ULTRA: settings.ultra_message_history_limit,
         AgentLLMTier.MAX: settings.max_message_history_limit,
         AgentLLMTier.PREMIUM: settings.premium_message_history_limit,
     }
@@ -175,6 +179,8 @@ def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
     settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
     limit_map = {
+        AgentLLMTier.ULTRA_MAX: settings.ultra_max_prompt_token_budget,
+        AgentLLMTier.ULTRA: settings.ultra_prompt_token_budget,
         AgentLLMTier.MAX: settings.max_prompt_token_budget,
         AgentLLMTier.PREMIUM: settings.premium_prompt_token_budget,
     }
@@ -194,10 +200,14 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
     prompt_settings = get_prompt_settings()
     tier = get_agent_llm_tier(agent)
     limit_map = {
+        AgentLLMTier.ULTRA_MAX: prompt_settings.ultra_max_unified_history_limit,
+        AgentLLMTier.ULTRA: prompt_settings.ultra_unified_history_limit,
         AgentLLMTier.MAX: prompt_settings.max_unified_history_limit,
         AgentLLMTier.PREMIUM: prompt_settings.premium_unified_history_limit,
     }
     hyst_map = {
+        AgentLLMTier.ULTRA_MAX: prompt_settings.ultra_max_unified_history_hysteresis,
+        AgentLLMTier.ULTRA: prompt_settings.ultra_unified_history_hysteresis,
         AgentLLMTier.MAX: prompt_settings.max_unified_history_hysteresis,
         AgentLLMTier.PREMIUM: prompt_settings.premium_unified_history_hysteresis,
     }

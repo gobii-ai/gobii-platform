@@ -186,6 +186,8 @@ def get_enabled_tool_limit(agent: Optional[PersistentAgent]) -> int:
         fallback = settings.standard_enabled_tool_limit
         tier = get_agent_llm_tier(agent)
         limit_map = {
+            AgentLLMTier.ULTRA_MAX: settings.ultra_max_enabled_tool_limit,
+            AgentLLMTier.ULTRA: settings.ultra_enabled_tool_limit,
             AgentLLMTier.MAX: settings.max_enabled_tool_limit,
             AgentLLMTier.PREMIUM: settings.premium_enabled_tool_limit,
         }

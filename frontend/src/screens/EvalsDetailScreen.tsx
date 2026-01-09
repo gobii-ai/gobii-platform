@@ -991,8 +991,17 @@ function TokenRangeCard({ range }: { range: LLMProfileTokenRange }) {
 }
 
 function TierCard({ tier }: { tier: LLMProfileTier }) {
-  const tierLabel = tier.is_max ? 'Max' : tier.is_premium ? 'Premium' : 'Standard'
-  const tierColor = tier.is_max ? 'text-amber-700 bg-amber-50' : tier.is_premium ? 'text-purple-700 bg-purple-50' : 'text-slate-600 bg-slate-50'
+  const tierStyles: Record<string, string> = {
+    standard: 'text-sky-700 bg-sky-50',
+    premium: 'text-emerald-700 bg-emerald-50',
+    max: 'text-indigo-700 bg-indigo-50',
+    ultra: 'text-amber-700 bg-amber-50',
+    ultra_max: 'text-rose-700 bg-rose-50',
+  }
+  const tierKey = tier.intelligence_tier?.key || 'standard'
+  const tierLabel = tier.intelligence_tier?.display_name || 'Standard'
+  const tierColor = tierStyles[tierKey] ?? tierStyles.standard
+  const multiplier = tier.intelligence_tier?.credit_multiplier
 
   return (
     <div className="px-4 py-3">
@@ -1002,8 +1011,8 @@ function TierCard({ tier }: { tier: LLMProfileTier }) {
           <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${tierColor}`}>
             {tierLabel}
           </span>
-          {tier.credit_multiplier && tier.credit_multiplier !== '1.00' && (
-            <span className="text-[10px] text-slate-500 font-mono">{tier.credit_multiplier}× credits</span>
+          {multiplier && multiplier !== '1.00' && (
+            <span className="text-[10px] text-slate-500 font-mono">{multiplier}× credits</span>
           )}
         </div>
         {tier.description && (

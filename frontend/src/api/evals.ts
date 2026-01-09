@@ -78,13 +78,18 @@ export type LLMProfileTierEndpoint = {
   endpoint_key: string
 }
 
+export type LLMProfileIntelligenceTier = {
+  key: string
+  display_name: string
+  rank: number
+  credit_multiplier: string
+}
+
 export type LLMProfileTier = {
   id: string
   order: number
   description: string
-  is_premium: boolean
-  is_max?: boolean
-  credit_multiplier?: string | null
+  intelligence_tier?: LLMProfileIntelligenceTier | null
   endpoints: LLMProfileTierEndpoint[]
 }
 

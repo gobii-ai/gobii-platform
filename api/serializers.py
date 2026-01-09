@@ -18,11 +18,13 @@ from .models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
+    IntelligenceTier,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
 )
 from jsonschema import Draft202012Validator, ValidationError as JSValidationError
 from util.analytics import AnalyticsSource
+from util.subscription_helper import get_owner_plan
 
 # Serializer for Listing Agents (id, name, created_at)
 class BrowserUseAgentListSerializer(serializers.ModelSerializer):
@@ -382,6 +384,12 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         allow_null=True,
         write_only=True,
     )
+    preferred_llm_tier = serializers.SlugRelatedField(
+        slug_field="key",
+        queryset=IntelligenceTier.objects.all(),
+        required=False,
+        allow_null=True,
+    )
     template_code = serializers.CharField(write_only=True, required=False, allow_blank=True, allow_null=True)
     enabled_personal_server_ids = serializers.ListField(
         child=serializers.UUIDField(format='hex_verbose'),
@@ -474,10 +482,15 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
     def validate_preferred_llm_tier(self, value):
         owner, is_org = self._resolve_preference_owner(getattr(self, "instance", None))
         if value in (None, ""):
-            default_value = default_preferred_tier_for_owner(owner).value if owner else AgentLLMTier.STANDARD.value
-            return default_value
+            default_key = default_preferred_tier_for_owner(owner).value if owner else AgentLLMTier.STANDARD.value
+            resolved_default = IntelligenceTier.objects.filter(key=default_key).first()
+            if resolved_default is None:
+                raise serializers.ValidationError("Unsupported intelligence tier selection.")
+            return resolved_default
+
+        tier_key = getattr(value, "key", None) or str(value)
         try:
-            tier = AgentLLMTier(value)
+            tier = AgentLLMTier(tier_key)
         except ValueError:
             raise serializers.ValidationError("Unsupported intelligence tier selection.")
 
@@ -492,7 +505,10 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             if settings.GOBII_PROPRIETARY_MODE:
                 raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
             raise serializers.ValidationError("Selected intelligence tier is not available for this deployment.")
-        return tier.value
+        resolved_tier = IntelligenceTier.objects.filter(key=tier.value).first()
+        if resolved_tier is None:
+            raise serializers.ValidationError("Unsupported intelligence tier selection.")
+        return resolved_tier
 
     def _apply_personal_servers(self, agent: PersistentAgent, server_ids):
         from .services import mcp_servers as server_service
@@ -577,7 +593,11 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         preferred_channel = preferred_input if isinstance(preferred_input, str) else None
         preferred_tier = validated_data.get('preferred_llm_tier')
         if not preferred_tier:
-            validated_data['preferred_llm_tier'] = default_preferred_tier_for_owner(organization or request.user).value
+            default_key = default_preferred_tier_for_owner(organization or request.user).value
+            resolved_default = IntelligenceTier.objects.filter(key=default_key).first()
+            if resolved_default is None:
+                raise serializers.ValidationError({'preferred_llm_tier': ['Unsupported intelligence tier selection.']})
+            validated_data['preferred_llm_tier'] = resolved_default
 
         with transaction.atomic():
             provision_kwargs = {

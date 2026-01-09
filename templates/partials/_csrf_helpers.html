@@ -1,0 +1,29 @@
+<script>
+(function () {
+  function getCsrfCookieName() {
+    var meta = document.querySelector('meta[name="csrf-cookie-name"]');
+    var name = meta && meta.getAttribute('content') ? meta.getAttribute('content').trim() : '';
+    return name || 'csrftoken';
+  }
+
+  function getCookieValue(name) {
+    if (!document.cookie) return '';
+    var cookies = document.cookie.split(';');
+    for (var i = 0; i < cookies.length; i++) {
+      var parts = cookies[i].trim().split('=');
+      if (parts[0] === name) {
+        return decodeURIComponent(parts.slice(1).join('='));
+      }
+    }
+    return '';
+  }
+
+  function getCsrfTokenValue() {
+    return getCookieValue(getCsrfCookieName());
+  }
+
+  if (!window.getCsrfCookieName) window.getCsrfCookieName = getCsrfCookieName;
+  if (!window.getCookieValue) window.getCookieValue = getCookieValue;
+  if (!window.getCsrfTokenValue) window.getCsrfTokenValue = getCsrfTokenValue;
+})();
+</script>

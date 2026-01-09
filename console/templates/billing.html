@@ -649,7 +649,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-CSRFToken': this.getCookie('csrftoken')
+              'X-CSRFToken': getCsrfTokenValue()
             },
             body: JSON.stringify({
               enabled: this.enabled,
@@ -681,7 +681,7 @@
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'X-CSRFToken': this.getCookie('csrftoken')
+              'X-CSRFToken': getCsrfTokenValue()
             }
           })
           .then(response => response.json())

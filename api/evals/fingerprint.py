@@ -150,10 +150,10 @@ def get_primary_model(routing_profile) -> str:
         if not token_range:
             return ""
 
-        # Get the first tier (order=1, non-premium for standard routing)
+        # Get the first tier (order=1, standard intelligence tier for routing)
         tier = (
             token_range.tiers
-            .filter(is_premium=False, is_max=False)
+            .filter(intelligence_tier__key="standard")
             .order_by("order")
             .first()
         )

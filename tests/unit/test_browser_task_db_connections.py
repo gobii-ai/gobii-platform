@@ -8,7 +8,6 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
 from typing import Any
 
-from api.agent.core.llm_config import AgentLLMTier
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -22,6 +21,7 @@ from api.models import (
     UserBilling,
 )
 from constants.plans import PlanNames
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 def _provider_entry(provider_key: str, supports_vision: bool) -> dict[str, object]:
@@ -122,7 +122,7 @@ class BrowserTaskPremiumTierTests(TestCase):
             user=self.user,
             name="Persistent Premium Agent",
             browser_use_agent=self.browser_agent,
-            preferred_llm_tier=AgentLLMTier.PREMIUM.value,
+            preferred_llm_tier=get_intelligence_tier("premium"),
         )
         UserBilling.objects.update_or_create(
             user=self.user,
@@ -163,13 +163,13 @@ class BrowserTaskPremiumTierTests(TestCase):
             policy=policy,
             order=1,
             description="Premium",
-            is_premium=True,
+            intelligence_tier=get_intelligence_tier("premium"),
         )
         standard_tier = BrowserLLMTier.objects.create(
             policy=policy,
             order=2,
             description="Standard",
-            is_premium=False,
+            intelligence_tier=get_intelligence_tier("standard"),
         )
 
         BrowserTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
@@ -200,7 +200,7 @@ class BrowserTaskPremiumTierTests(TestCase):
         self.assertTrue(priority, "Expected provider priority to be populated")
         first_tier_keys = {entry["endpoint_key"] for entry in priority[0]}
         self.assertEqual(first_tier_keys, {"openai_browser_premium"})
-        self.assertTrue(all(entry.get("is_premium") for entry in priority[0]))
+        self.assertTrue(all(entry.get("intelligence_tier") == "premium" for entry in priority[0]))
 
     def test_falls_back_to_standard_when_no_premium_available(self):
         premium_provider = LLMProvider.objects.create(
@@ -236,13 +236,13 @@ class BrowserTaskPremiumTierTests(TestCase):
             policy=policy,
             order=1,
             description="Premium",
-            is_premium=True,
+            intelligence_tier=get_intelligence_tier("premium"),
         )
         standard_tier = BrowserLLMTier.objects.create(
             policy=policy,
             order=2,
             description="Standard",
-            is_premium=False,
+            intelligence_tier=get_intelligence_tier("standard"),
         )
 
         BrowserTierEndpoint.objects.create(tier=premium_tier, endpoint=premium_endpoint, weight=1.0)
@@ -279,7 +279,7 @@ class BrowserTaskPremiumTierTests(TestCase):
         self.assertTrue(priority, "Expected provider priority to be populated")
         first_tier_keys = {entry["endpoint_key"] for entry in priority[0]}
         self.assertEqual(first_tier_keys, {"openai_browser_standard"})
-        self.assertTrue(all(not entry.get("is_premium") for entry in priority[0]))
+        self.assertTrue(all(entry.get("intelligence_tier") == "standard" for entry in priority[0]))
 
 
 @tag("batch_browser_task_db")

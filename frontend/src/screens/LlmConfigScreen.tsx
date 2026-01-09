@@ -26,6 +26,7 @@ import {
   Scale,
   Sparkles,
   Crown,
+  Star,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -74,6 +75,60 @@ const reasoningEffortOptions = [
   { value: 'high', label: 'High' },
 ]
 
+const DEFAULT_INTELLIGENCE_TIERS: llmApi.IntelligenceTier[] = [
+  { key: 'standard', display_name: 'Standard', rank: 0, credit_multiplier: '1.00' },
+  { key: 'premium', display_name: 'Premium', rank: 1, credit_multiplier: '2.00' },
+  { key: 'max', display_name: 'Max', rank: 2, credit_multiplier: '5.00' },
+  { key: 'ultra', display_name: 'Ultra', rank: 3, credit_multiplier: '20.00' },
+  { key: 'ultra_max', display_name: 'Ultra Max', rank: 4, credit_multiplier: '50.00' },
+]
+
+type TierStyle = {
+  icon: ReactNode
+  borderClass: string
+  sectionClass: string
+  headingClass: string
+  emptyClass: string
+}
+
+const TIER_STYLE_MAP: Record<string, TierStyle> = {
+  standard: {
+    icon: <Layers className="size-4 text-sky-700" />,
+    borderClass: 'border-sky-200',
+    sectionClass: 'bg-sky-50/70',
+    headingClass: 'text-sky-800',
+    emptyClass: 'text-sky-600',
+  },
+  premium: {
+    icon: <ShieldCheck className="size-4 text-emerald-700" />,
+    borderClass: 'border-emerald-200',
+    sectionClass: 'bg-emerald-50/60',
+    headingClass: 'text-emerald-800',
+    emptyClass: 'text-emerald-600',
+  },
+  max: {
+    icon: <Crown className="size-4 text-indigo-700" />,
+    borderClass: 'border-indigo-200',
+    sectionClass: 'bg-indigo-50/60',
+    headingClass: 'text-indigo-800',
+    emptyClass: 'text-indigo-600',
+  },
+  ultra: {
+    icon: <Sparkles className="size-4 text-amber-700" />,
+    borderClass: 'border-amber-200',
+    sectionClass: 'bg-amber-50/60',
+    headingClass: 'text-amber-800',
+    emptyClass: 'text-amber-600',
+  },
+  ultra_max: {
+    icon: <Star className="size-4 text-rose-700" />,
+    borderClass: 'border-rose-200',
+    sectionClass: 'bg-rose-50/60',
+    headingClass: 'text-rose-800',
+    emptyClass: 'text-rose-600',
+  },
+}
+
 type TierEndpoint = {
   id: string
   endpointId: string
@@ -92,9 +147,17 @@ type Tier = {
   name: string
   order: number
   rangeId: string
-  premium: boolean
-  isMax?: boolean
+  intelligenceTier?: llmApi.IntelligenceTier | null
   endpoints: TierEndpoint[]
+}
+
+type TierGroup = {
+  key: string
+  label: string
+  rank: number
+  creditMultiplier: string | null
+  tiers: Tier[]
+  style: TierStyle
 }
 
 type TokenRange = {
@@ -139,6 +202,63 @@ type ProviderCardData = {
 }
 
 type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler'
+
+const getTierStyle = (tierKey?: string | null) => TIER_STYLE_MAP[tierKey ?? 'standard'] ?? TIER_STYLE_MAP.standard
+
+const getTierKey = (tier: Tier) => tier.intelligenceTier?.key ?? 'standard'
+
+const buildTierGroups = (tiers: Tier[], intelligenceTiers: llmApi.IntelligenceTier[]): TierGroup[] => {
+  const parseMultiplier = (value: string | null) => {
+    if (!value) return null
+    const parsed = Number(value)
+    return Number.isNaN(parsed) ? null : parsed
+  }
+  const tiersByKey: Record<string, Tier[]> = {}
+  tiers.forEach((tier) => {
+    const key = getTierKey(tier)
+    if (!tiersByKey[key]) tiersByKey[key] = []
+    tiersByKey[key].push(tier)
+  })
+
+  const groups: TierGroup[] = intelligenceTiers.map((tier) => ({
+    key: tier.key,
+    label: tier.display_name,
+    rank: tier.rank,
+    creditMultiplier: tier.credit_multiplier,
+    tiers: tiersByKey[tier.key] ?? [],
+    style: getTierStyle(tier.key),
+  }))
+
+  const knownKeys = new Set(intelligenceTiers.map((tier) => tier.key))
+  Object.entries(tiersByKey).forEach(([key, values]) => {
+    if (knownKeys.has(key)) return
+    const meta = values[0]?.intelligenceTier
+    groups.push({
+      key,
+      label: meta?.display_name ?? key,
+      rank: meta?.rank ?? Number.MAX_SAFE_INTEGER,
+      creditMultiplier: meta?.credit_multiplier ?? null,
+      tiers: values,
+      style: getTierStyle(key),
+    })
+  })
+
+  groups.forEach((group) => {
+    group.tiers.sort((a, b) => a.order - b.order)
+  })
+  groups.sort((a, b) => {
+    const aMultiplier = parseMultiplier(a.creditMultiplier)
+    const bMultiplier = parseMultiplier(b.creditMultiplier)
+    if (aMultiplier !== null && bMultiplier !== null && aMultiplier !== bMultiplier) {
+      return aMultiplier - bMultiplier
+    }
+    if (aMultiplier !== null && bMultiplier === null) return -1
+    if (aMultiplier === null && bMultiplier !== null) return 1
+    if (a.rank !== b.rank) return a.rank - b.rank
+    return a.label.localeCompare(b.label)
+  })
+  return groups
+}
 
 type EndpointTestStatus = {
   state: 'pending' | 'success' | 'error'
@@ -525,8 +645,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
         name: (tier.description || '').trim(),
         order: tier.order,
         rangeId: range.id,
-        premium: tier.is_premium,
-        isMax: tier.is_max,
+        intelligenceTier: tier.intelligence_tier,
         endpoints: tier.endpoints.map((endpoint) => ({
           id: endpoint.id,
           endpointId: endpoint.endpoint_id,
@@ -539,7 +658,7 @@ function mapPersistentData(ranges: llmApi.TokenRange[] = []): { ranges: TokenRan
       })
     })
   })
-  applySequentialFallbackNames(mappedTiers, (tier) => `${tier.rangeId}:${tier.premium ? 'premium' : 'standard'}`)
+  applySequentialFallbackNames(mappedTiers, (tier) => `${tier.rangeId}:${getTierKey(tier)}`)
   return { ranges: mappedRanges, tiers: mappedTiers }
 }
 
@@ -552,7 +671,7 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'browser',
-      premium: tier.is_premium,
+      intelligenceTier: tier.intelligence_tier,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
         endpointId: endpoint.endpoint_id,
@@ -564,7 +683,7 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
       })),
     }
   })
-  applySequentialFallbackNames(tiers, (tier) => `${tier.rangeId}:${tier.premium ? 'premium' : 'standard'}`)
+  applySequentialFallbackNames(tiers, (tier) => `${tier.rangeId}:${getTierKey(tier)}`)
   return tiers
 }
 
@@ -576,7 +695,7 @@ function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'embedding',
-      premium: false,
+      intelligenceTier: null,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
         endpointId: endpoint.endpoint_id,
@@ -597,7 +716,7 @@ function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'file_handler',
-      premium: false,
+      intelligenceTier: null,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
         endpointId: endpoint.endpoint_id,
@@ -619,7 +738,7 @@ function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Ti
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'browser',
-      premium: tier.is_premium,
+      intelligenceTier: tier.intelligence_tier,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
         endpointId: endpoint.endpoint_id,
@@ -631,7 +750,7 @@ function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Ti
       })),
     }
   })
-  applySequentialFallbackNames(mapped, (tier) => `browser:${tier.premium ? 'premium' : 'standard'}`)
+  applySequentialFallbackNames(mapped, (tier) => `browser:${getTierKey(tier)}`)
   return mapped
 }
 
@@ -643,7 +762,7 @@ function mapEmbeddingTiersFromProfile(tiers: llmApi.ProfileEmbeddingTier[] = [])
       name: (tier.description || '').trim(),
       order: tier.order,
       rangeId: 'embedding',
-      premium: false,
+      intelligenceTier: null,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
         endpointId: endpoint.endpoint_id,
@@ -1726,7 +1845,8 @@ function TierCard({
   isActionBusy: (key: string) => boolean
 }) {
   const [openReasoningFor, setOpenReasoningFor] = useState<string | null>(null)
-  const headerIcon = tier.premium ? <ShieldCheck className="size-4 text-emerald-700" /> : <Layers className="size-4 text-slate-500" />
+  const tierStyle = getTierStyle(getTierKey(tier))
+  const headerIcon = tierStyle.icon
   const canAdjustWeights = tier.endpoints.length > 1
   const disabledHint = canAdjustWeights ? '' : 'At least two endpoints are required to rebalance weights.'
   const handleCommit = () => {
@@ -1759,7 +1879,7 @@ function TierCard({
     return null
   })()
   return (
-    <div className={`rounded-xl border ${tier.premium ? 'border-emerald-200' : 'border-slate-200'} bg-white`}>
+    <div className={`rounded-xl border ${tierStyle.borderClass} bg-white`}>
       <div className="flex items-center justify-between p-4 text-xs uppercase tracking-wide text-slate-500">
         <span className="flex items-center gap-2">{headerIcon} {tier.name}</span>
         <div className="flex items-center gap-1 text-xs">
@@ -1922,13 +2042,100 @@ function TierCard({
   )
 }
 
+function TierGroupSection({
+  group,
+  scope,
+  pendingWeights,
+  savingTierIds,
+  dirtyTierIds,
+  onAddTier,
+  onMoveTier,
+  onRemoveTier,
+  onAddEndpoint,
+  onStageEndpointWeight,
+  onCommitEndpointWeights,
+  onRemoveEndpoint,
+  onUpdateEndpointReasoning,
+  onUpdateExtraction,
+  browserChoices,
+  isActionBusy,
+}: {
+  group: TierGroup
+  scope: TierScope
+  pendingWeights: Record<string, number>
+  savingTierIds: Set<string>
+  dirtyTierIds: Set<string>
+  onAddTier: (tierKey: string) => void
+  onMoveTier: (tierId: string, direction: 'up' | 'down') => void
+  onRemoveTier: (tier: Tier) => void
+  onAddEndpoint: (tier: Tier) => void
+  onStageEndpointWeight: (tier: Tier, tierEndpointId: string, weight: number, scope: TierScope) => void
+  onCommitEndpointWeights: (tier: Tier, scope: TierScope) => void
+  onRemoveEndpoint: (tier: Tier, endpoint: TierEndpoint) => void
+  onUpdateEndpointReasoning?: (tier: Tier, endpoint: TierEndpoint, value: string | null, scope: TierScope) => void
+  onUpdateExtraction?: (tier: Tier, endpoint: TierEndpoint, extractionId: string | null, scope: TierScope) => void
+  browserChoices?: llmApi.ProviderEndpoint[]
+  isActionBusy: (key: string) => boolean
+}) {
+  const tiers = group.tiers
+  const multiplier = group.creditMultiplier && group.creditMultiplier !== '1.00'
+    ? `${group.creditMultiplier}x credits`
+    : null
+  const labelLower = group.label.toLowerCase()
+
+  return (
+    <div className={`${group.style.sectionClass} p-4 space-y-3 rounded-xl`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <h4 className={`text-sm font-semibold ${group.style.headingClass} flex items-center gap-2`}>
+            {group.style.icon}
+            <span>{group.label} tiers</span>
+          </h4>
+          {multiplier ? (
+            <span className="text-xs font-mono text-slate-500">{multiplier}</span>
+          ) : null}
+        </div>
+        <button type="button" className={button.secondary} onClick={() => onAddTier(group.key)}>
+          <PlusCircle className="size-4" /> Add
+        </button>
+      </div>
+      {tiers.length === 0 && <p className={`text-center text-xs ${group.style.emptyClass} py-4`}>No {labelLower} tiers.</p>}
+      {tiers.map((tier, index) => {
+        const lastIndex = tiers.length - 1
+        return (
+          <TierCard
+            key={tier.id}
+            tier={tier}
+            pendingWeights={pendingWeights}
+            isDirty={dirtyTierIds.has(`${scope}:${tier.id}`)}
+            isSaving={savingTierIds.has(`${scope}:${tier.id}`)}
+            scope={scope}
+            canMoveUp={index > 0}
+            canMoveDown={index < lastIndex}
+            onMove={(direction) => onMoveTier(tier.id, direction)}
+            onRemove={onRemoveTier}
+            onAddEndpoint={() => onAddEndpoint(tier)}
+            onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, scope)}
+            onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, scope)}
+            onRemoveEndpoint={onRemoveEndpoint}
+            onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, scope)}
+            onUpdateExtraction={(currentTier, endpoint, extractionId) => onUpdateExtraction?.(currentTier, endpoint, extractionId, scope)}
+            browserChoices={browserChoices}
+            isActionBusy={isActionBusy}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
 function RangeSection({
   range,
   tiers,
+  intelligenceTiers,
   onUpdate,
   onRemove,
   onAddTier,
-  onAddMaxTier,
   onMoveTier,
   onRemoveTier,
   onAddEndpoint,
@@ -1943,10 +2150,10 @@ function RangeSection({
 }: {
   range: TokenRange
   tiers: Tier[]
+  intelligenceTiers: llmApi.IntelligenceTier[]
   onUpdate: (field: 'name' | 'min_tokens' | 'max_tokens', value: string | number | null) => Promise<void> | void
   onRemove: () => void
-  onAddTier: (isPremium: boolean) => void
-  onAddMaxTier: () => void
+  onAddTier: (tierKey: string) => void
   onMoveTier: (tierId: string, direction: 'up' | 'down') => void
   onRemoveTier: (tier: Tier) => void
   onAddEndpoint: (tier: Tier) => void
@@ -1959,9 +2166,7 @@ function RangeSection({
   dirtyTierIds: Set<string>
   isActionBusy: (key: string) => boolean
 }) {
-  const standardTiers = tiers.filter((tier) => !tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
-  const premiumTiers = tiers.filter((tier) => tier.premium && !tier.isMax).sort((a, b) => a.order - b.order)
-  const maxTiers = tiers.filter((tier) => tier.isMax).sort((a, b) => a.order - b.order)
+  const tierGroups = useMemo(() => buildTierGroups(tiers, intelligenceTiers), [tiers, intelligenceTiers])
   const [nameInput, setNameInput] = useState(range.name)
   const [minInput, setMinInput] = useState(range.min_tokens.toString())
   const [maxInput, setMaxInput] = useState(range.max_tokens?.toString() ?? '')
@@ -2052,102 +2257,25 @@ function RangeSection({
         </div>
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 p-4">
-        <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
-            <button type="button" className={button.secondary} onClick={() => onAddTier(false)}>
-              <PlusCircle className="size-4" /> Add
-            </button>
-          </div>
-          {standardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard tiers.</p>}
-          {standardTiers.map((tier, index) => {
-            const lastIndex = standardTiers.length - 1
-            return (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
-                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
-                scope="persistent"
-                canMoveUp={index > 0}
-                canMoveDown={index < lastIndex}
-                onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={onRemoveTier}
-                onAddEndpoint={() => onAddEndpoint(tier)}
-                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
-                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-                onRemoveEndpoint={onRemoveEndpoint}
-                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
-                isActionBusy={isActionBusy}
-              />
-            )
-          })}
-        </div>
-        <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
-            <button type="button" className={button.secondary} onClick={() => onAddTier(true)}>
-              <PlusCircle className="size-4" /> Add
-            </button>
-          </div>
-          {premiumTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No premium tiers.</p>}
-          {premiumTiers.map((tier, index) => {
-            const lastIndex = premiumTiers.length - 1
-            return (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
-                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
-                scope="persistent"
-                canMoveUp={index > 0}
-                canMoveDown={index < lastIndex}
-                onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={onRemoveTier}
-                onAddEndpoint={() => onAddEndpoint(tier)}
-                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
-                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-                onRemoveEndpoint={onRemoveEndpoint}
-                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
-                isActionBusy={isActionBusy}
-              />
-            )
-          })}
-        </div>
-        <div className="bg-indigo-50/60 p-4 space-y-3 rounded-xl">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-indigo-800 flex items-center gap-2"><Crown className="size-4" /> Max tiers</h4>
-            <button type="button" className={button.secondary} onClick={onAddMaxTier}>
-              <PlusCircle className="size-4" /> Add
-            </button>
-          </div>
-          {maxTiers.length === 0 && <p className="text-center text-xs text-slate-500 py-4">No max tiers.</p>}
-          {maxTiers.map((tier, index) => {
-            const lastIndex = maxTiers.length - 1
-            return (
-              <TierCard
-                key={tier.id}
-                tier={tier}
-                pendingWeights={pendingWeights}
-                isDirty={dirtyTierIds.has(`persistent:${tier.id}`)}
-                isSaving={savingTierIds.has(`persistent:${tier.id}`)}
-                scope="persistent"
-                canMoveUp={index > 0}
-                canMoveDown={index < lastIndex}
-                onMove={(direction) => onMoveTier(tier.id, direction)}
-                onRemove={onRemoveTier}
-                onAddEndpoint={() => onAddEndpoint(tier)}
-                onStageEndpointWeight={(currentTier, endpointId, weight) => onStageEndpointWeight(currentTier, endpointId, weight, 'persistent')}
-                onCommitEndpointWeights={(currentTier) => onCommitEndpointWeights(currentTier, 'persistent')}
-                onRemoveEndpoint={onRemoveEndpoint}
-                onUpdateEndpointReasoning={(currentTier, endpoint, value) => onUpdateEndpointReasoning?.(currentTier, endpoint, value, 'persistent')}
-                isActionBusy={isActionBusy}
-              />
-            )
-          })}
-        </div>
+        {tierGroups.map((group) => (
+          <TierGroupSection
+            key={`${range.id}:${group.key}`}
+            group={group}
+            scope="persistent"
+            pendingWeights={pendingWeights}
+            savingTierIds={savingTierIds}
+            dirtyTierIds={dirtyTierIds}
+            onAddTier={onAddTier}
+            onMoveTier={onMoveTier}
+            onRemoveTier={onRemoveTier}
+            onAddEndpoint={onAddEndpoint}
+            onStageEndpointWeight={onStageEndpointWeight}
+            onCommitEndpointWeights={onCommitEndpointWeights}
+            onRemoveEndpoint={onRemoveEndpoint}
+            onUpdateEndpointReasoning={onUpdateEndpointReasoning}
+            isActionBusy={isActionBusy}
+          />
+        ))}
       </div>
     </div>
   )
@@ -2203,6 +2331,14 @@ export function LlmConfigScreen() {
     refetchOnWindowFocus: false,
   })
 
+  const intelligenceTiers = useMemo(() => {
+    const tiers = overviewQuery.data?.intelligence_tiers
+    if (tiers && tiers.length) {
+      return [...tiers].sort((a, b) => a.rank - b.rank)
+    }
+    return DEFAULT_INTELLIGENCE_TIERS
+  }, [overviewQuery.data?.intelligence_tiers])
+
   const stats = overviewQuery.data?.stats
   const providers = useMemo(() => mapProviders(overviewQuery.data?.providers), [overviewQuery.data?.providers])
 
@@ -2233,8 +2369,10 @@ export function LlmConfigScreen() {
     [overviewQuery.data?.file_handlers?.tiers],
   )
 
-  const browserStandardTiers = useMemo(() => browserTiers.filter((tier) => !tier.premium), [browserTiers])
-  const browserPremiumTiers = useMemo(() => browserTiers.filter((tier) => tier.premium), [browserTiers])
+  const browserTierGroups = useMemo(
+    () => buildTierGroups(browserTiers, intelligenceTiers),
+    [browserTiers, intelligenceTiers],
+  )
   const endpointChoices = overviewQuery.data?.choices ?? {
     persistent_endpoints: [],
     browser_endpoints: [],
@@ -2574,13 +2712,11 @@ export function LlmConfigScreen() {
         }),
     })
 
-  const handleTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
-    const isPremium = Boolean(options?.isPremium)
-    const isMax = Boolean(options?.isMax)
-    return runMutation(() => llmApi.createPersistentTier(rangeId, { is_premium: isPremium, is_max: isMax }), {
+  const handleTierAdd = (rangeId: string, intelligenceTierKey: string) => {
+    return runMutation(() => llmApi.createPersistentTier(rangeId, { intelligence_tier: intelligenceTierKey }), {
       successMessage: 'Tier added',
       label: 'Creating tier…',
-      busyKey: actionKey('range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+      busyKey: actionKey('range', rangeId, `add-${intelligenceTierKey}-tier`),
       context: 'Persistent tier',
     })
   }
@@ -2745,11 +2881,11 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleBrowserTierAdd = (isPremium: boolean) =>
-    runMutation(() => llmApi.createBrowserTier({ is_premium: isPremium }), {
+  const handleBrowserTierAdd = (intelligenceTierKey: string) =>
+    runMutation(() => llmApi.createBrowserTier({ intelligence_tier: intelligenceTierKey }), {
       successMessage: 'Browser tier added',
       label: 'Creating browser tier…',
-      busyKey: actionKey('browser', isPremium ? 'premium-add' : 'standard-add'),
+      busyKey: actionKey('browser', `${intelligenceTierKey}-add`),
       context: 'Browser tiers',
     })
   const handleBrowserTierMove = (tierId: string, direction: 'up' | 'down') =>
@@ -3135,19 +3271,17 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleProfileTierAdd = (rangeId: string, options?: { isPremium?: boolean; isMax?: boolean }) => {
-    const isPremium = Boolean(options?.isPremium)
-    const isMax = Boolean(options?.isMax)
-    if (!selectedProfile) return handleTierAdd(rangeId, { isPremium, isMax })
+  const handleProfileTierAdd = (rangeId: string, intelligenceTierKey: string) => {
+    if (!selectedProfile) return handleTierAdd(rangeId, intelligenceTierKey)
     return runWithFeedback(
       async () => {
-        await llmApi.createProfilePersistentTier(rangeId, { is_premium: isPremium, is_max: isMax })
+        await llmApi.createProfilePersistentTier(rangeId, { intelligence_tier: intelligenceTierKey })
         await invalidateProfileDetail()
       },
       {
         successMessage: 'Tier added',
         label: 'Creating tier…',
-        busyKey: actionKey('profile-range', rangeId, isMax ? 'add-max-tier' : isPremium ? 'add-premium-tier' : 'add-standard-tier'),
+        busyKey: actionKey('profile-range', rangeId, `add-${intelligenceTierKey}-tier`),
         context: 'Persistent tier',
       },
     )
@@ -3191,17 +3325,17 @@ export function LlmConfigScreen() {
     })
   }
 
-  const handleProfileBrowserTierAdd = (isPremium: boolean) => {
-    if (!selectedProfile || !selectedProfileId) return handleBrowserTierAdd(isPremium)
+  const handleProfileBrowserTierAdd = (intelligenceTierKey: string) => {
+    if (!selectedProfile || !selectedProfileId) return handleBrowserTierAdd(intelligenceTierKey)
     return runWithFeedback(
       async () => {
-        await llmApi.createProfileBrowserTier(selectedProfileId, { is_premium: isPremium })
+        await llmApi.createProfileBrowserTier(selectedProfileId, { intelligence_tier: intelligenceTierKey })
         await invalidateProfileDetail()
       },
       {
         successMessage: 'Browser tier added',
         label: 'Creating browser tier…',
-        busyKey: actionKey('profile-browser', isPremium ? 'premium-add' : 'standard-add'),
+        busyKey: actionKey('profile-browser', `${intelligenceTierKey}-add`),
         context: 'Browser tiers',
       },
     )
@@ -3677,8 +3811,8 @@ export function LlmConfigScreen() {
                 key={range.id}
                 range={range}
                 tiers={persistentStructures.tiers.filter((tier) => tier.rangeId === range.id)}
-                onAddTier={(isPremium) => selectedProfile ? handleProfileTierAdd(range.id, { isPremium }) : handleTierAdd(range.id, { isPremium })}
-                onAddMaxTier={() => selectedProfile ? handleProfileTierAdd(range.id, { isMax: true }) : handleTierAdd(range.id, { isMax: true })}
+                intelligenceTiers={intelligenceTiers}
+                onAddTier={(tierKey) => selectedProfile ? handleProfileTierAdd(range.id, tierKey) : handleTierAdd(range.id, tierKey)}
                 onUpdate={(field, value) => selectedProfile ? handleProfileRangeUpdate(range.id, field, value) : handleRangeUpdate(range.id, field, value)}
                 onRemove={() => selectedProfile ? handleProfileRangeRemove(range) : handleRangeRemove(range)}
                 onMoveTier={(tierId, direction) => selectedProfile ? handleProfileTierMove(range.id, tierId, direction) : handleTierMove(range.id, tierId, direction)}
@@ -3712,80 +3846,30 @@ export function LlmConfigScreen() {
           description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Dedicated tiers for browser automations.'}
         >
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <div className="bg-slate-50/80 p-4 space-y-3 rounded-xl">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-slate-700">Standard tiers</h4>
-                <button type="button" className={button.secondary} onClick={() => selectedProfile ? handleProfileBrowserTierAdd(false) : handleBrowserTierAdd(false)}>
-                  <PlusCircle className="size-4" /> Add
-                </button>
-              </div>
-              {browserStandardTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No standard browser tiers.</p>}
-              {browserStandardTiers.map((tier, index) => {
-                const lastIndex = browserStandardTiers.length - 1
-                return (
-                <TierCard
-                  key={tier.id}
-                  tier={tier}
-                  pendingWeights={pendingWeights}
-                  scope="browser"
-                  canMoveUp={index > 0}
-                  canMoveDown={index < lastIndex}
-                  isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
-                  isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                  onMove={(direction) => selectedProfile ? handleProfileBrowserTierMove(tier.id, direction) : handleBrowserTierMove(tier.id, direction)}
-                  onRemove={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
-                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
-                  onUpdateExtraction={(currentTier, endpoint, extractionId) =>
-                    selectedProfile
-                      ? handleProfileTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
-                      : handleTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
-                  }
-                  browserChoices={endpointChoices.browser_endpoints}
-                  isActionBusy={isBusy}
-                />
-                )
-              })}
-            </div>
-            <div className="bg-emerald-50/50 p-4 space-y-3 rounded-xl">
-              <div className="flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-emerald-800">Premium tiers</h4>
-                <button type="button" className={button.secondary} onClick={() => selectedProfile ? handleProfileBrowserTierAdd(true) : handleBrowserTierAdd(true)}>
-                  <PlusCircle className="size-4" /> Add
-                </button>
-              </div>
-              {browserPremiumTiers.length === 0 && <p className="text-center text-xs text-emerald-500 py-4">No premium browser tiers.</p>}
-              {browserPremiumTiers.map((tier, index) => {
-                const lastIndex = browserPremiumTiers.length - 1
-                return (
-                <TierCard
-                  key={tier.id}
-                  tier={tier}
-                  pendingWeights={pendingWeights}
-                  scope="browser"
-                  canMoveUp={index > 0}
-                  canMoveDown={index < lastIndex}
-                  isDirty={dirtyTierIds.has(`browser:${tier.id}`)}
-                  isSaving={savingTierIds.has(`browser:${tier.id}`)}
-                  onMove={(direction) => selectedProfile ? handleProfileBrowserTierMove(tier.id, direction) : handleBrowserTierMove(tier.id, direction)}
-                  onRemove={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
-                  onAddEndpoint={() => handleTierEndpointAdd(tier, 'browser')}
-                  onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'browser')}
-                  onCommitEndpointWeights={(currentTier) => selectedProfile ? commitProfileTierEndpointWeights(currentTier, 'browser') : commitTierEndpointWeights(currentTier, 'browser')}
-                  onRemoveEndpoint={(currentTier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(currentTier, endpoint, 'browser') : handleTierEndpointRemove(currentTier, endpoint, 'browser')}
-                  onUpdateExtraction={(currentTier, endpoint, extractionId) =>
-                    selectedProfile
-                      ? handleProfileTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
-                      : handleTierEndpointExtraction(currentTier, endpoint, extractionId, 'browser')
-                  }
-                  browserChoices={endpointChoices.browser_endpoints}
-                  isActionBusy={isBusy}
-                />
-                )
-              })}
-            </div>
+            {browserTierGroups.map((group) => (
+              <TierGroupSection
+                key={`browser:${group.key}`}
+                group={group}
+                scope="browser"
+                pendingWeights={pendingWeights}
+                savingTierIds={savingTierIds}
+                dirtyTierIds={dirtyTierIds}
+                onAddTier={(tierKey) => selectedProfile ? handleProfileBrowserTierAdd(tierKey) : handleBrowserTierAdd(tierKey)}
+                onMoveTier={(tierId, direction) => selectedProfile ? handleProfileBrowserTierMove(tierId, direction) : handleBrowserTierMove(tierId, direction)}
+                onRemoveTier={selectedProfile ? handleProfileBrowserTierRemove : handleBrowserTierRemove}
+                onAddEndpoint={(tier) => handleTierEndpointAdd(tier, 'browser')}
+                onStageEndpointWeight={stageTierEndpointWeight}
+                onCommitEndpointWeights={(tier) => selectedProfile ? commitProfileTierEndpointWeights(tier, 'browser') : commitTierEndpointWeights(tier, 'browser')}
+                onRemoveEndpoint={(tier, endpoint) => selectedProfile ? handleProfileTierEndpointRemove(tier, endpoint, 'browser') : handleTierEndpointRemove(tier, endpoint, 'browser')}
+                onUpdateExtraction={(tier, endpoint, extractionId) =>
+                  selectedProfile
+                    ? handleProfileTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
+                    : handleTierEndpointExtraction(tier, endpoint, extractionId, 'browser')
+                }
+                browserChoices={endpointChoices.browser_endpoints}
+                isActionBusy={isBusy}
+              />
+            ))}
           </div>
         </SectionCard>
         <SectionCard

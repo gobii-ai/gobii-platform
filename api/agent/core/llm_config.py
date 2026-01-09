@@ -30,11 +30,13 @@ from constants.plans import PlanNames, PlanSlugs
 
 logger = logging.getLogger(__name__)
 
-_TIER_MULTIPLIER_CACHE_KEY = "persistent_llm_tier_multipliers:v1"
+_TIER_MULTIPLIER_CACHE_KEY = "intelligence_tier_multipliers:v1"
 _DEFAULT_TIER_MULTIPLIERS: Dict[str, Decimal] = {
     "standard": Decimal("1.00"),
     "premium": Decimal("2.00"),
     "max": Decimal("5.00"),
+    "ultra": Decimal("20.00"),
+    "ultra_max": Decimal("50.00"),
 }
 
 # Certain models only support a single temperature. When we detect these models
@@ -69,7 +71,7 @@ def _apply_required_temperature(model: str, params: Dict[str, Any]) -> None:
     params["temperature"] = required_temp
 
 
-_PREMIUM_PLAN_IDS = {
+_PAID_PLAN_IDS = {
     "pro",
     "org",
     PlanNames.SCALE,
@@ -77,7 +79,7 @@ _PREMIUM_PLAN_IDS = {
     PlanSlugs.STARTUP,
     PlanSlugs.ORG_TEAM,
 }
-_PREMIUM_PLAN_NAMES = {
+_PAID_PLAN_NAMES = {
     "pro",
     "org",
     PlanNames.SCALE,
@@ -92,21 +94,29 @@ class AgentLLMTier(str, Enum):
     STANDARD = "standard"
     PREMIUM = "premium"
     MAX = "max"
+    ULTRA = "ultra"
+    ULTRA_MAX = "ultra_max"
 
 
 TIER_ORDER = {
     AgentLLMTier.STANDARD: 0,
     AgentLLMTier.PREMIUM: 1,
     AgentLLMTier.MAX: 2,
+    AgentLLMTier.ULTRA: 3,
+    AgentLLMTier.ULTRA_MAX: 4,
+}
+_TIER_RANK_CACHE_KEY = "intelligence_tier_ranks:v1"
+_DEFAULT_TIER_RANKS: Dict[str, int] = {
+    tier.value: rank for tier, rank in TIER_ORDER.items()
 }
 
 
-def _plan_supports_premium(plan: Optional[dict[str, Any]]) -> bool:
+def _plan_supports_paid_tiers(plan: Optional[dict[str, Any]]) -> bool:
     if not plan:
         return False
     plan_id = str(plan.get("id", "")).lower()
     plan_name = str(plan.get("name", "")).lower()
-    return plan_id in _PREMIUM_PLAN_IDS or plan_name in _PREMIUM_PLAN_NAMES
+    return plan_id in _PAID_PLAN_IDS or plan_name in _PAID_PLAN_NAMES
 
 
 def max_allowed_tier_for_plan(
@@ -115,9 +125,9 @@ def max_allowed_tier_for_plan(
     is_organization: bool = False,
 ) -> AgentLLMTier:
     if is_organization:
-        return AgentLLMTier.MAX
-    if _plan_supports_premium(plan):
-        return AgentLLMTier.MAX
+        return AgentLLMTier.ULTRA_MAX
+    if _plan_supports_paid_tiers(plan):
+        return AgentLLMTier.ULTRA_MAX
     return AgentLLMTier.STANDARD
 
 
@@ -143,7 +153,7 @@ def default_preferred_tier_for_owner(owner: Any | None) -> AgentLLMTier:
         owner_meta and owner_meta.app_label == "api" and owner_meta.model_name == "organization"
     )
     allowed = max_allowed_tier_for_plan(plan, is_organization=is_organization)
-    if allowed in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX):
+    if allowed in (AgentLLMTier.PREMIUM, AgentLLMTier.MAX, AgentLLMTier.ULTRA, AgentLLMTier.ULTRA_MAX):
         return AgentLLMTier.PREMIUM
     return AgentLLMTier.STANDARD
 
@@ -160,13 +170,12 @@ def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
 
     result: Dict[str, Decimal] = dict(_DEFAULT_TIER_MULTIPLIERS)
     try:
-        PersistentLLMTier = apps.get_model("api", "PersistentLLMTier")
-        for tier in PersistentLLMTier.objects.all().only("is_max", "is_premium", "credit_multiplier"):
-            tier_key = "max" if tier.is_max else ("premium" if tier.is_premium else "standard")
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        for tier in IntelligenceTier.objects.all().only("key", "credit_multiplier"):
+            tier_key = str(tier.key)
             multiplier = getattr(tier, "credit_multiplier", None) or Decimal("1.00")
             try:
-                current = result.get(tier_key, Decimal("1.00"))
-                result[tier_key] = max(current, Decimal(multiplier))
+                result[tier_key] = Decimal(multiplier)
             except Exception:
                 logger.debug(
                     "Invalid credit multiplier for tier %s (value=%s)",
@@ -175,7 +184,7 @@ def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
                     exc_info=True,
                 )
     except Exception:
-        logger.debug("Failed to load persistent tier multipliers", exc_info=True)
+        logger.debug("Failed to load intelligence tier multipliers", exc_info=True)
 
     cache.set(
         _TIER_MULTIPLIER_CACHE_KEY,
@@ -187,6 +196,48 @@ def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
 
 def invalidate_llm_tier_multiplier_cache() -> None:
     cache.delete(_TIER_MULTIPLIER_CACHE_KEY)
+
+
+def get_llm_tier_ranks(force_refresh: bool = False) -> Dict[str, int]:
+    """Return cached rank values per tier key."""
+
+    cached = None if force_refresh else cache.get(_TIER_RANK_CACHE_KEY)
+    if cached:
+        try:
+            return {key: int(value) for key, value in cached.items()}
+        except Exception:
+            logger.debug("Failed to deserialize cached tier ranks", exc_info=True)
+
+    result: Dict[str, int] = dict(_DEFAULT_TIER_RANKS)
+    try:
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        for tier in IntelligenceTier.objects.all().only("key", "rank"):
+            tier_key = str(tier.key)
+            rank = getattr(tier, "rank", None)
+            if rank is None:
+                continue
+            try:
+                result[tier_key] = int(rank)
+            except Exception:
+                logger.debug(
+                    "Invalid rank for intelligence tier %s (value=%s)",
+                    tier_key,
+                    rank,
+                    exc_info=True,
+                )
+    except Exception:
+        logger.debug("Failed to load intelligence tier ranks", exc_info=True)
+
+    cache.set(_TIER_RANK_CACHE_KEY, result, timeout=300)
+    return result
+
+
+def get_allowed_tier_rank(tier: AgentLLMTier) -> int:
+    ranks = get_llm_tier_ranks()
+    return ranks.get(
+        tier.value,
+        ranks.get(AgentLLMTier.STANDARD.value, TIER_ORDER[AgentLLMTier.STANDARD]),
+    )
 
 
 # Headroom subtracted from max_input_tokens to account for tokenizer differences
@@ -226,9 +277,15 @@ def invalidate_min_endpoint_input_tokens_cache() -> None:
     cache.delete(_MIN_ENDPOINT_INPUT_TOKENS_CACHE_KEY)
 
 
-def _normalize_tier_value(tier: AgentLLMTier | str) -> AgentLLMTier:
+def _normalize_tier_value(tier: AgentLLMTier | str | Any) -> AgentLLMTier:
     if isinstance(tier, AgentLLMTier):
         return tier
+    tier_key = getattr(tier, "key", None)
+    if tier_key:
+        try:
+            return AgentLLMTier(str(tier_key))
+        except ValueError:
+            return AgentLLMTier.STANDARD
     try:
         return AgentLLMTier(str(tier))
     except ValueError:
@@ -334,10 +391,7 @@ def get_agent_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> Agen
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
     if preferred_value:
-        try:
-            preferred = AgentLLMTier(preferred_value)
-        except ValueError:
-            preferred = default_preferred_tier_for_owner(owner)
+        preferred = _normalize_tier_value(preferred_value)
     else:
         preferred = default_preferred_tier_for_owner(owner)
 
@@ -356,7 +410,8 @@ def should_prioritize_premium(agent: Any, *, is_first_loop: bool | None = None) 
 def should_prioritize_max(agent: Any, *, is_first_loop: bool | None = None) -> bool:
     """Return True when the provided agent should route to the max tier."""
 
-    return get_agent_llm_tier(agent, is_first_loop=is_first_loop) is AgentLLMTier.MAX
+    tier = get_agent_llm_tier(agent, is_first_loop=is_first_loop)
+    return TIER_ORDER[tier] >= TIER_ORDER[AgentLLMTier.MAX]
 
 
 class LLMNotConfiguredError(RuntimeError):
@@ -690,13 +745,13 @@ def _collect_failover_configs(
     tiers,
     *,
     token_range_name: str,
-    tier_label: str,
     prefer_low_latency: bool = False,
 ) -> List[Tuple[str, str, dict]]:
     """Build failover configurations from the provided tier queryset."""
 
     failover_configs: List[Tuple[str, str, dict]] = []
     for tier in tiers:
+        tier_label = getattr(getattr(tier, "intelligence_tier", None), "key", "standard")
         endpoints_with_weights = []
         for te in tier.tier_endpoints.select_related("endpoint__provider").all():
             endpoint = te.endpoint
@@ -925,53 +980,19 @@ def _get_failover_configs_from_profile(
                 is_first_loop=is_first_loop,
             )
 
-        combined_configs: List[Tuple[str, str, dict]] = []
         profile_name = getattr(profile, 'name', 'unknown')
-
-        if agent_tier is AgentLLMTier.MAX:
-            max_tiers = ProfilePersistentTier.objects.filter(
-                token_range=token_range,
-                is_max=True,
-            ).order_by("order")
-            max_configs = _collect_failover_configs(
-            max_tiers,
+        allowed_rank = get_allowed_tier_rank(agent_tier)
+        tiers = (
+            ProfilePersistentTier.objects
+            .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)
+            .select_related("intelligence_tier")
+            .order_by("-intelligence_tier__rank", "order")
+        )
+        return _collect_failover_configs(
+            tiers,
             token_range_name=f"{profile_name}:{token_range.name}",
-            tier_label="max",
             prefer_low_latency=prefer_low_latency,
         )
-            if max_configs:
-                combined_configs.extend(max_configs)
-
-        if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
-            premium_tiers = ProfilePersistentTier.objects.filter(
-                token_range=token_range,
-                is_premium=True,
-                is_max=False,
-            ).order_by("order")
-            premium_configs = _collect_failover_configs(
-            premium_tiers,
-            token_range_name=f"{profile_name}:{token_range.name}",
-            tier_label="premium",
-            prefer_low_latency=prefer_low_latency,
-        )
-            if premium_configs:
-                combined_configs.extend(premium_configs)
-
-        standard_tiers = ProfilePersistentTier.objects.filter(
-            token_range=token_range,
-            is_premium=False,
-            is_max=False,
-        ).order_by("order")
-        standard_configs = _collect_failover_configs(
-        standard_tiers,
-        token_range_name=f"{profile_name}:{token_range.name}",
-        tier_label="standard",
-        prefer_low_latency=prefer_low_latency,
-    )
-        if standard_configs:
-            combined_configs.extend(standard_configs)
-
-        return combined_configs
 
     except Exception:
         logger.debug("Error getting config from routing profile", exc_info=True)
@@ -1045,52 +1066,18 @@ def _get_failover_configs_from_legacy(
             is_first_loop=is_first_loop,
         )
 
-    combined_configs: List[Tuple[str, str, dict]] = []
-
-    if agent_tier is AgentLLMTier.MAX:
-        max_tiers = PersistentLLMTier.objects.filter(
-            token_range=token_range,
-            is_max=True,
-        ).order_by("order")
-        max_configs = _collect_failover_configs(
-        max_tiers,
+    allowed_rank = get_allowed_tier_rank(agent_tier)
+    tiers = (
+        PersistentLLMTier.objects
+        .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)
+        .select_related("intelligence_tier")
+        .order_by("-intelligence_tier__rank", "order")
+    )
+    return _collect_failover_configs(
+        tiers,
         token_range_name=token_range.name,
-        tier_label="max",
         prefer_low_latency=prefer_low_latency,
     )
-        if max_configs:
-            combined_configs.extend(max_configs)
-
-    if agent_tier in (AgentLLMTier.MAX, AgentLLMTier.PREMIUM):
-        premium_tiers = PersistentLLMTier.objects.filter(
-            token_range=token_range,
-            is_premium=True,
-            is_max=False,
-        ).order_by("order")
-        premium_configs = _collect_failover_configs(
-        premium_tiers,
-        token_range_name=token_range.name,
-        tier_label="premium",
-        prefer_low_latency=prefer_low_latency,
-    )
-        if premium_configs:
-            combined_configs.extend(premium_configs)
-
-    standard_tiers = PersistentLLMTier.objects.filter(
-        token_range=token_range,
-        is_premium=False,
-        is_max=False,
-    ).order_by("order")
-    standard_configs = _collect_failover_configs(
-        standard_tiers,
-        token_range_name=token_range.name,
-        tier_label="standard",
-        prefer_low_latency=prefer_low_latency,
-    )
-    if standard_configs:
-        combined_configs.extend(standard_configs)
-
-    return combined_configs
 
 
 def get_summarization_llm_config(

@@ -18,7 +18,6 @@ from api.services.schedule_enforcement import (
     enforce_minimum_for_agents,
     tool_config_min_for_plan,
 )
-from api.agent.core.llm_config import AgentLLMTier
 from api.agent.core.schedule_parser import ScheduleParser
 from .admin_forms import (
     TestSmsForm,
@@ -44,6 +43,7 @@ from .models import (
     PersistentAgentWebhook,
     MCPServerConfig,
     AgentColor,
+    IntelligenceTier,
     EvalRun,
     EvalRunTask,
 )
@@ -1023,40 +1023,84 @@ class PromptConfigAdmin(admin.ModelAdmin):
         "standard_prompt_token_budget",
         "premium_prompt_token_budget",
         "max_prompt_token_budget",
+        "ultra_prompt_token_budget",
+        "ultra_max_prompt_token_budget",
         "standard_message_history_limit",
         "premium_message_history_limit",
         "max_message_history_limit",
+        "ultra_message_history_limit",
+        "ultra_max_message_history_limit",
         "standard_tool_call_history_limit",
         "premium_tool_call_history_limit",
         "max_tool_call_history_limit",
+        "ultra_tool_call_history_limit",
+        "ultra_max_tool_call_history_limit",
         "standard_enabled_tool_limit",
         "premium_enabled_tool_limit",
         "max_enabled_tool_limit",
+        "ultra_enabled_tool_limit",
+        "ultra_max_enabled_tool_limit",
         "standard_unified_history_limit",
         "premium_unified_history_limit",
         "max_unified_history_limit",
+        "ultra_unified_history_limit",
+        "ultra_max_unified_history_limit",
         "standard_unified_history_hysteresis",
         "premium_unified_history_hysteresis",
         "max_unified_history_hysteresis",
+        "ultra_unified_history_hysteresis",
+        "ultra_max_unified_history_hysteresis",
         "updated_at",
     )
     readonly_fields = ("singleton_id", "created_at", "updated_at")
     fieldsets = (
         (
             "Prompt token budgets",
-            {"fields": ("standard_prompt_token_budget", "premium_prompt_token_budget", "max_prompt_token_budget")},
+            {
+                "fields": (
+                    "standard_prompt_token_budget",
+                    "premium_prompt_token_budget",
+                    "max_prompt_token_budget",
+                    "ultra_prompt_token_budget",
+                    "ultra_max_prompt_token_budget",
+                )
+            },
         ),
         (
             "Message history limits",
-            {"fields": ("standard_message_history_limit", "premium_message_history_limit", "max_message_history_limit")},
+            {
+                "fields": (
+                    "standard_message_history_limit",
+                    "premium_message_history_limit",
+                    "max_message_history_limit",
+                    "ultra_message_history_limit",
+                    "ultra_max_message_history_limit",
+                )
+            },
         ),
         (
             "Tool call history limits",
-            {"fields": ("standard_tool_call_history_limit", "premium_tool_call_history_limit", "max_tool_call_history_limit")},
+            {
+                "fields": (
+                    "standard_tool_call_history_limit",
+                    "premium_tool_call_history_limit",
+                    "max_tool_call_history_limit",
+                    "ultra_tool_call_history_limit",
+                    "ultra_max_tool_call_history_limit",
+                )
+            },
         ),
         (
             "Enabled tool limits",
-            {"fields": ("standard_enabled_tool_limit", "premium_enabled_tool_limit", "max_enabled_tool_limit")},
+            {
+                "fields": (
+                    "standard_enabled_tool_limit",
+                    "premium_enabled_tool_limit",
+                    "max_enabled_tool_limit",
+                    "ultra_enabled_tool_limit",
+                    "ultra_max_enabled_tool_limit",
+                )
+            },
         ),
         (
             "Unified history limits",
@@ -1065,6 +1109,8 @@ class PromptConfigAdmin(admin.ModelAdmin):
                     "standard_unified_history_limit",
                     "premium_unified_history_limit",
                     "max_unified_history_limit",
+                    "ultra_unified_history_limit",
+                    "ultra_max_unified_history_limit",
                 )
             },
         ),
@@ -1075,6 +1121,8 @@ class PromptConfigAdmin(admin.ModelAdmin):
                     "standard_unified_history_hysteresis",
                     "premium_unified_history_hysteresis",
                     "max_unified_history_hysteresis",
+                    "ultra_unified_history_hysteresis",
+                    "ultra_max_unified_history_hysteresis",
                 )
             },
         ),
@@ -4061,56 +4109,25 @@ class FileHandlerLLMTierAdmin(admin.ModelAdmin):
     inlines = [FileHandlerTierEndpointInline]
 
 
+@admin.register(IntelligenceTier)
+class IntelligenceTierAdmin(admin.ModelAdmin):
+    list_display = ("display_name", "key", "rank", "credit_multiplier", "updated_at")
+    list_filter = ("key",)
+    search_fields = ("display_name", "key")
+    ordering = ("rank", "key")
+
+
 class PersistentTierEndpointInline(admin.TabularInline):
     model = PersistentTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium", "is_max")
-    fields = ("tier", "endpoint", "weight", "reasoning_effort_override", "is_premium", "is_max")
-
-
-PERSISTENT_LLMTIER_CHOICES = tuple((tier.value, tier.value.title()) for tier in AgentLLMTier)
-
-
-class PersistentLLMTierForm(forms.ModelForm):
-
-    tier_type = forms.ChoiceField(
-        choices=PERSISTENT_LLMTIER_CHOICES,
-        label="Tier type",
-        initial=AgentLLMTier.STANDARD.value,
-        help_text="Select whether this tier is standard, premium, or max.",
-    )
-
-    class Meta:
-        model = PersistentLLMTier
-        fields = ("token_range", "order", "description")
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        if not self.is_bound:
-            self.fields["tier_type"].initial = self._tier_type_from_instance(self.instance)
-
-    @staticmethod
-    def _tier_type_from_instance(instance):
-        if getattr(instance, "is_max", False):
-            return AgentLLMTier.MAX.value
-        if getattr(instance, "is_premium", False):
-            return AgentLLMTier.PREMIUM.value
-        return AgentLLMTier.STANDARD.value
-
-    def save(self, commit=True):
-        tier_type = self.cleaned_data.get("tier_type", AgentLLMTier.STANDARD.value)
-        tier_enum = AgentLLMTier(tier_type)
-        self.instance.is_max = tier_enum == AgentLLMTier.MAX
-        self.instance.is_premium = tier_enum == AgentLLMTier.PREMIUM
-        return super().save(commit=commit)
+    fields = ("tier", "endpoint", "weight", "reasoning_effort_override")
 
 
 @admin.register(PersistentLLMTier)
 class PersistentLLMTierAdmin(admin.ModelAdmin):
-    form = PersistentLLMTierForm
-    list_display = ("token_range", "order", "description", "is_premium", "is_max")
-    list_filter = ("token_range", "is_premium", "is_max")
-    fields = ("token_range", "order", "description", "tier_type")
+    list_display = ("token_range", "order", "description", "intelligence_tier")
+    list_filter = ("token_range", "intelligence_tier")
+    fields = ("token_range", "order", "description", "intelligence_tier")
     inlines = [PersistentTierEndpointInline]
 
 
@@ -4151,13 +4168,12 @@ class BrowserModelEndpointAdmin(admin.ModelAdmin):
 class BrowserTierEndpointInline(admin.TabularInline):
     model = BrowserTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium",)
 
 
 @admin.register(BrowserLLMTier)
 class BrowserLLMTierAdmin(admin.ModelAdmin):
-    list_display = ("policy", "order", "description", "is_premium")
-    list_filter = ("policy", "is_premium")
+    list_display = ("policy", "order", "description", "intelligence_tier")
+    list_filter = ("policy", "intelligence_tier")
     inlines = [BrowserTierEndpointInline]
 
 @admin.register(BrowserLLMPolicy)
@@ -4198,15 +4214,13 @@ class ProfileTokenRangeInline(admin.TabularInline):
 class ProfilePersistentTierEndpointInline(admin.TabularInline):
     model = ProfilePersistentTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium", "is_max")
     autocomplete_fields = ("endpoint",)
-    fields = ("tier", "endpoint", "weight", "reasoning_effort_override", "is_premium", "is_max")
+    fields = ("tier", "endpoint", "weight", "reasoning_effort_override")
 
 
 class ProfileBrowserTierEndpointInline(admin.TabularInline):
     model = ProfileBrowserTierEndpoint
     extra = 0
-    readonly_fields = ("is_premium",)
     autocomplete_fields = ("endpoint",)
 
 
@@ -4259,19 +4273,19 @@ class ProfileTokenRangeAdmin(admin.ModelAdmin):
 
 @admin.register(ProfilePersistentTier)
 class ProfilePersistentTierAdmin(admin.ModelAdmin):
-    list_display = ("token_range", "order", "description", "is_premium", "is_max", "credit_multiplier")
-    list_filter = ("token_range__profile", "is_premium", "is_max")
+    list_display = ("token_range", "order", "description", "intelligence_tier")
+    list_filter = ("token_range__profile", "intelligence_tier")
     search_fields = ("description", "token_range__name", "token_range__profile__name")
-    ordering = ("token_range__profile", "token_range__min_tokens", "order")
+    ordering = ("token_range__profile", "token_range__min_tokens", "intelligence_tier__rank", "order")
     inlines = [ProfilePersistentTierEndpointInline]
 
 
 @admin.register(ProfileBrowserTier)
 class ProfileBrowserTierAdmin(admin.ModelAdmin):
-    list_display = ("profile", "order", "description", "is_premium")
-    list_filter = ("profile", "is_premium")
+    list_display = ("profile", "order", "description", "intelligence_tier")
+    list_filter = ("profile", "intelligence_tier")
     search_fields = ("description", "profile__name")
-    ordering = ("profile", "order")
+    ordering = ("profile", "intelligence_tier__rank", "order")
     inlines = [ProfileBrowserTierEndpointInline]
 
 

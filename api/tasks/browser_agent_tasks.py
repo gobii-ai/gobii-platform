@@ -25,7 +25,7 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
-from ..agent.core.llm_config import should_prioritize_premium as should_prioritize_premium
+from ..agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, get_allowed_tier_rank
 from ..agent.files.filespace_service import get_or_create_default_filespace
 from ..models import (
     BrowserUseAgentTask,
@@ -433,7 +433,7 @@ def _init_chat_llm(
 
 def _resolve_browser_provider_priority_from_db(
     *,
-    prefer_premium: bool = False,
+    max_tier: AgentLLMTier = AgentLLMTier.STANDARD,
     routing_profile: Any = None,
 ):
     """Return DB-configured browser tiers as a list of tiers with endpoint dicts.
@@ -450,7 +450,7 @@ def _resolve_browser_provider_priority_from_db(
     }
 
     Args:
-        prefer_premium: Whether to prioritize premium tiers.
+        max_tier: Highest intelligence tier allowed for routing.
         routing_profile: Optional LLMRoutingProfile instance. When provided, uses
             this profile's browser config instead of the active profile or legacy policy.
 
@@ -458,19 +458,19 @@ def _resolve_browser_provider_priority_from_db(
     """
     # Try routing profile first
     result = _resolve_browser_from_profile(
-        prefer_premium=prefer_premium,
+        max_tier=max_tier,
         routing_profile=routing_profile,
     )
     if result:
         return result
 
     # Fall back to legacy BrowserLLMPolicy
-    return _resolve_browser_from_legacy_policy(prefer_premium=prefer_premium)
+    return _resolve_browser_from_legacy_policy(max_tier=max_tier)
 
 
 def _resolve_browser_from_profile(
     *,
-    prefer_premium: bool,
+    max_tier: AgentLLMTier,
     routing_profile: Any,
 ) -> list[list[dict[str, Any]]] | None:
     """Get browser tiers from an LLMRoutingProfile."""
@@ -487,9 +487,15 @@ def _resolve_browser_from_profile(
         if profile is None:
             return None  # No active profile, fall back to legacy
 
-        def collect_tiers(is_premium: bool) -> list[list[dict[str, Any]]]:
+        def collect_tiers(max_rank: int) -> list[list[dict[str, Any]]]:
             tiers: list[list[dict[str, Any]]] = []
-            for tier in ProfileBrowserTier.objects.filter(profile=profile, is_premium=is_premium).order_by('order'):
+            tier_qs = (
+                ProfileBrowserTier.objects
+                .filter(profile=profile, intelligence_tier__rank__lte=max_rank)
+                .select_related("intelligence_tier")
+                .order_by("-intelligence_tier__rank", "order")
+            )
+            for tier in tier_qs:
                 entries = []
                 for te in ProfileBrowserTierEndpoint.objects.filter(tier=tier).select_related(
                     'endpoint__provider',
@@ -536,31 +542,22 @@ def _resolve_browser_from_profile(
                         'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
                         'api_key': api_key,
                         'has_key': True,
-                        'is_premium': is_premium,
+                        'intelligence_tier': getattr(tier.intelligence_tier, "key", "standard"),
                         'extraction': extraction_payload,
                     })
                 if entries:
                     tiers.append(entries)
             return tiers
 
-        ordered_tiers: list[list[dict[str, Any]]] = []
-
-        if prefer_premium:
-            premium_tiers = collect_tiers(True)
-            if premium_tiers:
-                ordered_tiers.extend(premium_tiers)
-
-        standard_tiers = collect_tiers(False)
-        if standard_tiers:
-            ordered_tiers.extend(standard_tiers)
-
+        max_rank = get_allowed_tier_rank(max_tier)
+        ordered_tiers = collect_tiers(max_rank)
         return ordered_tiers or None
 
     except Exception:
         return None
 
 
-def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[dict[str, Any]]] | None:
+def _resolve_browser_from_legacy_policy(*, max_tier: AgentLLMTier) -> list[list[dict[str, Any]]] | None:
     """Get browser tiers from legacy BrowserLLMPolicy."""
     try:
         BrowserLLMPolicy = apps.get_model('api', 'BrowserLLMPolicy')
@@ -570,9 +567,15 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
         if not active:
             return None
 
-        def collect_tiers(is_premium: bool) -> list[list[dict[str, Any]]]:
+        def collect_tiers(max_rank: int) -> list[list[dict[str, Any]]]:
             tiers: list[list[dict[str, Any]]] = []
-            for tier in BrowserLLMTier.objects.filter(policy=active, is_premium=is_premium).order_by('order'):
+            tier_qs = (
+                BrowserLLMTier.objects
+                .filter(policy=active, intelligence_tier__rank__lte=max_rank)
+                .select_related("intelligence_tier")
+                .order_by("-intelligence_tier__rank", "order")
+            )
+            for tier in tier_qs:
                 entries = []
                 for te in BrowserTierEndpoint.objects.filter(tier=tier).select_related(
                     'endpoint__provider',
@@ -619,24 +622,15 @@ def _resolve_browser_from_legacy_policy(*, prefer_premium: bool) -> list[list[di
                         'supports_vision': bool(getattr(endpoint, 'supports_vision', False)),
                         'api_key': api_key,
                         'has_key': True,
-                        'is_premium': is_premium,
+                        'intelligence_tier': getattr(tier.intelligence_tier, "key", "standard"),
                         'extraction': extraction_payload,
                     })
                 if entries:
                     tiers.append(entries)
             return tiers
 
-        ordered_tiers: list[list[dict[str, Any]]] = []
-
-        if prefer_premium:
-            premium_tiers = collect_tiers(True)
-            if premium_tiers:
-                ordered_tiers.extend(premium_tiers)
-
-        standard_tiers = collect_tiers(False)
-        if standard_tiers:
-            ordered_tiers.extend(standard_tiers)
-
+        max_rank = get_allowed_tier_rank(max_tier)
+        ordered_tiers = collect_tiers(max_rank)
         return ordered_tiers or None
     except Exception:
         return None
@@ -1817,9 +1811,8 @@ def _process_browser_use_task_core(
                     except PersistentAgent.DoesNotExist:
                         agent_context = None
 
-                prefer_premium = should_prioritize_premium(agent_context)
-                if prefer_premium:
-                    agent_span.set_attribute("browser_tier.prefer_premium", True)
+                agent_tier = get_agent_llm_tier(agent_context)
+                agent_span.set_attribute("browser_tier.intelligence_tier", agent_tier.value)
 
                 owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
                 actions = ['mcp_brightdata_search_engine']
@@ -1863,7 +1856,7 @@ def _process_browser_use_task_core(
 
                 # Resolve provider priority from DB only (no legacy fallback)
                 db_priority = _resolve_browser_provider_priority_from_db(
-                    prefer_premium=prefer_premium,
+                    max_tier=agent_tier,
                     routing_profile=eval_routing_profile,
                 )
                 if not db_priority:
