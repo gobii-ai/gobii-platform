@@ -1,17 +1,44 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Pause, Play } from 'lucide-react'
+
+import { InsightEventCard } from './insights'
+import type { ProcessingWebTask } from '../../types/agentChat'
+import type { InsightEvent } from '../../types/insight'
 
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
+  // Working panel props
+  agentFirstName?: string
+  isProcessing?: boolean
+  processingTasks?: ProcessingWebTask[]
+  insights?: InsightEvent[]
+  currentInsightIndex?: number
+  onDismissInsight?: (insightId: string) => void
+  onInsightIndexChange?: (index: number) => void
+  onPauseChange?: (paused: boolean) => void
+  isInsightsPaused?: boolean
 }
 
-export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps) {
+export function AgentComposer({
+  onSubmit,
+  disabled = false,
+  agentFirstName = 'Agent',
+  isProcessing = false,
+  processingTasks = [],
+  insights = [],
+  currentInsightIndex = 0,
+  onDismissInsight,
+  onInsightIndexChange,
+  onPauseChange,
+  isInsightsPaused = false,
+}: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [isWorkingExpanded, setIsWorkingExpanded] = useState(true)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -19,6 +46,32 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
   const dragCounter = useRef(0)
 
   const MAX_COMPOSER_HEIGHT = 320
+
+  // Insight carousel logic
+  const totalInsights = insights.length
+  const hasMultipleInsights = totalInsights > 1
+  const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
+  const hasInsights = totalInsights > 0
+
+  const handlePrevInsight = useCallback(() => {
+    if (!hasMultipleInsights) return
+    const newIndex = (currentInsightIndex - 1 + totalInsights) % totalInsights
+    onInsightIndexChange?.(newIndex)
+  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
+
+  const handleNextInsight = useCallback(() => {
+    if (!hasMultipleInsights) return
+    const newIndex = (currentInsightIndex + 1) % totalInsights
+    onInsightIndexChange?.(newIndex)
+  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
+
+  const handleTogglePause = useCallback(() => {
+    onPauseChange?.(!isInsightsPaused)
+  }, [isInsightsPaused, onPauseChange])
+
+  const handleDotClick = useCallback((index: number) => {
+    onInsightIndexChange?.(index)
+  }, [onInsightIndexChange])
 
   const adjustTextareaHeight = useCallback(
     (reset = false) => {
@@ -194,9 +247,116 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     }
   }, [addAttachments, disabled, isSending])
 
+  const showWorkingPanel = isProcessing
+  const taskCount = processingTasks.length
+
   return (
-    <div className="composer-shell" id="agent-composer-shell" ref={shellRef}>
+    <div
+      className="composer-shell"
+      id="agent-composer-shell"
+      ref={shellRef}
+      data-processing={isProcessing ? 'true' : 'false'}
+      data-expanded={isWorkingExpanded ? 'true' : 'false'}
+    >
       <div className="composer-surface">
+        {/* Working panel - integrated above input */}
+        {showWorkingPanel ? (
+          <div className="composer-working-panel" data-expanded={isWorkingExpanded ? 'true' : 'false'}>
+            {/* Collapsible header */}
+            <button
+              type="button"
+              className="composer-working-header"
+              onClick={() => setIsWorkingExpanded(!isWorkingExpanded)}
+              aria-expanded={isWorkingExpanded}
+            >
+              <span className="composer-working-pip" aria-hidden="true" />
+              <span className="composer-working-status">
+                <strong>{agentFirstName}</strong> is working
+                <span className="composer-working-ellipsis" aria-label="working">
+                  <span className="composer-working-dot" />
+                  <span className="composer-working-dot" />
+                  <span className="composer-working-dot" />
+                </span>
+              </span>
+              {taskCount > 0 ? (
+                <span className="composer-working-tasks-badge">
+                  {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                </span>
+              ) : null}
+              <span className="composer-working-toggle">
+                {isWorkingExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
+              </span>
+            </button>
+
+            {/* Expanded content */}
+            {isWorkingExpanded && hasInsights ? (
+              <div className="composer-working-content">
+                <span className="composer-working-label">While you wait</span>
+                <div className="composer-working-insight" key={currentInsight?.insightId}>
+                  {currentInsight ? (
+                    <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
+                  ) : null}
+                </div>
+
+                {/* Carousel controls */}
+                {hasMultipleInsights ? (
+                  <div className="composer-working-carousel">
+                    <button
+                      type="button"
+                      className="composer-carousel-btn"
+                      onClick={handlePrevInsight}
+                      aria-label="Previous insight"
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </button>
+
+                    <div className="composer-carousel-dots">
+                      {insights.map((_, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          className="composer-carousel-dot"
+                          data-active={index === currentInsightIndex % totalInsights ? 'true' : 'false'}
+                          onClick={() => handleDotClick(index)}
+                          aria-label={`Go to insight ${index + 1}`}
+                        />
+                      ))}
+                    </div>
+
+                    <button
+                      type="button"
+                      className="composer-carousel-btn composer-carousel-pause"
+                      onClick={handleTogglePause}
+                      aria-label={isInsightsPaused ? 'Resume auto-play' : 'Pause auto-play'}
+                      data-paused={isInsightsPaused ? 'true' : 'false'}
+                    >
+                      {isInsightsPaused ? (
+                        <Play className="h-3.5 w-3.5" />
+                      ) : (
+                        <Pause className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="composer-carousel-btn"
+                      onClick={handleNextInsight}
+                      aria-label="Next insight"
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Main input form */}
         <form className="flex flex-col" onSubmit={handleSubmit}>
           {isDragActive ? (
             <div className="agent-chat-drop-overlay" aria-hidden="true">

@@ -1123,6 +1123,241 @@
 }
 
 /* ==========================================================================
+   Composer Working Panel (integrated)
+   ========================================================================== */
+
+.composer-working-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.96) 100%);
+  border-radius: 1rem 1rem 0 0;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-bottom: none;
+  overflow: hidden;
+  transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.composer-working-panel[data-expanded="false"] .composer-working-content {
+  display: none;
+}
+
+.composer-working-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  transition: background-color 0.15s ease;
+}
+
+.composer-working-header:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+.composer-working-pip {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: var(--composer-accent, #6366f1);
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+  animation: composerPipPulse 2s ease-in-out infinite;
+}
+
+@keyframes composerPipPulse {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
+  50% { box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.15); }
+}
+
+.composer-working-status {
+  flex: 1;
+  font-size: 0.8125rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.composer-working-status strong {
+  color: #334155;
+  font-weight: 600;
+}
+
+.composer-working-ellipsis {
+  display: inline-flex;
+  gap: 0.125rem;
+  margin-left: 0.125rem;
+}
+
+.composer-working-dot {
+  width: 0.25rem;
+  height: 0.25rem;
+  border-radius: 9999px;
+  background: #94a3b8;
+  animation: composerDotPulse 1.5s ease-in-out infinite;
+}
+
+.composer-working-dot:nth-child(1) { animation-delay: 0s; }
+.composer-working-dot:nth-child(2) { animation-delay: 0.15s; }
+.composer-working-dot:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes composerDotPulse {
+  0%, 60%, 100% { opacity: 0.4; transform: scale(1); }
+  30% { opacity: 1; transform: scale(1.2); }
+}
+
+.composer-working-tasks-badge {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.1);
+  padding: 0.125rem 0.5rem;
+  border-radius: 9999px;
+}
+
+.composer-working-toggle {
+  display: flex;
+  align-items: center;
+  color: #94a3b8;
+  transition: color 0.15s ease;
+}
+
+.composer-working-header:hover .composer-working-toggle {
+  color: #64748b;
+}
+
+.composer-working-content {
+  padding: 0 1rem 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.composer-working-label {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+}
+
+.composer-working-insight {
+  min-height: 4rem;
+  animation: composerInsightFadeIn 0.25s ease-out;
+}
+
+@keyframes composerInsightFadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.composer-working-insight .insight-card {
+  background: #fff;
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 0.625rem;
+  padding: 0.75rem;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+}
+
+.composer-working-insight .insight-card:hover {
+  border-color: rgba(165, 180, 252, 0.5);
+}
+
+.composer-working-insight .insight-dismiss {
+  opacity: 0.5;
+}
+
+.composer-working-insight .insight-dismiss:hover {
+  opacity: 1;
+}
+
+.composer-working-carousel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding-top: 0.375rem;
+}
+
+.composer-carousel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.composer-carousel-btn:hover {
+  background: rgba(99, 102, 241, 0.08);
+  color: #6366f1;
+}
+
+.composer-carousel-btn:active {
+  transform: scale(0.95);
+}
+
+.composer-carousel-pause[data-paused="true"] {
+  color: #6366f1;
+}
+
+.composer-carousel-pause[data-paused="true"]:hover {
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.composer-carousel-dots {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0 0.375rem;
+}
+
+.composer-carousel-dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 9999px;
+  border: none;
+  background: #cbd5e1;
+  cursor: pointer;
+  padding: 0;
+  transition: all 0.2s ease;
+}
+
+.composer-carousel-dot:hover {
+  background: #94a3b8;
+  transform: scale(1.15);
+}
+
+.composer-carousel-dot[data-active="true"] {
+  background: var(--composer-accent, #6366f1);
+  transform: scale(1.1);
+}
+
+.composer-carousel-dot[data-active="true"]:hover {
+  transform: scale(1.2);
+}
+
+/* Connect working panel to input surface */
+.composer-shell[data-processing="true"] .composer-input-surface {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-top: 1px solid rgba(226, 232, 240, 0.5);
+}
+
+.composer-shell[data-processing="true"][data-expanded="true"] .composer-input-surface {
+  margin-top: -1px;
+}
+
+/* ==========================================================================
    Drop Overlay
    ========================================================================== */
 

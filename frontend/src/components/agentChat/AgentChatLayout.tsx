@@ -2,7 +2,6 @@ import type { ReactNode, Ref } from 'react'
 import { useState, useCallback } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
-import { WorkingPanel } from './WorkingPanel'
 import { TimelineEventList } from './TimelineEventList'
 import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
@@ -242,7 +241,18 @@ export function AgentChatLayout({
               </div>
             </div>
 
-            <AgentComposer onSubmit={onSendMessage} />
+            <AgentComposer
+              onSubmit={onSendMessage}
+              agentFirstName={agentFirstName}
+              isProcessing={showProcessingIndicator}
+              processingTasks={processingWebTasks}
+              insights={insights}
+              currentInsightIndex={currentInsightIndex}
+              onDismissInsight={onDismissInsight}
+              onInsightIndexChange={onInsightIndexChange}
+              onPauseChange={onPauseChange}
+              isInsightsPaused={isInsightsPaused}
+            />
           </div>
           {footer ? <div className="mt-6">{footer}</div> : null}
         </div>
@@ -263,20 +273,6 @@ export function AgentChatLayout({
           <span className="sr-only">Jump to latest</span>
         </button>
 
-        {/* Working panel - fixed position above composer */}
-        <div id="working-panel-slot" className="working-panel-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
-          <WorkingPanel
-            agentFirstName={agentFirstName}
-            active={Boolean(processingActive || awaitingResponse || isStreaming)}
-            tasks={processingWebTasks}
-            insights={insights}
-            currentInsightIndex={currentInsightIndex}
-            onDismissInsight={onDismissInsight}
-            onInsightIndexChange={onInsightIndexChange}
-            onPauseChange={onPauseChange}
-            isPaused={isInsightsPaused}
-          />
-        </div>
       </main>
     </>
   )
