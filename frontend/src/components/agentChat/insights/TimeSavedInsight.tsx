@@ -1,5 +1,7 @@
+import { motion } from 'framer-motion'
+import { Check, Clock } from 'lucide-react'
 import type { InsightEvent, TimeSavedMetadata } from '../../../types/insight'
-import { AnimatedNumber } from '../../common/AnimatedNumber'
+import { InsightGauge } from './InsightGauge'
 
 type TimeSavedInsightProps = {
   insight: InsightEvent
@@ -16,68 +18,111 @@ export function TimeSavedInsight({ insight, onDismiss }: TimeSavedInsightProps) 
         ? 'this month'
         : 'in total'
 
+  // Calculate a reasonable max for the gauge based on the period
+  const maxHours =
+    metadata.comparisonPeriod === 'week'
+      ? Math.max(20, Math.ceil(metadata.hoursSaved / 10) * 10)
+      : metadata.comparisonPeriod === 'month'
+        ? Math.max(80, Math.ceil(metadata.hoursSaved / 20) * 20)
+        : Math.max(200, Math.ceil(metadata.hoursSaved / 50) * 50)
+
+  const formatHours = (val: number) => {
+    if (val >= 100) return `${Math.round(val)}`
+    return val.toFixed(1)
+  }
+
+  const avgMinPerTask = Math.round((metadata.hoursSaved * 60) / Math.max(1, metadata.tasksCompleted))
+
   return (
-    <div className="insight-card insight-card--time-saved">
-      <div className="insight-icon">
-        <svg
-          className="insight-icon-svg insight-icon-svg--time"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <circle cx="12" cy="12" r="10" />
-          <polyline points="12 6 12 12 16 14" />
-        </svg>
-      </div>
+    <motion.div
+      className="insight-card-v2 insight-card-v2--time-saved"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.35 }}
+    >
+      {/* Decorative background shapes */}
+      <div className="insight-bg-shape insight-bg-shape--1" />
+      <div className="insight-bg-shape insight-bg-shape--2" />
 
-      <div className="insight-content">
-        <div className="insight-headline">You've saved approximately</div>
-
-        <div className="insight-hero-stat">
-          <AnimatedNumber
-            value={metadata.hoursSaved}
-            suffix=" hours"
-            decimals={1}
-            className="insight-hero-number"
-          />
-          <span className="insight-period">{periodLabel}</span>
+      {/* Main gauge */}
+      <motion.div
+        className="insight-gauge-wrapper"
+        initial={{ scale: 0.8, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ duration: 0.5, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+      >
+        <InsightGauge
+          value={metadata.hoursSaved}
+          max={maxHours}
+          size={120}
+          gradientColors={['#34d399', '#059669']}
+          thickness={14}
+          showGlow={true}
+        />
+        <div className="insight-gauge-center">
+          <motion.span
+            className="insight-gauge-number"
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: 0.4, delay: 0.3 }}
+          >
+            {formatHours(metadata.hoursSaved)}
+          </motion.span>
+          <span className="insight-gauge-unit">hours</span>
         </div>
+      </motion.div>
 
-        <div className="insight-supporting">
-          <AnimatedNumber value={metadata.tasksCompleted} decimals={0} />
-          <span> tasks completed</span>
-          <span className="insight-methodology" title={metadata.methodology}>
-            <svg
-              className="insight-info-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="16" x2="12" y2="12" />
-              <line x1="12" y1="8" x2="12.01" y2="8" />
-            </svg>
-          </span>
+      {/* Center content */}
+      <motion.div
+        className="insight-center-content"
+        initial={{ opacity: 0, y: 4 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.35, delay: 0.15 }}
+      >
+        <span className="insight-main-title">Time saved</span>
+        <span className="insight-main-period">{periodLabel}</span>
+      </motion.div>
+
+      {/* Right stats - colorful cards */}
+      <motion.div
+        className="insight-metric-cards"
+        initial={{ opacity: 0, x: 10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.4, delay: 0.2 }}
+      >
+        <div className="insight-metric-card insight-metric-card--green">
+          <div className="insight-metric-card-icon">
+            <Check size={16} strokeWidth={2.5} />
+          </div>
+          <div className="insight-metric-card-content">
+            <span className="insight-metric-card-value">{metadata.tasksCompleted}</span>
+            <span className="insight-metric-card-label">tasks</span>
+          </div>
         </div>
-      </div>
+        <div className="insight-metric-card insight-metric-card--slate">
+          <div className="insight-metric-card-icon">
+            <Clock size={16} strokeWidth={2} />
+          </div>
+          <div className="insight-metric-card-content">
+            <span className="insight-metric-card-value">~{avgMinPerTask}</span>
+            <span className="insight-metric-card-label">min avg</span>
+          </div>
+        </div>
+      </motion.div>
 
       {onDismiss && insight.dismissible && (
         <button
           type="button"
-          className="insight-dismiss"
+          className="insight-dismiss-v2"
           onClick={() => onDismiss(insight.insightId)}
           aria-label="Dismiss"
         >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         </button>
       )}
-    </div>
+    </motion.div>
   )
 }

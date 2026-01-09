@@ -175,7 +175,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
   const insights = useAgentChatStore((state) => state.insights)
   const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
-  const insightProcessingStartedAt = useAgentChatStore((state) => state.insightProcessingStartedAt)
   const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
   const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
   const loading = useAgentChatStore((state) => state.loading)
