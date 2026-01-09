@@ -1,12 +1,27 @@
 import { type MouseEvent, useEffect, useRef, useState, useCallback } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { InsightEventCard } from './insights'
 import type { ProcessingWebTask } from '../../types/agentChat'
-import type { InsightEvent } from '../../types/insight'
+import type { InsightEvent, BurnRateMetadata } from '../../types/insight'
+import { INSIGHT_TIMING } from '../../types/insight'
 import { scrollIntoViewIfNeeded } from './scrollIntoView'
 import { useAgentChatStore } from '../../stores/agentChatStore'
+
+// Get the color for an insight tab based on its type
+function getInsightTabColor(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return '#10b981' // emerald-500
+  }
+  if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const percent = meta.percentUsed
+    if (percent >= 90) return '#ef4444' // red-500
+    if (percent >= 70) return '#f59e0b' // amber-500
+    return '#8b5cf6' // violet-500
+  }
+  return '#6b7280' // gray-500 fallback
+}
 
 function deriveElapsedSeconds(task: ProcessingWebTask, now: number): number {
   if (task.startedAt) {
@@ -68,8 +83,8 @@ export function WorkingPanel({
   currentInsightIndex = 0,
   onDismissInsight,
   onInsightIndexChange,
-  onPauseChange: _onPauseChange,
-  isPaused: _isPaused = false,
+  onPauseChange,
+  isPaused = false,
 }: WorkingPanelProps) {
   const activeTasks = Array.isArray(tasks) ? tasks.filter((task) => Boolean(task?.id)) : []
   const [currentTime, setCurrentTime] = useState(() => Date.now())
@@ -85,26 +100,73 @@ export function WorkingPanel({
   const pendingTaskExpansionRef = useRef<string | null>(null)
   const pendingPanelActionRef = useRef<'expand' | 'collapse' | null>(null)
 
+  // Countdown timer state for auto-rotation indicator
+  const [countdownProgress, setCountdownProgress] = useState(0)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastRotationTimeRef = useRef<number>(Date.now())
+
   // Carousel controls
   const totalInsights = insights.length
   const hasMultipleInsights = totalInsights > 1
   const currentInsight = insights[currentInsightIndex % totalInsights] ?? null
 
-  const handlePrev = useCallback(() => {
-    if (!hasMultipleInsights) return
-    const newIndex = (currentInsightIndex - 1 + totalInsights) % totalInsights
-    onInsightIndexChange?.(newIndex)
-  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleNext = useCallback(() => {
-    if (!hasMultipleInsights) return
-    const newIndex = (currentInsightIndex + 1) % totalInsights
-    onInsightIndexChange?.(newIndex)
-  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleDotClick = useCallback((index: number) => {
+  // Handle tab click - select that insight and pause auto-rotation
+  const handleTabClick = useCallback((index: number) => {
     onInsightIndexChange?.(index)
-  }, [onInsightIndexChange])
+    onPauseChange?.(true) // Pause when user manually selects
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [onInsightIndexChange, onPauseChange])
+
+  // Handle hover - pause auto-rotation
+  const handleInsightMouseEnter = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(true)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  const handleInsightMouseLeave = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(false)
+      lastRotationTimeRef.current = Date.now()
+      setCountdownProgress(0)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  // Update countdown progress for the timer indicator
+  useEffect(() => {
+    if (!hasMultipleInsights || isPaused) {
+      setCountdownProgress(0)
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+      return
+    }
+
+    const updateProgress = () => {
+      const elapsed = Date.now() - lastRotationTimeRef.current
+      const progress = Math.min(100, (elapsed / INSIGHT_TIMING.rotationIntervalMs) * 100)
+      setCountdownProgress(progress)
+    }
+
+    // Update every 100ms for smooth animation
+    countdownIntervalRef.current = setInterval(updateProgress, 100)
+    updateProgress()
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+    }
+  }, [hasMultipleInsights, isPaused])
+
+  // Reset countdown when insight changes
+  useEffect(() => {
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [currentInsightIndex])
 
   useEffect(() => {
     if (!active || !activeTasks.length) {
@@ -235,7 +297,7 @@ export function WorkingPanel({
       data-expanded={isExpanded ? 'true' : 'false'}
       data-has-insight={currentInsight ? 'true' : 'false'}
     >
-      {/* Header: Agent is working */}
+      {/* Header: Agent is working + insight tabs */}
       <div className="working-panel-header">
         <span className="working-panel-pip" aria-hidden="true" />
         <span className="working-panel-status">
@@ -246,50 +308,51 @@ export function WorkingPanel({
             <span className="working-panel-ellipsis-dot" />
           </span>
         </span>
+
+        {/* Colored pill tabs in header */}
+        {hasMultipleInsights ? (
+          <div className="working-panel-insight-tabs">
+            <div className="working-panel-insight-tabs-scroll">
+              {insights.map((insight, index) => {
+                const isActive = index === currentInsightIndex % totalInsights
+                const color = getInsightTabColor(insight)
+                return (
+                  <button
+                    key={insight.insightId}
+                    type="button"
+                    className="working-panel-insight-tab"
+                    data-active={isActive ? 'true' : 'false'}
+                    onClick={() => handleTabClick(index)}
+                    aria-label={`View ${insight.insightType.replace('_', ' ')} insight`}
+                    style={{
+                      '--tab-color': color,
+                      '--tab-progress': isActive && !isPaused ? `${countdownProgress}%` : '0%',
+                    } as React.CSSProperties}
+                  >
+                    <span className="working-panel-insight-tab-inner" />
+                    {isActive && !isPaused && (
+                      <span className="working-panel-insight-tab-progress" />
+                    )}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {/* Insight section */}
       {totalInsights > 0 ? (
-        <div className="working-panel-insight">
+        <div
+          className="working-panel-insight"
+          onMouseEnter={handleInsightMouseEnter}
+          onMouseLeave={handleInsightMouseLeave}
+        >
           <div className="working-panel-insight-content" key={currentInsight?.insightId}>
             {currentInsight ? (
               <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
             ) : null}
           </div>
-
-          {/* Inline carousel controls */}
-          {hasMultipleInsights ? (
-            <div className="working-panel-carousel-inline">
-              <div className="working-panel-carousel-dots">
-                {insights.map((_, index) => (
-                  <button
-                    key={index}
-                    type="button"
-                    className="working-panel-carousel-dot"
-                    data-active={index === currentInsightIndex % totalInsights ? 'true' : 'false'}
-                    onClick={() => handleDotClick(index)}
-                    aria-label={`Go to insight ${index + 1}`}
-                  />
-                ))}
-              </div>
-              <button
-                type="button"
-                className="working-panel-carousel-nav"
-                onClick={handlePrev}
-                aria-label="Previous"
-              >
-                <ChevronLeft size={14} />
-              </button>
-              <button
-                type="button"
-                className="working-panel-carousel-nav"
-                onClick={handleNext}
-                aria-label="Next"
-              >
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          ) : null}
         </div>
       ) : null}
 

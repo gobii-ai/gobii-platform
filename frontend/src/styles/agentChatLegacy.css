@@ -1142,15 +1142,32 @@
   display: none;
 }
 
+/* Header row - clickable to toggle expand/collapse */
+.composer-working-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.composer-working-header-row:hover {
+  background: rgba(99, 102, 241, 0.04);
+}
+
+/* Legacy - keep for any remaining uses */
 .composer-working-header {
   display: flex;
   align-items: center;
   gap: 0.625rem;
   padding: 0.75rem 1rem;
+  padding-right: 0.5rem;
   background: transparent;
   border: none;
   cursor: pointer;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   transition: background-color 0.15s ease;
 }
@@ -1226,7 +1243,8 @@
   transition: color 0.15s ease;
 }
 
-.composer-working-header:hover .composer-working-toggle {
+.composer-working-header:hover .composer-working-toggle,
+.composer-working-header-row:hover .composer-working-toggle {
   color: #64748b;
 }
 
@@ -1284,60 +1302,82 @@
   letter-spacing: -0.02em;
 }
 
-/* Inline carousel for composer */
-.composer-carousel-inline {
-  position: absolute;
-  bottom: 0.625rem;
-  right: 0.75rem;
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  z-index: 10;
+/* Colored pill tabs for composer insights - in header row */
+.composer-insight-tabs {
+  flex-shrink: 0;
+  max-width: 50%;
 }
 
-.composer-carousel-inline .composer-carousel-dots {
+.composer-insight-tabs-scroll {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px;
 }
 
-.composer-carousel-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
+.composer-insight-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.composer-insight-tab {
+  position: relative;
+  width: 24px;
+  height: 8px;
   border: none;
-  background: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.15s ease;
-}
-
-.composer-carousel-dot:hover {
-  background: rgba(255, 255, 255, 0.7);
-}
-
-.composer-carousel-dot[data-active="true"] {
-  background: rgba(255, 255, 255, 0.95);
-  transform: scale(1.2);
-}
-
-.composer-carousel-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.9);
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.35);
   cursor: pointer;
-  transition: background 150ms ease;
+  padding: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: transform 150ms ease, background 150ms ease, width 150ms ease;
 }
 
-.composer-carousel-nav:hover {
+.composer-insight-tab:hover {
   background: rgba(255, 255, 255, 0.5);
+  transform: scale(1.05);
+}
+
+.composer-insight-tab[data-active="true"] {
+  width: 32px;
+  background: transparent;
+}
+
+.composer-insight-tab-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--tab-color, #6b7280);
+  opacity: 0.4;
+  transition: opacity 150ms ease;
+}
+
+.composer-insight-tab[data-active="true"] .composer-insight-tab-inner {
+  opacity: 1;
+}
+
+.composer-insight-tab:hover .composer-insight-tab-inner {
+  opacity: 0.7;
+}
+
+.composer-insight-tab[data-active="true"]:hover .composer-insight-tab-inner {
+  opacity: 1;
+}
+
+/* Countdown progress indicator */
+.composer-insight-tab-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: var(--tab-progress, 0%);
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: width 100ms linear;
 }
 
 /* Connect working panel to input surface */
@@ -4226,6 +4266,7 @@
 }
 
 .working-panel-status {
+  flex: 1;
   font-size: 0.9375rem;
   color: #374151;
   font-weight: 500;
@@ -4652,60 +4693,82 @@
   border-radius: 12px;
 }
 
-/* Inline carousel controls - positioned on the card */
-.working-panel-carousel-inline {
-  position: absolute;
-  bottom: 0.875rem;
-  right: 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 0.375rem;
-  z-index: 10;
+/* Colored pill tabs for insights - in header */
+.working-panel-insight-tabs {
+  flex-shrink: 0;
+  max-width: 50%;
 }
 
-.working-panel-carousel-inline .working-panel-carousel-dots {
+.working-panel-insight-tabs-scroll {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  padding: 2px;
 }
 
-.working-panel-carousel-inline .working-panel-carousel-dot {
-  width: 6px;
-  height: 6px;
+.working-panel-insight-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.working-panel-insight-tab {
+  position: relative;
+  width: 24px;
+  height: 8px;
   border: none;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  padding: 0;
-  transition: background 150ms ease, transform 150ms ease;
-}
-
-.working-panel-carousel-inline .working-panel-carousel-dot:hover {
-  background: rgba(255, 255, 255, 0.7);
-}
-
-.working-panel-carousel-inline .working-panel-carousel-dot[data-active="true"] {
-  background: rgba(255, 255, 255, 0.95);
-  transform: scale(1.2);
-}
-
-.working-panel-carousel-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  border: none;
-  background: rgba(255, 255, 255, 0.3);
-  color: rgba(255, 255, 255, 0.9);
   border-radius: 4px;
+  background: rgba(255, 255, 255, 0.35);
   cursor: pointer;
-  transition: background 150ms ease;
+  padding: 0;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: transform 150ms ease, background 150ms ease, width 150ms ease;
 }
 
-.working-panel-carousel-nav:hover {
+.working-panel-insight-tab:hover {
   background: rgba(255, 255, 255, 0.5);
+  transform: scale(1.05);
+}
+
+.working-panel-insight-tab[data-active="true"] {
+  width: 32px;
+  background: transparent;
+}
+
+.working-panel-insight-tab-inner {
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: var(--tab-color, #6b7280);
+  opacity: 0.4;
+  transition: opacity 150ms ease;
+}
+
+.working-panel-insight-tab[data-active="true"] .working-panel-insight-tab-inner {
+  opacity: 1;
+}
+
+.working-panel-insight-tab:hover .working-panel-insight-tab-inner {
+  opacity: 0.7;
+}
+
+.working-panel-insight-tab[data-active="true"]:hover .working-panel-insight-tab-inner {
+  opacity: 1;
+}
+
+/* Countdown progress indicator */
+.working-panel-insight-tab-progress {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: var(--tab-progress, 0%);
+  background: rgba(255, 255, 255, 0.4);
+  border-radius: 4px;
+  pointer-events: none;
+  transition: width 100ms linear;
 }
 
 /* Responsive adjustments */
@@ -4930,8 +4993,16 @@
     padding: 0.375rem 0.5rem;
   }
 
-  .working-panel-carousel-inline {
-    bottom: 0.625rem;
-    right: 1rem;
+  .working-panel-insight-tabs {
+    max-width: 40%;
+  }
+
+  .working-panel-insight-tab {
+    width: 20px;
+    height: 6px;
+  }
+
+  .working-panel-insight-tab[data-active="true"] {
+    width: 26px;
   }
 }

@@ -1,10 +1,26 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import type { ProcessingWebTask } from '../../types/agentChat'
-import type { InsightEvent } from '../../types/insight'
+import type { InsightEvent, BurnRateMetadata } from '../../types/insight'
+import { INSIGHT_TIMING } from '../../types/insight'
+
+// Get the color for an insight tab based on its type
+function getInsightTabColor(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return '#10b981' // emerald-500
+  }
+  if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const percent = meta.percentUsed
+    if (percent >= 90) return '#ef4444' // red-500
+    if (percent >= 70) return '#f59e0b' // amber-500
+    return '#8b5cf6' // violet-500
+  }
+  return '#6b7280' // gray-500 fallback
+}
 
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
@@ -33,8 +49,8 @@ export function AgentComposer({
   currentInsightIndex = 0,
   onDismissInsight,
   onInsightIndexChange,
-  onPauseChange: _onPauseChange,
-  isInsightsPaused: _isInsightsPaused = false,
+  onPauseChange,
+  isInsightsPaused = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -47,6 +63,11 @@ export function AgentComposer({
   const attachmentInputId = useId()
   const dragCounter = useRef(0)
 
+  // Countdown timer state for auto-rotation indicator
+  const [countdownProgress, setCountdownProgress] = useState(0)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastRotationTimeRef = useRef<number>(Date.now())
+
   const MAX_COMPOSER_HEIGHT = 320
 
   // Insight carousel logic
@@ -55,21 +76,63 @@ export function AgentComposer({
   const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
   const hasInsights = totalInsights > 0
 
-  const handlePrevInsight = useCallback(() => {
-    if (!hasMultipleInsights) return
-    const newIndex = (currentInsightIndex - 1 + totalInsights) % totalInsights
-    onInsightIndexChange?.(newIndex)
-  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleNextInsight = useCallback(() => {
-    if (!hasMultipleInsights) return
-    const newIndex = (currentInsightIndex + 1) % totalInsights
-    onInsightIndexChange?.(newIndex)
-  }, [currentInsightIndex, totalInsights, hasMultipleInsights, onInsightIndexChange])
-
-  const handleDotClick = useCallback((index: number) => {
+  // Handle tab click - select that insight and pause auto-rotation
+  const handleTabClick = useCallback((index: number) => {
     onInsightIndexChange?.(index)
-  }, [onInsightIndexChange])
+    onPauseChange?.(true) // Pause when user manually selects
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [onInsightIndexChange, onPauseChange])
+
+  // Handle hover - pause auto-rotation
+  const handleInsightMouseEnter = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(true)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  const handleInsightMouseLeave = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(false)
+      lastRotationTimeRef.current = Date.now()
+      setCountdownProgress(0)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  // Update countdown progress for the timer indicator
+  useEffect(() => {
+    if (!hasMultipleInsights || isInsightsPaused) {
+      setCountdownProgress(0)
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+      return
+    }
+
+    const updateProgress = () => {
+      const elapsed = Date.now() - lastRotationTimeRef.current
+      const progress = Math.min(100, (elapsed / INSIGHT_TIMING.rotationIntervalMs) * 100)
+      setCountdownProgress(progress)
+    }
+
+    // Update every 100ms for smooth animation
+    countdownIntervalRef.current = setInterval(updateProgress, 100)
+    updateProgress()
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+    }
+  }, [hasMultipleInsights, isInsightsPaused])
+
+  // Reset countdown when insight changes
+  useEffect(() => {
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [currentInsightIndex])
 
   const adjustTextareaHeight = useCallback(
     (reset = false) => {
@@ -270,12 +333,19 @@ export function AgentComposer({
         {/* Working panel - integrated above input */}
         {showWorkingPanel ? (
           <div className="composer-working-panel" data-expanded={isWorkingExpanded ? 'true' : 'false'}>
-            {/* Collapsible header */}
-            <button
-              type="button"
-              className="composer-working-header"
+            {/* Header row - clickable to toggle, with tabs and chevron */}
+            <div
+              className="composer-working-header-row"
               onClick={() => setIsWorkingExpanded(!isWorkingExpanded)}
+              role="button"
+              tabIndex={0}
               aria-expanded={isWorkingExpanded}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setIsWorkingExpanded(!isWorkingExpanded)
+                }
+              }}
             >
               <span className="composer-working-pip" aria-hidden="true" />
               <span className="composer-working-status">
@@ -291,6 +361,42 @@ export function AgentComposer({
                   {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
                 </span>
               ) : null}
+
+              {/* Colored pill tabs in header */}
+              {hasMultipleInsights ? (
+                <div
+                  className="composer-insight-tabs"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <div className="composer-insight-tabs-scroll">
+                    {insights.map((insight, index) => {
+                      const isActive = index === currentInsightIndex % totalInsights
+                      const color = getInsightTabColor(insight)
+                      return (
+                        <button
+                          key={insight.insightId}
+                          type="button"
+                          className="composer-insight-tab"
+                          data-active={isActive ? 'true' : 'false'}
+                          onClick={() => handleTabClick(index)}
+                          aria-label={`View ${insight.insightType.replace('_', ' ')} insight`}
+                          style={{
+                            '--tab-color': color,
+                            '--tab-progress': isActive && !isInsightsPaused ? `${countdownProgress}%` : '0%',
+                          } as React.CSSProperties}
+                        >
+                          <span className="composer-insight-tab-inner" />
+                          {isActive && !isInsightsPaused && (
+                            <span className="composer-insight-tab-progress" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
               <span className="composer-working-toggle">
                 {isWorkingExpanded ? (
                   <ChevronDown className="h-4 w-4" />
@@ -298,50 +404,20 @@ export function AgentComposer({
                   <ChevronUp className="h-4 w-4" />
                 )}
               </span>
-            </button>
+            </div>
 
             {/* Expanded content */}
             {isWorkingExpanded && hasInsights ? (
-              <div className="composer-working-content">
+              <div
+                className="composer-working-content"
+                onMouseEnter={handleInsightMouseEnter}
+                onMouseLeave={handleInsightMouseLeave}
+              >
                 <div className="composer-working-insight" key={currentInsight?.insightId}>
                   {currentInsight ? (
                     <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
                   ) : null}
                 </div>
-
-                {/* Inline carousel controls */}
-                {hasMultipleInsights ? (
-                  <div className="composer-carousel-inline">
-                    <div className="composer-carousel-dots">
-                      {insights.map((_, index) => (
-                        <button
-                          key={index}
-                          type="button"
-                          className="composer-carousel-dot"
-                          data-active={index === currentInsightIndex % totalInsights ? 'true' : 'false'}
-                          onClick={() => handleDotClick(index)}
-                          aria-label={`Go to insight ${index + 1}`}
-                        />
-                      ))}
-                    </div>
-                    <button
-                      type="button"
-                      className="composer-carousel-nav"
-                      onClick={handlePrevInsight}
-                      aria-label="Previous"
-                    >
-                      <ChevronLeft size={14} />
-                    </button>
-                    <button
-                      type="button"
-                      className="composer-carousel-nav"
-                      onClick={handleNextInsight}
-                      aria-label="Next"
-                    >
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                ) : null}
               </div>
             ) : null}
           </div>
