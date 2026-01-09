@@ -19,13 +19,16 @@ ROOT_DIR = BASE_DIR.parent
 env = environ.Env(
     DEBUG=(bool, False),
 )
-# loads infra/local/.env when running locally
-env_file = ROOT_DIR / "infra" / "platform" / "local" / ".env"
-local_env_file = BASE_DIR / ".env"
-if env_file.exists():
-    environ.Env.read_env(env_file)
-elif local_env_file.exists():
-    environ.Env.read_env(local_env_file)
+# loads .env file when running locally, checking possible locations in order of preference.
+env_paths_to_check = [
+    ROOT_DIR / "infra" / "platform" / "local" / ".env",
+    BASE_DIR / ".env",
+]
+
+for env_path in env_paths_to_check:
+    if env_path.exists():
+        environ.Env.read_env(env_path)
+        break
 
 # Ensure local dev has a sensible default release environment identifier.
 # setdefault means staging/prod/preview, which explicitly pass this variable
