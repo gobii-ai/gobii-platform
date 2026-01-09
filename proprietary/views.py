@@ -154,7 +154,6 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                     "Unlimited always-on agents",
                     "Agents never expire or turn off",
                     "Highest intelligence levels available",
-                    "Dedicated onboarding specialist",
                     "$0.04 per task beyond 10,000",
                     "Priority work queue",
                     "1,500 requests/min API throughput",
@@ -180,7 +179,6 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ["Max contacts per agent", *max_contacts_per_agent],
             ["Agents never expire or turn off", "—", "✓", "✓"],
             ["Priority task execution", "—", "✓", "✓"],
-            ["Dedicated onboarding", "—", "—", "✓"],
             ["Batch scheduling & queueing", "—", "—", "✓"],
             ["Support", "Community", "Email & chat", "Dedicated channel"],
         ]
