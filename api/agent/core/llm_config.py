@@ -105,6 +105,10 @@ TIER_ORDER = {
     AgentLLMTier.ULTRA: 3,
     AgentLLMTier.ULTRA_MAX: 4,
 }
+_TIER_RANK_CACHE_KEY = "intelligence_tier_ranks:v1"
+_DEFAULT_TIER_RANKS: Dict[str, int] = {
+    tier.value: rank for tier, rank in TIER_ORDER.items()
+}
 
 
 def _plan_supports_paid_tiers(plan: Optional[dict[str, Any]]) -> bool:
@@ -192,6 +196,48 @@ def get_llm_tier_multipliers(force_refresh: bool = False) -> Dict[str, Decimal]:
 
 def invalidate_llm_tier_multiplier_cache() -> None:
     cache.delete(_TIER_MULTIPLIER_CACHE_KEY)
+
+
+def get_llm_tier_ranks(force_refresh: bool = False) -> Dict[str, int]:
+    """Return cached rank values per tier key."""
+
+    cached = None if force_refresh else cache.get(_TIER_RANK_CACHE_KEY)
+    if cached:
+        try:
+            return {key: int(value) for key, value in cached.items()}
+        except Exception:
+            logger.debug("Failed to deserialize cached tier ranks", exc_info=True)
+
+    result: Dict[str, int] = dict(_DEFAULT_TIER_RANKS)
+    try:
+        IntelligenceTier = apps.get_model("api", "IntelligenceTier")
+        for tier in IntelligenceTier.objects.all().only("key", "rank"):
+            tier_key = str(tier.key)
+            rank = getattr(tier, "rank", None)
+            if rank is None:
+                continue
+            try:
+                result[tier_key] = int(rank)
+            except Exception:
+                logger.debug(
+                    "Invalid rank for intelligence tier %s (value=%s)",
+                    tier_key,
+                    rank,
+                    exc_info=True,
+                )
+    except Exception:
+        logger.debug("Failed to load intelligence tier ranks", exc_info=True)
+
+    cache.set(_TIER_RANK_CACHE_KEY, result, timeout=300)
+    return result
+
+
+def get_allowed_tier_rank(tier: AgentLLMTier) -> int:
+    ranks = get_llm_tier_ranks()
+    return ranks.get(
+        tier.value,
+        ranks.get(AgentLLMTier.STANDARD.value, TIER_ORDER[AgentLLMTier.STANDARD]),
+    )
 
 
 # Headroom subtracted from max_input_tokens to account for tokenizer differences
@@ -935,7 +981,7 @@ def _get_failover_configs_from_profile(
             )
 
         profile_name = getattr(profile, 'name', 'unknown')
-        allowed_rank = TIER_ORDER.get(agent_tier, TIER_ORDER[AgentLLMTier.STANDARD])
+        allowed_rank = get_allowed_tier_rank(agent_tier)
         tiers = (
             ProfilePersistentTier.objects
             .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)
@@ -1020,7 +1066,7 @@ def _get_failover_configs_from_legacy(
             is_first_loop=is_first_loop,
         )
 
-    allowed_rank = TIER_ORDER.get(agent_tier, TIER_ORDER[AgentLLMTier.STANDARD])
+    allowed_rank = get_allowed_tier_rank(agent_tier)
     tiers = (
         PersistentLLMTier.objects
         .filter(token_range=token_range, intelligence_tier__rank__lte=allowed_rank)

@@ -25,7 +25,13 @@ def seed_intelligence_tiers(apps, schema_editor):
     ]
 
     multipliers = {key: default for key, _label, _rank, default in tier_specs}
-    for tier in PersistentLLMTier.objects.all().only("is_max", "is_premium", "credit_multiplier"):
+    all_tiers_with_multipliers = list(
+        PersistentLLMTier.objects.all().only("is_max", "is_premium", "credit_multiplier")
+    )
+    all_tiers_with_multipliers.extend(
+        list(ProfilePersistentTier.objects.all().only("is_max", "is_premium", "credit_multiplier"))
+    )
+    for tier in all_tiers_with_multipliers:
         tier_key = "max" if tier.is_max else ("premium" if tier.is_premium else "standard")
         try:
             multiplier = Decimal(str(tier.credit_multiplier))

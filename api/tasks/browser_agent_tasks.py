@@ -25,7 +25,7 @@ from django.db.utils import OperationalError
 
 from observability import traced, trace
 from ..agent.core.budget import AgentBudgetManager
-from ..agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_agent_llm_tier
+from ..agent.core.llm_config import AgentLLMTier, get_agent_llm_tier, get_allowed_tier_rank
 from ..agent.files.filespace_service import get_or_create_default_filespace
 from ..models import (
     BrowserUseAgentTask,
@@ -549,7 +549,7 @@ def _resolve_browser_from_profile(
                     tiers.append(entries)
             return tiers
 
-        max_rank = TIER_ORDER.get(max_tier, TIER_ORDER[AgentLLMTier.STANDARD])
+        max_rank = get_allowed_tier_rank(max_tier)
         ordered_tiers = collect_tiers(max_rank)
         return ordered_tiers or None
 
@@ -629,7 +629,7 @@ def _resolve_browser_from_legacy_policy(*, max_tier: AgentLLMTier) -> list[list[
                     tiers.append(entries)
             return tiers
 
-        max_rank = TIER_ORDER.get(max_tier, TIER_ORDER[AgentLLMTier.STANDARD])
+        max_rank = get_allowed_tier_rank(max_tier)
         ordered_tiers = collect_tiers(max_rank)
         return ordered_tiers or None
     except Exception:
