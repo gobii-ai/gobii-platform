@@ -9,6 +9,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, UTC
+from functools import partial
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from django.conf import settings
@@ -25,6 +26,8 @@ from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
+from .google_docs_tools import execute_docs_tool, get_docs_tool_definition
+from .google_sheets_tools import execute_sheets_tool, get_sheets_tool_definition
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 
@@ -75,6 +78,30 @@ CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+
+GOOGLE_BUILTIN_DEFAULT_TOOLS = {
+    # Docs
+    "google_docs_create_document",
+    "google_docs_find_document",
+    "google_docs_get_current_user",
+    "google_docs_get_document_content",
+    "google_docs_append_text",
+    "google_docs_replace_all_text",
+    "google_docs_insert_table",
+    # Sheets
+    "google_sheets_create_spreadsheet",
+    "google_sheets_create_worksheet",
+    "google_sheets_append_values",
+    "google_sheets_get_values_in_range",
+    "google_sheets_update_cell",
+    "google_sheets_get_current_user",
+    "google_sheets_get_spreadsheet_info",
+    "google_sheets_list_worksheets",
+    "google_sheets_clear_range",
+    "google_sheets_find_rows",
+    "google_sheets_delete_rows",
+    "google_sheets_update_values",
+}
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -140,6 +167,68 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_create_chart,
     },
 }
+
+GOOGLE_DOC_TOOL_NAMES = [
+    "google_docs_create_document",
+    "google_docs_find_document",
+    "google_docs_get_current_user",
+    "google_docs_get_document_content",
+    "google_docs_append_text",
+    "google_docs_replace_all_text",
+    "google_docs_insert_table",
+]
+
+GOOGLE_SHEET_TOOL_NAMES = [
+    "google_sheets_add_column",
+    "google_sheets_add_conditional_format_rule",
+    "google_sheets_add_multiple_rows",
+    "google_sheets_add_protected_range",
+    "google_sheets_add_single_row",
+    "google_sheets_append_values",
+    "google_sheets_clear_cell",
+    "google_sheets_clear_range",
+    "google_sheets_clear_rows",
+    "google_sheets_copy_worksheet",
+    "google_sheets_create_spreadsheet",
+    "google_sheets_create_worksheet",
+    "google_sheets_delete_rows",
+    "google_sheets_delete_worksheet",
+    "google_sheets_find_row",
+    "google_sheets_find_rows",
+    "google_sheets_get_cell",
+    "google_sheets_get_current_user",
+    "google_sheets_get_sheet",
+    "google_sheets_get_spreadsheet_by_id",
+    "google_sheets_get_spreadsheet_info",
+    "google_sheets_get_values_in_range",
+    "google_sheets_insert_anchored_note",
+    "google_sheets_insert_comment",
+    "google_sheets_insert_dimension",
+    "google_sheets_list_worksheets",
+    "google_sheets_move_dimension",
+    "google_sheets_set_data_validation",
+    "google_sheets_update_cell",
+    "google_sheets_update_conditional_format_rule",
+    "google_sheets_update_formatting",
+    "google_sheets_update_multiple_rows",
+    "google_sheets_update_row",
+    "google_sheets_update_values",
+    "google_sheets_upsert_row",
+]
+
+for tool_name in GOOGLE_DOC_TOOL_NAMES:
+    BUILTIN_TOOL_REGISTRY[tool_name] = {
+        "definition": partial(get_docs_tool_definition, tool_name),
+        "executor": partial(execute_docs_tool, tool_name=tool_name),
+        "feature_flag": "GOOGLE_WORKSPACE_TOOLS_ENABLED",
+    }
+
+for tool_name in GOOGLE_SHEET_TOOL_NAMES:
+    BUILTIN_TOOL_REGISTRY[tool_name] = {
+        "definition": partial(get_sheets_tool_definition, tool_name),
+        "executor": partial(execute_sheets_tool, tool_name=tool_name),
+        "feature_flag": "GOOGLE_WORKSPACE_TOOLS_ENABLED",
+    }
 
 
 @dataclass
@@ -212,6 +301,9 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
         )
 
     for name, info in BUILTIN_TOOL_REGISTRY.items():
+        feature_flag = info.get("feature_flag")
+        if feature_flag and not getattr(settings, feature_flag, False):
+            continue
         try:
             tool_def = info["definition"]()
         except Exception:
@@ -553,7 +645,10 @@ def ensure_default_tools_enabled(
     )
     default_tools = set(MCPToolManager.DEFAULT_ENABLED_TOOLS)
     missing_mcp = default_tools - enabled_tools
-    missing_builtin = DEFAULT_BUILTIN_TOOLS - enabled_tools
+    builtin_set = set(DEFAULT_BUILTIN_TOOLS)
+    if getattr(settings, "GOOGLE_WORKSPACE_TOOLS_ENABLED", False):
+        builtin_set |= GOOGLE_BUILTIN_DEFAULT_TOOLS
+    missing_builtin = builtin_set - enabled_tools
     if not missing_mcp and not missing_builtin:
         return
 
@@ -604,8 +699,11 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         # Skip sqlite_batch if agent is not eligible (even if previously enabled)
         if row.tool_full_name == SQLITE_TOOL_NAME and not sqlite_eligible:
             continue
-
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
+        feature_flag = registry_entry.get("feature_flag") if registry_entry else None
+        if feature_flag and not getattr(settings, feature_flag, False):
+            continue
+
         if not registry_entry:
             continue
         try:
