@@ -12,6 +12,7 @@ Design:
 import imaplib
 import logging
 import random
+import re
 from datetime import timedelta
 from typing import Iterable, List, Tuple, Optional
 import ssl
@@ -40,6 +41,9 @@ MAX_ENQUEUES_PER_RUN = 200
 BATCH_SIZE = 100
 MAX_MESSAGES_PER_ACCOUNT = 500
 IMAP_TIMEOUT_SEC = 60
+UID_SEARCH_CHUNK_SIZE = 1000
+
+_UIDNEXT_RE = re.compile(r"\d+")
 
 
 def _is_due(acct: AgentEmailAccount, now) -> bool:
@@ -69,6 +73,22 @@ def _parse_uid_list(raw: Iterable[bytes]) -> List[str]:
             parts = text.split()
             uids.extend([p for p in parts if p.isdigit()])
     return uids
+
+
+def _parse_uidnext_value(value: object) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="ignore")
+    else:
+        text = str(value)
+    match = _UIDNEXT_RE.search(text)
+    if not match:
+        return None
+    try:
+        return int(match.group(0))
+    except ValueError:
+        return None
 
 
 def _fetch_message_bytes(client: imaplib.IMAP4, uid: str) -> Optional[bytes]:
@@ -262,21 +282,7 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
     query = f"(UNSEEN UID {start + 1}:*)" if start > 0 else "(UNSEEN UID 1:*)"
     typ, data = client.uid("SEARCH", None, query)
     if typ != "OK":
-        # Fallback: search UNSEEN and filter client-side by UID range
-        typ2, data2 = client.uid("SEARCH", None, "UNSEEN")
-        if typ2 != "OK" or not data2:
-            return []
-        uids = _parse_uid_list(data2)
-        try:
-            min_uid = start + 1 if start > 0 else 1
-            uids = [u for u in uids if int(u) >= min_uid]
-        except Exception:
-            pass
-        try:
-            uids = sorted(uids, key=lambda s: int(s))
-        except Exception:
-            pass
-        return uids
+        return _uid_search_unseen_fallback(client, start)
     uids = _parse_uid_list(data)
     # Best-effort debug to help diagnose repeated processing in production
     try:
@@ -286,6 +292,64 @@ def _uid_search_new(client: imaplib.IMAP4, last_seen: str | None) -> List[str]:
     # Ascending order for processing
     try:
         uids = sorted(uids, key=lambda s: int(s))
+    except Exception:
+        pass
+    return uids
+
+
+def _get_uidnext(client: imaplib.IMAP4) -> Optional[int]:
+    try:
+        typ, data = client.response("UIDNEXT")
+        if typ == "OK" and data and isinstance(data, list) and data[0]:
+            return _parse_uidnext_value(data[0])
+    except Exception:
+        pass
+    return None
+
+
+def _uid_search_unseen_fallback(client: imaplib.IMAP4, start: int) -> List[str]:
+    # Fallback: search UNSEEN and filter client-side by UID range
+    typ2, data2 = client.uid("SEARCH", None, "UNSEEN")
+    if typ2 != "OK" or not data2:
+        return []
+    uids = _parse_uid_list(data2)
+    try:
+        min_uid = start + 1 if start > 0 else 1
+        uids = [u for u in uids if int(u) >= min_uid]
+    except Exception:
+        pass
+    try:
+        uids = sorted(uids, key=lambda s: int(s))
+    except Exception:
+        pass
+    return uids
+
+
+def _uid_search_new_chunked(client: imaplib.IMAP4, start: int) -> List[str]:
+    uidnext = _get_uidnext(client)
+    if not uidnext:
+        return _uid_search_unseen_fallback(client, start)
+    end = max(uidnext - 1, start)
+    if end <= start:
+        return []
+    uids: List[str] = []
+    cursor = start + 1
+    while cursor <= end:
+        chunk_end = min(cursor + UID_SEARCH_CHUNK_SIZE - 1, end)
+        query = f"(UNSEEN UID {cursor}:{chunk_end})"
+        typ, data = client.uid("SEARCH", None, query)
+        if typ != "OK":
+            logger.warning("IMAP UID SEARCH chunk returned %s for %s", typ, query)
+        else:
+            uids.extend(_parse_uid_list(data))
+        cursor = chunk_end + 1
+    try:
+        min_uid = start + 1 if start > 0 else 1
+        uids = [u for u in uids if int(u) >= min_uid]
+    except Exception:
+        pass
+    try:
+        uids = sorted(set(uids), key=lambda s: int(s))
     except Exception:
         pass
     return uids
@@ -361,7 +425,24 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
 
             # Search for newer, unread UIDs from stored_uid
             base_marker = f"v:{current_validity}:{stored_uid}" if current_validity is not None else str(stored_uid)
-            uids = _uid_search_new(client, base_marker)
+            try:
+                uids = _uid_search_new(client, base_marker)
+            except (imaplib.IMAP4.abort, imaplib.IMAP4.error) as exc:
+                logger.warning(
+                    "IMAP UID SEARCH failed for %s: %s; retrying with chunked search",
+                    acct.endpoint.address,
+                    exc,
+                )
+                try:
+                    if client is not None:
+                        try:
+                            client.logout()
+                        except Exception:
+                            client.shutdown()  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+                client = _connect_imap(acct)
+                uids = _uid_search_new_chunked(client, stored_uid)
             # Align with plan: new_uid_count; keep prior metric name minimal
             try:
                 span.set_attribute("new_uid_count", len(uids))
