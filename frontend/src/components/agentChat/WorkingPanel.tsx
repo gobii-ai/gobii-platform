@@ -34,6 +34,21 @@ function getInsightTabLabel(insight: InsightEvent): string {
   return 'Insight'
 }
 
+// Get background gradient for insight wrapper
+function getInsightBackground(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%)'
+  }
+  if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const percent = meta.percentUsed
+    if (percent >= 90) return 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%)'
+    if (percent >= 70) return 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%)'
+    return 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%)'
+  }
+  return 'transparent'
+}
+
 function deriveElapsedSeconds(task: ProcessingWebTask, now: number): number {
   if (task.startedAt) {
     const started = Date.parse(task.startedAt)
@@ -354,18 +369,18 @@ export function WorkingPanel({
         ) : null}
       </div>
 
-      {/* Insight section */}
-      {totalInsights > 0 ? (
+      {/* Insight section - background on wrapper for edge-to-edge fill */}
+      {totalInsights > 0 && currentInsight ? (
         <div
-          className="working-panel-insight"
+          style={{
+            background: getInsightBackground(currentInsight),
+            margin: 0,
+            padding: 0,
+          }}
           onMouseEnter={handleInsightMouseEnter}
           onMouseLeave={handleInsightMouseLeave}
         >
-          <div className="working-panel-insight-content" key={currentInsight?.insightId}>
-            {currentInsight ? (
-              <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
-            ) : null}
-          </div>
+          <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
         </div>
       ) : null}
 

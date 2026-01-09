@@ -2,6 +2,7 @@ import { motion } from 'framer-motion'
 import { Check, Clock } from 'lucide-react'
 import type { InsightEvent, TimeSavedMetadata } from '../../../types/insight'
 import { InsightGauge } from './InsightGauge'
+import '../../../styles/insights.css'
 
 type TimeSavedInsightProps = {
   insight: InsightEvent
@@ -36,6 +37,7 @@ export function TimeSavedInsight({ insight, onDismiss }: TimeSavedInsightProps) 
   return (
     <motion.div
       className="insight-card-v2 insight-card-v2--time-saved"
+      style={{ background: 'transparent', borderRadius: 0 }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35 }}

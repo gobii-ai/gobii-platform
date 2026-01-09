@@ -40,6 +40,7 @@ export function BurnRateInsight({ insight, onDismiss }: BurnRateInsightProps) {
   return (
     <motion.div
       className={`insight-card-v2 ${getCardClass()}`}
+      style={{ background: 'transparent', borderRadius: 0 }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35 }}

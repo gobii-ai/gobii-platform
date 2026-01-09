@@ -1,0 +1,336 @@
+/* ==========================================================================
+   Insight Cards V2 - Bold, colorful design
+   Used by TimeSavedInsight and BurnRateInsight components
+   ========================================================================== */
+
+.insight-card-v2 {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  position: relative;
+  width: 100%;
+  padding: 1rem 1.25rem;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* Theme: Time Saved - Green gradient */
+.insight-card-v2--time-saved {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);
+}
+
+.insight-card-v2--time-saved .insight-bg-shape--1 {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%);
+}
+
+.insight-card-v2--time-saved .insight-bg-shape--2 {
+  background: radial-gradient(circle, rgba(52, 211, 153, 0.12) 0%, transparent 70%);
+}
+
+/* Theme: Burn Rate - Purple gradient */
+.insight-card-v2--burn-rate {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
+}
+
+.insight-card-v2--burn-rate .insight-bg-shape--1 {
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
+}
+
+.insight-card-v2--burn-rate .insight-bg-shape--2 {
+  background: radial-gradient(circle, rgba(167, 139, 250, 0.1) 0%, transparent 70%);
+}
+
+/* Theme: Burn Rate Warning - Amber gradient */
+.insight-card-v2--burn-rate-warning {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%);
+}
+
+.insight-card-v2--burn-rate-warning .insight-bg-shape--1 {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.15) 0%, transparent 70%);
+}
+
+/* Theme: Burn Rate Critical - Red gradient */
+.insight-card-v2--burn-rate-critical {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
+}
+
+.insight-card-v2--burn-rate-critical .insight-bg-shape--1 {
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.15) 0%, transparent 70%);
+}
+
+/* Decorative background shapes */
+.insight-bg-shape {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.insight-bg-shape--1 {
+  width: 200px;
+  height: 200px;
+  top: -60px;
+  left: -40px;
+}
+
+.insight-bg-shape--2 {
+  width: 150px;
+  height: 150px;
+  bottom: -50px;
+  right: 20%;
+}
+
+/* Gauge wrapper */
+.insight-gauge-wrapper {
+  position: relative;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.insight-gauge {
+  position: relative;
+}
+
+.insight-gauge-center {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.insight-gauge-number {
+  font-size: 1.75rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  color: #0f172a;
+}
+
+.insight-gauge-unit {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #475569;
+  margin-top: 2px;
+}
+
+/* Center content */
+.insight-center-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  min-width: 0;
+  z-index: 1;
+}
+
+.insight-main-title {
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+}
+
+.insight-main-period {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #475569;
+}
+
+/* Status badges */
+.insight-status-badge {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.3125rem 0.75rem;
+  border-radius: 9999px;
+}
+
+.insight-status--normal {
+  background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+}
+
+.insight-status--warning {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+  color: #78350f;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.insight-status--critical {
+  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+/* Metric cards - colorful stat cards */
+.insight-metric-cards {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.insight-metric-card {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  min-width: 100px;
+}
+
+.insight-metric-card--green {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.9) 0%, rgba(5, 150, 105, 0.95) 100%);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
+}
+
+.insight-metric-card--green .insight-metric-card-icon,
+.insight-metric-card--green .insight-metric-card-value,
+.insight-metric-card--green .insight-metric-card-label {
+  color: white;
+}
+
+.insight-metric-card--slate {
+  background: linear-gradient(135deg, rgba(71, 85, 105, 0.9) 0%, rgba(51, 65, 85, 0.95) 100%);
+  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.2);
+}
+
+.insight-metric-card--slate .insight-metric-card-icon,
+.insight-metric-card--slate .insight-metric-card-value,
+.insight-metric-card--slate .insight-metric-card-label {
+  color: white;
+}
+
+.insight-metric-card--purple {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.9) 0%, rgba(124, 58, 237, 0.95) 100%);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
+}
+
+.insight-metric-card--purple .insight-metric-card-icon,
+.insight-metric-card--purple .insight-metric-card-value,
+.insight-metric-card--purple .insight-metric-card-label {
+  color: white;
+}
+
+.insight-metric-card--blue {
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.9) 0%, rgba(37, 99, 235, 0.95) 100%);
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
+}
+
+.insight-metric-card--blue .insight-metric-card-icon,
+.insight-metric-card--blue .insight-metric-card-value,
+.insight-metric-card--blue .insight-metric-card-label {
+  color: white;
+}
+
+.insight-metric-card-icon {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.insight-metric-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.insight-metric-card-value {
+  font-size: 1.125rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.insight-metric-card-label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  opacity: 0.85;
+}
+
+/* Dismiss button v2 */
+.insight-dismiss-v2 {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: rgba(255, 255, 255, 0.5);
+  color: #64748b;
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
+  z-index: 2;
+}
+
+.insight-card-v2:hover .insight-dismiss-v2 {
+  opacity: 1;
+}
+
+.insight-dismiss-v2:hover {
+  background: rgba(255, 255, 255, 0.8);
+  color: #374151;
+}
+
+.insight-dismiss-v2 svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ==========================================================================
+   Responsive adjustments
+   ========================================================================== */
+
+@media (max-width: 640px) {
+  .insight-card-v2 {
+    gap: 1rem;
+    padding: 0.875rem 1rem;
+  }
+
+  .insight-metric-cards {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .insight-metric-card {
+    padding: 0.5rem 0.75rem;
+    min-width: auto;
+  }
+
+  .insight-metric-card-value {
+    font-size: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .insight-gauge-wrapper {
+    transform: scale(0.85);
+    margin: -8px;
+  }
+
+  .insight-gauge-number {
+    font-size: 1.5rem;
+  }
+
+  .insight-main-title {
+    font-size: 1rem;
+  }
+
+  .insight-metric-card-value {
+    font-size: 0.9375rem;
+  }
+}

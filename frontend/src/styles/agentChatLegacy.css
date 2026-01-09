@@ -1270,36 +1270,31 @@
   to { opacity: 1; transform: translateY(0); }
 }
 
-.composer-working-insight .insight-card {
-  background: transparent !important;
-  border: none !important;
-  box-shadow: none !important;
+/* v2 insight card in composer - transparent bg, wrapper gets gradient */
+.composer-working-insight .insight-card-v2 {
+  background: transparent;
   border-radius: 0;
-  padding: 0;
-  gap: 0.875rem;
 }
 
-/* Hide dismiss button in composer insight */
-.composer-working-insight .insight-dismiss {
+.composer-working-insight .insight-dismiss-v2 {
   display: none;
 }
 
-/* Enhanced styling for composer insights */
-.composer-working-insight .insight-icon {
-  width: 2.25rem;
-  height: 2.25rem;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.12) 0%, rgba(16, 185, 129, 0.06) 100%);
-  border-radius: 8px;
+/* Apply gradients to wrapper based on card type */
+.composer-working-insight:has(.insight-card-v2--time-saved) {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);
 }
 
-.composer-working-insight .insight-card--burn-rate .insight-icon {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(99, 102, 241, 0.06) 100%);
+.composer-working-insight:has(.insight-card-v2--burn-rate) {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
 }
 
-.composer-working-insight .insight-hero-number {
-  font-size: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
+.composer-working-insight:has(.insight-card-v2--burn-rate-warning) {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%);
+}
+
+.composer-working-insight:has(.insight-card-v2--burn-rate-critical) {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
 }
 
 /* Colored pill tabs for composer insights - in header row */
@@ -3923,246 +3918,6 @@
   color: #64748b;
 }
 
-/* ==========================================================================
-   Insight Cards - Contextual information during agent working state
-   ========================================================================== */
-
-.insight-slot {
-  padding: 0 1rem;
-  margin-bottom: 0.75rem;
-  animation: insight-fade-in 0.3s ease-out;
-}
-
-@keyframes insight-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.insight-card {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 0.875rem;
-  padding: 1rem 1.25rem;
-  border-radius: 12px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.95) 0%, rgba(249, 250, 251, 0.9) 100%);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.02);
-}
-
-.insight-card--time-saved {
-  background: linear-gradient(135deg, rgba(236, 253, 245, 0.7) 0%, rgba(240, 253, 244, 0.5) 100%);
-  border-color: rgba(167, 243, 208, 0.6);
-}
-
-.insight-card--burn-rate {
-  background: linear-gradient(135deg, rgba(238, 242, 255, 0.7) 0%, rgba(243, 244, 255, 0.5) 100%);
-  border-color: rgba(199, 210, 254, 0.6);
-}
-
-.insight-icon {
-  flex-shrink: 0;
-  width: 2rem;
-  height: 2rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-}
-
-.insight-icon-svg {
-  width: 1.25rem;
-  height: 1.25rem;
-}
-
-.insight-icon-svg--time {
-  color: #10b981;
-}
-
-.insight-icon-svg--burn {
-  color: #6366f1;
-}
-
-.insight-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.insight-headline {
-  font-size: 0.8125rem;
-  font-weight: 500;
-  color: #64748b;
-  margin-bottom: 0.25rem;
-}
-
-.insight-hero-stat {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  margin-bottom: 0.375rem;
-}
-
-.insight-hero-number {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.02em;
-}
-
-.insight-period {
-  font-size: 0.875rem;
-  color: #64748b;
-}
-
-.insight-supporting {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  font-size: 0.8125rem;
-  color: #64748b;
-}
-
-.insight-methodology {
-  display: inline-flex;
-  cursor: help;
-}
-
-.insight-info-icon {
-  width: 0.875rem;
-  height: 0.875rem;
-  opacity: 0.6;
-}
-
-.insight-dismiss {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: transparent;
-  border-radius: 4px;
-  cursor: pointer;
-  color: #94a3b8;
-  transition: color 0.15s ease, background 0.15s ease;
-}
-
-.insight-dismiss:hover {
-  color: #64748b;
-  background: rgba(0, 0, 0, 0.05);
-}
-
-.insight-dismiss svg {
-  width: 0.875rem;
-  height: 0.875rem;
-}
-
-/* Burn Rate Insight specific styles */
-
-.insight-burn-stats {
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-  margin-bottom: 0.75rem;
-}
-
-.insight-burn-stat {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.insight-burn-label {
-  font-size: 0.8125rem;
-  color: #64748b;
-}
-
-.insight-burn-value {
-  display: flex;
-  align-items: baseline;
-  gap: 0.25rem;
-}
-
-.insight-burn-number {
-  font-size: 1rem;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.insight-burn-unit {
-  font-size: 0.75rem;
-  color: #94a3b8;
-}
-
-.insight-progress-container {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
-.insight-progress-bar {
-  flex: 1;
-  height: 6px;
-  background: rgba(0, 0, 0, 0.06);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.insight-progress-fill {
-  height: 100%;
-  border-radius: 3px;
-  transition: width 0.6s ease-out;
-}
-
-.insight-progress--normal .insight-progress-fill {
-  background: linear-gradient(90deg, #6366f1, #8b5cf6);
-}
-
-.insight-progress--warning .insight-progress-fill {
-  background: linear-gradient(90deg, #f59e0b, #f97316);
-}
-
-.insight-progress--critical .insight-progress-fill {
-  background: linear-gradient(90deg, #ef4444, #f43f5e);
-}
-
-.insight-progress-label {
-  font-size: 0.75rem;
-  color: #94a3b8;
-  white-space: nowrap;
-}
-
-/* Animated number styling */
-
-.animated-number {
-  font-variant-numeric: tabular-nums;
-}
-
-/* Mobile responsiveness */
-
-@media (max-width: 480px) {
-  .insight-card {
-    padding: 0.875rem 1rem;
-  }
-
-  .insight-hero-number {
-    font-size: 1.25rem;
-  }
-
-  .insight-burn-stats {
-    gap: 0.25rem;
-  }
-}
 
 /* ============================================
    Working Panel - Consolidated insight + processing
@@ -4308,381 +4063,9 @@
   animation-delay: 0.4s;
 }
 
-/* Insight section */
+/* Insight section wrapper - background applied here for edge-to-edge fill */
 .working-panel-insight {
-  padding: 0.625rem 1rem;
   position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-/* Insight content wrapper */
-.working-panel-insight-content {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-/* Override insight card styles when inside working panel */
-.working-panel-insight .insight-card {
-  border: none !important;
-  box-shadow: none !important;
-  background: transparent !important;
-  padding: 0;
-  border-radius: 0;
-  gap: 1rem;
-  animation: insight-content-fade 300ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-@keyframes insight-content-fade {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-/* Hide dismiss button inside working panel */
-.working-panel-insight .insight-dismiss {
-  display: none;
-}
-
-/* Enhanced typography for working panel insights */
-.working-panel-insight .insight-icon {
-  width: 2.5rem;
-  height: 2.5rem;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(16, 185, 129, 0.08) 100%);
-  border-radius: 10px;
-}
-
-.working-panel-insight .insight-card--burn-rate .insight-icon {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, rgba(99, 102, 241, 0.08) 100%);
-}
-
-.working-panel-insight .insight-icon-svg {
-  width: 1.375rem;
-  height: 1.375rem;
-}
-
-.working-panel-insight .insight-hero-number {
-  font-size: 1.75rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.working-panel-insight .insight-headline {
-  font-size: 0.8125rem;
-  color: #64748b;
-}
-
-.working-panel-insight .insight-period {
-  font-size: 0.9375rem;
-  font-weight: 500;
-  color: #475569;
-}
-
-.working-panel-insight .insight-supporting {
-  font-size: 0.8125rem;
-  color: #64748b;
-}
-
-/* ============================================
-   Insight Cards V2 - Bold, colorful design
-   ============================================ */
-
-.insight-card-v2 {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  position: relative;
-  width: 100%;
-  padding: 1rem 1.25rem;
-  border-radius: 16px;
-  overflow: hidden;
-}
-
-/* Theme: Time Saved - Green gradient */
-.insight-card-v2--time-saved {
-  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);
-}
-
-.insight-card-v2--time-saved .insight-bg-shape--1 {
-  background: radial-gradient(circle, rgba(16, 185, 129, 0.15) 0%, transparent 70%);
-}
-
-.insight-card-v2--time-saved .insight-bg-shape--2 {
-  background: radial-gradient(circle, rgba(52, 211, 153, 0.12) 0%, transparent 70%);
-}
-
-/* Theme: Burn Rate - Purple gradient */
-.insight-card-v2--burn-rate {
-  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
-}
-
-.insight-card-v2--burn-rate .insight-bg-shape--1 {
-  background: radial-gradient(circle, rgba(139, 92, 246, 0.12) 0%, transparent 70%);
-}
-
-.insight-card-v2--burn-rate .insight-bg-shape--2 {
-  background: radial-gradient(circle, rgba(167, 139, 250, 0.1) 0%, transparent 70%);
-}
-
-/* Theme: Burn Rate Warning - Amber gradient */
-.insight-card-v2--burn-rate-warning {
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%);
-}
-
-.insight-card-v2--burn-rate-warning .insight-bg-shape--1 {
-  background: radial-gradient(circle, rgba(245, 158, 11, 0.15) 0%, transparent 70%);
-}
-
-/* Theme: Burn Rate Critical - Red gradient */
-.insight-card-v2--burn-rate-critical {
-  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
-}
-
-.insight-card-v2--burn-rate-critical .insight-bg-shape--1 {
-  background: radial-gradient(circle, rgba(239, 68, 68, 0.15) 0%, transparent 70%);
-}
-
-/* Decorative background shapes */
-.insight-bg-shape {
-  position: absolute;
-  border-radius: 50%;
-  pointer-events: none;
-}
-
-.insight-bg-shape--1 {
-  width: 200px;
-  height: 200px;
-  top: -60px;
-  left: -40px;
-}
-
-.insight-bg-shape--2 {
-  width: 150px;
-  height: 150px;
-  bottom: -50px;
-  right: 20%;
-}
-
-/* Gauge wrapper */
-.insight-gauge-wrapper {
-  position: relative;
-  flex-shrink: 0;
-  z-index: 1;
-}
-
-.insight-gauge {
-  position: relative;
-}
-
-.insight-gauge-center {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  pointer-events: none;
-}
-
-.insight-gauge-number {
-  font-size: 1.75rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  line-height: 1;
-  color: #0f172a;
-}
-
-.insight-gauge-unit {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #475569;
-  margin-top: 2px;
-}
-
-/* Center content */
-.insight-center-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.5rem;
-  min-width: 0;
-  z-index: 1;
-}
-
-.insight-main-title {
-  font-size: 1.125rem;
-  font-weight: 700;
-  color: #0f172a;
-  letter-spacing: -0.02em;
-}
-
-.insight-main-period {
-  font-size: 0.875rem;
-  font-weight: 500;
-  color: #475569;
-}
-
-/* Status badges */
-.insight-status-badge {
-  font-size: 0.6875rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.3125rem 0.75rem;
-  border-radius: 9999px;
-}
-
-.insight-status--normal {
-  background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
-}
-
-.insight-status--warning {
-  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
-  color: #78350f;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
-}
-
-.insight-status--critical {
-  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
-  color: white;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
-}
-
-/* Metric cards - colorful stat cards */
-.insight-metric-cards {
-  display: flex;
-  gap: 0.75rem;
-  flex-shrink: 0;
-  z-index: 1;
-}
-
-.insight-metric-card {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.75rem 1rem;
-  border-radius: 12px;
-  min-width: 100px;
-}
-
-.insight-metric-card--green {
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.9) 0%, rgba(5, 150, 105, 0.95) 100%);
-  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.25);
-}
-
-.insight-metric-card--green .insight-metric-card-icon,
-.insight-metric-card--green .insight-metric-card-value,
-.insight-metric-card--green .insight-metric-card-label {
-  color: white;
-}
-
-.insight-metric-card--slate {
-  background: linear-gradient(135deg, rgba(71, 85, 105, 0.9) 0%, rgba(51, 65, 85, 0.95) 100%);
-  box-shadow: 0 4px 12px rgba(71, 85, 105, 0.2);
-}
-
-.insight-metric-card--slate .insight-metric-card-icon,
-.insight-metric-card--slate .insight-metric-card-value,
-.insight-metric-card--slate .insight-metric-card-label {
-  color: white;
-}
-
-.insight-metric-card--purple {
-  background: linear-gradient(135deg, rgba(139, 92, 246, 0.9) 0%, rgba(124, 58, 237, 0.95) 100%);
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.25);
-}
-
-.insight-metric-card--purple .insight-metric-card-icon,
-.insight-metric-card--purple .insight-metric-card-value,
-.insight-metric-card--purple .insight-metric-card-label {
-  color: white;
-}
-
-.insight-metric-card--blue {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.9) 0%, rgba(37, 99, 235, 0.95) 100%);
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.25);
-}
-
-.insight-metric-card--blue .insight-metric-card-icon,
-.insight-metric-card--blue .insight-metric-card-value,
-.insight-metric-card--blue .insight-metric-card-label {
-  color: white;
-}
-
-.insight-metric-card-icon {
-  flex-shrink: 0;
-  opacity: 0.9;
-}
-
-.insight-metric-card-content {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-}
-
-.insight-metric-card-value {
-  font-size: 1.125rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  line-height: 1;
-}
-
-.insight-metric-card-label {
-  font-size: 0.6875rem;
-  font-weight: 500;
-  opacity: 0.85;
-}
-
-/* Dismiss button v2 */
-.insight-dismiss-v2 {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 1.5rem;
-  height: 1.5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  background: rgba(255, 255, 255, 0.5);
-  color: #64748b;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 150ms ease, background 150ms ease, color 150ms ease;
-  z-index: 2;
-}
-
-.insight-card-v2:hover .insight-dismiss-v2 {
-  opacity: 1;
-}
-
-.insight-dismiss-v2:hover {
-  background: rgba(255, 255, 255, 0.8);
-  color: #374151;
-}
-
-.insight-dismiss-v2 svg {
-  width: 14px;
-  height: 14px;
 }
 
 /* Hide dismiss in working panel */
@@ -4690,10 +4073,27 @@
   display: none;
 }
 
-/* Working panel overrides */
+/* Card fills the wrapper, wrapper gets the background */
 .working-panel-insight .insight-card-v2 {
-  padding: 0.875rem 1rem;
-  border-radius: 12px;
+  border-radius: 0;
+  background: transparent;
+}
+
+/* Apply gradients to wrapper based on card type */
+.working-panel-insight:has(.insight-card-v2--time-saved) {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);
+}
+
+.working-panel-insight:has(.insight-card-v2--burn-rate) {
+  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
+}
+
+.working-panel-insight:has(.insight-card-v2--burn-rate-warning) {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%);
+}
+
+.working-panel-insight:has(.insight-card-v2--burn-rate-critical) {
+  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
 }
 
 /* Colored pill tabs for insights - in header */
@@ -4977,10 +4377,6 @@
     font-size: 0.875rem;
   }
 
-  .working-panel-insight {
-    padding: 0.5rem 0.75rem;
-  }
-
   .working-panel-tasks-toggle {
     padding: 0.5rem 1rem;
   }
@@ -4993,10 +4389,6 @@
 @media (max-width: 480px) {
   .working-panel-slot {
     padding: 0 0.5rem;
-  }
-
-  .working-panel-insight {
-    padding: 0.375rem 0.5rem;
   }
 
   .working-panel-insight-tabs {
