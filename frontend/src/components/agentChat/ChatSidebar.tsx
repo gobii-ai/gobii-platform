@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, type CSSProperties } from 'react'
-import { PanelLeft, PanelLeftClose, X, Check } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, X, Check, Menu } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry } from '../../types/agentRoster'
@@ -91,28 +91,10 @@ export const ChatSidebar = memo(function ChatSidebar({
           type="button"
           className="agent-fab"
           onClick={() => setDrawerOpen(true)}
-          aria-label="Switch agent"
+          aria-label="Open menu"
           aria-expanded={drawerOpen}
         >
-          {activeAgent ? (
-            <AgentAvatarBadge
-              name={activeAgent.name || 'Agent'}
-              avatarUrl={activeAgent.avatarUrl}
-              className="agent-fab-avatar"
-              imageClassName="agent-fab-avatar-image"
-              textClassName="agent-fab-avatar-text"
-              style={
-                activeAgent.displayColorHex
-                  ? ({ '--agent-accent': activeAgent.displayColorHex } as CSSProperties)
-                  : undefined
-              }
-            />
-          ) : (
-            <PanelLeft className="h-5 w-5" />
-          )}
-          {hasAgents && agents.length > 1 ? (
-            <span className="agent-fab-badge">{agents.length}</span>
-          ) : null}
+          <Menu className="h-5 w-5" />
         </button>
 
         {/* Drawer backdrop */}
