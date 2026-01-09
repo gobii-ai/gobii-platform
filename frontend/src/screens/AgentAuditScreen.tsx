@@ -1,15 +1,32 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Cpu, Filter, Megaphone, MessageCircle, RefreshCcw, Stethoscope, StepForward, Wrench, type LucideIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import {
+  ChevronDown,
+  ChevronUp,
+  Cpu,
+  Filter,
+  ListChevronsDownUp,
+  ListChevronsUpDown,
+  Megaphone,
+  MessageCircle,
+  RefreshCcw,
+  Search,
+  Stethoscope,
+  StepForward,
+  Wrench,
+  type LucideIcon,
+} from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent } from '../types/agentAudit'
-import { createSystemMessage, fetchPromptArchive, triggerProcessEvents, updateSystemMessage } from '../api/agentAudit'
+import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
+import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
 import { StructuredDataTable } from '../components/common/StructuredDataTable'
 import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
+import { MessageContent } from '../components/agentChat/MessageContent'
+import { EventHeader } from '../components/agentAudit/EventHeader'
 
 type AgentAuditScreenProps = {
   agentId: string
@@ -22,6 +39,82 @@ type PromptState = {
   data?: PromptArchive
   error?: string
 }
+
+function eventKeyFor(event: AuditEvent): string {
+  const id = 'id' in event ? event.id : event.run_id
+  return `${event.kind}:${id ?? 'unknown'}`
+}
+
+function getTargetMessageId(
+  messages: AuditMessageEvent[],
+  direction: 'prev' | 'next',
+  activeId: string | null,
+): string | null {
+  if (!messages.length) return null
+  const activeIndex = activeId ? messages.findIndex((event) => event.id === activeId) : -1
+  if (activeIndex === -1) {
+    return direction === 'next' ? messages[0]?.id ?? null : messages[messages.length - 1]?.id ?? null
+  }
+  const targetIndex = direction === 'next' ? activeIndex + 1 : activeIndex - 1
+  if (targetIndex < 0 || targetIndex >= messages.length) return null
+  return messages[targetIndex]?.id ?? null
+}
+
+const DEFAULT_FILTERS = {
+  messages: true,
+  toolCalls: true,
+  completions: true,
+  systemMessages: true,
+  systemSteps: true,
+  agentSteps: true,
+  tagGeneration: true,
+  miniDescription: true,
+  shortDescription: true,
+} as const
+
+const AGENT_SEARCH_LIMIT = 8
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value)
+}
+
+type FilterState = {
+  [Key in keyof typeof DEFAULT_FILTERS]: boolean
+}
+
+type EventFilterKey =
+  | 'messages'
+  | 'toolCalls'
+  | 'completions'
+  | 'systemMessages'
+  | 'systemSteps'
+  | 'agentSteps'
+
+type CompletionFilterKey = 'tagGeneration' | 'miniDescription' | 'shortDescription'
+
+const EVENT_TYPE_FILTERS: {
+  key: EventFilterKey
+  label: string
+  matches: (event: AuditEvent) => boolean
+}[] = [
+  { key: 'messages', label: 'Messages', matches: (event) => event.kind === 'message' },
+  { key: 'toolCalls', label: 'Tool calls', matches: (event) => event.kind === 'tool_call' },
+  { key: 'completions', label: 'LLM completions', matches: (event) => event.kind === 'completion' },
+  { key: 'systemMessages', label: 'System messages', matches: (event) => event.kind === 'system_message' },
+  { key: 'systemSteps', label: 'System steps', matches: (event) => event.kind === 'step' && event.is_system },
+  { key: 'agentSteps', label: 'Agent steps', matches: (event) => event.kind === 'step' && !event.is_system },
+]
+
+const COMPLETION_TYPE_FILTERS: {
+  key: CompletionFilterKey
+  label: string
+  matches: (completionType: string) => boolean
+}[] = [
+  { key: 'tagGeneration', label: 'Tag generation', matches: (completionType) => completionType === 'tag' },
+  { key: 'miniDescription', label: 'Mini description', matches: (completionType) => completionType === 'mini_description' },
+  { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
+]
 
 function renderHtmlOrText(
   value: string,
@@ -54,9 +147,25 @@ function TokenPill({ label, value }: { label: string; value: number | null | und
   )
 }
 
-function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
-  const [expanded, setExpanded] = useState(false)
-  const toggle = () => setExpanded((prev) => !prev)
+function ToolCallRow({
+  tool,
+  collapsed,
+  onToggle,
+}: {
+  tool: AuditToolCallEvent
+  collapsed?: boolean
+  onToggle?: () => void
+}) {
+  const [expanded, setExpanded] = useState(true)
+  const isControlled = collapsed !== undefined
+  const isExpanded = isControlled ? !collapsed : expanded
+  const toggle = () => {
+    if (isControlled) {
+      onToggle?.()
+    } else {
+      setExpanded((prev) => !prev)
+    }
+  }
   const resultPreview = useMemo(() => {
     if (!tool.result) return null
     const trimmed = tool.result.length > 160 ? `${tool.result.slice(0, 160)}…` : tool.result
@@ -103,35 +212,30 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <IconCircle icon={Wrench} bgClass="bg-indigo-50" textClass="text-indigo-700" />
-          <div>
-            <div className="text-sm font-semibold text-slate-900">{tool.tool_name || 'Tool call'}</div>
-            <div className="text-xs text-slate-600">{tool.timestamp ? new Date(tool.timestamp).toLocaleString() : '—'}</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {resultPreview ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">Tool</span> : null}
-          <button
-            type="button"
-            onClick={toggle}
-            className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-          >
-            {expanded ? 'Hide' : 'Show'}
-          </button>
-        </div>
-      </div>
-      {!expanded && resultPreview ? (
+      <EventHeader
+        left={
+          <>
+            <IconCircle icon={Wrench} bgClass="bg-indigo-50" textClass="text-indigo-700" />
+            <div>
+              <div className="text-sm font-semibold text-slate-900">{tool.tool_name || 'Tool call'}</div>
+              <div className="text-xs text-slate-600">{tool.timestamp ? new Date(tool.timestamp).toLocaleString() : '—'}</div>
+            </div>
+          </>
+        }
+        right={resultPreview ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">Tool</span> : null}
+        collapsed={!isExpanded}
+        onToggle={toggle}
+      />
+      {!isExpanded && resultPreview ? (
         <div className="mt-2 text-sm text-slate-700">{resultPreview}</div>
       ) : null}
-      {expanded && parsedParameters ? (
+      {isExpanded && parsedParameters ? (
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Parameters</div>
           {renderValue(parsedParameters)}
         </div>
       ) : null}
-      {expanded && parsedResult ? (
+      {isExpanded && parsedResult ? (
         <div className="mt-2 space-y-1">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Result</div>
           {renderValue(parsedResult)}
@@ -141,79 +245,115 @@ function ToolCallRow({ tool }: { tool: AuditToolCallEvent }) {
   )
 }
 
-function MessageRow({ message }: { message: AuditMessageEvent }) {
-  const renderBody = () => {
-    const body = message.body_text
-    if (!body) return null
-    return renderHtmlOrText(body)
-  }
+function MessageRow({
+  message,
+  collapsed = false,
+  onToggle,
+}: {
+  message: AuditMessageEvent
+  collapsed?: boolean
+  onToggle?: () => void
+}) {
+  const htmlBody = message.body_html && looksLikeHtml(message.body_html) ? message.body_html : null
+  const textBody = message.body_text || (htmlBody ? null : message.body_html)
+  const hasBody = Boolean(htmlBody || (textBody && textBody.trim().length > 0))
   const attachments = message.attachments || []
 
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <IconCircle icon={MessageCircle} bgClass="bg-emerald-50" textClass="text-emerald-700" />
-          <div>
-            <div className="text-sm font-semibold text-slate-900">
-              {message.is_outbound ? 'Agent → User' : 'User → Agent'}{' '}
-              <span className="text-xs font-normal text-slate-500">({message.channel || 'web'})</span>
+      <EventHeader
+        left={
+          <>
+            <IconCircle icon={MessageCircle} bgClass="bg-emerald-50" textClass="text-emerald-700" />
+            <div>
+              <div className="text-sm font-semibold text-slate-900">
+                {message.is_outbound ? 'Agent → User' : 'User → Agent'}{' '}
+                <span className="text-xs font-normal text-slate-500">({message.channel || 'web'})</span>
+              </div>
+              <div className="text-xs text-slate-600">{message.timestamp ? new Date(message.timestamp).toLocaleString() : '—'}</div>
             </div>
-            <div className="text-xs text-slate-600">{message.timestamp ? new Date(message.timestamp).toLocaleString() : '—'}</div>
-          </div>
-        </div>
-        <span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">Message</span>
-      </div>
-      <div className="mt-2">{renderBody()}</div>
-      {attachments.length > 0 ? (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {attachments.map((attachment) => {
-            const href = attachment.download_url || attachment.url
-            const label = attachment.filespace_path || attachment.filename
-            return (
-              <a
-                key={attachment.id}
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                title={attachment.filespace_path || attachment.filename}
-              >
-                <span className="max-w-[240px] truncate">
-                  {label}
-                </span>
-                {attachment.file_size_label ? <span className="text-indigo-500">{attachment.file_size_label}</span> : null}
-              </a>
-            )
-          })}
-        </div>
+          </>
+        }
+        right={<span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">Message</span>}
+        collapsed={collapsed}
+        onToggle={onToggle}
+      />
+      {!collapsed ? (
+        <>
+          {hasBody ? (
+            <div className="mt-2 prose prose-sm max-w-none text-slate-800">
+              <MessageContent bodyHtml={htmlBody} bodyText={textBody} showEmptyState={false} />
+            </div>
+          ) : null}
+          {attachments.length > 0 ? (
+            <div className="mt-3 flex flex-wrap gap-2">
+              {attachments.map((attachment) => {
+                const href = attachment.download_url || attachment.url
+                const label = attachment.filespace_path || attachment.filename
+                return (
+                  <a
+                    key={attachment.id}
+                    href={href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
+                    title={attachment.filespace_path || attachment.filename}
+                  >
+                    <span className="max-w-[240px] truncate">
+                      {label}
+                    </span>
+                    {attachment.file_size_label ? <span className="text-indigo-500">{attachment.file_size_label}</span> : null}
+                  </a>
+                )
+              })}
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   )
 }
 
-function StepRow({ step }: { step: AuditStepEvent }) {
+function StepRow({
+  step,
+  collapsed = false,
+  onToggle,
+}: {
+  step: AuditStepEvent
+  collapsed?: boolean
+  onToggle?: () => void
+}) {
   return (
     <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <IconCircle icon={StepForward} bgClass="bg-slate-100" textClass="text-slate-700" />
-          <div>
-            <div className="text-sm font-semibold text-slate-900">Step</div>
-            <div className="text-xs text-slate-600">{step.timestamp ? new Date(step.timestamp).toLocaleString() : '—'}</div>
-          </div>
-        </div>
-        {step.is_system ? (
-          <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-            {step.system_code || 'System'}
-          </span>
-        ) : (
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">Step</span>
-        )}
-      </div>
-      {step.description ? <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{step.description}</div> : null}
-      {step.is_system && step.system_notes ? (
-        <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-[12px] text-slate-700">{step.system_notes}</div>
+      <EventHeader
+        left={
+          <>
+            <IconCircle icon={StepForward} bgClass="bg-slate-100" textClass="text-slate-700" />
+            <div>
+              <div className="text-sm font-semibold text-slate-900">Step</div>
+              <div className="text-xs text-slate-600">{step.timestamp ? new Date(step.timestamp).toLocaleString() : '—'}</div>
+            </div>
+          </>
+        }
+        right={
+          step.is_system ? (
+            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
+              {step.system_code || 'System'}
+            </span>
+          ) : (
+            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">Step</span>
+          )
+        }
+        collapsed={collapsed}
+        onToggle={onToggle}
+      />
+      {!collapsed ? (
+        <>
+          {step.description ? <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{step.description}</div> : null}
+          {step.is_system && step.system_notes ? (
+            <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-[12px] text-slate-700">{step.system_notes}</div>
+          ) : null}
+        </>
       ) : null}
     </div>
   )
@@ -223,16 +363,23 @@ function CompletionCard({
   completion,
   promptState,
   onLoadPrompt,
+  collapsed = false,
+  onToggle,
 }: {
   completion: AuditCompletionEvent
   promptState: PromptState | undefined
   onLoadPrompt: (archiveId: string) => void
+  collapsed?: boolean
+  onToggle?: () => void
 }) {
   const archiveId = completion.prompt_archive?.id
   const promptPayload = archiveId ? promptState?.data?.payload : null
   const systemPrompt = promptPayload?.system_prompt
   const userPrompt = promptPayload?.user_prompt
   const [expanded, setExpanded] = useState(false)
+  const [responseIdCopied, setResponseIdCopied] = useState(false)
+  const responseCopyTimeout = useRef<number | null>(null)
+  const responseId = completion.response_id
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -242,6 +389,28 @@ function CompletionCard({
       console.error('Copy failed', err)
     }
   }
+
+  const handleCopyResponseId = async () => {
+    if (!responseId) return
+    try {
+      await navigator.clipboard.writeText(responseId)
+      setResponseIdCopied(true)
+      if (responseCopyTimeout.current) {
+        window.clearTimeout(responseCopyTimeout.current)
+      }
+      responseCopyTimeout.current = window.setTimeout(() => setResponseIdCopied(false), 1400)
+    } catch (err) {
+      console.error('Copy failed', err)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (responseCopyTimeout.current) {
+        window.clearTimeout(responseCopyTimeout.current)
+      }
+    }
+  }, [])
 
   const completionLabel = useMemo(() => {
     const key = (completion.completion_type || '').toLowerCase()
@@ -267,95 +436,117 @@ function CompletionCard({
 
   return (
     <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.1)]">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <IconCircle icon={Cpu} bgClass="bg-sky-50" textClass="text-sky-700" />
-          <div>
-            <div className="text-sm font-semibold text-slate-900">
-              {completionLabel} · {completion.llm_model || 'Unknown model'}{' '}
-              <span className="text-xs font-normal text-slate-500">({completion.llm_provider || 'provider'})</span>
+      <EventHeader
+        className="gap-4"
+        left={
+          <>
+            <IconCircle icon={Cpu} bgClass="bg-sky-50" textClass="text-sky-700" />
+            <div>
+              <div className="text-sm font-semibold text-slate-900">
+                {completionLabel} · {completion.llm_model || 'Unknown model'}{' '}
+                <span className="text-xs font-normal text-slate-500">({completion.llm_provider || 'provider'})</span>
+              </div>
+              <div className="text-xs text-slate-600">{completion.timestamp ? new Date(completion.timestamp).toLocaleString() : '—'}</div>
             </div>
-            <div className="text-xs text-slate-600">{completion.timestamp ? new Date(completion.timestamp).toLocaleString() : '—'}</div>
-          </div>
-        </div>
-        <span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">LLM</span>
-      </div>
+          </>
+        }
+        right={<span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">LLM</span>}
+        collapsed={collapsed}
+        onToggle={onToggle}
+      />
 
-      <div className="mt-3 flex flex-wrap gap-2">
-        <TokenPill label="Prompt" value={completion.prompt_tokens} />
-        <TokenPill label="Output" value={completion.completion_tokens} />
-        <TokenPill label="Total" value={completion.total_tokens} />
-        <TokenPill label="Cached" value={completion.cached_tokens} />
-      </div>
-
-      {archiveId ? (
-        <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Prompt</div>
-            <button
-              type="button"
-              className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800"
-              onClick={() => {
-                const next = !expanded
-                setExpanded(next)
-                if (next && !promptPayload && !promptState?.loading) {
-                  onLoadPrompt(archiveId)
-                }
-              }}
-              disabled={promptState?.loading && !expanded}
-            >
-              {expanded ? 'Collapse' : promptState?.loading ? 'Loading…' : 'Expand'}
-            </button>
+      {!collapsed ? (
+        <>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <TokenPill label="Prompt" value={completion.prompt_tokens} />
+            <TokenPill label="Output" value={completion.completion_tokens} />
+            <TokenPill label="Total" value={completion.total_tokens} />
+            <TokenPill label="Cached" value={completion.cached_tokens} />
+            {responseId ? (
+              <button
+                type="button"
+                onClick={handleCopyResponseId}
+                title="Copy response id"
+                className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-indigo-200"
+              >
+                Copy Response ID
+              </button>
+            ) : null}
+            {responseIdCopied ? (
+              <span className="text-[11px] text-emerald-600 transition-opacity">Copied</span>
+            ) : null}
           </div>
-          {promptState?.error ? <div className="mt-2 text-xs text-rose-600">{promptState.error}</div> : null}
-          {expanded && promptPayload ? (
-            <div className="mt-2 space-y-2">
-              {systemPrompt ? (
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                    <span>System Prompt</span>
-                    <button
-                      type="button"
-                      className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                      onClick={() => copyText(systemPrompt)}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                    {systemPrompt}
-                  </pre>
-                </div>
-              ) : null}
-              {userPrompt ? (
-                <div>
-                  <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                    <span>User Prompt</span>
-                    <button
-                      type="button"
-                      className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                      onClick={() => copyText(userPrompt)}
-                    >
-                      Copy
-                    </button>
-                  </div>
-                  <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                    {userPrompt}
-                  </pre>
+
+          {archiveId ? (
+            <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Prompt</div>
+                <button
+                  type="button"
+                  className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800"
+                  onClick={() => {
+                    const next = !expanded
+                    setExpanded(next)
+                    if (next && !promptPayload && !promptState?.loading) {
+                      onLoadPrompt(archiveId)
+                    }
+                  }}
+                  disabled={promptState?.loading && !expanded}
+                >
+                  {expanded ? 'Collapse' : promptState?.loading ? 'Loading…' : 'Expand'}
+                </button>
+              </div>
+              {promptState?.error ? <div className="mt-2 text-xs text-rose-600">{promptState.error}</div> : null}
+              {expanded && promptPayload ? (
+                <div className="mt-2 space-y-2">
+                  {systemPrompt ? (
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
+                        <span>System Prompt</span>
+                        <button
+                          type="button"
+                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                          onClick={() => copyText(systemPrompt)}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
+                        {systemPrompt}
+                      </pre>
+                    </div>
+                  ) : null}
+                  {userPrompt ? (
+                    <div>
+                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
+                        <span>User Prompt</span>
+                        <button
+                          type="button"
+                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
+                          onClick={() => copyText(userPrompt)}
+                        >
+                          Copy
+                        </button>
+                      </div>
+                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
+                        {userPrompt}
+                      </pre>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : null}
-        </div>
-      ) : null}
 
-      {completion.tool_calls && completion.tool_calls.length ? (
-        <div className="mt-4 space-y-2">
-          <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tool Calls</div>
-          {completion.tool_calls.map((tool) => (
-            <ToolCallRow key={tool.id} tool={tool} />
-          ))}
-        </div>
+          {completion.tool_calls && completion.tool_calls.length ? (
+            <div className="mt-4 space-y-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tool Calls</div>
+              {completion.tool_calls.map((tool) => (
+                <ToolCallRow key={tool.id} tool={tool} />
+              ))}
+            </div>
+          ) : null}
+        </>
       ) : null}
     </div>
   )
@@ -384,16 +575,13 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
   const loadingRef = useRef(loading)
   const bannerRef = useRef<HTMLDivElement | null>(null)
+  const messageNodeMap = useRef(new Map<string, HTMLDivElement>())
+  const messageIdByNode = useRef(new Map<Element, string>())
+  const agentSearchRequestId = useRef(0)
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
-  const [filters, setFilters] = useState({
-    hideTagGeneration: false,
-    hideMiniDescription: false,
-    hideShortDescription: false,
-    hideSystemSteps: false,
-    hideAgentSteps: false,
-    hideToolCalls: false,
-  })
+  const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
+  const [collapsedEventKeys, setCollapsedEventKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
@@ -402,6 +590,13 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const [messageActive, setMessageActive] = useState(true)
   const [messageSubmitting, setMessageSubmitting] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
+  const [agentSearchOpen, setAgentSearchOpen] = useState(false)
+  const [agentSearchQuery, setAgentSearchQuery] = useState('')
+  const [agentSearchResults, setAgentSearchResults] = useState<StaffAgentSearchResult[]>([])
+  const [agentSearchLoading, setAgentSearchLoading] = useState(false)
+  const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
+  const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
 
   useEffect(() => {
@@ -418,27 +613,122 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
 
-  const filteredEvents = useMemo(() => {
-    return events.filter((event) => {
-      if (event.kind === 'tool_call') {
-        if (filters.hideToolCalls) return false
-        return true
+  useEffect(() => {
+    if (!agentSearchOpen) {
+      agentSearchRequestId.current += 1
+      setAgentSearchQuery('')
+      setAgentSearchResults([])
+      setAgentSearchError(null)
+      setAgentSearchLoading(false)
+    }
+  }, [agentSearchOpen])
+
+  useEffect(() => {
+    if (!agentSearchOpen) {
+      return
+    }
+    const query = agentSearchQuery.trim()
+    if (!query) {
+      agentSearchRequestId.current += 1
+      setAgentSearchResults([])
+      setAgentSearchError(null)
+      setAgentSearchLoading(false)
+      return
+    }
+
+    const requestId = agentSearchRequestId.current + 1
+    agentSearchRequestId.current = requestId
+    setAgentSearchLoading(true)
+
+    const timeout = window.setTimeout(() => {
+      searchStaffAgents(query, { limit: AGENT_SEARCH_LIMIT })
+        .then((payload: any) => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchResults(payload.agents)
+          setAgentSearchError(null)
+        })
+        .catch((error: any) => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchResults([])
+          setAgentSearchError(error instanceof Error ? error.message : 'Unable to search agents right now.')
+        })
+        .finally(() => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchLoading(false)
+        })
+    }, 250)
+
+    return () => window.clearTimeout(timeout)
+  }, [agentSearchOpen, agentSearchQuery])
+
+  const handleAgentNavigate = useCallback(
+    (targetId: string) => {
+      if (!targetId || targetId === agentId) {
+        setAgentSearchOpen(false)
+        return
       }
-      if (event.kind === 'step') {
-        if (event.is_system && filters.hideSystemSteps) return false
-        if (!event.is_system && filters.hideAgentSteps) return false
-        return true
+      window.location.assign(`/console/staff/agents/${targetId}/audit/`)
+    },
+    [agentId],
+  )
+
+  const handleAgentSearchSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const query = agentSearchQuery.trim()
+      if (!query) return
+      const matchById = agentSearchResults.find((agent) => agent.id === query)
+      const matchByName = agentSearchResults.find((agent) => agent.name?.toLowerCase() === query.toLowerCase())
+      const fallback = agentSearchResults.length === 1 ? agentSearchResults[0] : null
+      const target = matchById || matchByName || (isUuid(query) ? { id: query } : null) || fallback
+      if (target) {
+        handleAgentNavigate(target.id)
       }
-      if (event.kind === 'completion') {
-        const key = (event.completion_type || '').toLowerCase()
-        if (filters.hideTagGeneration && key === 'tag') return false
-        if (filters.hideMiniDescription && key === 'mini_description') return false
-        if (filters.hideShortDescription && key === 'short_description') return false
+    },
+    [agentSearchQuery, agentSearchResults, handleAgentNavigate],
+  )
+
+  const filterEvents = useCallback(
+    (eventsToFilter: AuditEvent[]) => {
+      return eventsToFilter.filter((event) => {
+        const typeFilter = EVENT_TYPE_FILTERS.find((filter) => filter.matches(event))
+        if (typeFilter && !filters[typeFilter.key]) {
+          return false
+        }
+        if (event.kind === 'completion') {
+          const key = (event.completion_type || '').toLowerCase()
+          const completionFilter = COMPLETION_TYPE_FILTERS.find((filter) => filter.matches(key))
+          if (completionFilter && !filters[completionFilter.key]) {
+            return false
+          }
+        }
         return true
-      }
-      return true
-    })
-  }, [events, filters])
+      })
+    },
+    [filters],
+  )
+
+  const filteredEvents = useMemo(() => filterEvents(events), [events, filterEvents])
+
+  const messageEvents = useMemo(
+    () => filteredEvents.filter((event) => event.kind === 'message') as AuditMessageEvent[],
+    [filteredEvents],
+  )
+
+  const activeMessageIndex = useMemo(
+    () => messageEvents.findIndex((event) => event.id === activeMessageId),
+    [messageEvents, activeMessageId],
+  )
+  const messageEventIds = useMemo(() => messageEvents.map((event) => event.id), [messageEvents])
+  const messageFilterEnabled = filters.messages
+  const canNavigatePrevMessage =
+    messageFilterEnabled && messageEvents.length > 0 && (activeMessageIndex === -1 || activeMessageIndex > 0)
+  const canNavigateNextMessage = messageFilterEnabled
+    ? messageEvents.length > 0
+      ? activeMessageIndex === -1 || activeMessageIndex < messageEvents.length - 1 || hasMore
+      : hasMore
+    : false
+  const hasFilteredEvents = filteredEvents.length > 0
 
   useEffect(() => {
     if (editingMessage) {
@@ -522,6 +812,92 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     [jumpToTime],
   )
 
+  const handleToggleEventCollapse = useCallback((event: AuditEvent) => {
+    const key = eventKeyFor(event)
+    setCollapsedEventKeys((current) => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }, [])
+
+  const handleSetAllCollapsed = useCallback(
+    (collapsed: boolean) => {
+      if (!collapsed) {
+        setCollapsedEventKeys(new Set())
+        return
+      }
+      setCollapsedEventKeys(new Set(filteredEvents.map((event) => eventKeyFor(event))))
+    },
+    [filteredEvents],
+  )
+
+  const scrollToMessage = useCallback((messageId: string) => {
+    const target = messageNodeMap.current.get(messageId)
+    if (!target) return false
+    const offset = (bannerRef.current?.offsetHeight ?? 0) + 24
+    const top = target.getBoundingClientRect().top + window.scrollY - offset
+    window.scrollTo({ top, behavior: 'smooth' })
+    return true
+  }, [])
+
+  const scrollToMessageAndActivate = useCallback(
+    (messageId: string) => {
+      if (!scrollToMessage(messageId)) {
+        return false
+      }
+      setActiveMessageId(messageId)
+      return true
+    },
+    [scrollToMessage],
+  )
+
+  const handleNavigateMessage = useCallback(
+    async (direction: 'prev' | 'next') => {
+      if (!messageFilterEnabled) return
+      let targetId = getTargetMessageId(messageEvents, direction, activeMessageId)
+      if (!targetId && direction === 'next' && hasMore && !loadingRef.current) {
+        await loadMore()
+        const latestEvents = useAgentAuditStore.getState().events
+        const nextMessages = filterEvents(latestEvents).filter((event) => event.kind === 'message') as AuditMessageEvent[]
+        targetId = getTargetMessageId(nextMessages, direction, activeMessageId)
+      }
+      if (!targetId) return
+      if (!scrollToMessageAndActivate(targetId)) {
+        pendingMessageScrollId.current = targetId
+      }
+    },
+    [
+      activeMessageId,
+      filterEvents,
+      hasMore,
+      loadMore,
+      messageEvents,
+      messageFilterEnabled,
+      scrollToMessageAndActivate,
+    ],
+  )
+
+  const registerMessageRef = useCallback(
+    (messageId: string) => (node: HTMLDivElement | null) => {
+      const existingNode = messageNodeMap.current.get(messageId)
+      if (existingNode) {
+        messageIdByNode.current.delete(existingNode)
+      }
+      if (node) {
+        messageNodeMap.current.set(messageId, node)
+        messageIdByNode.current.set(node, messageId)
+      } else {
+        messageNodeMap.current.delete(messageId)
+      }
+    },
+    [],
+  )
+
   useEffect(() => {
     const container = eventsRef.current
     if (!container) return
@@ -549,6 +925,45 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     nodes.forEach((node) => observer.observe(node))
     return () => observer.disconnect()
   }, [filteredEvents, setSelectedDay])
+
+  useEffect(() => {
+  const nodes = messageEventIds
+    .map((messageId) => messageNodeMap.current.get(messageId))
+    .filter((node): node is HTMLDivElement => Boolean(node))
+    if (!nodes.length) {
+      setActiveMessageId(null)
+      return
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries.filter((entry) => entry.isIntersecting)
+        if (!visible.length) return
+        visible.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        const top = visible[0]?.target as HTMLElement | undefined
+        const messageId = top ? messageIdByNode.current.get(top) : undefined
+        if (messageId) {
+          setActiveMessageId(messageId)
+        }
+      },
+      {
+        root: null,
+        threshold: 0.3,
+        rootMargin: '-10% 0px -65% 0px',
+      },
+    )
+
+    nodes.forEach((node) => observer.observe(node))
+    return () => observer.disconnect()
+  }, [messageEventIds])
+
+  useEffect(() => {
+    const pendingId = pendingMessageScrollId.current
+    if (!pendingId) return
+    if (scrollToMessageAndActivate(pendingId)) {
+      pendingMessageScrollId.current = null
+    }
+  }, [messageEventIds, scrollToMessageAndActivate])
 
   useEffect(() => {
     loadingRef.current = loading
@@ -582,14 +997,69 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             <div className="flex items-center gap-2 text-2xl font-bold leading-tight text-slate-900">
               <Stethoscope className="h-6 w-6 text-slate-700" aria-hidden />
               <span>{agentName || 'Agent'}</span>
+              <div className="relative">
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                  onClick={() => setAgentSearchOpen((open) => !open)}
+                  aria-label="Switch agent"
+                  aria-expanded={agentSearchOpen}
+                >
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                </button>
+                {agentSearchOpen ? (
+                  <div className="absolute left-0 z-30 mt-2 w-72 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
+                    <form onSubmit={handleAgentSearchSubmit} className="space-y-2">
+                      <label className="relative block">
+                        <span className="sr-only">Search agents</span>
+                        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                          <Search className="h-4 w-4" aria-hidden />
+                        </span>
+                        <input
+                          type="search"
+                          value={agentSearchQuery}
+                          onChange={(event) => setAgentSearchQuery(event.target.value)}
+                          placeholder="Search Agents"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200/60"
+                          autoFocus
+                        />
+                      </label>
+                      {agentSearchLoading ? (
+                        <div className="px-1 text-xs text-slate-500">Searching…</div>
+                      ) : null}
+                      {agentSearchError ? (
+                        <div className="px-1 text-xs text-rose-600">{agentSearchError}</div>
+                      ) : null}
+                      {!agentSearchLoading && !agentSearchError && agentSearchQuery.trim() && !agentSearchResults.length ? (
+                        <div className="px-1 text-xs text-slate-500">No matching agents.</div>
+                      ) : null}
+                      <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {agentSearchResults.map((agent) => (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            className="w-full rounded-lg border border-transparent px-2 py-2 text-left text-slate-800 transition hover:border-slate-200 hover:bg-slate-900/5"
+                            onClick={() => handleAgentNavigate(agent.id)}
+                          >
+                            <div className="text-sm font-semibold text-slate-900">{agent.name || 'Agent'}</div>
+                            <div className="text-[11px] text-slate-500">{agent.id}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
               onClick={handleProcessEvents}
               disabled={processQueueing || processingActive}
+              title={processingActive ? 'Processing events' : processQueueing ? 'Queueing events' : 'Process events'}
+              aria-label={processingActive ? 'Processing events' : processQueueing ? 'Queueing events' : 'Process events'}
             >
               <RefreshCcw
                 className={`h-4 w-4 ${processingActive ? 'animate-spin' : ''}`}
@@ -599,7 +1069,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:border-amber-300 hover:text-amber-900"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
               onClick={() => {
                 setEditingMessage(null)
                 setMessageBody('')
@@ -607,94 +1077,100 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                 setMessageModalOpen(true)
                 setMessageError(null)
               }}
+              title="Add system message"
+              aria-label="Add system message"
             >
               <Megaphone className="h-4 w-4" aria-hidden />
-              Add system message
             </button>
             <div className="relative">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                 onClick={() => setFiltersOpen((open) => !open)}
                 aria-expanded={filtersOpen}
+                title="Filters"
+                aria-label="Filters"
               >
                 <Filter className="h-4 w-4" aria-hidden />
-                Filters
               </button>
               {filtersOpen ? (
                 <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Hide events</div>
+                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Event types</div>
                   <div className="space-y-2 text-slate-800">
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideTagGeneration}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideTagGeneration: e.target.checked }))}
-                      />
-                      <span>Tag generation</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideMiniDescription}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideMiniDescription: e.target.checked }))}
-                      />
-                      <span>Mini description</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideShortDescription}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideShortDescription: e.target.checked }))}
-                      />
-                      <span>Short description</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideSystemSteps}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideSystemSteps: e.target.checked }))}
-                      />
-                      <span>System steps</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideAgentSteps}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideAgentSteps: e.target.checked }))}
-                      />
-                      <span>Persistent agent steps</span>
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                        checked={filters.hideToolCalls}
-                        onChange={(e) => setFilters((f) => ({ ...f, hideToolCalls: e.target.checked }))}
-                      />
-                      <span>Tool calls</span>
-                    </label>
+                    {EVENT_TYPE_FILTERS.map((filter) => (
+                      <label key={filter.key} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                          checked={filters[filter.key]}
+                          onChange={(e) => setFilters((current) => ({ ...current, [filter.key]: e.target.checked }))}
+                        />
+                        <span>{filter.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Completion types</div>
+                  <div className="mt-2 space-y-2 text-slate-800">
+                    {COMPLETION_TYPE_FILTERS.map((filter) => (
+                      <label key={filter.key} className="flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
+                          checked={filters[filter.key]}
+                          onChange={(e) => setFilters((current) => ({ ...current, [filter.key]: e.target.checked }))}
+                          disabled={!filters.completions}
+                        />
+                        <span className={filters.completions ? '' : 'text-slate-400'}>{filter.label}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               ) : null}
             </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-800">{agentId}</div>
+            <div
+              className="inline-flex items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+              role="group"
+              aria-label="Message navigation"
+            >
+              <span className="inline-flex items-center px-3 py-2 text-sm font-semibold text-slate-700">
+                Message
+              </span>
+              <button
+                type="button"
+                className="inline-flex items-center border-l border-slate-200 px-3 py-2 text-slate-700 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                onClick={() => handleNavigateMessage('prev')}
+                disabled={!canNavigatePrevMessage}
+                aria-label="Previous message"
+              >
+                <ChevronUp className="h-4 w-4" aria-hidden />
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center border-l border-slate-200 px-3 py-2 text-slate-700 transition hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+                onClick={() => handleNavigateMessage('next')}
+                disabled={!canNavigateNextMessage}
+                aria-label="Next message"
+              >
+                <ChevronDown className="h-4 w-4" aria-hidden />
+              </button>
+            </div>
             <button
               type="button"
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
-              onClick={() => {
-                if (!agentId) return
-                navigator.clipboard?.writeText(agentId).catch(() => {})
-              }}
-              aria-label="Copy agent id"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+              onClick={() => handleSetAllCollapsed(false)}
+              disabled={!hasFilteredEvents}
             >
-              <Copy className="h-4 w-4" aria-hidden />
-              Copy
+              <ListChevronsUpDown className="h-4 w-4" aria-hidden />
+              Expand
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
+              onClick={() => handleSetAllCollapsed(true)}
+              disabled={!hasFilteredEvents}
+            >
+              <ListChevronsDownUp className="h-4 w-4" aria-hidden />
+              Collapse
             </button>
           </div>
         </div>
@@ -712,39 +1188,46 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                 parsedTimestamp && !Number.isNaN(parsedTimestamp.getTime())
                   ? `${parsedTimestamp.getFullYear()}-${String(parsedTimestamp.getMonth() + 1).padStart(2, '0')}-${String(parsedTimestamp.getDate()).padStart(2, '0')}`
                   : null
-              const wrapperProps = day ? { 'data-day-marker': 'true', 'data-day': day } : {}
+              const eventKey = eventKeyFor(event)
+              const collapsed = collapsedEventKeys.has(eventKey)
+              const messageRef = event.kind === 'message' ? registerMessageRef((event as AuditMessageEvent).id) : undefined
+              const wrapperProps = { ...(day ? { 'data-day-marker': 'true', 'data-day': day } : {}) }
 
               if (event.kind === 'completion') {
                 return (
-                  <div key={event.id} {...wrapperProps}>
+                  <div key={eventKey} {...wrapperProps}>
                     <CompletionCard
                       completion={event}
                       promptState={event.prompt_archive?.id ? promptState[event.prompt_archive.id] : undefined}
                       onLoadPrompt={handleLoadPrompt}
+                      collapsed={collapsed}
+                      onToggle={() => handleToggleEventCollapse(event)}
                     />
                   </div>
                 )
               }
               if (event.kind === 'tool_call') {
                 return (
-                  <div key={event.id} {...wrapperProps}>
-                    <ToolCallRow tool={event as AuditToolCallEvent} />
+                  <div key={eventKey} {...wrapperProps}>
+                    <ToolCallRow tool={event as AuditToolCallEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
                   </div>
                 )
               }
               if (event.kind === 'message') {
                 return (
-                  <div key={event.id} {...wrapperProps}>
-                    <MessageRow message={event as AuditMessageEvent} />
+                  <div key={eventKey} {...wrapperProps} ref={messageRef}>
+                    <MessageRow message={event as AuditMessageEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
                   </div>
                 )
               }
               if (event.kind === 'system_message') {
                 return (
-                  <div key={event.id} {...wrapperProps}>
+                  <div key={eventKey} {...wrapperProps}>
                     <SystemMessageCard
                       message={event as AuditSystemMessageEvent}
                       onEdit={handleEditMessage}
+                      collapsed={collapsed}
+                      onToggle={() => handleToggleEventCollapse(event)}
                       renderBody={(body) =>
                         renderHtmlOrText(body, {
                           htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
@@ -757,8 +1240,8 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
               }
               if (event.kind === 'step') {
                 return (
-                  <div key={event.id} {...wrapperProps}>
-                    <StepRow step={event as AuditStepEvent} />
+                  <div key={eventKey} {...wrapperProps}>
+                    <StepRow step={event as AuditStepEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
                   </div>
                 )
               }
@@ -773,7 +1256,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           </div>
 
           <div
-            className="lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
+            className="hidden lg:block lg:sticky lg:top-[112px] lg:min-h-[520px] lg:pt-4"
             style={timelineMaxHeight ? { maxHeight: `${timelineMaxHeight}px` } : undefined}
           >
             <AuditTimeline buckets={timeline} loading={timelineLoading} error={timelineError} selectedDay={selectedDay} onSelect={handleJumpToTimestamp} processingActive={processingActive} />

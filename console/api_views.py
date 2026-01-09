@@ -14,7 +14,7 @@ import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
-from django.db.models import Min, Max
+from django.db.models import Min, Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -723,6 +723,37 @@ class SystemAdminAPIView(LoginRequiredMixin, View):
         if not (request.user.is_staff or request.user.is_superuser):
             return JsonResponse({"error": "forbidden"}, status=403)
         return super().dispatch(request, *args, **kwargs)
+
+
+class StaffAgentSearchAPIView(SystemAdminAPIView):
+    """Search persistent agents by name or id for the staff audit UI."""
+
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        query = (request.GET.get("q") or "").strip()
+        limit_raw = request.GET.get("limit") or "8"
+        try:
+            limit = int(limit_raw)
+        except ValueError:
+            return HttpResponseBadRequest("limit must be an integer")
+        limit = max(1, min(limit, 25))
+        if not query:
+            return JsonResponse({"agents": []})
+
+        filters = Q(name__icontains=query)
+        try:
+            filters |= Q(id=uuid.UUID(query))
+        except (TypeError, ValueError):
+            pass
+
+        matches = (
+            PersistentAgent.objects.filter(filters)
+            .only("id", "name")
+            .order_by("name")[:limit]
+        )
+        payload = [{"id": str(agent.id), "name": agent.name or ""} for agent in matches]
+        return JsonResponse({"agents": payload})
 
 
 class StaffAgentAuditAPIView(SystemAdminAPIView):

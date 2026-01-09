@@ -121,6 +121,7 @@ def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: 
         "id": str(completion.id),
         "timestamp": _dt_to_iso(completion.created_at),
         "completion_type": completion.completion_type,
+        "response_id": completion.response_id,
         "prompt_tokens": completion.prompt_tokens,
         "completion_tokens": completion.completion_tokens,
         "total_tokens": completion.total_tokens,

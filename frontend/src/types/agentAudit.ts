@@ -29,6 +29,7 @@ export type AuditCompletionEvent = {
   id: string
   timestamp: string | null
   completion_type: string
+  response_id: string | null
   prompt_tokens: number | null
   completion_tokens: number | null
   total_tokens: number | null
