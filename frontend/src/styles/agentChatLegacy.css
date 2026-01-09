@@ -1324,47 +1324,50 @@
 
 .composer-insight-tab {
   position: relative;
-  width: 24px;
-  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
   border: none;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.35);
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--tab-color, #6b7280) 15%, transparent);
   cursor: pointer;
-  padding: 0;
+  padding: 0 10px;
   overflow: hidden;
   flex-shrink: 0;
-  transition: transform 150ms ease, background 150ms ease, width 150ms ease;
+  transition: background 150ms ease;
 }
 
 .composer-insight-tab:hover {
-  background: rgba(255, 255, 255, 0.5);
-  transform: scale(1.05);
+  background: color-mix(in srgb, var(--tab-color, #6b7280) 25%, transparent);
 }
 
 .composer-insight-tab[data-active="true"] {
-  width: 32px;
-  background: transparent;
+  background: var(--tab-color, #6b7280);
+}
+
+.composer-insight-tab[data-active="true"]:hover {
+  background: var(--tab-color, #6b7280);
 }
 
 .composer-insight-tab-inner {
-  position: absolute;
-  inset: 0;
-  border-radius: 4px;
-  background: var(--tab-color, #6b7280);
-  opacity: 0.4;
-  transition: opacity 150ms ease;
+  display: none;
 }
 
-.composer-insight-tab[data-active="true"] .composer-insight-tab-inner {
-  opacity: 1;
+.composer-insight-tab-label {
+  position: relative;
+  z-index: 1;
+  font-size: 0.625rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--tab-color, #6b7280);
+  line-height: 1;
+  transition: color 150ms ease;
 }
 
-.composer-insight-tab:hover .composer-insight-tab-inner {
-  opacity: 0.7;
-}
-
-.composer-insight-tab[data-active="true"]:hover .composer-insight-tab-inner {
-  opacity: 1;
+.composer-insight-tab[data-active="true"] .composer-insight-tab-label {
+  color: white;
+  font-weight: 600;
 }
 
 /* Countdown progress indicator */
@@ -1374,8 +1377,8 @@
   left: 0;
   height: 100%;
   width: var(--tab-progress, 0%);
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 11px;
   pointer-events: none;
   transition: width 100ms linear;
 }
@@ -4715,47 +4718,50 @@
 
 .working-panel-insight-tab {
   position: relative;
-  width: 24px;
-  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
   border: none;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.35);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tab-color, #6b7280) 15%, transparent);
   cursor: pointer;
-  padding: 0;
+  padding: 0 12px;
   overflow: hidden;
   flex-shrink: 0;
-  transition: transform 150ms ease, background 150ms ease, width 150ms ease;
+  transition: background 150ms ease;
 }
 
 .working-panel-insight-tab:hover {
-  background: rgba(255, 255, 255, 0.5);
-  transform: scale(1.05);
+  background: color-mix(in srgb, var(--tab-color, #6b7280) 25%, transparent);
 }
 
 .working-panel-insight-tab[data-active="true"] {
-  width: 32px;
-  background: transparent;
+  background: var(--tab-color, #6b7280);
+}
+
+.working-panel-insight-tab[data-active="true"]:hover {
+  background: var(--tab-color, #6b7280);
 }
 
 .working-panel-insight-tab-inner {
-  position: absolute;
-  inset: 0;
-  border-radius: 4px;
-  background: var(--tab-color, #6b7280);
-  opacity: 0.4;
-  transition: opacity 150ms ease;
+  display: none;
 }
 
-.working-panel-insight-tab[data-active="true"] .working-panel-insight-tab-inner {
-  opacity: 1;
+.working-panel-insight-tab-label {
+  position: relative;
+  z-index: 1;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--tab-color, #6b7280);
+  line-height: 1;
+  transition: color 150ms ease;
 }
 
-.working-panel-insight-tab:hover .working-panel-insight-tab-inner {
-  opacity: 0.7;
-}
-
-.working-panel-insight-tab[data-active="true"]:hover .working-panel-insight-tab-inner {
-  opacity: 1;
+.working-panel-insight-tab[data-active="true"] .working-panel-insight-tab-label {
+  color: white;
+  font-weight: 600;
 }
 
 /* Countdown progress indicator */
@@ -4765,8 +4771,8 @@
   left: 0;
   height: 100%;
   width: var(--tab-progress, 0%);
-  background: rgba(255, 255, 255, 0.4);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 12px;
   pointer-events: none;
   transition: width 100ms linear;
 }
@@ -4994,15 +5000,15 @@
   }
 
   .working-panel-insight-tabs {
-    max-width: 40%;
+    max-width: 45%;
   }
 
   .working-panel-insight-tab {
-    width: 20px;
-    height: 6px;
+    height: 20px;
+    padding: 0 8px;
   }
 
-  .working-panel-insight-tab[data-active="true"] {
-    width: 26px;
+  .working-panel-insight-tab-label {
+    font-size: 0.5625rem;
   }
 }

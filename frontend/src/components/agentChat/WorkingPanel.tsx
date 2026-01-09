@@ -23,6 +23,17 @@ function getInsightTabColor(insight: InsightEvent): string {
   return '#6b7280' // gray-500 fallback
 }
 
+// Get a short label for the insight tab
+function getInsightTabLabel(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return 'Time'
+  }
+  if (insight.insightType === 'burn_rate') {
+    return 'Usage'
+  }
+  return 'Insight'
+}
+
 function deriveElapsedSeconds(task: ProcessingWebTask, now: number): number {
   if (task.startedAt) {
     const started = Date.parse(task.startedAt)
@@ -316,6 +327,7 @@ export function WorkingPanel({
               {insights.map((insight, index) => {
                 const isActive = index === currentInsightIndex % totalInsights
                 const color = getInsightTabColor(insight)
+                const label = getInsightTabLabel(insight)
                 return (
                   <button
                     key={insight.insightId}
@@ -330,6 +342,7 @@ export function WorkingPanel({
                     } as React.CSSProperties}
                   >
                     <span className="working-panel-insight-tab-inner" />
+                    <span className="working-panel-insight-tab-label">{label}</span>
                     {isActive && !isPaused && (
                       <span className="working-panel-insight-tab-progress" />
                     )}
