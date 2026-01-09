@@ -9,31 +9,6 @@
   min-height: 100vh;
 }
 
-.immersive-exit {
-  position: fixed;
-  top: 1.5rem;
-  right: 1.5rem;
-  z-index: 60;
-  width: 2.75rem;
-  height: 2.75rem;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.4);
-  background: rgba(15, 23, 42, 0.82);
-  color: #f8fafc;
-  font-size: 1.4rem;
-  font-weight: 600;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.2s ease, border-color 0.2s ease;
-}
-
-.immersive-exit:hover {
-  transform: translateY(-1px);
-  border-color: rgba(99, 102, 241, 0.6);
-}
-
 .immersive-command {
   min-height: 100vh;
   display: flex;

@@ -7,17 +7,24 @@ import { TimelineEventList } from './TimelineEventList'
 import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { ChatSidebar } from './ChatSidebar'
+import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import type { AgentTimelineProps } from './types'
-import type { ProcessingWebTask, StreamState } from '../../types/agentChat'
+import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import { buildAgentComposerPalette } from '../../util/color'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentColorHex?: string | null
-  header?: ReactNode
+  agentAvatarUrl?: string | null
+  agentName?: string | null
+  connectionStatus?: ConnectionStatusTone
+  connectionLabel?: string
+  connectionDetail?: string | null
+  kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
+  onClose?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   autoScrollPinned?: boolean
   hasUnseenActivity?: boolean
@@ -39,7 +46,12 @@ export function AgentChatLayout({
   agentFirstName,
   events,
   agentColorHex,
-  header,
+  agentAvatarUrl,
+  agentName,
+  connectionStatus,
+  connectionLabel,
+  connectionDetail,
+  kanbanSnapshot,
   footer,
   hasMoreOlder,
   hasMoreNewer,
@@ -54,6 +66,7 @@ export function AgentChatLayout({
   onLoadOlder,
   onLoadNewer,
   onJumpToLatest,
+  onClose,
   onSendMessage,
   autoScrollPinned = true,
   hasUnseenActivity = false,
@@ -82,7 +95,8 @@ export function AgentChatLayout({
 
   const showJumpButton = hasMoreNewer || hasUnseenActivity || !autoScrollPinned
 
-  const containerStyle = header
+  const showBanner = Boolean(agentName)
+  const containerStyle = showBanner
     ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 1.5rem)' }
     : undefined
   const composerPalette = buildAgentComposerPalette(agentColorHex)
@@ -92,9 +106,22 @@ export function AgentChatLayout({
   return (
     <>
       <ChatSidebar defaultCollapsed={true} onToggle={handleSidebarToggle} />
+      {showBanner && (
+        <AgentChatBanner
+          agentName={agentName || 'Agent'}
+          agentAvatarUrl={agentAvatarUrl}
+          agentColorHex={agentColorHex}
+          connectionStatus={connectionStatus}
+          connectionLabel={connectionLabel}
+          connectionDetail={connectionDetail}
+          kanbanSnapshot={kanbanSnapshot}
+          processingActive={processingActive}
+          onClose={onClose}
+          sidebarCollapsed={sidebarCollapsed}
+        />
+      )}
       <main className={`min-h-screen ${mainClassName}`}>
         <div className="mx-auto flex min-h-screen w-full flex-col px-4 pb-0 pt-6 sm:px-6 lg:px-10" style={containerStyle}>
-          {header ? <div className="relative z-30">{header}</div> : null}
           <div
             id="agent-workspace-root"
             className="relative flex flex-1 flex-col gap-2"

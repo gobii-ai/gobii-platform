@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
-import { AgentChatBanner, type ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
+import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentChatStore } from '../stores/agentChatStore'
@@ -95,12 +95,13 @@ export type AgentChatPageProps = {
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
+  onClose?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose }: AgentChatPageProps) {
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
@@ -422,18 +423,13 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
       <AgentChatLayout
         agentFirstName={agentFirstName}
         agentColorHex={agentColorHex || agentColor || undefined}
-        header={
-          <AgentChatBanner
-            agentName={resolvedAgentName || 'Agent'}
-            agentAvatarUrl={resolvedAvatarUrl}
-            agentColorHex={agentColorHex || agentColor || undefined}
-            connectionStatus={connectionIndicator.status}
-            connectionLabel={connectionIndicator.label}
-            connectionDetail={connectionIndicator.detail}
-            kanbanSnapshot={latestKanbanSnapshot}
-            processingActive={processingActive}
-          />
-        }
+        agentAvatarUrl={resolvedAvatarUrl}
+        agentName={resolvedAgentName || 'Agent'}
+        connectionStatus={connectionIndicator.status}
+        connectionLabel={connectionIndicator.label}
+        connectionDetail={connectionIndicator.detail}
+        kanbanSnapshot={latestKanbanSnapshot}
+        onClose={onClose}
         events={events}
         hasMoreOlder={hasMoreOlder}
         hasMoreNewer={hasMoreNewer}

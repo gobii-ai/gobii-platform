@@ -183,20 +183,14 @@ export function ImmersiveApp() {
     return () => controller.abort()
   }, [route.kind])
 
+  const handleClose = () => window.location.assign(returnTo)
+
   return (
     <div className="immersive-shell">
-      {!embed ? (
-        <button
-          type="button"
-          className="immersive-exit"
-          aria-label="Exit immersive view"
-          onClick={() => window.location.assign(returnTo)}
-        >
-          <span aria-hidden="true">&times;</span>
-        </button>
-      ) : null}
       <div className="immersive-shell__content">
-        {route.kind === 'agent-chat' ? <AgentChatPage agentId={route.agentId} /> : null}
+        {route.kind === 'agent-chat' ? (
+          <AgentChatPage agentId={route.agentId} onClose={!embed ? handleClose : undefined} />
+        ) : null}
         {route.kind === 'command-center' ? <CommandCenter /> : null}
         {route.kind === 'not-found' ? <NotFound /> : null}
       </div>
