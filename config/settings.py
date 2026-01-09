@@ -21,8 +21,11 @@ env = environ.Env(
 )
 # loads infra/local/.env when running locally
 env_file = ROOT_DIR / "infra" / "platform" / "local" / ".env"
+local_env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(env_file)
+elif local_env_file.exists():
+    environ.Env.read_env(local_env_file)
 
 # Ensure local dev has a sensible default release environment identifier.
 # setdefault means staging/prod/preview, which explicitly pass this variable
