@@ -361,18 +361,38 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     if (pendingScrollFrameRef.current !== null) {
       return
     }
-    const scroller = getScrollContainer()
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      // Calculate max scroll accounting for visualViewport on mobile
-      const documentHeight = scroller.scrollHeight
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-      // On mobile with visualViewport, we need to account for the offset from page top
       const vvOffsetTop = window.visualViewport?.offsetTop ?? 0
+
+      // Find the bottom sentinel to determine where actual content ends
+      const sentinel = bottomSentinelRef.current
+      const composer = document.getElementById('agent-composer-shell')
+
+      if (sentinel && composer) {
+        const sentinelRect = sentinel.getBoundingClientRect()
+        const composerRect = composer.getBoundingClientRect()
+        // Small gap between content bottom and composer top
+        const gap = 16
+        // Calculate where we want the sentinel's bottom to be
+        const targetBottom = composerRect.top - gap
+        // How much we need to scroll to get the sentinel to that position
+        const delta = sentinelRect.bottom - targetBottom
+
+        // Only scroll down (positive delta) - never scroll up during auto-scroll
+        if (delta > 0) {
+          window.scrollBy({ top: delta })
+        }
+        return
+      }
+
+      // Fallback when elements not found: scroll to document bottom
+      const documentHeight = document.documentElement.scrollHeight
       const scrollTarget = documentHeight - viewportHeight + vvOffsetTop
       window.scrollTo({ top: Math.max(0, scrollTarget) })
     })
-  }, [getScrollContainer])
+  }, [])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
