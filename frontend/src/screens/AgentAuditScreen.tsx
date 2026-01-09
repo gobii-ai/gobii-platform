@@ -377,6 +377,9 @@ function CompletionCard({
   const systemPrompt = promptPayload?.system_prompt
   const userPrompt = promptPayload?.user_prompt
   const [expanded, setExpanded] = useState(false)
+  const [responseIdCopied, setResponseIdCopied] = useState(false)
+  const responseCopyTimeout = useRef<number | null>(null)
+  const responseId = completion.response_id
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -386,6 +389,28 @@ function CompletionCard({
       console.error('Copy failed', err)
     }
   }
+
+  const handleCopyResponseId = async () => {
+    if (!responseId) return
+    try {
+      await navigator.clipboard.writeText(responseId)
+      setResponseIdCopied(true)
+      if (responseCopyTimeout.current) {
+        window.clearTimeout(responseCopyTimeout.current)
+      }
+      responseCopyTimeout.current = window.setTimeout(() => setResponseIdCopied(false), 1400)
+    } catch (err) {
+      console.error('Copy failed', err)
+    }
+  }
+
+  useEffect(() => {
+    return () => {
+      if (responseCopyTimeout.current) {
+        window.clearTimeout(responseCopyTimeout.current)
+      }
+    }
+  }, [])
 
   const completionLabel = useMemo(() => {
     const key = (completion.completion_type || '').toLowerCase()
@@ -432,11 +457,24 @@ function CompletionCard({
 
       {!collapsed ? (
         <>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <div className="mt-3 flex flex-wrap items-center gap-2">
             <TokenPill label="Prompt" value={completion.prompt_tokens} />
             <TokenPill label="Output" value={completion.completion_tokens} />
             <TokenPill label="Total" value={completion.total_tokens} />
             <TokenPill label="Cached" value={completion.cached_tokens} />
+            {responseId ? (
+              <button
+                type="button"
+                onClick={handleCopyResponseId}
+                title="Copy response id"
+                className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-indigo-200"
+              >
+                Copy Response ID
+              </button>
+            ) : null}
+            {responseIdCopied ? (
+              <span className="text-[11px] text-emerald-600 transition-opacity">Copied</span>
+            ) : null}
           </div>
 
           {archiveId ? (
@@ -604,12 +642,12 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
 
     const timeout = window.setTimeout(() => {
       searchStaffAgents(query, { limit: AGENT_SEARCH_LIMIT })
-        .then((payload) => {
+        .then((payload: any) => {
           if (agentSearchRequestId.current !== requestId) return
           setAgentSearchResults(payload.agents)
           setAgentSearchError(null)
         })
-        .catch((error) => {
+        .catch((error: any) => {
           if (agentSearchRequestId.current !== requestId) return
           setAgentSearchResults([])
           setAgentSearchError(error instanceof Error ? error.message : 'Unable to search agents right now.')
