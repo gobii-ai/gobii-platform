@@ -1,8 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
   ChevronDown,
   ChevronUp,
-  Copy,
   Cpu,
   Filter,
   ListChevronsDownUp,
@@ -10,6 +9,7 @@ import {
   Megaphone,
   MessageCircle,
   RefreshCcw,
+  Search,
   Stethoscope,
   StepForward,
   Wrench,
@@ -18,7 +18,7 @@ import {
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
-import { createSystemMessage, fetchPromptArchive, triggerProcessEvents, updateSystemMessage } from '../api/agentAudit'
+import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
 import { StructuredDataTable } from '../components/common/StructuredDataTable'
 import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
@@ -71,6 +71,13 @@ const DEFAULT_FILTERS = {
   miniDescription: true,
   shortDescription: true,
 } as const
+
+const AGENT_SEARCH_LIMIT = 8
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function isUuid(value: string): boolean {
+  return UUID_PATTERN.test(value)
+}
 
 type FilterState = {
   [Key in keyof typeof DEFAULT_FILTERS]: boolean
@@ -532,6 +539,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const messageNodeMap = useRef(new Map<string, HTMLDivElement>())
   const messageIdByNode = useRef(new Map<Element, string>())
+  const agentSearchRequestId = useRef(0)
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
@@ -545,6 +553,11 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
   const [messageSubmitting, setMessageSubmitting] = useState(false)
   const [messageError, setMessageError] = useState<string | null>(null)
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
+  const [agentSearchOpen, setAgentSearchOpen] = useState(false)
+  const [agentSearchQuery, setAgentSearchQuery] = useState('')
+  const [agentSearchResults, setAgentSearchResults] = useState<StaffAgentSearchResult[]>([])
+  const [agentSearchLoading, setAgentSearchLoading] = useState(false)
+  const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
   const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
 
@@ -561,6 +574,81 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     window.addEventListener('resize', measure)
     return () => window.removeEventListener('resize', measure)
   }, [agentId, initialize, loadTimeline])
+
+  useEffect(() => {
+    if (!agentSearchOpen) {
+      agentSearchRequestId.current += 1
+      setAgentSearchQuery('')
+      setAgentSearchResults([])
+      setAgentSearchError(null)
+      setAgentSearchLoading(false)
+    }
+  }, [agentSearchOpen])
+
+  useEffect(() => {
+    if (!agentSearchOpen) {
+      return
+    }
+    const query = agentSearchQuery.trim()
+    if (!query) {
+      agentSearchRequestId.current += 1
+      setAgentSearchResults([])
+      setAgentSearchError(null)
+      setAgentSearchLoading(false)
+      return
+    }
+
+    const requestId = agentSearchRequestId.current + 1
+    agentSearchRequestId.current = requestId
+    setAgentSearchLoading(true)
+
+    const timeout = window.setTimeout(() => {
+      searchStaffAgents(query, { limit: AGENT_SEARCH_LIMIT })
+        .then((payload) => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchResults(payload.agents)
+          setAgentSearchError(null)
+        })
+        .catch((error) => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchResults([])
+          setAgentSearchError(error instanceof Error ? error.message : 'Unable to search agents right now.')
+        })
+        .finally(() => {
+          if (agentSearchRequestId.current !== requestId) return
+          setAgentSearchLoading(false)
+        })
+    }, 250)
+
+    return () => window.clearTimeout(timeout)
+  }, [agentSearchOpen, agentSearchQuery])
+
+  const handleAgentNavigate = useCallback(
+    (targetId: string) => {
+      if (!targetId || targetId === agentId) {
+        setAgentSearchOpen(false)
+        return
+      }
+      window.location.assign(`/console/staff/agents/${targetId}/audit/`)
+    },
+    [agentId],
+  )
+
+  const handleAgentSearchSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault()
+      const query = agentSearchQuery.trim()
+      if (!query) return
+      const matchById = agentSearchResults.find((agent) => agent.id === query)
+      const matchByName = agentSearchResults.find((agent) => agent.name?.toLowerCase() === query.toLowerCase())
+      const fallback = agentSearchResults.length === 1 ? agentSearchResults[0] : null
+      const target = matchById || matchByName || (isUuid(query) ? { id: query } : null) || fallback
+      if (target) {
+        handleAgentNavigate(target.id)
+      }
+    },
+    [agentSearchQuery, agentSearchResults, handleAgentNavigate],
+  )
 
   const filterEvents = useCallback(
     (eventsToFilter: AuditEvent[]) => {
@@ -871,21 +959,62 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             <div className="flex items-center gap-2 text-2xl font-bold leading-tight text-slate-900">
               <Stethoscope className="h-6 w-6 text-slate-700" aria-hidden />
               <span>{agentName || 'Agent'}</span>
+              <div className="relative">
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:text-slate-900"
+                  onClick={() => setAgentSearchOpen((open) => !open)}
+                  aria-label="Switch agent"
+                  aria-expanded={agentSearchOpen}
+                >
+                  <ChevronDown className="h-4 w-4" aria-hidden />
+                </button>
+                {agentSearchOpen ? (
+                  <div className="absolute left-0 z-30 mt-2 w-72 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
+                    <form onSubmit={handleAgentSearchSubmit} className="space-y-2">
+                      <label className="relative block">
+                        <span className="sr-only">Search agents</span>
+                        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+                          <Search className="h-4 w-4" aria-hidden />
+                        </span>
+                        <input
+                          type="search"
+                          value={agentSearchQuery}
+                          onChange={(event) => setAgentSearchQuery(event.target.value)}
+                          placeholder="Search Agents"
+                          className="w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm text-slate-800 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-200/60"
+                          autoFocus
+                        />
+                      </label>
+                      {agentSearchLoading ? (
+                        <div className="px-1 text-xs text-slate-500">Searching…</div>
+                      ) : null}
+                      {agentSearchError ? (
+                        <div className="px-1 text-xs text-rose-600">{agentSearchError}</div>
+                      ) : null}
+                      {!agentSearchLoading && !agentSearchError && agentSearchQuery.trim() && !agentSearchResults.length ? (
+                        <div className="px-1 text-xs text-slate-500">No matching agents.</div>
+                      ) : null}
+                      <div className="max-h-56 space-y-1 overflow-y-auto">
+                        {agentSearchResults.map((agent) => (
+                          <button
+                            key={agent.id}
+                            type="button"
+                            className="w-full rounded-lg border border-transparent px-2 py-2 text-left text-slate-800 transition hover:border-slate-200 hover:bg-slate-900/5"
+                            onClick={() => handleAgentNavigate(agent.id)}
+                          >
+                            <div className="text-sm font-semibold text-slate-900">{agent.name || 'Agent'}</div>
+                            <div className="text-[11px] text-slate-500">{agent.id}</div>
+                          </button>
+                        ))}
+                      </div>
+                    </form>
+                  </div>
+                ) : null}
+              </div>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
-              onClick={() => {
-                if (!agentId) return
-                navigator.clipboard?.writeText(agentId).catch(() => {})
-              }}
-              aria-label="Copy agent id"
-            >
-              <Copy className="h-4 w-4" aria-hidden />
-              Copy Agent ID
-            </button>
             <button
               type="button"
               className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"

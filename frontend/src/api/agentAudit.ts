@@ -19,6 +19,15 @@ type TimelineResponse = {
   days: number
 }
 
+export type StaffAgentSearchResult = {
+  id: string
+  name: string
+}
+
+type StaffAgentSearchResponse = {
+  agents: StaffAgentSearchResult[]
+}
+
 export async function fetchAuditEvents(
   agentId: string,
   params: { cursor?: string | null; limit?: number; at?: string | null; day?: string | null; tzOffsetMinutes?: number | null } = {},
@@ -45,6 +54,14 @@ export async function fetchAuditTimeline(agentId: string, params: { days?: numbe
   query.set('tz_offset_minutes', tzOffset.toString())
   const url = `/console/api/staff/agents/${agentId}/audit/timeline/${query.toString() ? `?${query.toString()}` : ''}`
   return jsonFetch<TimelineResponse>(url)
+}
+
+export async function searchStaffAgents(query: string, params: { limit?: number } = {}): Promise<StaffAgentSearchResponse> {
+  const search = new URLSearchParams()
+  search.set('q', query)
+  if (params.limit) search.set('limit', params.limit.toString())
+  const url = `/console/api/staff/agents/search/${search.toString() ? `?${search.toString()}` : ''}`
+  return jsonFetch<StaffAgentSearchResponse>(url)
 }
 
 export async function triggerProcessEvents(agentId: string): Promise<{ queued: boolean; processing_active: boolean }> {
