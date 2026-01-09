@@ -2904,6 +2904,66 @@
   color: #64748b;
 }
 
+/* Sidebar search */
+.chat-sidebar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin: 0 0.25rem 0.5rem;
+}
+
+.chat-sidebar-search-icon {
+  position: absolute;
+  left: 0.5rem;
+  width: 0.875rem;
+  height: 0.875rem;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.chat-sidebar-search-input {
+  width: 100%;
+  height: 1.75rem;
+  padding: 0 1.75rem 0 1.75rem;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 0.375rem;
+  background: rgba(248, 250, 252, 0.6);
+  font-size: 0.75rem;
+  color: #334155;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-sidebar-search-input::placeholder {
+  color: #94a3b8;
+}
+
+.chat-sidebar-search-input:focus {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: white;
+}
+
+.chat-sidebar-search-clear {
+  position: absolute;
+  right: 0.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: none;
+  border-radius: 0.25rem;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.chat-sidebar-search-clear:hover {
+  background: rgba(100, 116, 139, 0.1);
+  color: #64748b;
+}
+
 .chat-sidebar--collapsed .chat-sidebar-section {
   overflow: visible;
 }
@@ -3218,6 +3278,69 @@
 
 .agent-drawer-close:active {
   background: rgba(203, 213, 225, 1);
+}
+
+/* Drawer search */
+.agent-drawer-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.agent-drawer-search-icon {
+  position: absolute;
+  left: 1.25rem;
+  width: 1rem;
+  height: 1rem;
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.agent-drawer-search-input {
+  width: 100%;
+  height: 2.5rem;
+  padding: 0 2.5rem;
+  border: 1px solid rgba(226, 232, 240, 0.8);
+  border-radius: 0.5rem;
+  background: rgba(248, 250, 252, 0.6);
+  font-size: 0.9375rem;
+  color: #334155;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.agent-drawer-search-input::placeholder {
+  color: #94a3b8;
+}
+
+.agent-drawer-search-input:focus {
+  border-color: rgba(99, 102, 241, 0.4);
+  background: white;
+}
+
+.agent-drawer-search-clear {
+  position: absolute;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  border-radius: 0.375rem;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.agent-drawer-search-clear:active {
+  background: rgba(100, 116, 139, 0.15);
+  color: #64748b;
 }
 
 .agent-drawer-list {

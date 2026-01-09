@@ -1,8 +1,10 @@
-import { memo, useState, useCallback, useEffect, type CSSProperties } from 'react'
-import { PanelLeft, PanelLeftClose, X, Check, Menu } from 'lucide-react'
+import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react'
+import { PanelLeft, PanelLeftClose, X, Check, Menu, Search } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+
+const SEARCH_THRESHOLD = 6
 
 type ChatSidebarProps = {
   agents?: AgentRosterEntry[]
@@ -28,6 +30,25 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const [isMobile, setIsMobile] = useState(false)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const showSearch = agents.length >= SEARCH_THRESHOLD
+  const filteredAgents = useMemo(() => {
+    if (!searchQuery.trim()) return agents
+    const query = searchQuery.toLowerCase()
+    return agents.filter(
+      (agent) =>
+        agent.name?.toLowerCase().includes(query) ||
+        agent.shortDescription?.toLowerCase().includes(query),
+    )
+  }, [agents, searchQuery])
+
+  // Clear search when drawer closes
+  useEffect(() => {
+    if (!drawerOpen) {
+      setSearchQuery('')
+    }
+  }, [drawerOpen])
 
   // Detect mobile breakpoint
   useEffect(() => {
@@ -122,6 +143,31 @@ export const ChatSidebar = memo(function ChatSidebar({
               <X className="h-5 w-5" />
             </button>
           </div>
+          {showSearch ? (
+            <div className="agent-drawer-search">
+              <Search className="agent-drawer-search-icon" aria-hidden="true" />
+              <input
+                type="text"
+                className="agent-drawer-search-input"
+                placeholder="Search agents..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  className="agent-drawer-search-clear"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
           <div className="agent-drawer-list" role="list">
             {!hasAgents && loading ? (
               <div className="agent-drawer-empty">Loading agents...</div>
@@ -132,7 +178,10 @@ export const ChatSidebar = memo(function ChatSidebar({
             {!hasAgents && !loading && !errorMessage ? (
               <div className="agent-drawer-empty">No agents yet.</div>
             ) : null}
-            {agents.map((agent) => {
+            {hasAgents && filteredAgents.length === 0 && searchQuery ? (
+              <div className="agent-drawer-empty">No agents match "{searchQuery}"</div>
+            ) : null}
+            {filteredAgents.map((agent) => {
               const isActive = agent.id === activeAgentId
               const isSwitching = agent.id === switchingAgentId
               const accentStyle = agent.displayColorHex
@@ -207,6 +256,32 @@ export const ChatSidebar = memo(function ChatSidebar({
             ) : null}
           </div>
 
+          {!collapsed && showSearch ? (
+            <div className="chat-sidebar-search">
+              <Search className="chat-sidebar-search-icon" aria-hidden="true" />
+              <input
+                type="text"
+                className="chat-sidebar-search-input"
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
+              {searchQuery ? (
+                <button
+                  type="button"
+                  className="chat-sidebar-search-clear"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Clear search"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
           <div className="chat-sidebar-agent-list" role="list">
             {!hasAgents && loading ? (
               <div className="chat-sidebar-agent-empty">Loading agents...</div>
@@ -217,7 +292,10 @@ export const ChatSidebar = memo(function ChatSidebar({
             {!hasAgents && !loading && !errorMessage ? (
               <div className="chat-sidebar-agent-empty">No agents yet.</div>
             ) : null}
-            {agents.map((agent) => {
+            {hasAgents && filteredAgents.length === 0 && searchQuery ? (
+              <div className="chat-sidebar-agent-empty">No matches</div>
+            ) : null}
+            {filteredAgents.map((agent) => {
               const isActive = agent.id === activeAgentId
               const isSwitching = agent.id === switchingAgentId
               const accentStyle = agent.displayColorHex
