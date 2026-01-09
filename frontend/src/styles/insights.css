@@ -6,10 +6,10 @@
 .insight-card-v2 {
   display: flex;
   align-items: center;
-  gap: 1.5rem;
+  gap: 2rem;
   position: relative;
   width: 100%;
-  padding: 1rem 1.25rem;
+  padding: 0.25rem 1.5rem 0.25rem 0.5rem;
   border-radius: 16px;
   overflow: hidden;
 }
@@ -126,7 +126,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.5rem;
+  gap: 0.25rem;
   min-width: 0;
   z-index: 1;
 }
