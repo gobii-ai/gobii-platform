@@ -1,8 +1,8 @@
-import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react'
-import { PanelLeft, PanelLeftClose, X, Check, Menu, Search } from 'lucide-react'
+import { memo, useState, useCallback, useEffect, useMemo } from 'react'
+import { PanelLeft, PanelLeftClose, Menu } from 'lucide-react'
 
-import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
 
 const SEARCH_THRESHOLD = 6
 
@@ -143,81 +143,35 @@ export const ChatSidebar = memo(function ChatSidebar({
             </button>
           </div>
           {showSearch ? (
-            <div className="agent-drawer-search">
-              <Search className="agent-drawer-search-icon" aria-hidden="true" />
-              <input
-                type="text"
-                className="agent-drawer-search-input"
-                placeholder="Search agents..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  className="agent-drawer-search-clear"
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Clear search"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              ) : null}
-            </div>
+            <AgentSearchInput
+              variant="drawer"
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onClear={() => setSearchQuery('')}
+            />
           ) : null}
           <div className="agent-drawer-list" role="list">
-            {!hasAgents && loading ? (
-              <div className="agent-drawer-empty">Loading agents...</div>
-            ) : null}
-            {!hasAgents && !loading && errorMessage ? (
-              <div className="agent-drawer-empty">{errorMessage}</div>
-            ) : null}
-            {!hasAgents && !loading && !errorMessage ? (
-              <div className="agent-drawer-empty">No agents yet.</div>
-            ) : null}
-            {hasAgents && filteredAgents.length === 0 && searchQuery ? (
-              <div className="agent-drawer-empty">No agents match "{searchQuery}"</div>
-            ) : null}
+            <AgentEmptyState
+              variant="drawer"
+              hasAgents={hasAgents}
+              loading={loading}
+              errorMessage={errorMessage}
+              filteredCount={filteredAgents.length}
+              searchQuery={searchQuery}
+            />
             {filteredAgents.map((agent) => {
               const isActive = agent.id === activeAgentId
               const isSwitching = agent.id === switchingAgentId
-              const accentStyle = agent.displayColorHex
-                ? ({ '--agent-accent': agent.displayColorHex } as CSSProperties)
-                : undefined
               return (
-                <button
+                <AgentListItem
                   key={agent.id}
-                  type="button"
-                  className="agent-drawer-item"
-                  data-active={isActive ? 'true' : 'false'}
-                  data-switching={isSwitching ? 'true' : 'false'}
-                  data-enabled={agent.isActive ? 'true' : 'false'}
-                  onClick={() => handleAgentSelect(agent)}
-                  style={accentStyle}
-                  role="listitem"
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  <AgentAvatarBadge
-                    name={agent.name || 'Agent'}
-                    avatarUrl={agent.avatarUrl}
-                    className="agent-drawer-item-avatar"
-                    imageClassName="agent-drawer-item-avatar-image"
-                    textClassName="agent-drawer-item-avatar-text"
-                  />
-                  <span className="agent-drawer-item-meta">
-                    <span className="agent-drawer-item-name">{agent.name || 'Agent'}</span>
-                    {agent.shortDescription ? (
-                      <span className="agent-drawer-item-desc">{agent.shortDescription}</span>
-                    ) : !agent.isActive ? (
-                      <span className="agent-drawer-item-state">Paused</span>
-                    ) : null}
-                  </span>
-                  {isActive ? (
-                    <Check className="agent-drawer-item-check" aria-hidden="true" />
-                  ) : null}
-                </button>
+                  variant="drawer"
+                  agent={agent}
+                  isActive={isActive}
+                  isSwitching={isSwitching}
+                  onSelect={handleAgentSelect}
+                  accentColor={agent.displayColorHex}
+                />
               )
             })}
           </div>
@@ -256,82 +210,37 @@ export const ChatSidebar = memo(function ChatSidebar({
           </div>
 
           {!collapsed && showSearch ? (
-            <div className="chat-sidebar-search">
-              <Search className="chat-sidebar-search-icon" aria-hidden="true" />
-              <input
-                type="text"
-                className="chat-sidebar-search-input"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                autoComplete="off"
-                autoCapitalize="off"
-                spellCheck={false}
-              />
-              {searchQuery ? (
-                <button
-                  type="button"
-                  className="chat-sidebar-search-clear"
-                  onClick={() => setSearchQuery('')}
-                  aria-label="Clear search"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              ) : null}
-            </div>
+            <AgentSearchInput
+              variant="sidebar"
+              value={searchQuery}
+              onChange={setSearchQuery}
+              onClear={() => setSearchQuery('')}
+            />
           ) : null}
 
           <div className="chat-sidebar-agent-list" role="list">
-            {!hasAgents && loading ? (
-              <div className="chat-sidebar-agent-empty">Loading agents...</div>
-            ) : null}
-            {!hasAgents && !loading && errorMessage ? (
-              <div className="chat-sidebar-agent-empty">{errorMessage}</div>
-            ) : null}
-            {!hasAgents && !loading && !errorMessage ? (
-              <div className="chat-sidebar-agent-empty">No agents yet.</div>
-            ) : null}
-            {hasAgents && filteredAgents.length === 0 && searchQuery ? (
-              <div className="chat-sidebar-agent-empty">No matches</div>
-            ) : null}
+            <AgentEmptyState
+              variant="sidebar"
+              hasAgents={hasAgents}
+              loading={loading}
+              errorMessage={errorMessage}
+              filteredCount={filteredAgents.length}
+              searchQuery={searchQuery}
+            />
             {filteredAgents.map((agent) => {
               const isActive = agent.id === activeAgentId
               const isSwitching = agent.id === switchingAgentId
-              const accentStyle = agent.displayColorHex
-                ? ({ '--agent-accent': agent.displayColorHex } as CSSProperties)
-                : undefined
               return (
-                <button
+                <AgentListItem
                   key={agent.id}
-                  type="button"
-                  className="chat-sidebar-agent"
-                  data-active={isActive ? 'true' : 'false'}
-                  data-switching={isSwitching ? 'true' : 'false'}
-                  data-enabled={agent.isActive ? 'true' : 'false'}
-                  onClick={() => handleAgentSelect(agent)}
-                  title={collapsed ? agent.name || 'Agent' : undefined}
-                  style={accentStyle}
-                  role="listitem"
-                  aria-current={isActive ? 'page' : undefined}
-                >
-                  <AgentAvatarBadge
-                    name={agent.name || 'Agent'}
-                    avatarUrl={agent.avatarUrl}
-                    className="chat-sidebar-agent-avatar"
-                    imageClassName="chat-sidebar-agent-avatar-image"
-                    textClassName="chat-sidebar-agent-avatar-text"
-                  />
-                  {!collapsed ? (
-                    <span className="chat-sidebar-agent-meta">
-                      <span className="chat-sidebar-agent-name">{agent.name || 'Agent'}</span>
-                      {agent.shortDescription ? (
-                        <span className="chat-sidebar-agent-desc">{agent.shortDescription}</span>
-                      ) : !agent.isActive ? (
-                        <span className="chat-sidebar-agent-state">Paused</span>
-                      ) : null}
-                    </span>
-                  ) : null}
-                </button>
+                  variant="sidebar"
+                  agent={agent}
+                  isActive={isActive}
+                  isSwitching={isSwitching}
+                  onSelect={handleAgentSelect}
+                  accentColor={agent.displayColorHex}
+                  collapsed={collapsed}
+                />
               )
             })}
           </div>

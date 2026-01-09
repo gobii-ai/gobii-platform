@@ -2,42 +2,29 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   ChevronDown,
   ChevronUp,
-  Cpu,
-  Filter,
   ListChevronsDownUp,
   ListChevronsUpDown,
   Megaphone,
-  MessageCircle,
   RefreshCcw,
   Search,
   Stethoscope,
-  StepForward,
-  Wrench,
-  type LucideIcon,
 } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditCompletionEvent, AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, PromptArchive, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
+import type { AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
-import { StructuredDataTable } from '../components/common/StructuredDataTable'
-import { normalizeStructuredValue } from '../components/agentChat/toolDetails'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
-import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
-import { MessageContent } from '../components/agentChat/MessageContent'
-import { EventHeader } from '../components/agentAudit/EventHeader'
+import { AgentAuditFiltersMenu } from '../components/agentAudit/AgentAuditFiltersMenu'
+import { CompletionCard, type PromptState } from '../components/agentAudit/CompletionCard'
+import { MessageRow, StepRow, ToolCallRow } from '../components/agentAudit/EventRows'
+import { renderHtmlOrText } from '../components/agentAudit/eventPrimitives'
 
 type AgentAuditScreenProps = {
   agentId: string
   agentName?: string | null
   agentColor?: string | null
-}
-
-type PromptState = {
-  loading: boolean
-  data?: PromptArchive
-  error?: string
 }
 
 function eventKeyFor(event: AuditEvent): string {
@@ -115,442 +102,6 @@ const COMPLETION_TYPE_FILTERS: {
   { key: 'miniDescription', label: 'Mini description', matches: (completionType) => completionType === 'mini_description' },
   { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
 ]
-
-function renderHtmlOrText(
-  value: string,
-  {
-    htmlClassName = 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
-    textClassName = 'whitespace-pre-wrap break-words text-sm text-slate-800',
-  }: { htmlClassName?: string; textClassName?: string } = {},
-) {
-  if (looksLikeHtml(value)) {
-    return <div className={htmlClassName} dangerouslySetInnerHTML={{ __html: sanitizeHtml(value) }} />
-  }
-  return <div className={textClassName}>{value}</div>
-}
-
-function IconCircle({ icon: Icon, bgClass, textClass }: { icon: LucideIcon; bgClass: string; textClass: string }) {
-  return (
-    <div className={`mt-0.5 flex h-9 w-9 items-center justify-center rounded-full ${bgClass} ${textClass}`}>
-      <Icon className="h-4 w-4" aria-hidden />
-    </div>
-  )
-}
-
-function TokenPill({ label, value }: { label: string; value: number | null | undefined }) {
-  if (value == null) return null
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800">
-      <span className="text-[10px] uppercase tracking-wide text-slate-600">{label}</span>
-      <span className="font-semibold">{value}</span>
-    </span>
-  )
-}
-
-function ToolCallRow({
-  tool,
-  collapsed,
-  onToggle,
-}: {
-  tool: AuditToolCallEvent
-  collapsed?: boolean
-  onToggle?: () => void
-}) {
-  const [expanded, setExpanded] = useState(true)
-  const isControlled = collapsed !== undefined
-  const isExpanded = isControlled ? !collapsed : expanded
-  const toggle = () => {
-    if (isControlled) {
-      onToggle?.()
-    } else {
-      setExpanded((prev) => !prev)
-    }
-  }
-  const resultPreview = useMemo(() => {
-    if (!tool.result) return null
-    const trimmed = tool.result.length > 160 ? `${tool.result.slice(0, 160)}…` : tool.result
-    return trimmed
-  }, [tool.result])
-
-  const parsedParameters = useMemo(() => {
-    if (tool.parameters === null || tool.parameters === undefined) return null
-    try {
-      return normalizeStructuredValue(tool.parameters, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
-    } catch {
-      return tool.parameters
-    }
-  }, [tool.parameters])
-
-  const parsedResult = useMemo(() => {
-    if (tool.result === null || tool.result === undefined) return null
-    let value: unknown = tool.result
-    if (typeof value === 'string') {
-      try {
-        const maybeJson = JSON.parse(value)
-        value = maybeJson
-      } catch {
-        // leave as string
-      }
-    }
-    try {
-      return normalizeStructuredValue(value, { depth: 0, maxDepth: 6, seen: new WeakSet<object>() })
-    } catch {
-      return value
-    }
-  }, [tool.result])
-
-  const renderValue = (value: unknown) => {
-    if (value === null || value === undefined) return null
-    if (typeof value === 'string') {
-      return renderHtmlOrText(value, {
-        htmlClassName: 'prose prose-sm max-w-none rounded-md bg-white px-3 py-2 text-slate-800 shadow-inner shadow-slate-200/60',
-        textClassName: 'rounded-md bg-indigo-50 px-2 py-1 text-[12px] text-slate-800',
-      })
-    }
-    return <StructuredDataTable value={value} />
-  }
-
-  return (
-    <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <EventHeader
-        left={
-          <>
-            <IconCircle icon={Wrench} bgClass="bg-indigo-50" textClass="text-indigo-700" />
-            <div>
-              <div className="text-sm font-semibold text-slate-900">{tool.tool_name || 'Tool call'}</div>
-              <div className="text-xs text-slate-600">{tool.timestamp ? new Date(tool.timestamp).toLocaleString() : '—'}</div>
-            </div>
-          </>
-        }
-        right={resultPreview ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">Tool</span> : null}
-        collapsed={!isExpanded}
-        onToggle={toggle}
-      />
-      {!isExpanded && resultPreview ? (
-        <div className="mt-2 text-sm text-slate-700">{resultPreview}</div>
-      ) : null}
-      {isExpanded && parsedParameters ? (
-        <div className="mt-2 space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Parameters</div>
-          {renderValue(parsedParameters)}
-        </div>
-      ) : null}
-      {isExpanded && parsedResult ? (
-        <div className="mt-2 space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-600">Result</div>
-          {renderValue(parsedResult)}
-        </div>
-      ) : null}
-    </div>
-  )
-}
-
-function MessageRow({
-  message,
-  collapsed = false,
-  onToggle,
-}: {
-  message: AuditMessageEvent
-  collapsed?: boolean
-  onToggle?: () => void
-}) {
-  const htmlBody = message.body_html && looksLikeHtml(message.body_html) ? message.body_html : null
-  const textBody = message.body_text || (htmlBody ? null : message.body_html)
-  const hasBody = Boolean(htmlBody || (textBody && textBody.trim().length > 0))
-  const attachments = message.attachments || []
-
-  return (
-    <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <EventHeader
-        left={
-          <>
-            <IconCircle icon={MessageCircle} bgClass="bg-emerald-50" textClass="text-emerald-700" />
-            <div>
-              <div className="text-sm font-semibold text-slate-900">
-                {message.is_outbound ? 'Agent → User' : 'User → Agent'}{' '}
-                <span className="text-xs font-normal text-slate-500">({message.channel || 'web'})</span>
-              </div>
-              <div className="text-xs text-slate-600">{message.timestamp ? new Date(message.timestamp).toLocaleString() : '—'}</div>
-            </div>
-          </>
-        }
-        right={<span className="rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">Message</span>}
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
-      {!collapsed ? (
-        <>
-          {hasBody ? (
-            <div className="mt-2 prose prose-sm max-w-none text-slate-800">
-              <MessageContent bodyHtml={htmlBody} bodyText={textBody} showEmptyState={false} />
-            </div>
-          ) : null}
-          {attachments.length > 0 ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              {attachments.map((attachment) => {
-                const href = attachment.download_url || attachment.url
-                const label = attachment.filespace_path || attachment.filename
-                return (
-                  <a
-                    key={attachment.id}
-                    href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-100"
-                    title={attachment.filespace_path || attachment.filename}
-                  >
-                    <span className="max-w-[240px] truncate">
-                      {label}
-                    </span>
-                    {attachment.file_size_label ? <span className="text-indigo-500">{attachment.file_size_label}</span> : null}
-                  </a>
-                )
-              })}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-function StepRow({
-  step,
-  collapsed = false,
-  onToggle,
-}: {
-  step: AuditStepEvent
-  collapsed?: boolean
-  onToggle?: () => void
-}) {
-  return (
-    <div className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,0.06)]">
-      <EventHeader
-        left={
-          <>
-            <IconCircle icon={StepForward} bgClass="bg-slate-100" textClass="text-slate-700" />
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Step</div>
-              <div className="text-xs text-slate-600">{step.timestamp ? new Date(step.timestamp).toLocaleString() : '—'}</div>
-            </div>
-          </>
-        }
-        right={
-          step.is_system ? (
-            <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-700">
-              {step.system_code || 'System'}
-            </span>
-          ) : (
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700">Step</span>
-          )
-        }
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
-      {!collapsed ? (
-        <>
-          {step.description ? <div className="mt-2 whitespace-pre-wrap break-words text-sm text-slate-800">{step.description}</div> : null}
-          {step.is_system && step.system_notes ? (
-            <div className="mt-2 rounded-md bg-slate-50 px-2 py-1 text-[12px] text-slate-700">{step.system_notes}</div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  )
-}
-
-function CompletionCard({
-  completion,
-  promptState,
-  onLoadPrompt,
-  collapsed = false,
-  onToggle,
-}: {
-  completion: AuditCompletionEvent
-  promptState: PromptState | undefined
-  onLoadPrompt: (archiveId: string) => void
-  collapsed?: boolean
-  onToggle?: () => void
-}) {
-  const archiveId = completion.prompt_archive?.id
-  const promptPayload = archiveId ? promptState?.data?.payload : null
-  const systemPrompt = promptPayload?.system_prompt
-  const userPrompt = promptPayload?.user_prompt
-  const [expanded, setExpanded] = useState(false)
-  const [responseIdCopied, setResponseIdCopied] = useState(false)
-  const responseCopyTimeout = useRef<number | null>(null)
-  const responseId = completion.response_id
-
-  const copyText = async (text?: string | null) => {
-    if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
-    } catch (err) {
-      console.error('Copy failed', err)
-    }
-  }
-
-  const handleCopyResponseId = async () => {
-    if (!responseId) return
-    try {
-      await navigator.clipboard.writeText(responseId)
-      setResponseIdCopied(true)
-      if (responseCopyTimeout.current) {
-        window.clearTimeout(responseCopyTimeout.current)
-      }
-      responseCopyTimeout.current = window.setTimeout(() => setResponseIdCopied(false), 1400)
-    } catch (err) {
-      console.error('Copy failed', err)
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      if (responseCopyTimeout.current) {
-        window.clearTimeout(responseCopyTimeout.current)
-      }
-    }
-  }, [])
-
-  const completionLabel = useMemo(() => {
-    const key = (completion.completion_type || '').toLowerCase()
-    switch (key) {
-      case 'orchestrator':
-        return 'Orchestrator'
-      case 'compaction':
-        return 'Comms Compaction'
-      case 'step_compaction':
-        return 'Step Compaction'
-      case 'tag':
-        return 'Tag Generation'
-      case 'short_description':
-        return 'Short Description Generation'
-      case 'mini_description':
-        return 'Mini Description Generation'
-      case 'tool_search':
-        return 'Tool Search'
-      default:
-        return 'Other'
-    }
-  }, [completion.completion_type])
-
-  return (
-    <div className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-[0_1px_3px_rgba(15,23,42,0.1)]">
-      <EventHeader
-        className="gap-4"
-        left={
-          <>
-            <IconCircle icon={Cpu} bgClass="bg-sky-50" textClass="text-sky-700" />
-            <div>
-              <div className="text-sm font-semibold text-slate-900">
-                {completionLabel} · {completion.llm_model || 'Unknown model'}{' '}
-                <span className="text-xs font-normal text-slate-500">({completion.llm_provider || 'provider'})</span>
-              </div>
-              <div className="text-xs text-slate-600">{completion.timestamp ? new Date(completion.timestamp).toLocaleString() : '—'}</div>
-            </div>
-          </>
-        }
-        right={<span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">LLM</span>}
-        collapsed={collapsed}
-        onToggle={onToggle}
-      />
-
-      {!collapsed ? (
-        <>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <TokenPill label="Prompt" value={completion.prompt_tokens} />
-            <TokenPill label="Output" value={completion.completion_tokens} />
-            <TokenPill label="Total" value={completion.total_tokens} />
-            <TokenPill label="Cached" value={completion.cached_tokens} />
-            {responseId ? (
-              <button
-                type="button"
-                onClick={handleCopyResponseId}
-                title="Copy response id"
-                className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-indigo-200"
-              >
-                Copy Response ID
-              </button>
-            ) : null}
-            {responseIdCopied ? (
-              <span className="text-[11px] text-emerald-600 transition-opacity">Copied</span>
-            ) : null}
-          </div>
-
-          {archiveId ? (
-            <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Prompt</div>
-                <button
-                  type="button"
-                  className="rounded-md bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white transition hover:bg-slate-800"
-                  onClick={() => {
-                    const next = !expanded
-                    setExpanded(next)
-                    if (next && !promptPayload && !promptState?.loading) {
-                      onLoadPrompt(archiveId)
-                    }
-                  }}
-                  disabled={promptState?.loading && !expanded}
-                >
-                  {expanded ? 'Collapse' : promptState?.loading ? 'Loading…' : 'Expand'}
-                </button>
-              </div>
-              {promptState?.error ? <div className="mt-2 text-xs text-rose-600">{promptState.error}</div> : null}
-              {expanded && promptPayload ? (
-                <div className="mt-2 space-y-2">
-                  {systemPrompt ? (
-                    <div>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span>System Prompt</span>
-                        <button
-                          type="button"
-                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                          onClick={() => copyText(systemPrompt)}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                        {systemPrompt}
-                      </pre>
-                    </div>
-                  ) : null}
-                  {userPrompt ? (
-                    <div>
-                      <div className="mb-1 flex items-center justify-between text-xs font-semibold text-slate-700">
-                        <span>User Prompt</span>
-                        <button
-                          type="button"
-                          className="rounded bg-slate-900 px-2 py-1 text-[11px] font-semibold text-white hover:bg-slate-800"
-                          onClick={() => copyText(userPrompt)}
-                        >
-                          Copy
-                        </button>
-                      </div>
-                      <pre className="whitespace-pre-wrap break-words rounded-md bg-white px-2 py-2 text-[12px] text-slate-800 shadow-inner shadow-slate-200/80">
-                        {userPrompt}
-                      </pre>
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-
-          {completion.tool_calls && completion.tool_calls.length ? (
-            <div className="mt-4 space-y-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tool Calls</div>
-              {completion.tool_calls.map((tool) => (
-                <ToolCallRow key={tool.id} tool={tool} />
-              ))}
-            </div>
-          ) : null}
-        </>
-      ) : null}
-    </div>
-  )
-}
 
 export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {
   const {
@@ -687,6 +238,10 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
     },
     [agentSearchQuery, agentSearchResults, handleAgentNavigate],
   )
+
+  const handleFilterChange = useCallback((key: string, value: boolean) => {
+    setFilters((current) => ({ ...current, [key as keyof FilterState]: value }))
+  }, [])
 
   const filterEvents = useCallback(
     (eventsToFilter: AuditEvent[]) => {
@@ -1082,51 +637,14 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             >
               <Megaphone className="h-4 w-4" aria-hidden />
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
-                onClick={() => setFiltersOpen((open) => !open)}
-                aria-expanded={filtersOpen}
-                title="Filters"
-                aria-label="Filters"
-              >
-                <Filter className="h-4 w-4" aria-hidden />
-              </button>
-              {filtersOpen ? (
-                <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
-                  <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Event types</div>
-                  <div className="space-y-2 text-slate-800">
-                    {EVENT_TYPE_FILTERS.map((filter) => (
-                      <label key={filter.key} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                          checked={filters[filter.key]}
-                          onChange={(e) => setFilters((current) => ({ ...current, [filter.key]: e.target.checked }))}
-                        />
-                        <span>{filter.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">Completion types</div>
-                  <div className="mt-2 space-y-2 text-slate-800">
-                    {COMPLETION_TYPE_FILTERS.map((filter) => (
-                      <label key={filter.key} className="flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 rounded border-slate-300 text-slate-700 focus:ring-slate-600"
-                          checked={filters[filter.key]}
-                          onChange={(e) => setFilters((current) => ({ ...current, [filter.key]: e.target.checked }))}
-                          disabled={!filters.completions}
-                        />
-                        <span className={filters.completions ? '' : 'text-slate-400'}>{filter.label}</span>
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
-            </div>
+            <AgentAuditFiltersMenu
+              filtersOpen={filtersOpen}
+              onToggle={() => setFiltersOpen((open) => !open)}
+              filters={filters}
+              eventFilters={EVENT_TYPE_FILTERS}
+              completionFilters={COMPLETION_TYPE_FILTERS}
+              onFilterChange={handleFilterChange}
+            />
             <div
               className="inline-flex items-stretch overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
               role="group"
