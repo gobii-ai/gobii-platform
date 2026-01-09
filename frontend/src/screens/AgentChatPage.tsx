@@ -415,7 +415,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl }
   ])
 
   return (
-    <div className="min-h-screen">
+    <div className="agent-chat-page min-h-screen">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
