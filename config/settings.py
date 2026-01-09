@@ -180,6 +180,10 @@ def _cookie_secure_default(site_url: str) -> bool:
 _SECURE_COOKIE_DEFAULT = _cookie_secure_default(PUBLIC_SITE_URL)
 SESSION_COOKIE_SECURE = env.bool("SESSION_COOKIE_SECURE", default=_SECURE_COOKIE_DEFAULT)
 CSRF_COOKIE_SECURE = env.bool("CSRF_COOKIE_SECURE", default=_SECURE_COOKIE_DEFAULT)
+
+SESSION_COOKIE_NAME = env.str("SESSION_COOKIE_NAME", default="sessionid")
+CSRF_COOKIE_NAME = env.str("CSRF_COOKIE_NAME", default="csrftoken")
+
 PUBLIC_CONTACT_EMAIL = env(
     "PUBLIC_CONTACT_EMAIL",
     default=_proprietary_default("brand", "PUBLIC_CONTACT_EMAIL"),
