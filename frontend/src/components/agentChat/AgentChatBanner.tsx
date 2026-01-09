@@ -110,10 +110,8 @@ export function AgentChatBanner({
             name={trimmedName}
             avatarUrl={agentAvatarUrl}
             className="banner-avatar"
-            imageClassName="h-full w-full object-cover"
-            textClassName="flex h-full w-full items-center justify-center text-sm font-semibold text-white"
-            style={{ borderColor: accentColor }}
-            fallbackStyle={{ background: `linear-gradient(135deg, ${accentColor}, color-mix(in srgb, ${accentColor} 60%, #1e1b4b))` }}
+            imageClassName="banner-avatar-image"
+            textClassName="banner-avatar-text"
           />
           <div className="banner-info">
             <div className="banner-top-row">

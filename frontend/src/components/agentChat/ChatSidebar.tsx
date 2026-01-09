@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, type CSSProperties } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Users, X, Check } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import type { AgentRosterEntry } from '../../types/agentRoster'
@@ -27,6 +27,7 @@ export const ChatSidebar = memo(function ChatSidebar({
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const [isMobile, setIsMobile] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
   // Detect mobile breakpoint
   useEffect(() => {
@@ -38,20 +39,164 @@ export const ChatSidebar = memo(function ChatSidebar({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // On mobile, sidebar is hidden by default
+  // Close drawer on escape key
+  useEffect(() => {
+    if (!drawerOpen) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setDrawerOpen(false)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [drawerOpen])
+
+  // Prevent body scroll when drawer is open
+  useEffect(() => {
+    if (drawerOpen) {
+      document.body.style.overflow = 'hidden'
+    } else {
+      document.body.style.overflow = ''
+    }
+    return () => {
+      document.body.style.overflow = ''
+    }
+  }, [drawerOpen])
+
   const handleToggle = useCallback(() => {
     const next = !collapsed
     setCollapsed(next)
     onToggle?.(next)
   }, [collapsed, onToggle])
 
-  const hasAgents = agents.length > 0
+  const handleAgentSelect = useCallback(
+    (agent: AgentRosterEntry) => {
+      onSelectAgent?.(agent)
+      if (isMobile) {
+        setDrawerOpen(false)
+      }
+    },
+    [isMobile, onSelectAgent],
+  )
 
-  // Don't render sidebar on mobile (for now - can add drawer later)
+  const hasAgents = agents.length > 0
+  const activeAgent = agents.find((a) => a.id === activeAgentId)
+
+  // Mobile FAB and drawer
   if (isMobile) {
-    return null
+    return (
+      <>
+        {/* FAB button */}
+        <button
+          type="button"
+          className="agent-fab"
+          onClick={() => setDrawerOpen(true)}
+          aria-label="Switch agent"
+          aria-expanded={drawerOpen}
+        >
+          {activeAgent ? (
+            <AgentAvatarBadge
+              name={activeAgent.name || 'Agent'}
+              avatarUrl={activeAgent.avatarUrl}
+              className="agent-fab-avatar"
+              imageClassName="agent-fab-avatar-image"
+              textClassName="agent-fab-avatar-text"
+              style={
+                activeAgent.displayColorHex
+                  ? ({ '--agent-accent': activeAgent.displayColorHex } as CSSProperties)
+                  : undefined
+              }
+            />
+          ) : (
+            <Users className="h-5 w-5" />
+          )}
+          {hasAgents && agents.length > 1 ? (
+            <span className="agent-fab-badge">{agents.length}</span>
+          ) : null}
+        </button>
+
+        {/* Drawer backdrop */}
+        <div
+          className={`agent-drawer-backdrop ${drawerOpen ? 'agent-drawer-backdrop--open' : ''}`}
+          onClick={() => setDrawerOpen(false)}
+          aria-hidden="true"
+        />
+
+        {/* Drawer */}
+        <div
+          className={`agent-drawer ${drawerOpen ? 'agent-drawer--open' : ''}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Switch agent"
+        >
+          <div className="agent-drawer-header">
+            <span className="agent-drawer-title">Switch Agent</span>
+            <button
+              type="button"
+              className="agent-drawer-close"
+              onClick={() => setDrawerOpen(false)}
+              aria-label="Close"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="agent-drawer-list" role="list">
+            {!hasAgents && loading ? (
+              <div className="agent-drawer-empty">Loading agents...</div>
+            ) : null}
+            {!hasAgents && !loading && errorMessage ? (
+              <div className="agent-drawer-empty">{errorMessage}</div>
+            ) : null}
+            {!hasAgents && !loading && !errorMessage ? (
+              <div className="agent-drawer-empty">No agents yet.</div>
+            ) : null}
+            {agents.map((agent) => {
+              const isActive = agent.id === activeAgentId
+              const isSwitching = agent.id === switchingAgentId
+              const accentStyle = agent.displayColorHex
+                ? ({ '--agent-accent': agent.displayColorHex } as CSSProperties)
+                : undefined
+              return (
+                <button
+                  key={agent.id}
+                  type="button"
+                  className="agent-drawer-item"
+                  data-active={isActive ? 'true' : 'false'}
+                  data-switching={isSwitching ? 'true' : 'false'}
+                  data-enabled={agent.isActive ? 'true' : 'false'}
+                  onClick={() => handleAgentSelect(agent)}
+                  style={accentStyle}
+                  role="listitem"
+                  aria-current={isActive ? 'page' : undefined}
+                >
+                  <AgentAvatarBadge
+                    name={agent.name || 'Agent'}
+                    avatarUrl={agent.avatarUrl}
+                    className="agent-drawer-item-avatar"
+                    imageClassName="agent-drawer-item-avatar-image"
+                    textClassName="agent-drawer-item-avatar-text"
+                  />
+                  <span className="agent-drawer-item-meta">
+                    <span className="agent-drawer-item-name">{agent.name || 'Agent'}</span>
+                    {agent.shortDescription ? (
+                      <span className="agent-drawer-item-desc">{agent.shortDescription}</span>
+                    ) : !agent.isActive ? (
+                      <span className="agent-drawer-item-state">Paused</span>
+                    ) : null}
+                  </span>
+                  {isActive ? (
+                    <Check className="agent-drawer-item-check" aria-hidden="true" />
+                  ) : null}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </>
+    )
   }
 
+  // Desktop sidebar
   return (
     <aside
       className={`chat-sidebar ${collapsed ? 'chat-sidebar--collapsed' : ''}`}
@@ -104,7 +249,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                   data-active={isActive ? 'true' : 'false'}
                   data-switching={isSwitching ? 'true' : 'false'}
                   data-enabled={agent.isActive ? 'true' : 'false'}
-                  onClick={() => onSelectAgent?.(agent)}
+                  onClick={() => handleAgentSelect(agent)}
                   title={collapsed ? agent.name || 'Agent' : undefined}
                   style={accentStyle}
                   role="listitem"
@@ -120,7 +265,9 @@ export const ChatSidebar = memo(function ChatSidebar({
                   {!collapsed ? (
                     <span className="chat-sidebar-agent-meta">
                       <span className="chat-sidebar-agent-name">{agent.name || 'Agent'}</span>
-                      {!agent.isActive ? (
+                      {agent.shortDescription ? (
+                        <span className="chat-sidebar-agent-desc">{agent.shortDescription}</span>
+                      ) : !agent.isActive ? (
                         <span className="chat-sidebar-agent-state">Paused</span>
                       ) : null}
                     </span>

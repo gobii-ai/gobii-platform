@@ -391,6 +391,12 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
 
+  // Update document title when agent changes
+  useEffect(() => {
+    const name = resolvedAgentName || 'Agent'
+    document.title = `${name} · Gobii`
+  }, [resolvedAgentName])
+
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
       ? rosterQuery.error.message
@@ -406,6 +412,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       avatarUrl: resolvedAvatarUrl,
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
+      shortDescription: '',
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
   const sidebarAgents = useMemo(() => {

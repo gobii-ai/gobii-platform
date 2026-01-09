@@ -12,6 +12,7 @@ type AgentRosterPayload = {
     avatar_url: string | null
     display_color_hex: string | null
     is_active: boolean
+    short_description: string
   }[]
 }
 
@@ -23,6 +24,7 @@ export async function fetchAgentRoster(): Promise<AgentRosterEntry[]> {
     avatarUrl: agent.avatar_url,
     displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
+    shortDescription: agent.short_description,
   }))
 }
 
