@@ -76,6 +76,130 @@ def seed_intelligence_tiers(apps, schema_editor):
     PersistentAgent.objects.filter(preferred_llm_tier__isnull=True).update(preferred_llm_tier_id=standard_id)
 
 
+def collapse_intelligence_tiers_for_rollback(apps, schema_editor):
+    PersistentLLMTier = apps.get_model("api", "PersistentLLMTier")
+    ProfilePersistentTier = apps.get_model("api", "ProfilePersistentTier")
+    BrowserLLMTier = apps.get_model("api", "BrowserLLMTier")
+    ProfileBrowserTier = apps.get_model("api", "ProfileBrowserTier")
+    PersistentAgent = apps.get_model("api", "PersistentAgent")
+
+    def has_field(model, name: str) -> bool:
+        return any(field.name == name for field in model._meta.fields)
+
+    def legacy_flags_for_tier(tier) -> tuple[bool, bool]:
+        key = getattr(getattr(tier, "intelligence_tier", None), "key", "standard")
+        if key == "premium":
+            return True, False
+        if key in ("max", "ultra", "ultra_max"):
+            return False, True
+        return False, False
+
+    def legacy_browser_flag(tier) -> bool:
+        key = getattr(getattr(tier, "intelligence_tier", None), "key", "standard")
+        return key != "standard"
+
+    def resequence_tiers(tiers, group_key_fn, update_fields):
+        grouped = {}
+        for tier in tiers:
+            grouped.setdefault(group_key_fn(tier), []).append(tier)
+        for group in grouped.values():
+            for index, tier in enumerate(group, start=1):
+                tier.order = index
+        if tiers:
+            model = tiers[0].__class__
+            model.objects.bulk_update(tiers, update_fields)
+
+    persistent_tiers = list(
+        PersistentLLMTier.objects.select_related("intelligence_tier").order_by(
+            "token_range_id",
+            "intelligence_tier__rank",
+            "order",
+            "id",
+        )
+    )
+    for tier in persistent_tiers:
+        is_premium, is_max = legacy_flags_for_tier(tier)
+        tier.is_premium = is_premium
+        tier.is_max = is_max
+        if has_field(PersistentLLMTier, "credit_multiplier") and getattr(tier, "intelligence_tier", None):
+            tier.credit_multiplier = tier.intelligence_tier.credit_multiplier
+    persistent_update_fields = ["is_premium", "is_max", "order"]
+    if has_field(PersistentLLMTier, "credit_multiplier"):
+        persistent_update_fields.append("credit_multiplier")
+    resequence_tiers(
+        persistent_tiers,
+        lambda tier: (tier.token_range_id, tier.is_premium, tier.is_max),
+        persistent_update_fields,
+    )
+
+    profile_persistent_tiers = list(
+        ProfilePersistentTier.objects.select_related("intelligence_tier").order_by(
+            "token_range_id",
+            "intelligence_tier__rank",
+            "order",
+            "id",
+        )
+    )
+    for tier in profile_persistent_tiers:
+        is_premium, is_max = legacy_flags_for_tier(tier)
+        tier.is_premium = is_premium
+        tier.is_max = is_max
+        if has_field(ProfilePersistentTier, "credit_multiplier") and getattr(tier, "intelligence_tier", None):
+            tier.credit_multiplier = tier.intelligence_tier.credit_multiplier
+    profile_persistent_update_fields = ["is_premium", "is_max", "order"]
+    if has_field(ProfilePersistentTier, "credit_multiplier"):
+        profile_persistent_update_fields.append("credit_multiplier")
+    resequence_tiers(
+        profile_persistent_tiers,
+        lambda tier: (tier.token_range_id, tier.is_premium, tier.is_max),
+        profile_persistent_update_fields,
+    )
+
+    browser_tiers = list(
+        BrowserLLMTier.objects.select_related("intelligence_tier").order_by(
+            "policy_id",
+            "intelligence_tier__rank",
+            "order",
+            "id",
+        )
+    )
+    for tier in browser_tiers:
+        tier.is_premium = legacy_browser_flag(tier)
+    resequence_tiers(
+        browser_tiers,
+        lambda tier: (tier.policy_id, tier.is_premium),
+        ["is_premium", "order"],
+    )
+
+    profile_browser_tiers = list(
+        ProfileBrowserTier.objects.select_related("intelligence_tier").order_by(
+            "profile_id",
+            "intelligence_tier__rank",
+            "order",
+            "id",
+        )
+    )
+    for tier in profile_browser_tiers:
+        tier.is_premium = legacy_browser_flag(tier)
+    resequence_tiers(
+        profile_browser_tiers,
+        lambda tier: (tier.profile_id, tier.is_premium),
+        ["is_premium", "order"],
+    )
+
+    if has_field(PersistentAgent, "preferred_llm_tier_value"):
+        agents = list(PersistentAgent.objects.select_related("preferred_llm_tier"))
+        for agent in agents:
+            key = getattr(getattr(agent, "preferred_llm_tier", None), "key", "standard")
+            if key in ("ultra", "ultra_max"):
+                key = "max"
+            if key not in ("standard", "premium", "max"):
+                key = "standard"
+            agent.preferred_llm_tier_value = key
+        if agents:
+            PersistentAgent.objects.bulk_update(agents, ["preferred_llm_tier_value"])
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -377,6 +501,7 @@ class Migration(migrations.Migration):
             model_name="profilepersistenttierendpoint",
             name="is_premium",
         ),
+        migrations.RunPython(migrations.RunPython.noop, collapse_intelligence_tiers_for_rollback),
         migrations.AlterUniqueTogether(
             name="browserllmtier",
             unique_together={("policy", "order", "intelligence_tier")},
