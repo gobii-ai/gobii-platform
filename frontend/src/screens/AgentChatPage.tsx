@@ -163,6 +163,14 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshLatest = useAgentChatStore((state) => state.refreshLatest)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
+  const fetchInsights = useAgentChatStore((state) => state.fetchInsights)
+  const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
+  const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
+  const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
+  const insights = useAgentChatStore((state) => state.insights)
+  const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
+  const insightProcessingStartedAt = useAgentChatStore((state) => state.insightProcessingStartedAt)
+  const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -198,7 +206,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
     })
-  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize])
+    // Fetch insights when agent initializes
+    void fetchInsights()
+  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize, fetchInsights])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
@@ -480,6 +490,28 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
 
+  // Start/stop insight rotation based on processing state
+  const isProcessing = processingActive || awaitingResponse || (streaming && !streaming.done)
+  useEffect(() => {
+    if (isProcessing) {
+      startInsightRotation()
+    } else {
+      stopInsightRotation()
+    }
+  }, [isProcessing, startInsightRotation, stopInsightRotation])
+
+  // Get the current insight to display
+  const currentInsight = useMemo(() => {
+    const availableInsights = insights.filter(
+      (insight) => !dismissedInsightIds.has(insight.insightId)
+    )
+    if (availableInsights.length === 0) {
+      return null
+    }
+    const index = currentInsightIndex % availableInsights.length
+    return availableInsights[index] ?? null
+  }, [insights, currentInsightIndex, insightProcessingStartedAt, dismissedInsightIds, isProcessing])
+
   useEffect(() => {
     if (!streaming || streaming.done) {
       return () => undefined
@@ -565,6 +597,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}
         initialLoading={initialLoading}
+        currentInsight={currentInsight}
+        onDismissInsight={dismissInsight}
       />
     </div>
   )

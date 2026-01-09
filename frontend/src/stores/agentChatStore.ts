@@ -8,7 +8,9 @@ import type {
   StreamState,
   TimelineEvent,
 } from '../types/agentChat'
-import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
+import type { InsightEvent } from '../types/insight'
+import { INSIGHT_TIMING } from '../types/insight'
+import { fetchAgentTimeline, sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
 import { mergeTimelineEvents, normalizeTimelineEvent, prepareTimelineEvents } from './agentChatTimeline'
 
@@ -219,6 +221,13 @@ export type AgentChatState = {
   agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
+  // Insight state
+  insights: InsightEvent[]
+  currentInsightIndex: number
+  insightsFetchedAt: number | null
+  insightRotationTimer: ReturnType<typeof setTimeout> | null
+  insightProcessingStartedAt: number | null
+  dismissedInsightIds: Set<string>
   initialize: (
     agentId: string,
     options?: {
@@ -241,6 +250,12 @@ export type AgentChatState = {
   suppressAutoScrollPin: (durationMs?: number) => void
   toggleThinkingCollapsed: (cursor: string) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
+  // Insight actions
+  fetchInsights: () => Promise<void>
+  startInsightRotation: () => void
+  stopInsightRotation: () => void
+  dismissInsight: (insightId: string) => void
+  getCurrentInsight: () => InsightEvent | null
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
@@ -270,6 +285,13 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentColorHex: null,
   agentName: null,
   agentAvatarUrl: null,
+  // Insight state
+  insights: [],
+  currentInsightIndex: 0,
+  insightsFetchedAt: null,
+  insightRotationTimer: null,
+  insightProcessingStartedAt: null,
+  dismissedInsightIds: new Set(),
 
   async initialize(agentId, options) {
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
@@ -841,5 +863,121 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   setStreamingThinkingCollapsed(collapsed) {
     set({ streamingThinkingCollapsed: collapsed })
+  },
+
+  // Insight actions
+  async fetchInsights() {
+    const agentId = get().agentId
+    if (!agentId) return
+
+    // Check if insights are still fresh (fetched within 5 minutes)
+    const now = Date.now()
+    const fetchedAt = get().insightsFetchedAt
+    if (fetchedAt && now - fetchedAt < 5 * 60 * 1000) {
+      return
+    }
+
+    try {
+      const response = await fetchAgentInsights(agentId)
+      set({
+        insights: response.insights,
+        insightsFetchedAt: now,
+        currentInsightIndex: 0,
+      })
+    } catch (error) {
+      console.error('Failed to fetch insights:', error)
+    }
+  },
+
+  startInsightRotation() {
+    const state = get()
+    // Clear any existing timer
+    if (state.insightRotationTimer) {
+      clearTimeout(state.insightRotationTimer)
+    }
+
+    // Record when processing started for minimum display logic
+    set({ insightProcessingStartedAt: Date.now() })
+
+    // Fetch insights if not already fetched or stale
+    void get().fetchInsights()
+
+    // Start rotation timer
+    const rotate = () => {
+      const current = get()
+      const availableInsights = current.insights.filter(
+        (insight) => !current.dismissedInsightIds.has(insight.insightId)
+      )
+
+      if (availableInsights.length <= 1) {
+        return // No rotation needed
+      }
+
+      // Move to next insight
+      const nextIndex = (current.currentInsightIndex + 1) % availableInsights.length
+      set({ currentInsightIndex: nextIndex })
+
+      // Schedule next rotation if still processing
+      if (current.processingActive || current.awaitingResponse) {
+        const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
+        set({ insightRotationTimer: timer })
+      }
+    }
+
+    // Start first rotation after initial delay
+    const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
+    set({ insightRotationTimer: timer })
+  },
+
+  stopInsightRotation() {
+    const timer = get().insightRotationTimer
+    if (timer) {
+      clearTimeout(timer)
+      set({ insightRotationTimer: null })
+    }
+  },
+
+  dismissInsight(insightId) {
+    set((state) => {
+      const newDismissed = new Set(state.dismissedInsightIds)
+      newDismissed.add(insightId)
+
+      // If we dismissed the current insight, move to next
+      const availableInsights = state.insights.filter(
+        (insight) => !newDismissed.has(insight.insightId)
+      )
+
+      let nextIndex = state.currentInsightIndex
+      if (availableInsights.length > 0) {
+        nextIndex = nextIndex % availableInsights.length
+      }
+
+      return {
+        dismissedInsightIds: newDismissed,
+        currentInsightIndex: nextIndex,
+      }
+    })
+  },
+
+  getCurrentInsight() {
+    const state = get()
+
+    // Don't show insights if processing hasn't been active long enough
+    const processingStartedAt = state.insightProcessingStartedAt
+    if (processingStartedAt && Date.now() - processingStartedAt < INSIGHT_TIMING.showAfterMs) {
+      return null
+    }
+
+    // Filter out dismissed insights
+    const availableInsights = state.insights.filter(
+      (insight) => !state.dismissedInsightIds.has(insight.insightId)
+    )
+
+    if (availableInsights.length === 0) {
+      return null
+    }
+
+    const index = state.currentInsightIndex % availableInsights.length
+    return availableInsights[index] ?? null
   },
 }))

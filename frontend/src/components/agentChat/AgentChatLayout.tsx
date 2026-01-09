@@ -8,8 +8,10 @@ import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import { InsightEventCard } from './insights'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
+import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { buildAgentComposerPalette } from '../../util/color'
 
@@ -47,6 +49,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onToggleThinking?: (cursor: string) => void
   streamingThinkingCollapsed?: boolean
   onToggleStreamingThinking?: () => void
+  currentInsight?: InsightEvent | null
+  onDismissInsight?: (insightId: string) => void
 }
 
 export function AgentChatLayout({
@@ -88,6 +92,8 @@ export function AgentChatLayout({
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
+  currentInsight,
+  onDismissInsight,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
 
@@ -201,6 +207,16 @@ export function AgentChatLayout({
                         isStreaming={isStreaming}
                       />
                     ) : null}
+                  </div>
+                ) : null}
+
+                {/* Insight slot - shows during agent working state */}
+                {showProcessingIndicator && currentInsight ? (
+                  <div id="insight-slot" className="insight-slot">
+                    <InsightEventCard
+                      insight={currentInsight}
+                      onDismiss={onDismissInsight}
+                    />
                   </div>
                 ) : null}
 

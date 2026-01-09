@@ -108,6 +108,7 @@ from console.usage_views import (
     UsageAgentLeaderboardAPIView,
     UsageAgentsAPIView,
 )
+from console.insight_views import AgentInsightsAPIView
 from console.views import (
     ConsoleHome,
     ApiKeyListView,
@@ -235,6 +236,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/files/folders/", AgentFsNodeCreateDirAPIView.as_view(), name="console_agent_fs_create_folder"),
     path("console/api/agents/<uuid:agent_id>/files/move/", AgentFsNodeMoveAPIView.as_view(), name="console_agent_fs_move"),
     path("console/api/agents/<uuid:agent_id>/processing/", AgentProcessingStatusAPIView.as_view(), name="console_agent_processing_status"),
+    path("console/api/agents/<uuid:agent_id>/insights/", AgentInsightsAPIView.as_view(), name="console_agent_insights"),
     path("console/api/staff/agents/search/", StaffAgentSearchAPIView.as_view(), name="console_agent_search"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditAPIView.as_view(), name="console_agent_audit"),
     path("console/api/staff/agents/<uuid:agent_id>/audit/timeline/", StaffAgentAuditTimelineAPIView.as_view(), name="console_agent_audit_timeline"),

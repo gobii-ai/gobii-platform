@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo } from 'react'
-import {PanelLeft, PanelLeftClose, Menu, X} from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Menu, X } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
