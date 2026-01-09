@@ -228,6 +228,7 @@ export type AgentChatState = {
   insightRotationTimer: ReturnType<typeof setTimeout> | null
   insightProcessingStartedAt: number | null
   dismissedInsightIds: Set<string>
+  insightsPaused: boolean
   initialize: (
     agentId: string,
     options?: {
@@ -256,6 +257,8 @@ export type AgentChatState = {
   stopInsightRotation: () => void
   dismissInsight: (insightId: string) => void
   getCurrentInsight: () => InsightEvent | null
+  setInsightsPaused: (paused: boolean) => void
+  setCurrentInsightIndex: (index: number) => void
 }
 
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
@@ -292,6 +295,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   insightRotationTimer: null,
   insightProcessingStartedAt: null,
   dismissedInsightIds: new Set(),
+  insightsPaused: false,
 
   async initialize(agentId, options) {
     const providedColor = options?.agentColorHex ? normalizeHexColor(options.agentColorHex) : null
@@ -905,6 +909,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     // Start rotation timer
     const rotate = () => {
       const current = get()
+
+      // Don't rotate if paused
+      if (current.insightsPaused) {
+        return
+      }
+
       const availableInsights = current.insights.filter(
         (insight) => !current.dismissedInsightIds.has(insight.insightId)
       )
@@ -917,16 +927,18 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const nextIndex = (current.currentInsightIndex + 1) % availableInsights.length
       set({ currentInsightIndex: nextIndex })
 
-      // Schedule next rotation if still processing
-      if (current.processingActive || current.awaitingResponse) {
+      // Schedule next rotation if still processing and not paused
+      if ((current.processingActive || current.awaitingResponse) && !current.insightsPaused) {
         const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
         set({ insightRotationTimer: timer })
       }
     }
 
-    // Start first rotation after initial delay
-    const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
-    set({ insightRotationTimer: timer })
+    // Start first rotation after initial delay (only if not paused)
+    if (!state.insightsPaused) {
+      const timer = setTimeout(rotate, INSIGHT_TIMING.rotationIntervalMs)
+      set({ insightRotationTimer: timer })
+    }
   },
 
   stopInsightRotation() {
@@ -979,5 +991,37 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     const index = state.currentInsightIndex % availableInsights.length
     return availableInsights[index] ?? null
+  },
+
+  setInsightsPaused(paused) {
+    const state = get()
+
+    // Clear existing timer when pausing
+    if (paused && state.insightRotationTimer) {
+      clearTimeout(state.insightRotationTimer)
+      set({ insightsPaused: true, insightRotationTimer: null })
+      return
+    }
+
+    // Resume rotation when unpausing
+    if (!paused) {
+      set({ insightsPaused: false })
+      // Restart rotation if still processing
+      if (state.processingActive || state.awaitingResponse) {
+        get().startInsightRotation()
+      }
+    }
+  },
+
+  setCurrentInsightIndex(index) {
+    const state = get()
+    const availableInsights = state.insights.filter(
+      (insight) => !state.dismissedInsightIds.has(insight.insightId)
+    )
+    if (availableInsights.length === 0) return
+
+    // Clamp index to valid range
+    const validIndex = Math.max(0, Math.min(index, availableInsights.length - 1))
+    set({ currentInsightIndex: validIndex })
   },
 }))

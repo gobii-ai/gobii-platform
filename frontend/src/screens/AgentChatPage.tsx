@@ -167,10 +167,13 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
   const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
+  const setInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
+  const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
   const insights = useAgentChatStore((state) => state.insights)
   const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
   const insightProcessingStartedAt = useAgentChatStore((state) => state.insightProcessingStartedAt)
   const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
+  const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
@@ -500,17 +503,12 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     }
   }, [isProcessing, startInsightRotation, stopInsightRotation])
 
-  // Get the current insight to display
-  const currentInsight = useMemo(() => {
-    const availableInsights = insights.filter(
+  // Get available insights (filtered for dismissed)
+  const availableInsights = useMemo(() => {
+    return insights.filter(
       (insight) => !dismissedInsightIds.has(insight.insightId)
     )
-    if (availableInsights.length === 0) {
-      return null
-    }
-    const index = currentInsightIndex % availableInsights.length
-    return availableInsights[index] ?? null
-  }, [insights, currentInsightIndex, insightProcessingStartedAt, dismissedInsightIds, isProcessing])
+  }, [insights, dismissedInsightIds])
 
   useEffect(() => {
     if (!streaming || streaming.done) {
@@ -597,8 +595,12 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         loadingOlder={loadingOlder}
         loadingNewer={loadingNewer}
         initialLoading={initialLoading}
-        currentInsight={currentInsight}
+        insights={availableInsights}
+        currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
+        onInsightIndexChange={setCurrentInsightIndex}
+        onPauseChange={setInsightsPaused}
+        isInsightsPaused={insightsPaused}
       />
     </div>
   )

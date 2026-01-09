@@ -518,6 +518,7 @@
 
 :root {
   --composer-height: 6.5rem;
+  --working-panel-height: 13rem;
 }
 
 #timeline-events {
@@ -527,6 +528,15 @@
 
 #timeline-events[data-has-jump-button="true"] {
   padding-bottom: calc(var(--composer-height, 6.5rem) + 2rem);
+}
+
+/* Extra padding when working panel is visible (fixed above composer) */
+#timeline-events[data-has-working-panel="true"] {
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem));
+}
+
+#timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + 2rem);
 }
 
 #timeline-events.timeline-align-end {
@@ -3714,5 +3724,490 @@
 
   .insight-burn-stats {
     gap: 0.25rem;
+  }
+}
+
+/* ============================================
+   Working Panel - Consolidated insight + processing
+   ============================================ */
+
+.working-panel-slot {
+  /* Fixed position above composer - rock solid, never moves */
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: calc(var(--composer-height, 6.5rem) + 0.5rem);
+  z-index: 50;
+  /* Center the content */
+  display: flex;
+  justify-content: center;
+  padding: 0 1rem;
+  /* Prevent pointer events on the slot itself, only on the panel */
+  pointer-events: none;
+}
+
+/* Adjust for sidebar on desktop */
+.has-sidebar .working-panel-slot {
+  left: 15rem;
+}
+
+.has-sidebar--collapsed .working-panel-slot {
+  left: 5rem;
+}
+
+@media (max-width: 767px) {
+  .has-sidebar .working-panel-slot,
+  .has-sidebar--collapsed .working-panel-slot {
+    left: 0;
+  }
+}
+
+.working-panel-slot[data-visible="false"] {
+  display: none;
+}
+
+.working-panel {
+  /* Re-enable pointer events on the actual panel */
+  pointer-events: auto;
+  /* Constrain width like the composer */
+  width: 100%;
+  max-width: 56rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.99) 0%, rgba(249, 250, 251, 0.98) 100%);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  border-radius: 16px;
+  box-shadow:
+    0 -4px 16px rgba(0, 0, 0, 0.04),
+    0 2px 8px rgba(0, 0, 0, 0.06),
+    0 0 0 1px rgba(0, 0, 0, 0.02);
+  overflow: hidden;
+  animation: working-panel-slide-up 300ms ease-out;
+  /* Hardware acceleration */
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+@keyframes working-panel-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Header: Agent is working */
+.working-panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.03) 100%);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.1);
+}
+
+.working-panel-pip {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+  animation: working-pulse 2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes working-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.2);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(16, 185, 129, 0.1);
+    transform: scale(1.05);
+  }
+}
+
+.working-panel-status {
+  font-size: 0.9375rem;
+  color: #374151;
+  font-weight: 500;
+}
+
+.working-panel-status strong {
+  font-weight: 700;
+  color: #111827;
+}
+
+.working-panel-ellipsis {
+  display: inline-flex;
+  gap: 3px;
+  margin-left: 2px;
+  vertical-align: baseline;
+}
+
+.working-panel-ellipsis-dot {
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  background: #10b981;
+  border-radius: 50%;
+  animation: ellipsis-bounce 1.4s ease-in-out infinite;
+}
+
+.working-panel-ellipsis-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.working-panel-ellipsis-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.working-panel-ellipsis-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Insight section */
+.working-panel-insight {
+  padding: 1rem 1.25rem;
+  /* Fixed height container to prevent layout shifts during rotation */
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+}
+
+.working-panel-insight-label {
+  display: block;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #9ca3af;
+  margin-bottom: 0.625rem;
+  flex-shrink: 0;
+}
+
+/* Insight content wrapper for fixed height */
+.working-panel-insight-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+/* Override insight card styles when inside working panel */
+.working-panel-insight .insight-card {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+  border-radius: 0;
+  /* Smooth transition for content changes */
+  animation: insight-content-fade 250ms ease-out;
+}
+
+@keyframes insight-content-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.working-panel-insight .insight-dismiss {
+  top: -0.25rem;
+  right: -0.25rem;
+}
+
+/* Carousel controls */
+.working-panel-carousel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.875rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgba(229, 231, 235, 0.5);
+}
+
+.working-panel-carousel-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.working-panel-carousel-btn:hover {
+  background: rgba(0, 0, 0, 0.05);
+  color: #6b7280;
+}
+
+.working-panel-carousel-btn:active {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.working-panel-carousel-icon {
+  width: 16px;
+  height: 16px;
+}
+
+.working-panel-carousel-pause {
+  margin: 0 0.25rem;
+}
+
+.working-panel-carousel-pause[data-paused="true"] {
+  color: #10b981;
+}
+
+.working-panel-carousel-pause[data-paused="true"]:hover {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.working-panel-carousel-dots {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0.5rem;
+}
+
+.working-panel-carousel-dot {
+  width: 6px;
+  height: 6px;
+  border: none;
+  border-radius: 50%;
+  background: #d1d5db;
+  cursor: pointer;
+  padding: 0;
+  transition: background 150ms ease, transform 150ms ease;
+}
+
+.working-panel-carousel-dot:hover {
+  background: #9ca3af;
+  transform: scale(1.2);
+}
+
+.working-panel-carousel-dot[data-active="true"] {
+  background: #10b981;
+  transform: scale(1.2);
+}
+
+.working-panel-carousel-dot[data-active="true"]:hover {
+  background: #059669;
+}
+
+/* Web tasks section */
+.working-panel-tasks {
+  border-top: 1px solid rgba(229, 231, 235, 0.6);
+  background: rgba(249, 250, 251, 0.5);
+}
+
+.working-panel-tasks-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem 1.25rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 0.8125rem;
+  color: #6b7280;
+  transition: background 150ms ease;
+}
+
+.working-panel-tasks-toggle:hover {
+  background: rgba(243, 244, 246, 0.8);
+}
+
+.working-panel-tasks-pip {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  animation: processing-pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.working-panel-tasks-label {
+  flex: 1;
+  text-align: left;
+  font-weight: 500;
+}
+
+.working-panel-tasks-chevron {
+  width: 1rem;
+  height: 1rem;
+  color: #9ca3af;
+  transition: transform 200ms ease;
+}
+
+.working-panel-tasks-chevron[data-expanded="true"] {
+  transform: rotate(180deg);
+}
+
+/* Task list */
+.working-panel-task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0.75rem;
+  border-top: 1px solid rgba(229, 231, 235, 0.6);
+}
+
+.working-panel-task-card {
+  display: block;
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid rgba(229, 231, 235, 0.8);
+  cursor: pointer;
+  text-align: left;
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+
+.working-panel-task-card:hover {
+  border-color: rgba(209, 213, 219, 1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.working-panel-task-card[data-expanded="true"] {
+  background: rgba(249, 250, 251, 1);
+}
+
+.working-panel-task-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.375rem;
+}
+
+.working-panel-task-status {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px;
+  background: rgba(99, 102, 241, 0.1);
+  color: #6366f1;
+}
+
+.working-panel-task-status[data-status="running"] {
+  background: rgba(16, 185, 129, 0.1);
+  color: #059669;
+}
+
+.working-panel-task-status[data-status="waiting"] {
+  background: rgba(245, 158, 11, 0.1);
+  color: #d97706;
+}
+
+.working-panel-task-duration {
+  font-size: 0.75rem;
+  color: #9ca3af;
+  font-variant-numeric: tabular-nums;
+}
+
+.working-panel-task-body {
+  font-size: 0.8125rem;
+  color: #374151;
+  line-height: 1.5;
+}
+
+.working-panel-task-preview {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.working-panel-task-markdown {
+  font-size: 0.8125rem;
+}
+
+.working-panel-task-id {
+  margin-top: 0.5rem;
+  font-size: 0.6875rem;
+  color: #9ca3af;
+  font-family: ui-monospace, monospace;
+}
+
+/* Mobile responsiveness for working panel */
+@media (max-width: 767px) {
+  .working-panel-slot {
+    padding: 0 0.75rem;
+    bottom: calc(var(--composer-height, 6.5rem) + 0.25rem);
+  }
+
+  .working-panel {
+    border-radius: 12px;
+  }
+
+  .working-panel-header {
+    padding: 0.75rem 1rem;
+  }
+
+  .working-panel-status {
+    font-size: 0.875rem;
+  }
+
+  .working-panel-insight {
+    padding: 0.75rem 1rem;
+    min-height: 100px;
+  }
+
+  .working-panel-carousel {
+    padding-top: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .working-panel-tasks-toggle {
+    padding: 0.5rem 1rem;
+  }
+
+  .working-panel-task-list {
+    padding: 0.375rem 0.625rem 0.625rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .working-panel-slot {
+    padding: 0 0.5rem;
+  }
+
+  .working-panel-insight {
+    min-height: 90px;
+  }
+
+  .working-panel-carousel-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .working-panel-carousel-icon {
+    width: 18px;
+    height: 18px;
+  }
+
+  .working-panel-carousel-dot {
+    width: 8px;
+    height: 8px;
   }
 }

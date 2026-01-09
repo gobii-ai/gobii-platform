@@ -2,13 +2,12 @@ import type { ReactNode, Ref } from 'react'
 import { useState, useCallback } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
-import { ProcessingIndicator } from './ProcessingIndicator'
+import { WorkingPanel } from './WorkingPanel'
 import { TimelineEventList } from './TimelineEventList'
 import { ThinkingBubble } from './ThinkingBubble'
 import { StreamingReplyCard } from './StreamingReplyCard'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
-import { InsightEventCard } from './insights'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
@@ -49,8 +48,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onToggleThinking?: (cursor: string) => void
   streamingThinkingCollapsed?: boolean
   onToggleStreamingThinking?: () => void
-  currentInsight?: InsightEvent | null
+  insights?: InsightEvent[]
+  currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
+  onInsightIndexChange?: (index: number) => void
+  onPauseChange?: (paused: boolean) => void
+  isInsightsPaused?: boolean
 }
 
 export function AgentChatLayout({
@@ -92,8 +95,12 @@ export function AgentChatLayout({
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
-  currentInsight,
+  insights,
+  currentInsightIndex,
   onDismissInsight,
+  onInsightIndexChange,
+  onPauseChange,
+  isInsightsPaused,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
 
@@ -156,7 +163,7 @@ export function AgentChatLayout({
             style={composerPalette.cssVars}
           >
             <div id="timeline-shell" className="relative flex-1">
-              <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'}>
+              <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 <div
                   id="timeline-load-older"
                   className="timeline-load-control"
@@ -210,25 +217,6 @@ export function AgentChatLayout({
                   </div>
                 ) : null}
 
-                {/* Insight slot - shows during agent working state */}
-                {showProcessingIndicator && currentInsight ? (
-                  <div id="insight-slot" className="insight-slot">
-                    <InsightEventCard
-                      insight={currentInsight}
-                      onDismiss={onDismissInsight}
-                    />
-                  </div>
-                ) : null}
-
-                <div id="processing-indicator-slot" className="processing-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
-                  <ProcessingIndicator
-                    agentFirstName={agentFirstName}
-                    active={Boolean(processingActive || awaitingResponse)}
-                    tasks={processingWebTasks}
-                    isStreaming={Boolean(isStreaming || awaitingResponse)}
-                  />
-                </div>
-
                 {showBottomSentinel ? (
                   <div ref={bottomSentinelRef} id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
                 ) : null}
@@ -274,6 +262,21 @@ export function AgentChatLayout({
           </svg>
           <span className="sr-only">Jump to latest</span>
         </button>
+
+        {/* Working panel - fixed position above composer */}
+        <div id="working-panel-slot" className="working-panel-slot" data-visible={showProcessingIndicator ? 'true' : 'false'}>
+          <WorkingPanel
+            agentFirstName={agentFirstName}
+            active={Boolean(processingActive || awaitingResponse || isStreaming)}
+            tasks={processingWebTasks}
+            insights={insights}
+            currentInsightIndex={currentInsightIndex}
+            onDismissInsight={onDismissInsight}
+            onInsightIndexChange={onInsightIndexChange}
+            onPauseChange={onPauseChange}
+            isPaused={isInsightsPaused}
+          />
+        </div>
       </main>
     </>
   )
