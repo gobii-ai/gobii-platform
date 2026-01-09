@@ -86,12 +86,31 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit =
   return (payload === null ? undefined : (payload as T)) as T
 }
 
-export function getCsrfToken(): string {
+function getCsrfCookieName(): string {
+  if (typeof document === 'undefined') {
+    return 'csrftoken'
+  }
+  const meta = document.querySelector('meta[name="csrf-cookie-name"]')
+  const name = meta?.getAttribute('content')?.trim()
+  return name || 'csrftoken'
+}
+
+function getCookieValue(name: string): string {
   if (typeof document === 'undefined') {
     return ''
   }
-  const match = document.cookie.match(/csrftoken=([^;]+)/)
-  return match ? decodeURIComponent(match[1]) : ''
+  const cookies = document.cookie.split(';')
+  for (const cookie of cookies) {
+    const [rawKey, ...rest] = cookie.trim().split('=')
+    if (rawKey === name) {
+      return decodeURIComponent(rest.join('='))
+    }
+  }
+  return ''
+}
+
+export function getCsrfToken(): string {
+  return getCookieValue(getCsrfCookieName())
 }
 
 type JsonRequestInit = RequestInit & {
