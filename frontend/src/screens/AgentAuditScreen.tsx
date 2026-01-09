@@ -876,9 +876,23 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-500"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+              onClick={() => {
+                if (!agentId) return
+                navigator.clipboard?.writeText(agentId).catch(() => {})
+              }}
+              aria-label="Copy agent id"
+            >
+              <Copy className="h-4 w-4" aria-hidden />
+              Copy Agent ID
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:text-slate-400"
               onClick={handleProcessEvents}
               disabled={processQueueing || processingActive}
+              title={processingActive ? 'Processing events' : processQueueing ? 'Queueing events' : 'Process events'}
+              aria-label={processingActive ? 'Processing events' : processQueueing ? 'Queueing events' : 'Process events'}
             >
               <RefreshCcw
                 className={`h-4 w-4 ${processingActive ? 'animate-spin' : ''}`}
@@ -888,7 +902,7 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 shadow-sm transition hover:border-amber-300 hover:text-amber-900"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
               onClick={() => {
                 setEditingMessage(null)
                 setMessageBody('')
@@ -896,19 +910,21 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
                 setMessageModalOpen(true)
                 setMessageError(null)
               }}
+              title="Add system message"
+              aria-label="Add system message"
             >
               <Megaphone className="h-4 w-4" aria-hidden />
-              Add system message
             </button>
             <div className="relative">
               <button
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
                 onClick={() => setFiltersOpen((open) => !open)}
                 aria-expanded={filtersOpen}
+                title="Filters"
+                aria-label="Filters"
               >
                 <Filter className="h-4 w-4" aria-hidden />
-                Filters
               </button>
               {filtersOpen ? (
                 <div className="absolute right-0 z-30 mt-2 w-64 rounded-xl border border-slate-200 bg-white/95 p-3 text-sm shadow-xl backdrop-blur">
@@ -988,18 +1004,6 @@ export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) 
             >
               <ListChevronsDownUp className="h-4 w-4" aria-hidden />
               Collapse
-            </button>
-            <button
-              type="button"
-              className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
-              onClick={() => {
-                if (!agentId) return
-                navigator.clipboard?.writeText(agentId).catch(() => {})
-              }}
-              aria-label="Copy agent id"
-            >
-              <Copy className="h-4 w-4" aria-hidden />
-              Copy Agent ID
             </button>
           </div>
         </div>
