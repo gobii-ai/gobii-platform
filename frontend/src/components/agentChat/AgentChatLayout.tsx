@@ -39,7 +39,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
-  bottomSentinelRef?: Ref<HTMLDivElement>
   loadingOlder?: boolean
   loadingNewer?: boolean
   initialLoading?: boolean
@@ -95,7 +94,6 @@ export function AgentChatLayout({
   isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
-  bottomSentinelRef,
   loadingOlder = false,
   loadingNewer = false,
   initialLoading = false,
@@ -235,7 +233,7 @@ export function AgentChatLayout({
                 ) : null}
 
                 {showBottomSentinel ? (
-                  <div ref={bottomSentinelRef} id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
+                  <div id="timeline-bottom-sentinel" className="timeline-bottom-sentinel" aria-hidden="true" />
                 ) : null}
 
                 <div

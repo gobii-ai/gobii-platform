@@ -18,7 +18,6 @@ type InsightGaugeProps = {
   showGlow?: boolean
   label?: string
   sublabel?: string
-  formatValue?: (value: number) => string
 }
 
 export function InsightGauge({
@@ -33,7 +32,6 @@ export function InsightGauge({
   showGlow = true,
   label,
   sublabel,
-  formatValue,
 }: InsightGaugeProps) {
   const chartRef = useRef<ReactEChartsCore>(null)
   const [displayValue, setDisplayValue] = useState(animate ? 0 : value)
@@ -133,11 +131,6 @@ export function InsightGauge({
         opts={{ renderer: 'canvas' }}
         notMerge={true}
       />
-      {formatValue && (
-        <div className="insight-gauge-overlay">
-          <span className="insight-gauge-value">{formatValue(displayValue)}</span>
-        </div>
-      )}
     </div>
   )
 }

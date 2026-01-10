@@ -1,7 +1,6 @@
 export * from './AgentChatLayout'
 export * from './AgentComposer'
 export * from './MessageEventCard'
-export * from './ProcessingIndicator'
 export * from './TimelineEventList'
 export * from './ToolClusterCard'
 export * from './types'
