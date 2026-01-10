@@ -432,7 +432,39 @@ def generate_insights_for_agent(
     if not INSIGHTS_ENABLED:
         logger.info("Insights disabled via feature flag")
         return []
-    return [_get_agent_setup_insight(request, agent, organization)]
+
+    try:
+        owner = organization or user
+        period_start_date, period_end_date = BillingService.get_current_billing_period_for_owner(owner)
+        period_start = timezone.make_aware(datetime.combine(period_start_date, time.min))
+        period_end = timezone.make_aware(datetime.combine(period_end_date, time.max))
+    except Exception:
+        logger.exception("Failed to resolve billing period for insights")
+        period_end = timezone.now()
+        period_start = period_end - timedelta(days=30)
+
+    ctx = InsightContext(
+        agent=agent,
+        user=user,
+        organization=organization,
+        period_start=period_start,
+        period_end=period_end,
+    )
+
+    insights: list[dict] = [
+        _get_agent_setup_insight(request, agent, organization),
+    ]
+
+    time_saved = _get_time_saved_insight(ctx)
+    if time_saved:
+        insights.append(time_saved)
+
+    burn_rate = _get_burn_rate_insight(ctx)
+    if burn_rate:
+        insights.append(burn_rate)
+
+    insights.sort(key=lambda item: item.get("priority", 0), reverse=True)
+    return insights
 
 
 class AgentInsightsAPIView(LoginRequiredMixin, View):

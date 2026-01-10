@@ -861,10 +861,15 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     set((state) => {
       const awaitingResponse = false
-      const isNewStream = isStart || !state.streaming || state.streaming.streamId !== payload.stream_id
-      const base = isNewStream
-        ? { streamId: payload.stream_id, reasoning: '', content: '', done: false }
-        : state.streaming
+      const existingStream = state.streaming
+      let isNewStream = false
+      let base: StreamState
+      if (isStart || !existingStream || existingStream.streamId !== payload.stream_id) {
+        isNewStream = true
+        base = { streamId: payload.stream_id, reasoning: '', content: '', done: false }
+      } else {
+        base = existingStream
+      }
 
       const reasoningDelta = payload.reasoning_delta ?? ''
       const contentDelta = payload.content_delta ?? ''

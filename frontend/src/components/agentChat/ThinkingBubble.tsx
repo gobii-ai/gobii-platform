@@ -28,9 +28,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
     disabled: false,
   })
 
-  const hasContent = displayedContent.trim().length > 0
   const hasTargetContent = reasoning.trim().length > 0
-  const showContent = hasContent && !collapsed
 
   // Auto-scroll content to bottom when streaming new content
   useLayoutEffect(() => {
