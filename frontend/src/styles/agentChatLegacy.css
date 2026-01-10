@@ -701,7 +701,7 @@
 
 .processing-ellipsis {
   display: inline-flex;
-  align-items: baseline;
+  align-items: center;
   gap: 0.15rem;
   margin-left: 0.15rem;
 }
@@ -725,11 +725,11 @@
 @keyframes processingEllipsis {
   0%, 80%, 100% {
     opacity: 0.25;
-    transform: scale(0.8);
+    transform: scale(0.8) translateY(2px);
   }
   40% {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1) translateY(2px);
   }
 }
 
@@ -989,12 +989,12 @@
 
 @keyframes processingPulse {
   0%, 100% {
-    transform: scale(0.9);
+    transform: scale(0.9) translateY(2px);
     box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.5);
     opacity: 0.85;
   }
   50% {
-    transform: scale(1.05);
+    transform: scale(1.05) translateY(2px);
     box-shadow: 0 0 0 6px rgba(99, 102, 241, 0);
     opacity: 1;
   }
