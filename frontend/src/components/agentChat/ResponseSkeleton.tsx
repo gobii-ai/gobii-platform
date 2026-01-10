@@ -23,6 +23,14 @@ export function ResponseSkeleton({ startTime }: ResponseSkeletonProps) {
   const estimatedTimeRef = useRef(getEstimatedResponseTime())
   const rafRef = useRef<number | null>(null)
 
+  // Reset when startTime changes (e.g., new tool call, thinking, or message)
+  useEffect(() => {
+    const newEffectiveStartTime = startTime ?? Date.now()
+    startTimeRef.current = newEffectiveStartTime
+    estimatedTimeRef.current = getEstimatedResponseTime()
+    setProgress(calculateProgress(Date.now() - newEffectiveStartTime, estimatedTimeRef.current))
+  }, [startTime])
+
   const animate = useCallback(() => {
     const elapsed = Date.now() - startTimeRef.current
     const newProgress = calculateProgress(elapsed, estimatedTimeRef.current)

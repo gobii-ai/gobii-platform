@@ -208,6 +208,7 @@ type CachedAgentState = {
   agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
+  streaming: StreamState | null
 }
 
 export type AgentChatState = {
@@ -338,7 +339,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         currentState.processingActive ||
         currentState.awaitingResponse ||
         currentState.processingStartedAt !== null ||
-        currentState.processingWebTasks.length > 0
+        currentState.processingWebTasks.length > 0 ||
+        currentState.streaming !== null
       )
     if (shouldCache && currentAgentIdForCache) {
       nextCache = {
@@ -356,6 +358,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           agentColorHex: currentState.agentColorHex,
           agentName: currentState.agentName,
           agentAvatarUrl: currentState.agentAvatarUrl,
+          streaming: currentState.streaming,
         },
       }
     }
@@ -384,10 +387,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       error: null,
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
-      streaming: null,
+      streaming: cachedState?.streaming ?? null,
       streamingLastUpdatedAt: null,
       streamingClearOnDone: false,
-      streamingThinkingCollapsed: false,
+      streamingThinkingCollapsed: Boolean(cachedState?.streaming?.reasoning),
       thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
@@ -809,9 +812,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         awaitingResponse = false
       }
 
-      // Reset progress bar when new tool steps arrive live (indicates new work cycle)
+      // Reset progress bar when new activity arrives live (indicates new work cycle)
       // This only affects live events, not cached state when switching agents
-      const shouldResetProgress = normalized.kind === 'steps'
+      const isOutboundMessage = normalized.kind === 'message' && normalized.message.isOutbound
+      const shouldResetProgress = normalized.kind === 'steps' || normalized.kind === 'thinking' || isOutboundMessage
       const nextProcessingStartedAt = shouldResetProgress ? Date.now() : state.processingStartedAt
 
       if (!state.autoScrollPinned) {
@@ -855,13 +859,20 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     set((state) => {
       const awaitingResponse = false
-      const base =
-        isStart || !state.streaming || state.streaming.streamId !== payload.stream_id
-          ? { streamId: payload.stream_id, reasoning: '', content: '', done: false }
-          : state.streaming
+      const isNewStream = isStart || !state.streaming || state.streaming.streamId !== payload.stream_id
+      const base = isNewStream
+        ? { streamId: payload.stream_id, reasoning: '', content: '', done: false }
+        : state.streaming
 
       const reasoningDelta = payload.reasoning_delta ?? ''
       const contentDelta = payload.content_delta ?? ''
+
+      // Reset progress when new stream starts OR when reasoning first appears (thinking begins)
+      const hadNoReasoning = !base.reasoning?.trim()
+      const hasNewReasoning = Boolean(reasoningDelta)
+      const isThinkingStart = hadNoReasoning && hasNewReasoning
+      const shouldResetProgress = isNewStream || isThinkingStart
+      const processingStartedAt = shouldResetProgress ? now : state.processingStartedAt
 
       const next: StreamState = {
         streamId: base.streamId,
@@ -881,6 +892,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streamingLastUpdatedAt: now,
           streamingClearOnDone: false,
           awaitingResponse,
+          processingStartedAt,
         }
       }
 
@@ -894,6 +906,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
             streamingClearOnDone: false,
             streamingLastUpdatedAt: now,
             awaitingResponse,
+            processingStartedAt,
           }
         }
         shouldRefreshLatest = true
@@ -904,6 +917,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
           awaitingResponse,
+          processingStartedAt,
         }
       }
 
@@ -916,6 +930,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
           awaitingResponse,
+          processingStartedAt,
         }
       }
 
@@ -929,6 +944,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
         streamingLastUpdatedAt: now,
         awaitingResponse,
+        processingStartedAt,
       }
     })
 
