@@ -524,20 +524,21 @@
 
 #timeline-events {
   --timeline-row-gap: 1rem;
-  padding: 0 1rem calc(var(--composer-height, 6.5rem) - 0.5rem);
+  --timeline-bottom-spacing: 1.5rem;
+  padding: 0 1rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
 }
 
 #timeline-events[data-has-jump-button="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + 2rem);
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing) + 2rem);
 }
 
 /* Extra padding when working panel is visible (fixed above composer) */
 #timeline-events[data-has-working-panel="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem));
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing));
 }
 
 #timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + 2rem);
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing) + 2rem);
 }
 
 #timeline-events.timeline-align-end {
@@ -1454,19 +1455,19 @@
   }
 
   #timeline-events {
-    padding: 0 0.5rem calc(var(--composer-height, 6.5rem) - 0.25rem);
+    padding: 0 0.5rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing, 1.5rem));
   }
 
   #timeline-events[data-has-jump-button="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + 1rem);
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing, 1.5rem) + 1.5rem);
   }
 
   #timeline-events[data-has-working-panel="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem));
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing, 1.5rem));
   }
 
   #timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + 1rem);
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing, 1.5rem) + 1.5rem);
   }
 
   .jump-to-latest {
@@ -2506,7 +2507,7 @@
    ========================================================================== */
 
 .response-progress-container {
-  padding: 1rem 0;
+  padding: 1.5rem 0;
   animation: progressFadeIn 0.3s ease-out;
 }
 
