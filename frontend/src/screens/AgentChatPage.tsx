@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
@@ -37,6 +38,26 @@ function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot |
     }
   }
   return null
+}
+
+function compareRosterNames(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { sensitivity: 'base' })
+}
+
+function insertRosterEntry(agents: AgentRosterEntry[], entry: AgentRosterEntry): AgentRosterEntry[] {
+  const insertionIndex = agents.findIndex((agent) => compareRosterNames(entry.name, agent.name) < 0)
+  if (insertionIndex === -1) {
+    return [...agents, entry]
+  }
+  return [...agents.slice(0, insertionIndex), entry, ...agents.slice(insertionIndex)]
+}
+
+function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRosterEntry): AgentRosterEntry[] {
+  const roster = agents ?? []
+  if (roster.some((agent) => agent.id === entry.id)) {
+    return roster
+  }
+  return insertRosterEntry(roster, entry)
 }
 
 type ConnectionIndicator = {
@@ -157,6 +178,7 @@ const SCROLL_END_TOLERANCE_PX = 4
 const BOTTOM_PANEL_GAP_PX = 20
 
 export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
+  const queryClient = useQueryClient()
   const isNewAgent = agentId === null
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -633,6 +655,22 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     if (isNewAgent) {
       try {
         const result = await createAgent(body)
+        const createdAgentName = result.agent_name?.trim() || 'Agent'
+        pendingAgentMetaRef.current = {
+          agentId: result.agent_id,
+          agentName: createdAgentName,
+        }
+        queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
+          mergeRosterEntry(current, {
+            id: result.agent_id,
+            name: createdAgentName,
+            avatarUrl: null,
+            displayColorHex: null,
+            isActive: true,
+            shortDescription: '',
+          }),
+        )
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
         onAgentCreated?.(result.agent_id)
       } catch (err) {
         console.error('Failed to create agent:', err)
