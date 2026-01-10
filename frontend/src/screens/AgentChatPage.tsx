@@ -154,7 +154,7 @@ export type AgentChatPageProps = {
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
 const SCROLL_END_TOLERANCE_PX = 4
-const BOTTOM_PANEL_GAP_PX = 12
+const BOTTOM_PANEL_GAP_PX = 16
 
 export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
   const isNewAgent = agentId === null

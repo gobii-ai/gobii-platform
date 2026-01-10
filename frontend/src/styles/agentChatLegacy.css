@@ -504,7 +504,7 @@
    ========================================================================== */
 
 #agent-workspace-root {
-  min-height: 24rem;
+  min-height: 0;
   position: relative;
   z-index: 1;
 }
@@ -524,7 +524,7 @@
 
 #timeline-events {
   --timeline-row-gap: 1rem;
-  --timeline-bottom-spacing: 1.5rem;
+  --timeline-bottom-spacing: 2rem;
   padding: 0 1rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
 }
 
@@ -532,14 +532,7 @@
   padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing) + 2rem);
 }
 
-/* Extra padding when working panel is visible (fixed above composer) */
-#timeline-events[data-has-working-panel="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing));
-}
-
-#timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing) + 2rem);
-}
+/* Working panel height is already included in dynamically-measured --composer-height */
 
 #timeline-events.timeline-align-end {
   justify-content: flex-end;
@@ -1161,9 +1154,7 @@
   letter-spacing: 0.015em;
 }
 
-#timeline-load-newer {
-  margin-bottom: var(--timeline-row-gap, 1rem);
-}
+/* gap-3 on parent handles spacing - no extra margins needed */
 
 #timeline-load-newer[hidden] {
   display: none !important;
@@ -1455,20 +1446,13 @@
   }
 
   #timeline-events {
-    padding: 0 0.5rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing, 1.5rem));
+    padding: 0 0.5rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
   }
 
   #timeline-events[data-has-jump-button="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing, 1.5rem) + 1.5rem);
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing) + 1.5rem);
   }
 
-  #timeline-events[data-has-working-panel="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing, 1.5rem));
-  }
-
-  #timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + var(--timeline-bottom-spacing, 1.5rem) + 1.5rem);
-  }
 
   .jump-to-latest {
     width: 2.25rem;
@@ -2479,9 +2463,7 @@
   50% { opacity: 0.3; }
 }
 
-#streaming-response-slot {
-  margin-top: var(--timeline-row-gap, 1rem);
-}
+/* gap-3 on parent #timeline-events handles spacing between siblings */
 
 .streaming-reply-event[data-waiting='true'] .streaming-reply-bubble {
   animation: streamingWaitingPulse 1.5s ease-in-out infinite;
@@ -2507,24 +2489,31 @@
    ========================================================================== */
 
 .response-progress-container {
-  padding: 1.5rem 0;
-  animation: progressFadeIn 0.3s ease-out;
+  padding: 0.75rem 0;
+  animation: progressFadeIn 0.4s ease-out;
 }
 
 @keyframes progressFadeIn {
   from {
     opacity: 0;
+    transform: scaleX(0.98);
   }
   to {
     opacity: 1;
+    transform: scaleX(1);
   }
 }
 
 .response-progress-track {
-  height: 4px;
+  height: 3px;
   border-radius: 9999px;
-  background: rgba(148, 163, 184, 0.12);
-  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.08) 0%,
+    rgba(148, 163, 184, 0.12) 50%,
+    rgba(148, 163, 184, 0.08) 100%
+  );
+  overflow: visible;
   position: relative;
 }
 
@@ -2533,41 +2522,72 @@
   border-radius: 9999px;
   background: linear-gradient(
     90deg,
-    #059669 0%,
-    #10b981 50%,
-    #34d399 100%
+    #10b981 0%,
+    #34d399 50%,
+    #6ee7b7 100%
   );
   position: relative;
-  transition: width 32ms linear;
+  transition: width 16ms linear;
   min-width: 0;
-  box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
+  box-shadow:
+    0 0 20px rgba(16, 185, 129, 0.4),
+    0 0 40px rgba(16, 185, 129, 0.2);
 }
 
+/* Flowing shimmer wave across the bar */
+.response-progress-fill::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: progressShimmer 1.5s ease-in-out infinite;
+  border-radius: 9999px;
+}
+
+@keyframes progressShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* Energetic leading edge glow */
 .response-progress-glow {
   position: absolute;
-  top: -2px;
-  right: -6px;
-  bottom: -2px;
-  width: 20px;
-  background: radial-gradient(
-    ellipse at center,
-    rgba(255, 255, 255, 0.95) 0%,
-    rgba(52, 211, 153, 0.7) 50%,
-    transparent 70%
-  );
-  border-radius: 9999px;
-  animation: progressGlow 1.2s ease-in-out infinite;
-  filter: blur(1px);
+  top: 50%;
+  right: 0;
+  width: 4px;
+  height: 4px;
+  transform: translate(50%, -50%);
+  background: #fff;
+  border-radius: 50%;
+  box-shadow:
+    0 0 4px 2px rgba(255, 255, 255, 0.9),
+    0 0 8px 4px rgba(110, 231, 183, 0.8),
+    0 0 16px 8px rgba(52, 211, 153, 0.5),
+    0 0 32px 12px rgba(16, 185, 129, 0.3);
+  animation: progressPulse 0.8s ease-in-out infinite;
 }
 
-@keyframes progressGlow {
+@keyframes progressPulse {
   0%, 100% {
-    opacity: 0.5;
-    transform: scale(0.9);
+    transform: translate(50%, -50%) scale(1);
+    opacity: 0.9;
   }
   50% {
+    transform: translate(50%, -50%) scale(1.2);
     opacity: 1;
-    transform: scale(1.1);
   }
 }
 
@@ -2577,11 +2597,17 @@
   }
   .response-progress-fill {
     transition: width 100ms linear;
-    box-shadow: none;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+  }
+  .response-progress-fill::before {
+    animation: none;
+    opacity: 0;
   }
   .response-progress-glow {
     animation: none;
-    opacity: 0.7;
+    box-shadow:
+      0 0 4px 2px rgba(255, 255, 255, 0.8),
+      0 0 8px 4px rgba(110, 231, 183, 0.6);
   }
 }
 
