@@ -207,6 +207,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
+  const processingStartedAt = useAgentChatStore((state) => state.processingStartedAt)
   const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
@@ -800,6 +801,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         oldestCursor={isNewAgent ? null : (events.length ? events[0].cursor : null)}
         newestCursor={isNewAgent ? null : (events.length ? events[events.length - 1].cursor : null)}
         processingActive={isNewAgent ? false : processingActive}
+        processingStartedAt={isNewAgent ? null : processingStartedAt}
         awaitingResponse={isNewAgent ? false : awaitingResponse}
         processingWebTasks={isNewAgent ? [] : processingWebTasks}
         streaming={isNewAgent ? null : streaming}

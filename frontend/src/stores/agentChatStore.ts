@@ -194,9 +194,25 @@ function buildOptimisticMessageEvent(body: string, attachments: File[]): { event
   }
 }
 
+// Cached state for preserving agent data when switching between agents
+type CachedAgentState = {
+  events: TimelineEvent[]
+  oldestCursor: string | null
+  newestCursor: string | null
+  hasMoreOlder: boolean
+  hasMoreNewer: boolean
+  processingActive: boolean
+  processingStartedAt: number | null
+  processingWebTasks: ProcessingWebTask[]
+  agentColorHex: string | null
+  agentName: string | null
+  agentAvatarUrl: string | null
+}
+
 export type AgentChatState = {
   agentId: string | null
   events: TimelineEvent[]
+  agentStateCache: Record<string, CachedAgentState>
   streaming: StreamState | null
   streamingLastUpdatedAt: number | null
   streamingClearOnDone: boolean
@@ -208,6 +224,7 @@ export type AgentChatState = {
   hasMoreNewer: boolean
   hasUnseenActivity: boolean
   processingActive: boolean
+  processingStartedAt: number | null
   awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   loading: boolean
@@ -264,6 +281,7 @@ export type AgentChatState = {
 export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentId: null,
   events: [],
+  agentStateCache: {},
   streaming: null,
   streamingLastUpdatedAt: null,
   streamingClearOnDone: false,
@@ -275,6 +293,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   hasMoreNewer: false,
   hasUnseenActivity: false,
   processingActive: false,
+  processingStartedAt: null,
   awaitingResponse: false,
   processingWebTasks: [],
   loading: false,
@@ -305,17 +324,45 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const fallbackColor = reuseExisting ? get().agentColorHex : DEFAULT_CHAT_COLOR_HEX
     const fallbackName = reuseExisting ? get().agentName : null
     const fallbackAvatarUrl = reuseExisting ? get().agentAvatarUrl : null
+
+    // Cache current agent's state before switching (if we have a different agent)
+    const currentState = get()
+    let nextCache = currentState.agentStateCache
+    if (currentState.agentId && currentState.agentId !== agentId && currentState.events.length > 0) {
+      nextCache = {
+        ...currentState.agentStateCache,
+        [currentState.agentId]: {
+          events: currentState.events,
+          oldestCursor: currentState.oldestCursor,
+          newestCursor: currentState.newestCursor,
+          hasMoreOlder: currentState.hasMoreOlder,
+          hasMoreNewer: currentState.hasMoreNewer,
+          processingActive: currentState.processingActive,
+          processingStartedAt: currentState.processingStartedAt,
+          processingWebTasks: currentState.processingWebTasks,
+          agentColorHex: currentState.agentColorHex,
+          agentName: currentState.agentName,
+          agentAvatarUrl: currentState.agentAvatarUrl,
+        },
+      }
+    }
+
+    // Check if we have cached state for the new agent
+    const cachedState = nextCache[agentId]
+
     set({
       loading: true,
       agentId,
-      events: [],
-      oldestCursor: null,
-      newestCursor: null,
-      hasMoreOlder: false,
-      hasMoreNewer: false,
+      // Use cached state if available, otherwise clear
+      events: cachedState?.events ?? [],
+      oldestCursor: cachedState?.oldestCursor ?? null,
+      newestCursor: cachedState?.newestCursor ?? null,
+      hasMoreOlder: cachedState?.hasMoreOlder ?? false,
+      hasMoreNewer: cachedState?.hasMoreNewer ?? false,
       hasUnseenActivity: false,
-      processingActive: false,
-      processingWebTasks: [],
+      processingActive: cachedState?.processingActive ?? false,
+      processingStartedAt: cachedState?.processingStartedAt ?? null,
+      processingWebTasks: cachedState?.processingWebTasks ?? [],
       loadingOlder: false,
       loadingNewer: false,
       refreshingLatest: false,
@@ -329,9 +376,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingThinkingCollapsed: false,
       thinkingCollapsedByCursor: {},
       awaitingResponse: false,
-      agentColorHex: providedColor ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
-      agentName: providedName ?? fallbackName ?? null,
-      agentAvatarUrl: providedAvatarUrl ?? fallbackAvatarUrl ?? null,
+      agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
+      agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
+      agentAvatarUrl: providedAvatarUrl ?? cachedState?.agentAvatarUrl ?? fallbackAvatarUrl ?? null,
+      agentStateCache: nextCache,
     })
 
     const currentAgentId = agentId
@@ -613,7 +661,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       return
     }
     const { event: optimisticEvent, clientId } = buildOptimisticMessageEvent(trimmed, attachments)
-    set({ awaitingResponse: true })
+    set({ awaitingResponse: true, processingStartedAt: Date.now() })
     get().receiveRealtimeEvent(optimisticEvent)
     try {
       const event = await sendAgentMessage(state.agentId, trimmed, attachments)
@@ -627,6 +675,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           events: updatedEvents.events,
           pendingEvents: updatedPending.events,
           awaitingResponse: false,
+          processingStartedAt: null,
           error: message,
         }
       })
@@ -809,12 +858,24 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   updateProcessing(snapshotInput) {
     const snapshot = normalizeProcessingUpdate(snapshotInput)
-    set((state) => ({
-      processingActive: snapshot.active,
-      processingWebTasks: snapshot.webTasks,
-      hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
-      awaitingResponse: snapshot.active ? false : state.awaitingResponse,
-    }))
+    set((state) => {
+      // Track when processing started (for progress bar)
+      let processingStartedAt = state.processingStartedAt
+      if (snapshot.active && !state.processingActive) {
+        // Processing just started
+        processingStartedAt = Date.now()
+      } else if (!snapshot.active) {
+        // Processing ended
+        processingStartedAt = null
+      }
+      return {
+        processingActive: snapshot.active,
+        processingStartedAt,
+        processingWebTasks: snapshot.webTasks,
+        hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
+        awaitingResponse: snapshot.active ? false : state.awaitingResponse,
+      }
+    })
   },
 
   setAutoScrollPinned(pinned) {

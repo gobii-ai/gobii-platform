@@ -9,9 +9,17 @@ function calculateProgress(elapsed: number, estimated: number): number {
   return Math.min(asymptotic * 92, 92)
 }
 
-export function ResponseSkeleton() {
-  const [progress, setProgress] = useState(0)
-  const startTimeRef = useRef(Date.now())
+type ResponseSkeletonProps = {
+  startTime?: number | null
+}
+
+export function ResponseSkeleton({ startTime }: ResponseSkeletonProps) {
+  // Use provided start time or fall back to now
+  const effectiveStartTime = startTime ?? Date.now()
+  const initialProgress = calculateProgress(Date.now() - effectiveStartTime, getEstimatedResponseTime())
+
+  const [progress, setProgress] = useState(initialProgress)
+  const startTimeRef = useRef(effectiveStartTime)
   const estimatedTimeRef = useRef(getEstimatedResponseTime())
   const rafRef = useRef<number | null>(null)
 
@@ -23,12 +31,13 @@ export function ResponseSkeleton() {
   }, [])
 
   useEffect(() => {
-    const startTime = startTimeRef.current
+    const startTimeValue = startTimeRef.current
 
-    // Small delay for smoother entrance
+    // Small delay for smoother entrance (only if starting fresh)
+    const delay = startTime ? 0 : 80
     const timer = setTimeout(() => {
       rafRef.current = requestAnimationFrame(animate)
-    }, 80)
+    }, delay)
 
     return () => {
       clearTimeout(timer)
@@ -36,13 +45,13 @@ export function ResponseSkeleton() {
         cancelAnimationFrame(rafRef.current)
       }
       // Record the actual response time when component unmounts
-      const duration = Date.now() - startTime
+      const duration = Date.now() - startTimeValue
       // Only record reasonable durations (between 200ms and 60s)
       if (duration >= 200 && duration <= 60000) {
         recordResponseTime(duration)
       }
     }
-  }, [animate])
+  }, [animate, startTime])
 
   return (
     <div className="response-progress-container">

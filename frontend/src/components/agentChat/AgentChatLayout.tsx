@@ -43,6 +43,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   loadingNewer?: boolean
   initialLoading?: boolean
   processingWebTasks?: ProcessingWebTask[]
+  processingStartedAt?: number | null
   awaitingResponse?: boolean
   streaming?: StreamState | null
   thinkingCollapsedByCursor?: Record<string, boolean>
@@ -79,6 +80,7 @@ export function AgentChatLayout({
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
+  processingStartedAt,
   awaitingResponse = false,
   processingWebTasks = [],
   streaming,
@@ -230,7 +232,7 @@ export function AgentChatLayout({
                 ) : null}
 
                 {showResponseSkeleton ? (
-                  <ResponseSkeleton key={`progress-${events.length}-${showStreamingSlot}`} />
+                  <ResponseSkeleton startTime={processingStartedAt} />
                 ) : null}
 
                 {showBottomSentinel ? (
