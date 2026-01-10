@@ -524,7 +524,7 @@
 
 #timeline-events {
   --timeline-row-gap: 1rem;
-  --timeline-bottom-spacing: 2rem;
+  --timeline-bottom-spacing: 1.25rem; /* Must match BOTTOM_PANEL_GAP_PX in AgentChatPage.tsx */
   padding: 0 1rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
 }
 
@@ -1087,6 +1087,10 @@
   text-transform: none;
   font-size: 0.75rem;
   color: #64748b;
+}
+
+.timeline-load-control[hidden] {
+  display: none;
 }
 
 .timeline-bottom-sentinel {

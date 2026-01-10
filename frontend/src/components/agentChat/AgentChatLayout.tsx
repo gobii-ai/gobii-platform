@@ -119,13 +119,12 @@ export function AgentChatLayout({
   // Streaming slot shows while actively streaming content
   const showStreamingSlot = (showStreamingReasoning || hasStreamingContent) && isStreaming
 
-  // Show progress bar when:
-  // - Awaiting response OR processing active
-  // - AND streaming slot is not showing
-  // - AND not viewing older history
+  // Show progress bar whenever processing is active (agent is working)
+  // Hide it only while actively streaming message content (the streaming text is the feedback)
+  const isActivelyStreamingContent = hasStreamingContent && isStreaming
   const showResponseSkeleton = Boolean(
-    (awaitingResponse || processingActive) &&
-    !showStreamingSlot &&
+    (awaitingResponse || processingActive || isStreaming) &&
+    !isActivelyStreamingContent &&
     !hasMoreNewer
   )
 
@@ -138,7 +137,7 @@ export function AgentChatLayout({
 
   const showBanner = Boolean(agentName)
   const containerStyle = showBanner
-    ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 1.5rem)' }
+    ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 0.75rem)' }
     : undefined
   const composerPalette = buildAgentComposerPalette(agentColorHex)
 
@@ -172,7 +171,7 @@ export function AgentChatLayout({
         />
       )}
       <main className={`min-h-screen ${mainClassName}`}>
-        <div className="mx-auto flex min-h-screen w-full flex-col px-4 pb-0 pt-6 sm:px-6 lg:px-10" style={containerStyle}>
+        <div className="mx-auto flex w-full flex-col px-4 pb-0 sm:px-6 lg:px-10" style={containerStyle}>
           <div
             id="agent-workspace-root"
             className="relative flex flex-1 flex-col gap-2"
@@ -210,8 +209,6 @@ export function AgentChatLayout({
                   />
                 </div>
 
-                {showResponseSkeleton ? <ResponseSkeleton /> : null}
-
                 {showStreamingSlot && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
                     {showStreamingReasoning && onToggleStreamingThinking ? (
@@ -230,6 +227,10 @@ export function AgentChatLayout({
                       />
                     ) : null}
                   </div>
+                ) : null}
+
+                {showResponseSkeleton ? (
+                  <ResponseSkeleton key={`progress-${events.length}-${showStreamingSlot}`} />
                 ) : null}
 
                 {showBottomSentinel ? (
