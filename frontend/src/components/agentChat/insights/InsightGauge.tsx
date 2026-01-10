@@ -2,7 +2,8 @@ import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
 import { GaugeChart } from 'echarts/charts'
 import { CanvasRenderer } from 'echarts/renderers'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import * as sizeSensor from 'size-sensor'
 
 echarts.use([GaugeChart, CanvasRenderer])
 
@@ -35,6 +36,13 @@ export function InsightGauge({
 }: InsightGaugeProps) {
   const chartRef = useRef<ReactEChartsCore>(null)
   const [displayValue, setDisplayValue] = useState(animate ? 0 : value)
+
+  useLayoutEffect(() => {
+    const element = (chartRef.current as unknown as { ele?: HTMLElement })?.ele
+    if (!element) return
+    // Pre-bind size-sensor so echarts-for-react cleanup doesn't crash on fast unmounts.
+    sizeSensor.bind(element, () => {})
+  }, [])
 
   useEffect(() => {
     if (animate) {
