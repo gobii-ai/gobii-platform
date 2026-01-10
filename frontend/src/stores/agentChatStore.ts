@@ -209,6 +209,7 @@ type CachedAgentState = {
   agentName: string | null
   agentAvatarUrl: string | null
   streaming: StreamState | null
+  streamingThinkingCollapsed: boolean
 }
 
 export type AgentChatState = {
@@ -359,6 +360,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           agentName: currentState.agentName,
           agentAvatarUrl: currentState.agentAvatarUrl,
           streaming: currentState.streaming,
+          streamingThinkingCollapsed: currentState.streamingThinkingCollapsed,
         },
       }
     }
@@ -390,7 +392,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streaming: cachedState?.streaming ?? null,
       streamingLastUpdatedAt: null,
       streamingClearOnDone: false,
-      streamingThinkingCollapsed: Boolean(cachedState?.streaming?.reasoning),
+      streamingThinkingCollapsed: cachedState?.streamingThinkingCollapsed ?? false,
       thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,

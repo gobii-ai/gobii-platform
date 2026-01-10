@@ -91,7 +91,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
             </svg>
           </span>
         </button>
-        {showContent && (
+        {!collapsed && (
           <div ref={contentRef} className="thinking-window-content">
             {displayedContent}
           </div>

@@ -2367,8 +2367,11 @@
 }
 
 .thinking-window-content {
-  max-height: 10rem;
-  overflow-y: auto;
+  height: 8rem;
+  overflow-y: scroll;
+  overflow-x: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
   padding: 0 0.875rem 0.75rem;
   font-size: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
@@ -2379,22 +2382,8 @@
   animation: thinkingWindowFadeIn 0.2s ease;
 }
 
-/* Custom scrollbar for thinking window */
 .thinking-window-content::-webkit-scrollbar {
-  width: 5px;
-}
-
-.thinking-window-content::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.thinking-window-content::-webkit-scrollbar-thumb {
-  background: rgba(99, 102, 241, 0.2);
-  border-radius: 3px;
-}
-
-.thinking-window-content::-webkit-scrollbar-thumb:hover {
-  background: rgba(99, 102, 241, 0.35);
+  display: none; /* Chrome/Safari */
 }
 
 @keyframes thinkingWindowFadeIn {

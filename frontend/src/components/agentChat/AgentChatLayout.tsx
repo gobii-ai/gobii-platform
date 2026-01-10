@@ -115,11 +115,12 @@ export function AgentChatLayout({
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
-  // Only show streaming reasoning while actually streaming - once done, the historical event takes over
-  const showStreamingReasoning = hasStreamingReasoning && isStreaming
+  // Show streaming reasoning while streaming, or briefly after done to allow collapse animation
+  // (streaming is cleared when historical thinking event arrives)
+  const showStreamingReasoning = hasStreamingReasoning && (isStreaming || streaming?.done)
 
-  // Streaming slot shows while actively streaming content
-  const showStreamingSlot = (showStreamingReasoning || hasStreamingContent) && isStreaming
+  // Streaming slot shows while actively streaming content, or briefly after done for reasoning collapse
+  const showStreamingSlot = showStreamingReasoning || (hasStreamingContent && isStreaming)
 
   // Show progress bar whenever processing is active (agent is working)
   // Hide it only while actively streaming message content (the streaming text is the feedback)
