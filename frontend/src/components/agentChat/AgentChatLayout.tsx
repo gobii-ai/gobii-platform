@@ -116,11 +116,16 @@ export function AgentChatLayout({
   // Only show streaming reasoning while actually streaming - once done, the historical event takes over
   const showStreamingReasoning = hasStreamingReasoning && isStreaming
 
-  // Show skeleton when awaiting response but no streaming content yet
+  // Streaming slot shows while actively streaming content
+  const showStreamingSlot = (showStreamingReasoning || hasStreamingContent) && isStreaming
+
+  // Show progress bar when:
+  // - Awaiting response OR processing active
+  // - AND streaming slot is not showing
+  // - AND not viewing older history
   const showResponseSkeleton = Boolean(
     (awaitingResponse || processingActive) &&
-    !hasStreamingReasoning &&
-    !hasStreamingContent &&
+    !showStreamingSlot &&
     !hasMoreNewer
   )
 
@@ -207,7 +212,7 @@ export function AgentChatLayout({
 
                 {showResponseSkeleton ? <ResponseSkeleton /> : null}
 
-                {(showStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
+                {showStreamingSlot && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
                     {showStreamingReasoning && onToggleStreamingThinking ? (
                       <ThinkingBubble
