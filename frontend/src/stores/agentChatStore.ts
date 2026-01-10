@@ -809,6 +809,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         awaitingResponse = false
       }
 
+      // Reset progress bar when new tool steps arrive live (indicates new work cycle)
+      // This only affects live events, not cached state when switching agents
+      const shouldResetProgress = normalized.kind === 'steps'
+      const nextProcessingStartedAt = shouldResetProgress ? Date.now() : state.processingStartedAt
+
       if (!state.autoScrollPinned) {
         const mergedPending = mergeTimelineEvents(pendingEvents, [normalized])
         return {
@@ -818,6 +823,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
           awaitingResponse,
+          processingStartedAt: nextProcessingStartedAt,
         }
       }
 
@@ -832,6 +838,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         streaming: nextStreaming,
         streamingClearOnDone: nextStreamingClearOnDone,
         awaitingResponse,
+        processingStartedAt: nextProcessingStartedAt,
       }
     })
   },
@@ -904,8 +911,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return {
           streaming: next,
           hasUnseenActivity,
-          // Start collapsed - shows compact preview with a few lines scrolling by
-          streamingThinkingCollapsed: true,
+          // Start expanded so user can see thinking, auto-collapses when done
+          streamingThinkingCollapsed: false,
           streamingClearOnDone: false,
           streamingLastUpdatedAt: now,
           awaitingResponse,

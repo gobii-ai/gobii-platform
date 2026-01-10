@@ -2259,14 +2259,14 @@
 }
 
 /* ==========================================================================
-   Thinking Bubble
+   Thinking Window - Unified reasoning/thinking display
    ========================================================================== */
 
 .thinking-event {
   align-items: flex-start;
 }
 
-.thinking-bubble {
+.thinking-window {
   max-width: 100%;
   border-radius: 0.875rem;
   background: rgba(248, 250, 252, 0.85);
@@ -2275,16 +2275,12 @@
   overflow: hidden;
 }
 
-.thinking-bubble[data-streaming='true'] {
+.thinking-window[data-streaming='true'] {
   background: rgba(245, 247, 255, 0.85);
   border-color: rgba(199, 210, 254, 0.5);
 }
 
-.thinking-bubble[data-has-preview='true'] {
-  border-color: rgba(203, 213, 225, 0.5);
-}
-
-.thinking-bubble-header {
+.thinking-window-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -2301,16 +2297,16 @@
   transition: background 0.15s ease;
 }
 
-.thinking-bubble-header:hover {
+.thinking-window-header:hover {
   background: rgba(99, 102, 241, 0.04);
 }
 
-.thinking-bubble-header:focus-visible {
+.thinking-window-header:focus-visible {
   outline: 2px solid rgba(99, 102, 241, 0.4);
   outline-offset: -2px;
 }
 
-.thinking-bubble-icon {
+.thinking-window-icon {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2319,21 +2315,21 @@
   color: #6366f1;
 }
 
-.thinking-bubble-icon svg {
+.thinking-window-icon svg {
   width: 0.875rem;
   height: 0.875rem;
 }
 
-.thinking-pulse {
+.thinking-window-pulse {
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
   background: linear-gradient(135deg, #818cf8 0%, #6366f1 100%);
   box-shadow: 0 0 6px rgba(99, 102, 241, 0.35);
-  animation: thinkingPulse 1.4s ease-in-out infinite;
+  animation: thinkingWindowPulse 1.4s ease-in-out infinite;
 }
 
-@keyframes thinkingPulse {
+@keyframes thinkingWindowPulse {
   0%, 100% {
     transform: scale(1);
     opacity: 1;
@@ -2346,12 +2342,12 @@
   }
 }
 
-.thinking-bubble-label {
+.thinking-window-label {
   flex: 1;
   text-align: left;
 }
 
-.thinking-bubble-chevron {
+.thinking-window-chevron {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2361,56 +2357,47 @@
   transition: transform 0.2s ease;
 }
 
-.thinking-bubble-chevron svg {
+.thinking-window-chevron svg {
   width: 0.75rem;
   height: 0.75rem;
 }
 
-.thinking-bubble-chevron[data-collapsed='true'] {
+.thinking-window-chevron[data-collapsed='true'] {
   transform: rotate(-90deg);
 }
 
-.thinking-bubble-preview {
-  position: relative;
-  max-height: 4.5rem;
-  overflow: hidden;
-  margin: 0 0.75rem 0.625rem;
-  border-radius: 0.5rem;
-  background: rgba(99, 102, 241, 0.03);
-}
-
-.thinking-bubble-preview-fade {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 1.5rem;
-  background: linear-gradient(
-    to bottom,
-    rgba(248, 250, 255, 0.95) 0%,
-    rgba(248, 250, 255, 0) 100%
-  );
-  pointer-events: none;
-  z-index: 1;
-}
-
-.thinking-bubble-preview-content {
-  padding: 0.5rem 0.625rem;
+.thinking-window-content {
+  max-height: 10rem;
+  overflow-y: auto;
+  padding: 0 0.875rem 0.75rem;
   font-size: 0.75rem;
   font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
   color: #4338ca;
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  opacity: 0.85;
+  animation: thinkingWindowFadeIn 0.2s ease;
 }
 
-.thinking-bubble-content {
-  padding: 0 0.875rem 0.75rem;
-  animation: thinkingContentFadeIn 0.2s ease;
+/* Custom scrollbar for thinking window */
+.thinking-window-content::-webkit-scrollbar {
+  width: 5px;
 }
 
-@keyframes thinkingContentFadeIn {
+.thinking-window-content::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thinking-window-content::-webkit-scrollbar-thumb {
+  background: rgba(99, 102, 241, 0.2);
+  border-radius: 3px;
+}
+
+.thinking-window-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.35);
+}
+
+@keyframes thinkingWindowFadeIn {
   from {
     opacity: 0;
     transform: translateY(-4px);
@@ -2419,24 +2406,6 @@
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.thinking-bubble-markdown {
-  font-size: 0.8rem;
-  color: #1e1b4b;
-  line-height: 1.55;
-}
-
-.thinking-bubble-markdown p {
-  margin: 0.35rem 0;
-}
-
-.thinking-bubble-markdown p:first-child {
-  margin-top: 0;
-}
-
-.thinking-bubble-markdown p:last-child {
-  margin-bottom: 0;
 }
 
 /* ==========================================================================
