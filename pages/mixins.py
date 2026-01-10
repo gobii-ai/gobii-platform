@@ -7,6 +7,7 @@ from django.shortcuts import redirect
 from django.http import HttpResponse
 from django.template.loader import render_to_string
 from api.models import UserPhoneNumber
+from console.phone_utils import get_phone_cooldown_remaining
 from console.forms import PhoneVerifyForm, PhoneAddForm
 from util import sms
 from django.utils import timezone
@@ -23,16 +24,8 @@ class PhoneNumberMixin:
     # --- helpers -------------------------------------------------------------
 
     def _get_cooldown_remaining(self, phone, cooldown_seconds: int = 60) -> int:
-        """Compute remaining resend cooldown in seconds for a given phone.
-
-        Returns 0 if no cooldown applies (no last attempt, already verified, etc.).
-        """
-        if not phone or phone.is_verified:
-            return 0
-        if not phone.last_verification_attempt:
-            return 0
-        elapsed = (timezone.now() - phone.last_verification_attempt).total_seconds()
-        return max(0, int(cooldown_seconds - elapsed))
+        """Compute remaining resend cooldown in seconds for a given phone."""
+        return get_phone_cooldown_remaining(phone, cooldown_seconds=cooldown_seconds)
 
     def _current_phone(self):
         return UserPhoneNumber.objects.filter(

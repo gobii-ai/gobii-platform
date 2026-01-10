@@ -855,6 +855,10 @@
   background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
 }
 
+.composer-working-insight:has(.insight-card-v2--agent-setup) {
+  background: linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%);
+}
+
 /* Colored pill tabs for composer insights - in header row */
 .composer-insight-tabs {
   flex-shrink: 0;

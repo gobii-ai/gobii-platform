@@ -373,6 +373,28 @@ class CheckoutRedirectTests(TestCase):
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
 
     @tag("batch_pages")
+    @patch("pages.views.get_user_plan")
+    def test_startup_checkout_sets_return_to_param(self, mock_get_user_plan):
+        user = get_user_model().objects.create_user(
+            email="returnto@test.com",
+            password="pw",
+            username="returnto_user",
+        )
+        self.client.force_login(user)
+
+        mock_get_user_plan.return_value = {"id": PlanNames.SCALE}
+
+        return_to = "/console/agents/123/chat/"
+        resp = self.client.get(reverse("proprietary:pro_checkout"), {"return_to": return_to})
+
+        self.assertEqual(resp.status_code, 302)
+        parsed = urlparse(resp["Location"])
+        self.assertEqual(parsed.path, return_to)
+
+        session = self.client.session
+        self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
+
+    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")

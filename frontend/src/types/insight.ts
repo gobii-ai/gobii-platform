@@ -3,7 +3,7 @@
  * Insights are contextual, helpful information shown inline during processing.
  */
 
-export type InsightType = 'time_saved' | 'burn_rate'
+export type InsightType = 'time_saved' | 'burn_rate' | 'agent_setup'
 
 // Timing constants for insight display
 export const INSIGHT_TIMING = {
@@ -31,7 +31,52 @@ export type BurnRateMetadata = {
   percentUsed: number
 }
 
-export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata
+export type AgentSetupPhone = {
+  number: string
+  isVerified: boolean
+  verifiedAt: string | null
+  cooldownRemaining: number
+}
+
+export type AgentSetupUpsellItem = {
+  plan: 'pro' | 'scale'
+  title: string
+  subtitle: string
+  body: string
+  bullets: string[]
+  price?: string | null
+  ctaLabel: string
+  accent: 'indigo' | 'violet'
+}
+
+export type AgentSetupMetadata = {
+  agentId: string
+  alwaysOn: {
+    title: string
+    body: string
+    note?: string | null
+  }
+  sms: {
+    enabled: boolean
+    agentNumber?: string | null
+    userPhone?: AgentSetupPhone | null
+  }
+  organization: {
+    currentOrg?: { id: string; name: string } | null
+    options: { id: string; name: string }[]
+  }
+  upsell?: {
+    items: AgentSetupUpsellItem[]
+    planId: string
+  } | null
+  checkout: {
+    proUrl?: string
+    scaleUrl?: string
+  }
+  utmQuerystring?: string
+}
+
+export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata | AgentSetupMetadata
 
 export type InsightEvent = {
   insightId: string

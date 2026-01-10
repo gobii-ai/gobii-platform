@@ -19,6 +19,9 @@ function getInsightTabColor(insight: InsightEvent): string {
     if (percent >= 70) return '#f59e0b' // amber-500
     return '#8b5cf6' // violet-500
   }
+  if (insight.insightType === 'agent_setup') {
+    return '#0ea5e9' // sky-500
+  }
   return '#6b7280' // gray-500 fallback
 }
 
@@ -29,6 +32,9 @@ function getInsightTabLabel(insight: InsightEvent): string {
   }
   if (insight.insightType === 'burn_rate') {
     return 'Usage'
+  }
+  if (insight.insightType === 'agent_setup') {
+    return 'Setup'
   }
   return 'Insight'
 }
@@ -44,6 +50,9 @@ function getInsightBackground(insight: InsightEvent): string {
     if (percent >= 90) return 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%)'
     if (percent >= 70) return 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%)'
     return 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%)'
+  }
+  if (insight.insightType === 'agent_setup') {
+    return 'linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%)'
   }
   return 'transparent'
 }

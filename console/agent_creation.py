@@ -332,3 +332,90 @@ def create_persistent_agent_from_charter(
             preferred_contact_method=preferred_contact_method,
             initial_message=initial_message,
         )
+
+
+def enable_agent_sms_contact(agent: PersistentAgent, phone) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
+    if not phone or not phone.is_verified:
+        raise ValidationError("Please verify a phone number before enabling SMS.")
+
+    with transaction.atomic():
+        existing_agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        created = False
+
+        if existing_agent_sms:
+            agent_sms_endpoint = existing_agent_sms
+            updates = []
+            if not agent_sms_endpoint.is_primary:
+                agent_sms_endpoint.is_primary = True
+                updates.append("is_primary")
+            if agent_sms_endpoint.owner_agent_id != agent.id:
+                agent_sms_endpoint.owner_agent = agent
+                updates.append("owner_agent")
+            if updates:
+                agent_sms_endpoint.save(update_fields=updates)
+        else:
+            agent_sms = find_unused_number()
+            agent_sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+                owner_agent=agent,
+                channel=CommsChannel.SMS,
+                address=agent_sms.phone_number,
+                is_primary=True,
+            )
+            PersistentAgentSmsEndpoint.objects.create(
+                endpoint=agent_sms_endpoint,
+                supports_mms=True,
+                carrier_name=agent_sms.provider,
+            )
+            created = True
+
+        user_sms_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.SMS,
+            address=phone.phone_number,
+            defaults={"owner_agent": None},
+        )
+
+        if agent.preferred_contact_endpoint_id != user_sms_endpoint.id:
+            agent.preferred_contact_endpoint = user_sms_endpoint
+            agent.save(update_fields=["preferred_contact_endpoint"])
+
+        conversation = _get_or_create_conversation(
+            channel=CommsChannel.SMS.value,
+            address=phone.phone_number,
+            owner_agent=agent,
+        )
+        _ensure_participant(
+            conversation,
+            user_sms_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        )
+        _ensure_participant(
+            conversation,
+            agent_sms_endpoint,
+            PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+        )
+
+        if created:
+            try:
+                sms.send_sms(
+                    to_number=phone.phone_number,
+                    from_number=agent_sms_endpoint.address,
+                    body="Gobii: You've enabled SMS communication with Gobii. Reply HELP for help, STOP to opt-out.",
+                )
+            except Exception:
+                pass
+
+            PersistentAgentMessage.objects.create(
+                is_outbound=False,
+                from_endpoint=user_sms_endpoint,
+                to_endpoint=agent_sms_endpoint,
+                conversation=conversation,
+                body=(
+                    "Hi I've enabled SMS communication with you! "
+                    "Could you introduce yourself and confirm SMS is working?"
+                ),
+                owner_agent=agent,
+            )
+
+        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
+
+    return agent_sms_endpoint, user_sms_endpoint
