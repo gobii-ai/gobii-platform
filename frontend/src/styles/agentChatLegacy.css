@@ -1248,16 +1248,18 @@
   opacity: 0.85;
 }
 
-.chat-event[data-status='sending'] .chat-meta {
+.chat-event[data-status='sending'] .chat-timestamp {
   color: rgba(129, 140, 248, 0.9);
+  opacity: 1;
 }
 
 .chat-event[data-status='failed'] .chat-bubble {
   border-color: rgba(244, 63, 94, 0.35);
 }
 
-.chat-event[data-status='failed'] .chat-meta {
+.chat-event[data-status='failed'] .chat-timestamp {
   color: rgba(244, 63, 94, 0.85);
+  opacity: 1;
 }
 
 .chat-content {
@@ -1373,28 +1375,34 @@
   color: var(--user-channel-badge-text, rgba(255, 255, 255, 0.85));
 }
 
-/* Chat meta (timestamp) */
-.chat-meta {
-  margin-top: 0.5rem;
+/* Chat timestamp (inline in header) */
+.chat-timestamp {
+  margin-left: auto;
   font-size: 0.6875rem;
-  letter-spacing: 0.01em;
-  text-transform: none;
-  color: #94a3b8;
   font-weight: 400;
-}
-
-.chat-meta.is-user {
-  color: #a5b4fc;
-  text-align: left;
-  align-self: flex-start;
-}
-
-.chat-event.is-agent .chat-meta {
+  letter-spacing: 0.01em;
   color: #94a3b8;
+  opacity: 0.7;
+  transition: opacity 0.15s ease;
 }
 
-.chat-meta--peer {
-  color: #c4b5fd;
+.chat-bubble:hover .chat-timestamp {
+  opacity: 1;
+}
+
+.chat-author--user .chat-timestamp {
+  color: currentColor;
+  opacity: 0.5;
+}
+
+.chat-author--user:hover .chat-timestamp,
+.chat-bubble:hover .chat-author--user .chat-timestamp {
+  opacity: 0.7;
+}
+
+.chat-author--peer .chat-timestamp {
+  color: #a78bfa;
+  opacity: 0.6;
 }
 
 /* Chat attachments */
