@@ -519,6 +519,7 @@
 :root {
   --composer-height: 6.5rem;
   --working-panel-height: 13rem;
+  --working-panel-gap: 0.75rem;
 }
 
 #timeline-events {
@@ -532,11 +533,11 @@
 
 /* Extra padding when working panel is visible (fixed above composer) */
 #timeline-events[data-has-working-panel="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem));
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem));
 }
 
 #timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + 2rem);
+  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + 2rem);
 }
 
 #timeline-events.timeline-align-end {
@@ -1450,6 +1451,14 @@
 
   #timeline-events[data-has-jump-button="true"] {
     padding-bottom: calc(var(--composer-height, 6.5rem) + 1rem);
+  }
+
+  #timeline-events[data-has-working-panel="true"] {
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem));
+  }
+
+  #timeline-events[data-has-working-panel="true"][data-has-jump-button="true"] {
+    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--working-panel-height, 12rem) + var(--working-panel-gap, 0.75rem) + 1rem);
   }
 
   .jump-to-latest {
@@ -3481,5 +3490,3 @@
   font-size: 0.875rem;
   color: #64748b;
 }
-
-

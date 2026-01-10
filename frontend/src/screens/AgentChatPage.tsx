@@ -123,6 +123,7 @@ export type AgentChatPageProps = {
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
 const SCROLL_END_TOLERANCE_PX = 4
+const BOTTOM_PANEL_GAP_PX = 12
 
 export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
   const isNewAgent = agentId === null
@@ -255,15 +256,19 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
 
     return Math.max(0, paddingBottom - composerHeight)
   }, [])
-  const updateIsNearBottom = useCallback(() => {
+  const getAdjustedDistanceToBottom = useCallback(() => {
     const scrollDistance = getScrollDistanceToBottom()
     const bottomGapOffset = getBottomGapOffset()
-    const adjustedDistance = scrollDistance - bottomGapOffset
+    const visualGap = bottomGapOffset > 0 ? BOTTOM_PANEL_GAP_PX : 0
+    return scrollDistance - bottomGapOffset + visualGap
+  }, [getBottomGapOffset, getScrollDistanceToBottom])
+  const updateIsNearBottom = useCallback(() => {
+    const adjustedDistance = getAdjustedDistanceToBottom()
     const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
     isNearBottomRef.current = nextIsNearBottom
     setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
     return adjustedDistance
-  }, [getBottomGapOffset, getScrollDistanceToBottom])
+  }, [getAdjustedDistanceToBottom])
 
   useEffect(() => {
     const scroller = getScrollContainer()
@@ -326,9 +331,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         const currentScrollTop = target.scrollTop
         const scrolledDown = currentScrollTop > lastScrollTop
         lastScrollTop = currentScrollTop
-        const scrollDistance = getScrollDistanceToBottom()
-        const bottomGapOffset = getBottomGapOffset()
-        const adjustedDistance = scrollDistance - bottomGapOffset
+        const adjustedDistance = getAdjustedDistanceToBottom()
         const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
         const nearBottomForRestick = adjustedDistance <= restickThreshold
         isNearBottomRef.current = nextIsNearBottom
@@ -354,7 +357,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
     }
-  }, [getBottomGapOffset, getScrollContainer, getScrollDistanceToBottom, setAutoScrollPinned])
+  }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
 
   useEffect(() => {
     updateIsNearBottom()
@@ -401,15 +404,13 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     }
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      const scrollDistance = getScrollDistanceToBottom()
-      const bottomGapOffset = getBottomGapOffset()
-      const adjustedDistance = scrollDistance - bottomGapOffset
+      const adjustedDistance = getAdjustedDistanceToBottom()
       if (adjustedDistance > 0) {
         window.scrollBy({ top: adjustedDistance })
       }
       updateIsNearBottom()
     })
-  }, [getBottomGapOffset, getScrollDistanceToBottom, updateIsNearBottom])
+  }, [getAdjustedDistanceToBottom, updateIsNearBottom])
 
   useEffect(() => {
     const composer = document.getElementById('agent-composer-shell')
