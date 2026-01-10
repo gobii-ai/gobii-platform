@@ -1,0 +1,23 @@
+<div id="immersive-overlay" class="immersive-overlay" data-state="closed" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Immersive agent workspace">
+  <button id="immersive-close" class="immersive-close" type="button" aria-label="Close immersive view" hidden>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>
+  </button>
+  <div class="immersive-status" role="status" aria-live="polite">
+    <div class="immersive-status__inner">
+      <div class="immersive-status__eyebrow">Launching</div>
+      <div class="immersive-status__title">Building your agent workspace</div>
+      <div class="immersive-status__subtitle">Hang tight. Your immersive view is loading.</div>
+      <div class="immersive-status__progress" aria-hidden="true"></div>
+    </div>
+  </div>
+  <iframe
+    id="immersive-frame"
+    class="immersive-frame"
+    name="immersive-frame"
+    title="Gobii agent workspace"
+    loading="eager"
+  ></iframe>
+</div>

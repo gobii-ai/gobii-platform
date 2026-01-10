@@ -1,6 +1,13 @@
 {% extends "console_page.html" %}
 {% load vite_tags %}
 
+{% block head_extras %}
+  {{ block.super }}
+  <style>
+    {% include "partials/_immersive_overlay_styles.html" %}
+  </style>
+{% endblock %}
+
 {% block console_content %}
 {% include "partials/_pending_agent_transfers.html" %}
 <div id="gobii-frontend-root"
@@ -9,9 +16,11 @@
      data-props-json-id="persistent-agents-props">
 </div>
 {{ agent_list_props|json_script:"persistent-agents-props" }}
+{% include "partials/_immersive_overlay.html" %}
 {% endblock %}
 
 {% block extra_js %}
   {{ block.super }}
   {% vite_asset 'src/main.tsx' %}
+  {% include "partials/_immersive_overlay_script.html" %}
 {% endblock %}
