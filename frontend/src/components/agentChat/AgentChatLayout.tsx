@@ -192,9 +192,6 @@ export function AgentChatLayout({
                     <span className="timeline-load-indicator" data-loading={loadingOlder ? 'true' : 'false'} aria-hidden="true" />
                     <span className="timeline-load-label">{loadingOlder ? 'Loading…' : 'Load older'}</span>
                   </button>
-                  <span className="timeline-history-label" hidden={hasMoreOlder || initialLoading}>
-                    Beginning of history
-                  </span>
                 </div>
 
                 <div id="timeline-event-list" className="flex flex-col gap-3">
