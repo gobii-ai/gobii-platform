@@ -2502,78 +2502,85 @@
 }
 
 /* ==========================================================================
-   Response Skeleton - Loading placeholder
+   Response Progress Bar - Loading indicator
    ========================================================================== */
 
-.response-skeleton-event {
-  align-items: flex-start;
-  animation: skeletonFadeIn 0.15s ease-out;
+.response-progress-container {
+  padding: 1rem 0;
+  animation: progressFadeIn 0.3s ease-out;
 }
 
-@keyframes skeletonFadeIn {
+@keyframes progressFadeIn {
   from {
     opacity: 0;
-    transform: translateY(4px);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
   }
 }
 
-.response-skeleton-bubble {
-  width: 100%;
-  max-width: 100%;
+.response-progress-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.12);
+  overflow: hidden;
+  position: relative;
 }
 
-.response-skeleton-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
+.response-progress-fill {
+  height: 100%;
+  border-radius: 9999px;
+  background: linear-gradient(
+    90deg,
+    #059669 0%,
+    #10b981 50%,
+    #34d399 100%
+  );
+  position: relative;
+  transition: width 32ms linear;
+  min-width: 0;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.5);
 }
 
-.response-skeleton-row .chat-author {
-  flex-shrink: 0;
-  margin-bottom: 0;
+.response-progress-glow {
+  position: absolute;
+  top: -2px;
+  right: -6px;
+  bottom: -2px;
+  width: 20px;
+  background: radial-gradient(
+    ellipse at center,
+    rgba(255, 255, 255, 0.95) 0%,
+    rgba(52, 211, 153, 0.7) 50%,
+    transparent 70%
+  );
+  border-radius: 9999px;
+  animation: progressGlow 1.2s ease-in-out infinite;
+  filter: blur(1px);
 }
 
-.response-skeleton-line {
-  flex: 1;
-  height: 0.875rem;
-  border-radius: 4px;
-  background:
-    linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.5) 50%,
-      transparent 100%
-    ),
-    rgba(148, 163, 184, 0.12);
-  background-size: 50% 100%, 100% 100%;
-  background-position: -100% 0, 0 0;
-  background-repeat: no-repeat;
-  animation: skeletonShimmer 1.4s ease-in-out infinite;
-}
-
-@keyframes skeletonShimmer {
-  0% {
-    background-position: -100% 0, 0 0;
+@keyframes progressGlow {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(0.9);
   }
-  100% {
-    background-position: 200% 0, 0 0;
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .response-skeleton-event {
+  .response-progress-container {
     animation: none;
   }
-  .response-skeleton-line {
-    animation: skeletonPulse 2s ease-in-out infinite;
+  .response-progress-fill {
+    transition: width 100ms linear;
+    box-shadow: none;
   }
-  @keyframes skeletonPulse {
-    0%, 100% { opacity: 0.5; }
-    50% { opacity: 0.8; }
+  .response-progress-glow {
+    animation: none;
+    opacity: 0.7;
   }
 }
 

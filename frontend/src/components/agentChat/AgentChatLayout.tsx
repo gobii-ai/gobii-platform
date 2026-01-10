@@ -205,9 +205,7 @@ export function AgentChatLayout({
                   />
                 </div>
 
-                {showResponseSkeleton ? (
-                  <ResponseSkeleton agentFirstName={agentFirstName} />
-                ) : null}
+                {showResponseSkeleton ? <ResponseSkeleton /> : null}
 
                 {(showStreamingReasoning || hasStreamingContent) && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">
