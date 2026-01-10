@@ -329,9 +329,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     // Cache current agent's state before switching (if we have a different agent)
     const currentState = get()
     let nextCache = currentState.agentStateCache
+    const currentAgentIdForCache = currentState.agentId
     const shouldCache =
-      currentState.agentId &&
-      currentState.agentId !== agentId &&
+      currentAgentIdForCache &&
+      currentAgentIdForCache !== agentId &&
       (
         currentState.events.length > 0 ||
         currentState.processingActive ||
@@ -339,10 +340,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         currentState.processingStartedAt !== null ||
         currentState.processingWebTasks.length > 0
       )
-    if (shouldCache) {
+    if (shouldCache && currentAgentIdForCache) {
       nextCache = {
         ...currentState.agentStateCache,
-        [currentState.agentId]: {
+        [currentAgentIdForCache]: {
           events: currentState.events,
           oldestCursor: currentState.oldestCursor,
           newestCursor: currentState.newestCursor,
@@ -428,6 +429,19 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         }
       }
 
+      // Determine processingStartedAt for this final state update.
+      // We must explicitly handle this to avoid race conditions with WebSocket updates.
+      const currentProcessingStartedAt = get().processingStartedAt
+      const cachedProcessingStartedAt = cachedState?.processingStartedAt ?? null
+      let finalProcessingStartedAt: number | null = null
+      if (processingSnapshot.active || awaitingResponse) {
+        // Processing is active or we're awaiting a response - ensure we have a timestamp.
+        // Prefer current state (may have been set by sendMessage or updateProcessing),
+        // fall back to cached state, then to a new timestamp as last resort.
+        finalProcessingStartedAt = currentProcessingStartedAt ?? cachedProcessingStartedAt ?? Date.now()
+      }
+      // If neither processing nor awaiting, finalProcessingStartedAt stays null (progress bar hidden)
+
       set({
         events,
         oldestCursor,
@@ -435,6 +449,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         hasMoreOlder: snapshot.has_more_older,
         hasMoreNewer: snapshot.has_more_newer,
         processingActive: processingSnapshot.active,
+        processingStartedAt: finalProcessingStartedAt,
         processingWebTasks: processingSnapshot.webTasks,
         loading: false,
         autoScrollPinned: true,
@@ -463,11 +478,23 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     try {
       const { processing_active, processing_snapshot } = await fetchProcessingStatus(agentId)
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
-      set((state) => ({
-        processingActive: snapshot.active,
-        processingWebTasks: snapshot.webTasks,
-        awaitingResponse: snapshot.active ? false : state.awaitingResponse,
-      }))
+      set((state) => {
+        // Handle processingStartedAt consistently with updateProcessing
+        let processingStartedAt = state.processingStartedAt
+        if (snapshot.active && !state.processingActive) {
+          // Processing just started - preserve existing timestamp or create new one
+          processingStartedAt = state.processingStartedAt ?? Date.now()
+        } else if (!snapshot.active && !state.awaitingResponse) {
+          // Processing ended and not awaiting - clear timestamp
+          processingStartedAt = null
+        }
+        return {
+          processingActive: snapshot.active,
+          processingStartedAt,
+          processingWebTasks: snapshot.webTasks,
+          awaitingResponse: snapshot.active ? false : state.awaitingResponse,
+        }
+      })
     } catch (error) {
       set({
         error: error instanceof Error ? error.message : 'Failed to refresh processing status',
@@ -512,17 +539,28 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
               : false
         const baseEvents = removeOptimisticMatches(current.events, incoming)
         const basePendingEvents = removeOptimisticMatches(current.pendingEvents, incoming)
+
+        // Handle processingStartedAt consistently
+        const nextAwaitingResponse = shouldClearAwaiting ? false : current.awaitingResponse
+        let processingStartedAt = current.processingStartedAt
+        if (processingSnapshot.active && !current.processingActive) {
+          processingStartedAt = current.processingStartedAt ?? Date.now()
+        } else if (!processingSnapshot.active && !nextAwaitingResponse) {
+          processingStartedAt = null
+        }
+
         if (!current.autoScrollPinned) {
           const pendingEvents = mergeTimelineEvents(basePendingEvents, incoming)
           return {
             events: baseEvents,
             processingActive: processingSnapshot.active,
+            processingStartedAt,
             processingWebTasks: processingSnapshot.webTasks,
             pendingEvents,
             hasUnseenActivity: incoming.length ? true : current.hasUnseenActivity,
             streaming: nextStreaming,
             streamingClearOnDone: nextStreamingClearOnDone,
-            awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
+            awaitingResponse: nextAwaitingResponse,
             refreshingLatest: false,
             agentColorHex,
           }
@@ -541,11 +579,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           hasMoreOlder,
           hasMoreNewer: snapshot.has_more_newer,
           processingActive: processingSnapshot.active,
+          processingStartedAt,
           processingWebTasks: processingSnapshot.webTasks,
           pendingEvents: [],
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
-          awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
+          awaitingResponse: nextAwaitingResponse,
           refreshingLatest: false,
           agentColorHex,
         }
@@ -623,18 +662,29 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       )
       const hasAgentActivity = hasAgentResponse(incoming)
       const shouldClearAwaiting = hasAgentActivity || processingSnapshot.active
-      set((current) => ({
-        events,
-        oldestCursor,
-        newestCursor,
-        hasMoreOlder,
-        hasMoreNewer: snapshot.has_more_newer,
-        processingActive: processingSnapshot.active,
-        processingWebTasks: processingSnapshot.webTasks,
-        loadingNewer: false,
-        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
-        awaitingResponse: shouldClearAwaiting ? false : current.awaitingResponse,
-      }))
+      set((current) => {
+        // Handle processingStartedAt consistently
+        const nextAwaitingResponse = shouldClearAwaiting ? false : current.awaitingResponse
+        let processingStartedAt = current.processingStartedAt
+        if (processingSnapshot.active && !current.processingActive) {
+          processingStartedAt = current.processingStartedAt ?? Date.now()
+        } else if (!processingSnapshot.active && !nextAwaitingResponse) {
+          processingStartedAt = null
+        }
+        return {
+          events,
+          oldestCursor,
+          newestCursor,
+          hasMoreOlder,
+          hasMoreNewer: snapshot.has_more_newer,
+          processingActive: processingSnapshot.active,
+          processingStartedAt,
+          processingWebTasks: processingSnapshot.webTasks,
+          loadingNewer: false,
+          agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+          awaitingResponse: nextAwaitingResponse,
+        }
+      })
     } catch (error) {
       set({
         loadingNewer: false,
@@ -657,20 +707,32 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
-      set((current) => ({
-        events,
-        oldestCursor,
-        newestCursor,
-        hasMoreOlder: snapshot.has_more_older,
-        hasMoreNewer: snapshot.has_more_newer,
-        processingActive: processingSnapshot.active,
-        processingWebTasks: processingSnapshot.webTasks,
-        hasUnseenActivity: false,
-        loading: false,
-        pendingEvents: [],
-        agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
-        awaitingResponse: false,
-      }))
+      set((current) => {
+        // Handle processingStartedAt consistently
+        // When jumping to latest, we reset awaitingResponse to false
+        let processingStartedAt = current.processingStartedAt
+        if (processingSnapshot.active && !current.processingActive) {
+          processingStartedAt = current.processingStartedAt ?? Date.now()
+        } else if (!processingSnapshot.active) {
+          // Not awaiting (always false here), so clear timestamp
+          processingStartedAt = null
+        }
+        return {
+          events,
+          oldestCursor,
+          newestCursor,
+          hasMoreOlder: snapshot.has_more_older,
+          hasMoreNewer: snapshot.has_more_newer,
+          processingActive: processingSnapshot.active,
+          processingStartedAt,
+          processingWebTasks: processingSnapshot.webTasks,
+          hasUnseenActivity: false,
+          loading: false,
+          pendingEvents: [],
+          agentColorHex: snapshot.agent_color_hex ? normalizeHexColor(snapshot.agent_color_hex) : current.agentColorHex,
+          awaitingResponse: false,
+        }
+      })
     } catch (error) {
       set({
         loading: false,

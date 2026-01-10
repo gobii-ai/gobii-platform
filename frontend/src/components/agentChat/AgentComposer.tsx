@@ -94,6 +94,21 @@ export function AgentComposer({
   const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const lastRotationTimeRef = useRef<number>(Date.now())
 
+  // Track previous processing state for auto-expand/collapse
+  const wasProcessingRef = useRef(isProcessing)
+
+  // Auto-expand when processing starts, auto-collapse when it ends
+  useEffect(() => {
+    if (!wasProcessingRef.current && isProcessing) {
+      // Processing just started - auto-expand
+      setIsWorkingExpanded(true)
+    } else if (wasProcessingRef.current && !isProcessing) {
+      // Processing just ended - auto-collapse
+      setIsWorkingExpanded(false)
+    }
+    wasProcessingRef.current = isProcessing
+  }, [isProcessing])
+
   const MAX_COMPOSER_HEIGHT = 320
 
   // Insight carousel logic
@@ -102,13 +117,17 @@ export function AgentComposer({
   const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
   const hasInsights = totalInsights > 0
 
-  // Handle tab click - select that insight and pause auto-rotation
+  // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
   const handleTabClick = useCallback((index: number) => {
+    // Expand panel if collapsed
+    if (!isWorkingExpanded) {
+      setIsWorkingExpanded(true)
+    }
     onInsightIndexChange?.(index)
     onPauseChange?.(true) // Pause when user manually selects
     lastRotationTimeRef.current = Date.now()
     setCountdownProgress(0)
-  }, [onInsightIndexChange, onPauseChange])
+  }, [isWorkingExpanded, onInsightIndexChange, onPauseChange])
 
   // Handle hover - pause auto-rotation
   const handleInsightMouseEnter = useCallback(() => {
@@ -344,7 +363,8 @@ export function AgentComposer({
     }
   }, [addAttachments, disabled, isSending])
 
-  const showWorkingPanel = isProcessing
+  // Show the panel when processing OR when there are insights to display
+  const showWorkingPanel = isProcessing || hasInsights
   const taskCount = processingTasks.length
 
   return (
@@ -354,6 +374,7 @@ export function AgentComposer({
       ref={shellRef}
       data-processing={isProcessing ? 'true' : 'false'}
       data-expanded={isWorkingExpanded ? 'true' : 'false'}
+      data-panel-visible={showWorkingPanel ? 'true' : 'false'}
     >
       <div className="composer-surface">
         {/* Working panel - integrated above input */}
@@ -377,20 +398,28 @@ export function AgentComposer({
                 }
               }}
             >
-              <span className="composer-working-pip" aria-hidden="true" />
-              <span className="composer-working-status">
-                <strong>{agentFirstName}</strong> is working
-                <span className="composer-working-ellipsis" aria-label="working">
-                  <span className="composer-working-dot" />
-                  <span className="composer-working-dot" />
-                  <span className="composer-working-dot" />
+              {isProcessing ? (
+                <>
+                  <span className="composer-working-pip" aria-hidden="true" />
+                  <span className="composer-working-status">
+                    <strong>{agentFirstName}</strong> is working
+                    <span className="composer-working-ellipsis" aria-label="working">
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                    </span>
+                  </span>
+                  {taskCount > 0 ? (
+                    <span className="composer-working-tasks-badge">
+                      {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="composer-working-status">
+                  <strong>Insights</strong>
                 </span>
-              </span>
-              {taskCount > 0 ? (
-                <span className="composer-working-tasks-badge">
-                  {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
-                </span>
-              ) : null}
+              )}
 
               {/* Colored pill tabs in header */}
               {hasMultipleInsights ? (

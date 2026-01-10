@@ -937,13 +937,13 @@
 }
 
 /* Connect working panel to input surface */
-.composer-shell[data-processing="true"] .composer-input-surface {
+.composer-shell[data-panel-visible="true"] .composer-input-surface {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
   border-top: 1px solid rgba(226, 232, 240, 0.5);
 }
 
-.composer-shell[data-processing="true"][data-expanded="true"] .composer-input-surface {
+.composer-shell[data-panel-visible="true"][data-expanded="true"] .composer-input-surface {
   margin-top: -1px;
 }
 
