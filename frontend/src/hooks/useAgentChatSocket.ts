@@ -70,11 +70,17 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
   const closingSocketRef = useRef<WebSocket | null>(null)
   const pauseReasonRef = useRef<'offline' | 'hidden' | null>(null)
   const lastSyncAtRef = useRef(0)
+  const agentIdRef = useRef<string | null>(agentId)
+  const subscribedAgentIdRef = useRef<string | null>(null)
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
     status: 'idle',
     lastConnectedAt: null,
     lastError: null,
   })
+
+  useEffect(() => {
+    agentIdRef.current = agentId
+  }, [agentId])
 
   const updateSnapshot = useCallback((updates: Partial<AgentChatSocketSnapshot>) => {
     setSnapshot((current) => ({ ...current, ...updates }))
@@ -93,10 +99,46 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     void refreshProcessingRef.current()
   }, [])
 
-  const handleResume = useCallback((reason: PageLifecycleResumeReason) => {
-    if (!agentId) {
+  const sendSocketMessage = useCallback((payload: Record<string, unknown>) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      return false
+    }
+    try {
+      socket.send(JSON.stringify(payload))
+      return true
+    } catch (error) {
+      console.warn('Failed to send agent chat socket message', error)
+      return false
+    }
+  }, [])
+
+  const updateSubscription = useCallback((nextAgentId: string | null) => {
+    const socket = socketRef.current
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
       return
     }
+
+    const currentAgentId = subscribedAgentIdRef.current
+    if (currentAgentId && currentAgentId !== nextAgentId) {
+      sendSocketMessage({ type: 'unsubscribe', agent_id: currentAgentId })
+      subscribedAgentIdRef.current = null
+    }
+
+    if (!nextAgentId || currentAgentId === nextAgentId) {
+      return
+    }
+
+    if (sendSocketMessage({ type: 'subscribe', agent_id: nextAgentId })) {
+      subscribedAgentIdRef.current = nextAgentId
+    }
+  }, [sendSocketMessage])
+
+  useEffect(() => {
+    updateSubscription(agentId)
+  }, [agentId, updateSubscription])
+
+  const handleResume = useCallback((reason: PageLifecycleResumeReason) => {
     if (!isPageVisible()) {
       if (pauseReasonRef.current !== 'offline') {
         pauseReasonRef.current = 'hidden'
@@ -122,12 +164,9 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     updateSnapshot({ status: 'connecting', lastError: null })
     scheduleConnectRef.current(0)
     syncNow()
-  }, [agentId, syncNow, updateSnapshot])
+  }, [syncNow, updateSnapshot])
 
   const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
-    if (!agentId) {
-      return
-    }
     if (reason === 'offline') {
       pauseReasonRef.current = 'offline'
       retryRef.current = 0
@@ -146,16 +185,11 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
       clearTimeout(timeoutRef.current)
       timeoutRef.current = null
     }
-  }, [agentId, updateSnapshot])
+  }, [updateSnapshot])
 
   usePageLifecycle({ onResume: handleResume, onSuspend: handleSuspend })
 
   useEffect(() => {
-    if (!agentId) {
-      updateSnapshot({ status: 'idle', lastError: null, lastConnectedAt: null })
-      return () => undefined
-    }
-
     retryRef.current = 0
     lastSyncAtRef.current = 0
 
@@ -179,6 +213,7 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
           console.warn('Failed to close agent chat socket', error)
         }
         socketRef.current = null
+        subscribedAgentIdRef.current = null
       }
     }
     closeSocketRef.current = closeSocket
@@ -192,7 +227,7 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
         return
       }
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-      const socket = new WebSocket(`${protocol}://${window.location.host}/ws/agents/${agentId}/chat/`)
+      const socket = new WebSocket(`${protocol}://${window.location.host}/ws/agents/chat/`)
       const socketInstance = socket
       socketRef.current = socket
       updateSnapshot({
@@ -210,6 +245,8 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
           lastConnectedAt: Date.now(),
           lastError: null,
         })
+        subscribedAgentIdRef.current = null
+        updateSubscription(agentIdRef.current)
         syncNow()
       }
 
@@ -239,6 +276,7 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
           return
         }
         socketRef.current = null
+        subscribedAgentIdRef.current = null
         if (closingSocketRef.current === socketInstance) {
           closingSocketRef.current = null
           return
@@ -308,7 +346,7 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
       }
       closeSocket()
     }
-  }, [agentId, syncNow, updateSnapshot])
+  }, [syncNow, updateSnapshot, updateSubscription])
 
   return snapshot
 }
