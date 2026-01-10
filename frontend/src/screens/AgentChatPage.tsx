@@ -122,6 +122,7 @@ export type AgentChatPageProps = {
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
+const BOTTOM_GAP_PX = 16
 
 export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
   const isNewAgent = agentId === null
@@ -183,7 +184,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
+  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const initialLoading = !isNewAgent && loading && events.length === 0
+
+  const [isNearBottom, setIsNearBottom] = useState(true)
 
   const socketSnapshot = useAgentChatSocket(activeAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
@@ -193,6 +197,11 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   useEffect(() => {
     autoScrollPinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
+  const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
+  useEffect(() => {
+    autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
+  }, [autoScrollPinSuppressedUntil])
+  const restickThresholdRef = useRef(20)
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
@@ -213,6 +222,36 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize, fetchInsights])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
+  const getScrollDistanceToBottom = useCallback(() => {
+    const target = getScrollContainer()
+    // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const documentHeight = target.scrollHeight
+    const scrollTop = target.scrollTop
+    // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
+    const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
+    return documentHeight - effectiveClientHeight - scrollTop
+  }, [getScrollContainer])
+  const getDistanceToBottom = useCallback(() => {
+    const scrollDistance = getScrollDistanceToBottom()
+    const sentinel = bottomSentinelRef.current
+    const composer = document.getElementById('agent-composer-shell')
+    if (sentinel && composer) {
+      const sentinelRect = sentinel.getBoundingClientRect()
+      const composerRect = composer.getBoundingClientRect()
+      const targetBottom = composerRect.top - BOTTOM_GAP_PX
+      const sentinelDistance = sentinelRect.bottom - targetBottom
+      return Math.min(scrollDistance, sentinelDistance)
+    }
+    return scrollDistance
+  }, [getScrollDistanceToBottom])
+  const updateNearBottom = useCallback((distanceOverride?: number) => {
+    const distanceToBottom = typeof distanceOverride === 'number' ? distanceOverride : getDistanceToBottom()
+    const threshold = restickThresholdRef.current
+    const nextIsNearBottom = distanceToBottom <= threshold
+    setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
+    return nextIsNearBottom
+  }, [getDistanceToBottom])
 
   useEffect(() => {
     const scroller = getScrollContainer()
@@ -223,16 +262,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     // Use larger thresholds on mobile to account for browser chrome changes (address bar, keyboard)
     const restickThreshold = isTouchDevice ? 80 : 20
     const touchScrollThreshold = 40 // More intentional gesture required to unpin
-
-    const getDistanceToBottom = () => {
-      const target = scroller || document.documentElement || document.body
-      // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-      const documentHeight = target.scrollHeight
-      const scrollTop = target.scrollTop
-      // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
-      const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
-      return documentHeight - effectiveClientHeight - scrollTop
+    restickThresholdRef.current = restickThreshold
+    const isAutoPinSuppressed = () => {
+      const suppressedUntil = autoScrollPinSuppressedUntilRef.current
+      return typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
     }
 
     // Detect user scrolling UP via wheel - immediately unstick
@@ -282,15 +315,18 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         const currentScrollTop = target.scrollTop
         const scrolledDown = currentScrollTop > lastScrollTop
         lastScrollTop = currentScrollTop
+        const distanceToBottom = getDistanceToBottom()
+        const isNearBottom = updateNearBottom(distanceToBottom)
 
         // Only restick if user actively scrolled down to the bottom
-        if (!autoScrollPinnedRef.current && scrolledDown) {
-          const distanceToBottom = getDistanceToBottom()
-          if (distanceToBottom <= restickThreshold) {
-            setAutoScrollPinned(true)
-          }
+        if (!autoScrollPinnedRef.current && scrolledDown && isNearBottom && !isAutoPinSuppressed()) {
+          setAutoScrollPinned(true)
         }
       })
+    }
+
+    const handleResize = () => {
+      updateNearBottom()
     }
 
     window.addEventListener('wheel', handleWheel, { passive: true })
@@ -298,6 +334,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     window.addEventListener('touchmove', handleTouchMove, { passive: true })
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('scroll', handleResize)
+    updateNearBottom()
 
     return () => {
       window.removeEventListener('wheel', handleWheel)
@@ -305,8 +345,15 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('scroll', handleResize)
     }
-  }, [getScrollContainer, setAutoScrollPinned])
+  }, [getDistanceToBottom, getScrollContainer, setAutoScrollPinned, updateNearBottom])
+
+  useEffect(() => {
+    updateNearBottom()
+  }, [events, initialLoading, loadingNewer, loadingOlder, streaming, updateNearBottom])
 
   // Unpin auto-scroll when processing ends so user's reading position is preserved
   const prevProcessingRef = useRef(processingActive)
@@ -347,9 +394,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         const sentinelRect = sentinel.getBoundingClientRect()
         const composerRect = composer.getBoundingClientRect()
         // Small gap between content bottom and composer top
-        const gap = 16
         // Calculate where we want the sentinel's bottom to be
-        const targetBottom = composerRect.top - gap
+        const targetBottom = composerRect.top - BOTTOM_GAP_PX
         // How much we need to scroll to get the sentinel to that position
         const delta = sentinelRect.bottom - targetBottom
 
@@ -357,6 +403,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         if (delta > 0) {
           window.scrollBy({ top: delta })
         }
+        requestAnimationFrame(() => {
+          updateNearBottom()
+        })
         return
       }
 
@@ -364,8 +413,11 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       const documentHeight = document.documentElement.scrollHeight
       const scrollTarget = documentHeight - viewportHeight + vvOffsetTop
       window.scrollTo({ top: Math.max(0, scrollTarget) })
+      requestAnimationFrame(() => {
+        updateNearBottom()
+      })
     })
-  }, [])
+  }, [updateNearBottom])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -613,7 +665,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer={isNewAgent}
-        autoScrollPinned={autoScrollPinned}
+        isNearBottom={isNearBottom}
         hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}
         timelineRef={captureTimelineRef}
         bottomSentinelRef={captureBottomSentinelRef}

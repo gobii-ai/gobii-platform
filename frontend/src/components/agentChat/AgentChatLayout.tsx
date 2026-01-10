@@ -36,7 +36,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
-  autoScrollPinned?: boolean
+  isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
   bottomSentinelRef?: Ref<HTMLDivElement>
@@ -92,7 +92,7 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onSendMessage,
-  autoScrollPinned = true,
+  isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
   bottomSentinelRef,
@@ -131,7 +131,7 @@ export function AgentChatLayout({
   const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
   const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
 
-  const showJumpButton = hasMoreNewer || hasUnseenActivity || !autoScrollPinned
+  const showJumpButton = hasMoreNewer || hasUnseenActivity || !isNearBottom
 
   const showBanner = Boolean(agentName)
   const containerStyle = showBanner
