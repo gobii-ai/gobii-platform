@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Plus, Zap } from 'lucide-react'
 import { jsonFetch } from '../api/http'
+import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
 import '../styles/immersiveApp.css'
 
@@ -128,7 +130,45 @@ function resolveReturnTo(search: string): string {
   return '/'
 }
 
-function CommandCenter() {
+type CommandCenterProps = {
+  hasAgents: boolean
+  isLoading: boolean
+  onCreateAgent: () => void
+}
+
+function CommandCenter({ hasAgents, isLoading, onCreateAgent }: CommandCenterProps) {
+  if (isLoading) {
+    return (
+      <section className="immersive-command">
+        <p className="immersive-command__eyebrow">Gobii Command Center</p>
+        <h1 className="immersive-command__title">Loading...</h1>
+      </section>
+    )
+  }
+
+  if (!hasAgents) {
+    return (
+      <section className="immersive-command">
+        <div className="mb-8 flex size-20 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-xl">
+          <Zap className="size-8" aria-hidden="true" />
+        </div>
+        <p className="immersive-command__eyebrow">Gobii Command Center</p>
+        <h1 className="immersive-command__title">No agents yet</h1>
+        <p className="immersive-command__subtitle">
+          Create your first AI agent to get started. Agents can automate tasks, monitor changes, send notifications, and much more.
+        </p>
+        <button
+          type="button"
+          onClick={onCreateAgent}
+          className="group mt-6 inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+          Create Your First Agent
+        </button>
+      </section>
+    )
+  }
+
   return (
     <section className="immersive-command">
       <p className="immersive-command__eyebrow">Gobii Command Center</p>
@@ -136,6 +176,14 @@ function CommandCenter() {
       <p className="immersive-command__subtitle">
         Jump into an agent chat to get started. We will expand this space with switching and ops controls next.
       </p>
+      <button
+        type="button"
+        onClick={onCreateAgent}
+        className="group mt-6 inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      >
+        <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+        Create Agent
+      </button>
     </section>
   )
 }
@@ -160,6 +208,8 @@ export function ImmersiveApp() {
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
   const embed = useMemo(() => parseBooleanFlag(new URLSearchParams(location.search).get('embed')), [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
+  const rosterQuery = useAgentRoster()
+  const hasAgents = (rosterQuery.data?.length ?? 0) > 0
 
   useEffect(() => {
     const fromQuery = readReturnToFromSearch(location.search)
@@ -213,7 +263,13 @@ export function ImmersiveApp() {
             onAgentCreated={handleAgentCreated}
           />
         ) : null}
-        {route.kind === 'command-center' ? <CommandCenter /> : null}
+        {route.kind === 'command-center' ? (
+          <CommandCenter
+            hasAgents={hasAgents}
+            isLoading={rosterQuery.isLoading}
+            onCreateAgent={handleNavigateToNewAgent}
+          />
+        ) : null}
         {route.kind === 'not-found' ? <NotFound /> : null}
       </div>
     </div>

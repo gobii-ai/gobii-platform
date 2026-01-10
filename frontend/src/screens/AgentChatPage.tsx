@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -108,6 +110,35 @@ function deriveConnectionIndicator({
   }
 
   return { status: 'connecting', label: 'Connecting', detail: 'Opening live connection.' }
+}
+
+type AgentNotFoundStateProps = {
+  hasOtherAgents: boolean
+  onCreateAgent: () => void
+}
+
+function AgentNotFoundState({ hasOtherAgents, onCreateAgent }: AgentNotFoundStateProps) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+      <div className="mb-6 flex size-16 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+        <AlertTriangle className="size-8" aria-hidden="true" />
+      </div>
+      <h2 className="mb-2 text-xl font-semibold text-gray-800">Agent not found</h2>
+      <p className="mb-6 max-w-md text-center text-sm text-gray-600">
+        {hasOtherAgents
+          ? 'This agent may have been deleted or you may not have access to it. Select another agent from the sidebar or create a new one.'
+          : 'This agent may have been deleted or you may not have access to it. Create a new agent to get started.'}
+      </p>
+      <button
+        type="button"
+        onClick={onCreateAgent}
+        className="group inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      >
+        <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+        Create New Agent
+      </button>
+    </div>
+  )
 }
 
 export type AgentChatPageProps = {
@@ -534,6 +565,22 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     return [fallbackAgent, ...rosterAgents]
   }, [activeAgentId, fallbackAgent, rosterAgents])
 
+  // Detect if the requested agent doesn't exist (deleted or never existed)
+  const agentNotFound = useMemo(() => {
+    // Not applicable for new agent creation
+    if (isNewAgent) return false
+    // Wait for both roster and initial load to complete
+    if (rosterQuery.isLoading || initialLoading) return false
+    // Check if agent exists in roster
+    const agentInRoster = rosterAgents.some((agent) => agent.id === activeAgentId)
+    // If there's an error loading the agent AND it's not in the roster, it's not found
+    // Also consider not found if roster loaded but agent isn't there and we have an error
+    if (!agentInRoster && error) return true
+    // If roster loaded, agent isn't in roster, and we have no events (failed to load), mark as not found
+    if (!agentInRoster && !loading && events.length === 0) return true
+    return false
+  }, [isNewAgent, rosterQuery.isLoading, initialLoading, rosterAgents, activeAgentId, error, loading, events.length])
+
   useEffect(() => {
     if (!switchingAgentId) {
       return
@@ -664,6 +711,28 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     streaming,
     streamingLastUpdatedAt,
   ])
+
+  // Show a dedicated not-found state with sidebar still accessible
+  if (agentNotFound) {
+    return (
+      <div className="agent-chat-page min-h-screen">
+        <ChatSidebar
+          agents={rosterAgents}
+          activeAgentId={null}
+          loading={rosterQuery.isLoading}
+          errorMessage={rosterErrorMessage}
+          onSelectAgent={handleSelectAgent}
+          onCreateAgent={handleCreateAgent}
+        />
+        <main className="has-sidebar has-sidebar--collapsed min-h-screen">
+          <AgentNotFoundState
+            hasOtherAgents={rosterAgents.length > 0}
+            onCreateAgent={handleCreateAgent}
+          />
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="agent-chat-page min-h-screen">
