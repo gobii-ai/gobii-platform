@@ -890,11 +890,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       // Track when processing started (for progress bar)
       let processingStartedAt = state.processingStartedAt
       if (snapshot.active && !state.processingActive) {
-        // Processing just started
-        processingStartedAt = Date.now()
+        // Processing just started; preserve the original start time if we're already awaiting a response.
+        processingStartedAt = state.processingStartedAt ?? Date.now()
       } else if (!snapshot.active) {
-        // Processing ended
-        processingStartedAt = null
+        // Processing ended; keep the timer if we're still awaiting a response.
+        processingStartedAt = state.awaitingResponse ? state.processingStartedAt : null
       }
       return {
         processingActive: snapshot.active,
