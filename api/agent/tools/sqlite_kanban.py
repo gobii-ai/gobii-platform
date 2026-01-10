@@ -573,3 +573,8 @@ def _build_board_snapshot(agent) -> KanbanBoardSnapshot:
         doing_titles=doing_cards[:MAX_TITLES],
         done_titles=done_cards[:MAX_TITLES],
     )
+
+
+def build_kanban_board_snapshot(agent) -> KanbanBoardSnapshot:
+    """Public wrapper for building the current kanban snapshot."""
+    return _build_board_snapshot(agent)

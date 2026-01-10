@@ -203,6 +203,7 @@ type CachedAgentState = {
   hasMoreNewer: boolean
   processingActive: boolean
   processingStartedAt: number | null
+  awaitingResponse: boolean
   processingWebTasks: ProcessingWebTask[]
   agentColorHex: string | null
   agentName: string | null
@@ -328,7 +329,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     // Cache current agent's state before switching (if we have a different agent)
     const currentState = get()
     let nextCache = currentState.agentStateCache
-    if (currentState.agentId && currentState.agentId !== agentId && currentState.events.length > 0) {
+    const shouldCache =
+      currentState.agentId &&
+      currentState.agentId !== agentId &&
+      (
+        currentState.events.length > 0 ||
+        currentState.processingActive ||
+        currentState.awaitingResponse ||
+        currentState.processingStartedAt !== null ||
+        currentState.processingWebTasks.length > 0
+      )
+    if (shouldCache) {
       nextCache = {
         ...currentState.agentStateCache,
         [currentState.agentId]: {
@@ -339,6 +350,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           hasMoreNewer: currentState.hasMoreNewer,
           processingActive: currentState.processingActive,
           processingStartedAt: currentState.processingStartedAt,
+          awaitingResponse: currentState.awaitingResponse,
           processingWebTasks: currentState.processingWebTasks,
           agentColorHex: currentState.agentColorHex,
           agentName: currentState.agentName,
@@ -362,6 +374,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       hasUnseenActivity: false,
       processingActive: cachedState?.processingActive ?? false,
       processingStartedAt: cachedState?.processingStartedAt ?? null,
+      awaitingResponse: cachedState?.awaitingResponse ?? false,
       processingWebTasks: cachedState?.processingWebTasks ?? [],
       loadingOlder: false,
       loadingNewer: false,
@@ -375,7 +388,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingClearOnDone: false,
       streamingThinkingCollapsed: false,
       thinkingCollapsedByCursor: {},
-      awaitingResponse: false,
       agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? cachedState?.agentAvatarUrl ?? fallbackAvatarUrl ?? null,
@@ -400,6 +412,22 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const agentName = snapshot.agent_name ?? providedName ?? get().agentName ?? null
       const agentAvatarUrl = snapshot.agent_avatar_url ?? providedAvatarUrl ?? get().agentAvatarUrl ?? null
 
+      // Preserve awaitingResponse on agent switch unless we can confirm activity resumed.
+      const cachedAwaiting = cachedState?.awaitingResponse ?? false
+      let awaitingResponse = cachedAwaiting
+      if (processingSnapshot.active) {
+        awaitingResponse = false
+      } else if (cachedAwaiting && cachedState?.events?.length) {
+        const cachedCursors = new Set(cachedState.events.map((event) => event.cursor))
+        const hasNewAgentResponse = events.some((event) => (
+          !cachedCursors.has(event.cursor) &&
+          (event.kind === 'thinking' || (event.kind === 'message' && event.message.isOutbound))
+        ))
+        if (hasNewAgentResponse) {
+          awaitingResponse = false
+        }
+      }
+
       set({
         events,
         oldestCursor,
@@ -415,7 +443,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         agentColorHex,
         agentName,
         agentAvatarUrl,
-        awaitingResponse: false,
+        awaitingResponse,
       })
     } catch (error) {
       if (get().agentId !== currentAgentId) {
