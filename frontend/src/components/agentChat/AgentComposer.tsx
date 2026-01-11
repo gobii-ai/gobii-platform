@@ -75,6 +75,8 @@ type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
   autoFocus?: boolean
+  // Key that triggers re-focus when changed (e.g., agentId for switching agents)
+  focusKey?: string | null
   // Working panel props
   agentFirstName?: string
   isProcessing?: boolean
@@ -91,6 +93,7 @@ export function AgentComposer({
   onSubmit,
   disabled = false,
   autoFocus = false,
+  focusKey,
   agentFirstName = 'Agent',
   isProcessing = false,
   processingTasks = [],
@@ -225,7 +228,7 @@ export function AgentComposer({
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
 
-  // Auto-focus the textarea when autoFocus prop is true
+  // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
   useEffect(() => {
     if (!autoFocus) return
     // Use a small delay to ensure the DOM is ready after navigation
@@ -233,7 +236,7 @@ export function AgentComposer({
       textareaRef.current?.focus()
     }, 100)
     return () => clearTimeout(timer)
-  }, [autoFocus])
+  }, [autoFocus, focusKey])
 
   useEffect(() => {
     const node = shellRef.current

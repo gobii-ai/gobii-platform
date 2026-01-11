@@ -813,7 +813,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
-        autoFocusComposer={isNewAgent}
+        autoFocusComposer
         isNearBottom={isNearBottom}
         hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}
         timelineRef={captureTimelineRef}

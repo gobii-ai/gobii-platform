@@ -267,6 +267,7 @@ export function AgentChatLayout({
               isProcessing={showProcessingIndicator}
               processingTasks={processingWebTasks}
               autoFocus={autoFocusComposer}
+              focusKey={activeAgentId}
               insights={insights}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}
