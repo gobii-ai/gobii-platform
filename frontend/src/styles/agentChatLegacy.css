@@ -907,6 +907,7 @@
 .composer-insight-tabs {
   flex-shrink: 1;
   min-width: 0;
+  margin-left: auto;
 }
 
 .composer-insight-tabs-scroll {
