@@ -220,6 +220,17 @@ def _strip_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     return cleaned, found
 
 
+def _should_imply_continue(
+    *,
+    has_canonical_continuation: bool,
+    has_other_tool_calls: bool,
+    has_explicit_sleep: bool,
+) -> bool:
+    if has_explicit_sleep:
+        return False
+    return has_canonical_continuation or has_other_tool_calls
+
+
 class _CanonicalContinuationStreamFilter:
     def __init__(self) -> None:
         self._buffer = ""
@@ -2878,7 +2889,11 @@ def _run_agent_loop(
             if message_text and not has_explicit_send:
                 # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                 # This is safer—agent won't keep running unexpectedly.
-                implied_will_continue = has_canonical_continuation and not has_explicit_sleep
+                implied_will_continue = _should_imply_continue(
+                    has_canonical_continuation=has_canonical_continuation,
+                    has_other_tool_calls=has_other_tool_calls,
+                    has_explicit_sleep=has_explicit_sleep,
+                )
                 implied_call, implied_error = _build_implied_send_tool_call(
                     agent,
                     message_text,

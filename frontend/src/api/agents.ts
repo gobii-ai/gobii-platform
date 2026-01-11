@@ -5,6 +5,11 @@ export type UpdateAgentPayload = {
   preferred_llm_tier?: string
 }
 
+export type CreateAgentResponse = {
+  agent_id: string
+  agent_name: string
+}
+
 type AgentRosterPayload = {
   agents: {
     id: string
@@ -33,5 +38,13 @@ export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promi
     method: 'PATCH',
     json: payload,
     includeCsrf: true,
+  })
+}
+
+export async function createAgent(message: string): Promise<CreateAgentResponse> {
+  return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
   })
 }

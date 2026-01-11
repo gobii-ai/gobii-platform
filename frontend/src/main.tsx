@@ -54,6 +54,18 @@ function readJsonScript<T>(scriptId?: string): T {
   return JSON.parse(script.textContent) as T
 }
 
+// Check if we're embedded in an iframe (immersive overlay)
+const isEmbedded = new URLSearchParams(window.location.search).get('embed') === '1'
+
+// Create close handler for embedded mode - posts message to parent to close overlay
+const handleEmbeddedClose = isEmbedded
+  ? () => {
+      if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'gobii-immersive-close' }, window.location.origin)
+      }
+    }
+  : undefined
+
 switch (appName) {
   case 'agent-chat':
     if (!agentId) {
@@ -65,6 +77,7 @@ switch (appName) {
         agentName={agentName}
         agentColor={agentColor}
         agentAvatarUrl={agentAvatarUrl}
+        onClose={handleEmbeddedClose}
       />
     )
     break

@@ -26,6 +26,7 @@ from console.agent_audit.serializers import (
     serialize_tool_call,
 )
 
+from .kanban_events import persist_kanban_event
 from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
@@ -248,12 +249,29 @@ def broadcast_kanban_changes(agent, changes, snapshot) -> None:
         # Use first name if available
         if " " in agent_name:
             agent_name = agent_name.split()[0]
-
         payload = serialize_kanban_event(agent_name, changes, snapshot)
+    except Exception:
+        logger.debug(
+            "Failed to serialize kanban changes for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return
+
+    try:
         _send(_group_name(agent.id), "timeline_event", payload)
     except Exception:
         logger.debug(
             "Failed to broadcast kanban changes for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+
+    try:
+        persist_kanban_event(agent, payload)
+    except Exception:
+        logger.debug(
+            "Failed to persist kanban changes for agent %s",
             getattr(agent, "id", None),
             exc_info=True,
         )

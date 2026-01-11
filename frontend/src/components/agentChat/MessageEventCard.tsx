@@ -64,8 +64,6 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
     authorLabel = peerDirectionLabel
   }
 
-  const metaTheme = isPeer ? 'chat-meta chat-meta--peer' : isAgent ? 'chat-meta' : 'chat-meta is-user'
-
   let channelLabel = getChannelLabel(channel)
   let showChannelTag = channel !== 'web'
   if (isPeer) {
@@ -101,8 +99,9 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
     >
       <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>
         <div className={`chat-author ${authorTheme}`}>
-          {authorLabel}
+          <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
+          <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
         </div>
         <div
           className={`chat-content prose prose-sm max-w-none leading-relaxed ${contentTone}`}
@@ -148,9 +147,6 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
             })}
           </div>
         ) : null}
-      </div>
-      <div className={metaTheme} title={metaTitle}>
-        {metaLabel}
       </div>
     </article>
   )

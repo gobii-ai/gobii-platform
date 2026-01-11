@@ -266,15 +266,6 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
         <div ref={detailHostRef} className="tool-cluster-detail-host" hidden={!activeEntry || collapsed} id={detailHostId} aria-live="polite">
           {!collapsed && activeEntry ? renderDetail(activeEntry) : null}
         </div>
-        {transformed.latestTimestamp ? (
-          <div
-            className="tool-cluster-timestamp chat-meta"
-            data-role="cluster-timestamp"
-            title={transformed.latestTimestamp}
-          >
-            {formatRelativeTimestamp(transformed.latestTimestamp) ?? transformed.latestTimestamp}
-          </div>
-        ) : null}
       </div>
     </article>
   )

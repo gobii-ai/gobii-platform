@@ -66,6 +66,7 @@ from api.models import (
     OrganizationMembership,
     build_web_agent_address,
     build_web_user_address,
+    UserPhoneNumber,
 )
 from django.core.files.storage import default_storage
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
@@ -82,6 +83,7 @@ from api.services.web_sessions import (
     touch_web_session,
 )
 
+from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 from console.agent_chat.access import agent_queryset_for, resolve_agent
@@ -95,7 +97,10 @@ from console.agent_chat.timeline import (
     serialize_processing_snapshot,
 )
 from console.context_helpers import build_console_context
-from console.forms import MCPServerConfigForm
+from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
+from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
+from console.agent_creation import enable_agent_sms_contact
+from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from console.llm_serializers import build_llm_overview
 import litellm
@@ -118,6 +123,15 @@ logger = logging.getLogger(__name__)
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
 MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
+
+
+class ApiLoginRequiredMixin(LoginRequiredMixin):
+    """Return JSON 401 instead of redirecting to the login page."""
+
+    def handle_no_permission(self):
+        if not self.request.user.is_authenticated:
+            return JsonResponse({"error": "Authentication required"}, status=401)
+        return super().handle_no_permission()
 
 
 class ConsoleSessionAPIView(LoginRequiredMixin, View):
@@ -1209,6 +1223,232 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             for agent in agents
         ]
         return JsonResponse({"agents": payload})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentQuickCreateAPIView(LoginRequiredMixin, View):
+    """API endpoint to create an agent from an initial message and return the agent ID."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from console.agent_creation import create_persistent_agent_from_charter
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        initial_message = (body.get("message") or "").strip()
+        if not initial_message:
+            return JsonResponse({"error": "Message is required"}, status=400)
+
+        contact_email = (request.user.email or "").strip()
+        if not contact_email:
+            return JsonResponse({"error": "Please add an email address to continue"}, status=400)
+
+        try:
+            result = create_persistent_agent_from_charter(
+                request,
+                initial_message=initial_message,
+                contact_email=contact_email,
+                email_enabled=True,
+                sms_enabled=False,
+                preferred_contact_method="email",
+            )
+        except ValidationError as exc:
+            error_messages = []
+            if hasattr(exc, "message_dict"):
+                for field_errors in exc.message_dict.values():
+                    error_messages.extend(field_errors)
+            error_messages.extend(getattr(exc, "messages", []))
+            if not error_messages:
+                error_messages.append("We couldn't create that agent. Please try again.")
+            return JsonResponse({"error": error_messages[0]}, status=400)
+        except Exception:
+            logger.exception("Error creating persistent agent via API")
+            return JsonResponse({"error": "We ran into a problem creating your agent. Please try again."}, status=500)
+
+        return JsonResponse({
+            "agent_id": str(result.agent.id),
+            "agent_name": result.agent.name,
+        })
+
+
+def _extract_phone_form_error(form: PhoneAddForm) -> str:
+    error_msg = "Enter a valid phone number."
+    try:
+        data = form.errors.as_data()
+        for errors in data.values():
+            for err in errors:
+                if getattr(err, "code", None) == "unsupported_region":
+                    return "Phone numbers from this country are not yet supported."
+    except Exception:
+        pass
+    return error_msg
+
+
+class UserPhoneAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post", "delete"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        phone = get_primary_phone(request.user)
+        return JsonResponse({"phone": serialize_phone(phone)})
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        if get_primary_phone(request.user):
+            return JsonResponse(
+                {"error": "Delete your existing phone number before adding a new one."},
+                status=400,
+            )
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        raw_number = (body.get("phone_number") or body.get("phoneNumber") or body.get("phone") or "").strip()
+        if not raw_number:
+            return JsonResponse({"error": "Phone number is required."}, status=400)
+
+        form = PhoneAddForm(
+            {
+                "phone_number": raw_number,
+                "phone_number_hidden": raw_number,
+            },
+            user=request.user,
+        )
+
+        if not form.is_valid():
+            return JsonResponse({"error": _extract_phone_form_error(form)}, status=400)
+
+        try:
+            phone = form.save()
+        except IntegrityError:
+            return JsonResponse({"error": "This phone number is already in use."}, status=400)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to add phone number."
+            return JsonResponse({"error": message_text}, status=400)
+
+        return JsonResponse({"phone": serialize_phone(phone)})
+
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        phone = get_primary_phone(request.user)
+        if phone:
+            phone.delete()
+        return JsonResponse({"phone": None})
+
+
+class UserPhoneVerifyAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        phone = get_primary_phone(request.user)
+        if not phone:
+            return JsonResponse({"error": "Add a phone number first."}, status=400)
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        code = (body.get("verification_code") or body.get("code") or "").strip()
+        if not code:
+            return JsonResponse({"error": "Verification code is required."}, status=400)
+
+        form = PhoneVerifyForm(
+            {
+                "phone_number": phone.phone_number,
+                "verification_code": code,
+            },
+            user=request.user,
+        )
+
+        if not form.is_valid():
+            error_msg = next(iter(form.errors.values()))[0] if form.errors else "Invalid verification code."
+            return JsonResponse({"error": error_msg}, status=400)
+
+        try:
+            verified_phone = form.save()
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to verify code."
+            return JsonResponse({"error": message_text}, status=400)
+
+        return JsonResponse({"phone": serialize_phone(verified_phone)})
+
+
+class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        phone = get_primary_phone(request.user)
+        if not phone:
+            return JsonResponse({"error": "Add a phone number first."}, status=400)
+        if phone.is_verified:
+            return JsonResponse({"phone": serialize_phone(phone)})
+
+        remaining = get_phone_cooldown_remaining(phone)
+        if remaining == 0:
+            try:
+                sid = sms.start_verification(phone_number=phone.phone_number)
+            except Exception as exc:
+                return JsonResponse({"error": f"Failed to resend verification: {exc}"}, status=400)
+            phone.last_verification_attempt = timezone.now()
+            phone.verification_sid = sid
+            phone.save(update_fields=["last_verification_attempt", "verification_sid", "updated_at"])
+
+        return JsonResponse({"phone": serialize_phone(phone)})
+
+
+class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        phone = get_primary_phone(request.user)
+        if not phone or not phone.is_verified:
+            return JsonResponse({"error": "Please verify a phone number before enabling SMS."}, status=400)
+
+        try:
+            agent_sms_endpoint, _ = enable_agent_sms_contact(agent, phone)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to enable SMS."
+            return JsonResponse({"error": message_text}, status=400)
+
+        return JsonResponse({
+            "agentSms": {"number": agent_sms_endpoint.address},
+            "userPhone": serialize_phone(phone),
+            "preferredContactMethod": "sms",
+        })
+
+
+class AgentReassignAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent(request.user, request.session, agent_id)
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        target_org_id = (body.get("target_org_id") or body.get("targetOrgId") or "").strip() or None
+
+        try:
+            result = reassign_agent_organization(request, agent, target_org_id)
+        except PermissionDenied as exc:
+            return JsonResponse({"success": False, "error": str(exc)}, status=403)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to reassign agent."
+            return JsonResponse({"success": False, "error": message_text}, status=400)
+        except Exception:
+            logger.exception("Failed to reassign agent %s", agent.id)
+            return JsonResponse({"success": False, "error": "An unexpected error occurred."}, status=500)
+
+        return JsonResponse({
+            "success": True,
+            **result,
+        })
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -4663,15 +4903,6 @@ def _session_response(result) -> JsonResponse:
     if session.ended_at:
         payload["ended_at"] = session.ended_at.isoformat()
     return JsonResponse(payload)
-
-
-class ApiLoginRequiredMixin(LoginRequiredMixin):
-    """Return JSON 401 instead of redirecting to the login page."""
-
-    def handle_no_permission(self):
-        if not self.request.user.is_authenticated:
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        return super().handle_no_permission()
 
 
 @method_decorator(csrf_exempt, name="dispatch")

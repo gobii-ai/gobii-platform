@@ -6,12 +6,15 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
 
+from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
 from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
     DeliveryStatus,
     PersistentAgent,
+    PersistentAgentKanbanCard,
+    PersistentAgentKanbanEvent,
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
@@ -24,7 +27,9 @@ from api.models import (
 from api.agent.core.processing_flags import clear_processing_queued_flag, set_processing_queued_flag
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.web_sessions import start_web_session
+from console.agent_chat.kanban_events import persist_kanban_event
 from console.agent_chat.timeline import build_processing_snapshot
+from console.agent_chat.timeline import serialize_kanban_event
 from util.analytics import AnalyticsEvent
 
 CHANNEL_LAYER_SETTINGS = {
@@ -143,6 +148,66 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(thinking_event.get("reasoning"), "Reasoned path")
         self.assertEqual(thinking_event.get("completionId"), str(completion.id))
+
+    @tag("batch_agent_chat")
+    def test_timeline_includes_kanban_events(self):
+        card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Investigate kanban persistence",
+            description="Ensure kanban survives refresh.",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+        snapshot = KanbanBoardSnapshot(
+            todo_count=1,
+            doing_count=0,
+            done_count=0,
+            todo_titles=[card.title],
+            doing_titles=[],
+            done_titles=[],
+        )
+        changes = [
+            KanbanCardChange(
+                card_id=str(card.id),
+                title=card.title,
+                action="created",
+                to_status=PersistentAgentKanbanCard.Status.TODO,
+            )
+        ]
+        agent_name = (self.agent.name or "Agent").split()[0]
+        kanban_payload = serialize_kanban_event(agent_name, changes, snapshot)
+        persist_kanban_event(self.agent, kanban_payload)
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        timeline_payload = response.json()
+        events = timeline_payload.get("events", [])
+        kanban_event = next(event for event in events if event.get("kind") == "kanban")
+
+        self.assertEqual(kanban_event.get("displayText"), kanban_payload.get("displayText"))
+        self.assertEqual(kanban_event.get("primaryAction"), kanban_payload.get("primaryAction"))
+        snapshot_payload = kanban_event.get("snapshot", {})
+        self.assertEqual(snapshot_payload.get("todoCount"), 1)
+        self.assertEqual(snapshot_payload.get("todoTitles"), [card.title])
+        self.assertEqual(kanban_event.get("changes")[0].get("cardId"), str(card.id))
+
+    @tag("batch_agent_chat")
+    def test_timeline_creates_baseline_kanban_event(self):
+        card = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Baseline task",
+            description="Baseline snapshot coverage.",
+            status=PersistentAgentKanbanCard.Status.TODO,
+        )
+
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        events = response.json().get("events", [])
+        kanban_event = next(event for event in events if event.get("kind") == "kanban")
+
+        snapshot_payload = kanban_event.get("snapshot", {})
+        self.assertEqual(snapshot_payload.get("todoCount"), 1)
+        self.assertEqual(snapshot_payload.get("todoTitles"), [card.title])
+        self.assertTrue(PersistentAgentKanbanEvent.objects.filter(agent=self.agent).exists())
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_html_email_body(self):

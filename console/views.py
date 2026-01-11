@@ -356,7 +356,8 @@ from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
 from api.services import mcp_servers as mcp_server_service
-from console.agent_creation import create_persistent_agent_from_charter
+from console.agent_creation import create_persistent_agent_from_charter, enable_agent_sms_contact
+from console.agent_reassignment import reassign_agent_organization
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
@@ -2383,74 +2384,16 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
 
     def _enable_sms_and_redirect(self, phone: UserPhoneNumber):
         try:
-            with transaction.atomic():
-                agent_sms = find_unused_number()
-
-                agent_ep = PersistentAgentCommsEndpoint.objects.create(
-                    owner_agent=self.agent,
-                    channel=CommsChannel.SMS,
-                    address=agent_sms.phone_number,
-                    is_primary=True,
-                )
-                PersistentAgentSmsEndpoint.objects.create(
-                    endpoint=agent_ep,
-                    supports_mms=True,
-                    carrier_name=agent_sms.provider,
-                )
-
-                user_ep, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
-                    channel=CommsChannel.SMS,
-                    address=phone.phone_number,
-                    defaults={"owner_agent": None},
-                )
-
-                self.agent.preferred_contact_endpoint = user_ep
-                self.agent.save(update_fields=["preferred_contact_endpoint"])
-
-                try:
-                    sms.send_sms(
-                        to_number=phone.phone_number,
-                        from_number=agent_sms.phone_number,
-                        body="Gobii: You’ve enabled SMS communication with Gobii. Reply HELP for help, STOP to opt-out.",
-                    )
-
-                except Exception as e:
-                    logger.error(
-                        "Error sending initial SMS to user after enabling agent SMS: %s", str(e)
-                    )
-
-                conversation = _get_or_create_conversation(
-                    channel=CommsChannel.SMS.value,
-                    address=phone.phone_number,
-                    owner_agent=self.agent,
-                )
-                _ensure_participant(
-                    conversation,
-                    user_ep,
-                    PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
-                )
-                _ensure_participant(
-                    conversation,
-                    agent_ep,
-                    PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-                )
-
-                PersistentAgentMessage.objects.create(
-                    is_outbound=False,
-                    from_endpoint=user_ep,
-                    to_endpoint=agent_ep,
-                    conversation=conversation,
-                    body="Hi I've enabled SMS communication with you! Could you introduce yourself and confirm SMS is working?",
-                    owner_agent=self.agent,
-                )
-
-                # Trigger the first event processing run after commit
-                transaction.on_commit(lambda: process_agent_events_task.delay(str(self.agent.id)))
-
-        except Exception as e:
+            enable_agent_sms_contact(self.agent, phone)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Error enabling SMS."
+            messages.error(self.request, message_text)
+            return redirect("agent_detail", pk=self.agent.pk)
+        except Exception as exc:
+            logger.exception("Error enabling SMS", exc_info=True)
             messages.error(
                 self.request,
-                f"Error enabling SMS: {str(e)}",
+                f"Error enabling SMS: {str(exc)}",
             )
             return redirect("agent_detail", pk=self.agent.pk)
 
@@ -3610,101 +3553,14 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 # Reassign a user-owned agent to an organization, or move org-owned back to personal
                 target_org_id = (request.POST.get('target_org_id') or '').strip() or None
                 try:
+                    result = reassign_agent_organization(request, agent, target_org_id)
                     if target_org_id:
-                        # Ensure user is owner/admin in target org
-                        has_rights = OrganizationMembership.objects.filter(
-                            org_id=target_org_id,
-                            user=request.user,
-                            status=OrganizationMembership.OrgStatus.ACTIVE,
-                            role__in=[
-                                OrganizationMembership.OrgRole.OWNER,
-                                OrganizationMembership.OrgRole.ADMIN,
-                            ],
-                        ).exists()
-                        if not has_rights:
-                            return JsonResponse({'success': False, 'error': 'You must be an organization owner or admin to assign agents to that organization.'}, status=403)
-
-                        # Pre-check name uniqueness within target org
-                        if (
-                            PersistentAgent.objects.non_eval()
-                            .filter(organization_id=target_org_id, name=agent.name)
-                            .exclude(id=agent.id)
-                            .exists()
-                        ):
-                            return JsonResponse({'success': False, 'error': 'An agent with this name already exists in the selected organization. Please rename the agent first.'}, status=400)
-
-                        # Assign; model-level validators will enforce seat availability
-                        agent.organization_id = target_org_id
-                        agent.full_clean()
-                        agent.save(update_fields=['organization'])
-
-                        # Drop any personal MCP server assignments when moving into an organization
-                        from api.models import PersistentAgentEnabledTool, PersistentAgentMCPServer, MCPServerConfig
-
-                        removed_personal_ids = list(
-                            PersistentAgentMCPServer.objects.filter(
-                                agent=agent, server_config__scope=MCPServerConfig.Scope.USER
-                            ).values_list('server_config_id', flat=True)
-                        )
-                        if removed_personal_ids:
-                            PersistentAgentMCPServer.objects.filter(
-                                agent=agent,
-                                server_config__scope=MCPServerConfig.Scope.USER,
-                            ).delete()
-                            PersistentAgentEnabledTool.objects.filter(
-                                agent=agent,
-                                server_config_id__in=removed_personal_ids,
-                            ).delete()
-
                         messages.success(request, 'Agent assigned to organization.')
-                        # Also switch the server-side session context so subsequent requests
-                        # operate under the correct organization scope immediately.
-                        try:
-                            # Validate membership again and set session context
-                            membership = OrganizationMembership.objects.get(
-                                org_id=target_org_id,
-                                user=request.user,
-                                status=OrganizationMembership.OrgStatus.ACTIVE,
-                            )
-                            request.session['context_type'] = 'organization'
-                            request.session['context_id'] = str(membership.org.id)
-                            request.session['context_name'] = membership.org.name
-                        except OrganizationMembership.DoesNotExist:
-                            # If for some reason membership is missing, do not crash; client may still handle switch
-                            pass
-                        # Instruct client to switch to organization context and redirect back to this agent
-                        return JsonResponse({
-                            'success': True,
-                            'switch': {
-                                'type': 'organization',
-                                'id': str(target_org_id),
-                            },
-                            'redirect': request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
-                        })
                     else:
-                        # Move to personal scope
-                        if (
-                            PersistentAgent.objects.non_eval()
-                            .filter(user_id=agent.user_id, organization__isnull=True, name=agent.name)
-                            .exclude(id=agent.id)
-                            .exists()
-                        ):
-                            return JsonResponse({'success': False, 'error': 'You already have a personal agent with this name. Please rename the agent first.'}, status=400)
-                        agent.organization = None
-                        agent.save(update_fields=['organization'])
                         messages.success(request, 'Agent moved to personal ownership.')
-                        # Switch server-side session back to personal context
-                        request.session['context_type'] = 'personal'
-                        request.session['context_id'] = str(request.user.id)
-                        request.session['context_name'] = request.user.get_full_name() or request.user.username
-                        return JsonResponse({
-                            'success': True,
-                            'switch': {
-                                'type': 'personal',
-                                'id': str(request.user.id),
-                            },
-                            'redirect': request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
-                        })
+                    return JsonResponse({'success': True, **result})
+                except PermissionDenied as exc:
+                    return JsonResponse({'success': False, 'error': str(exc)}, status=403)
                 except ValidationError as e:
                     err = e.messages[0] if hasattr(e, 'messages') and e.messages else str(e)
                     return JsonResponse({'success': False, 'error': err}, status=400)

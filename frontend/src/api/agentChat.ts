@@ -1,4 +1,5 @@
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
+import type { InsightsResponse } from '../types/insight'
 import { jsonFetch } from './http'
 
 export type TimelineDirection = 'initial' | 'older' | 'newer'
@@ -112,4 +113,9 @@ export function endAgentWebSession(
   { keepalive = false }: { keepalive?: boolean } = {},
 ): Promise<AgentWebSessionSnapshot> {
   return postWebSession(agentId, 'end', { session_key: sessionKey }, { keepalive })
+}
+
+export async function fetchAgentInsights(agentId: string): Promise<InsightsResponse> {
+  const url = `/console/api/agents/${agentId}/insights/`
+  return jsonFetch<InsightsResponse>(url)
 }

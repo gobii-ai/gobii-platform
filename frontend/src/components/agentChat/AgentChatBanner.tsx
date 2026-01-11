@@ -48,6 +48,7 @@ export function AgentChatBanner({
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
+  const hasAnimatedRef = useRef(false)
   const prevDoneRef = useRef<number | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
 
@@ -70,14 +71,19 @@ export function AgentChatBanner({
     }
   }, [])
 
-  // Animate on mount and when kanban changes
+  // Animate on first appearance only (not when switching agents)
   useEffect(() => {
-    if (kanbanSnapshot) {
+    if (kanbanSnapshot && !hasAnimatedRef.current) {
+      hasAnimatedRef.current = true
       setAnimate(false)
       const timer = setTimeout(() => setAnimate(true), 30)
       return () => clearTimeout(timer)
     }
-  }, [kanbanSnapshot?.doneCount, kanbanSnapshot?.todoCount, kanbanSnapshot?.doingCount])
+    // If we already have kanban data, ensure animate stays true
+    if (kanbanSnapshot && hasAnimatedRef.current && !animate) {
+      setAnimate(true)
+    }
+  }, [kanbanSnapshot?.doneCount, kanbanSnapshot?.todoCount, kanbanSnapshot?.doingCount, animate])
 
   // Detect task completion for celebration
   useEffect(() => {

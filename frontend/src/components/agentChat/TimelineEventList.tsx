@@ -42,7 +42,7 @@ export const TimelineEventList = memo(function TimelineEventList({
   }
 
   if (!events.length) {
-    return <div className="timeline-empty text-center text-sm font-medium tracking-tight text-slate-400/80">No activity yet.</div>
+    return null
   }
 
   return (
