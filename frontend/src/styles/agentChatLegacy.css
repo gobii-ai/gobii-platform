@@ -823,21 +823,31 @@
 }
 
 .composer-working-insight {
-  --composer-insight-height: 128px;
   display: flex;
   align-items: stretch;
   overflow: hidden;
-  height: var(--composer-insight-height);
+  min-height: 100px;
+  max-height: 160px;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
 .composer-working-insight .insight-card-v2 {
-  height: 100%;
+  height: auto;
+  min-height: 100%;
 }
 
 @media (max-width: 640px) {
   .composer-working-insight {
-    --composer-insight-height: 148px;
+    min-height: 90px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 420px) {
+  .composer-working-insight {
+    min-height: 80px;
+    max-height: 120px;
   }
 }
 
@@ -879,8 +889,8 @@
 
 /* Colored pill tabs for composer insights - in header row */
 .composer-insight-tabs {
-  flex-shrink: 0;
-  max-width: 50%;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .composer-insight-tabs-scroll {
