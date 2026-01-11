@@ -307,6 +307,9 @@
   align-items: center;
   margin-left: auto;
   flex-shrink: 0;
+  padding-left: 0.75rem;
+  position: relative;
+  z-index: 2;
 }
 
 .banner-close {
@@ -317,15 +320,16 @@
   height: 1.75rem;
   border-radius: 0.5rem;
   border: none;
-  background: transparent;
-  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.8);
+  color: #64748b;
   cursor: pointer;
   transition: all 0.15s ease;
+  isolation: isolate;
 }
 
 .banner-close:hover {
-  background: rgba(15, 23, 42, 0.06);
-  color: #475569;
+  background: rgba(15, 23, 42, 0.08);
+  color: #334155;
   transform: scale(1.05);
 }
 

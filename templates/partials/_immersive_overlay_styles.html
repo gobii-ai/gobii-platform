@@ -31,28 +31,9 @@ body.immersive-open {
   pointer-events: auto;
 }
 
+/* Overlay close button - hidden by default since iframe content has its own close button */
 .immersive-close {
-  position: absolute;
-  top: 1rem;
-  right: 1rem;
-  z-index: 3;
-  width: 1.75rem;
-  height: 1.75rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.5rem;
-  border: none;
-  background: transparent;
-  color: #94a3b8;
-  cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.immersive-close:hover {
-  background: rgba(15, 23, 42, 0.06);
-  color: #475569;
-  transform: scale(1.05);
+  display: none;
 }
 
 .immersive-frame {

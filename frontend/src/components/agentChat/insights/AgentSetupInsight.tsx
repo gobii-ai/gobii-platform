@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Building2, CheckCircle2, Copy, MessageSquare, Phone, Sparkles, Zap } from 'lucide-react'
+import { ArrowRight, Building2, Check, CheckCircle2, Copy, MessageSquare, Phone, Sparkles, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -13,6 +13,45 @@ import {
 } from '../../../api/agentSetup'
 import { HttpError } from '../../../api/http'
 import '../../../styles/insights.css'
+
+// Staggered animation variants for insight panels
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.08,
+      delayChildren: 0.05,
+    },
+  },
+}
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 8 },
+  visible: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.35 },
+  },
+}
+
+const visualVariants = {
+  hidden: { opacity: 0, scale: 0.85 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    transition: { duration: 0.4 },
+  },
+}
+
+const badgeVariants = {
+  hidden: { opacity: 0, x: 10 },
+  visible: {
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.35, delay: 0.15 },
+  },
+}
 
 declare global {
   interface Window {
@@ -291,29 +330,34 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   }, [metadata.agentId, selectedOrgId])
 
   const renderAlwaysOn = () => (
-    <div className="always-on-hero">
+    <motion.div
+      className="always-on-hero"
+      variants={containerVariants}
+      initial="hidden"
+      animate="visible"
+    >
       {/* Left visual - animated rings */}
-      <div className="always-on-hero__visual">
+      <motion.div className="always-on-hero__visual" variants={visualVariants}>
         <div className="always-on-hero__ring always-on-hero__ring--outer" />
         <div className="always-on-hero__ring always-on-hero__ring--middle" />
         <div className="always-on-hero__ring always-on-hero__ring--inner" />
         <div className="always-on-hero__icon">
           <Sparkles size={28} strokeWidth={2} />
         </div>
-      </div>
+      </motion.div>
 
       {/* Center content */}
-      <div className="always-on-hero__content">
+      <motion.div className="always-on-hero__content" variants={itemVariants}>
         <h3 className="always-on-hero__title">{metadata.alwaysOn.title}</h3>
         <p className="always-on-hero__body">{metadata.alwaysOn.body}</p>
-      </div>
+      </motion.div>
 
       {/* Right badge */}
-      <div className="always-on-hero__badge">
+      <motion.div className="always-on-hero__badge" variants={badgeVariants}>
         <span className="always-on-hero__badge-dot" />
         <span>Always On</span>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 
   const renderSms = () => {
@@ -335,18 +379,23 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     }
 
     return (
-      <div className="sms-hero">
+      <motion.div
+        className="sms-hero"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
         {/* Left visual */}
-        <div className="sms-hero__visual">
+        <motion.div className="sms-hero__visual" variants={visualVariants}>
           <div className={`sms-hero__bubble sms-hero__bubble--1${isComplete ? ' sms-hero__bubble--active' : ''}`} />
           <div className={`sms-hero__bubble sms-hero__bubble--2${isComplete ? ' sms-hero__bubble--active' : ''}`} />
           <div className="sms-hero__icon">
             {isComplete ? <MessageSquare size={26} strokeWidth={2} /> : <Phone size={26} strokeWidth={2} />}
           </div>
-        </div>
+        </motion.div>
 
         {/* Center content */}
-        <div className="sms-hero__content">
+        <motion.div className="sms-hero__content" variants={itemVariants}>
           <h3 className="sms-hero__title">{getTitle()}</h3>
           <p className={`sms-hero__body${smsError ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
 
@@ -433,8 +482,8 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
               </button>
             </div>
           )}
-        </div>
-      </div>
+        </motion.div>
+      </motion.div>
     )
   }
 
@@ -490,30 +539,48 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     const accentClass = isPro ? 'upsell-hero--indigo' : 'upsell-hero--violet'
 
     return (
-      <div className={`upsell-hero ${accentClass}`}>
-        {/* Left visual */}
-        <div className="upsell-hero__visual">
-          <div className="upsell-hero__glow" />
+      <motion.div
+        className={`upsell-hero ${accentClass}`}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Left: Icon + Price */}
+        <motion.div className="upsell-hero__left" variants={visualVariants}>
           <div className="upsell-hero__icon">
-            <Zap size={28} strokeWidth={2} />
+            <Zap size={24} strokeWidth={2.5} />
           </div>
-        </div>
+          {upsellItem.price && (
+            <div className="upsell-hero__price-tag">
+              <span className="upsell-hero__price-amount">{upsellItem.price}</span>
+            </div>
+          )}
+        </motion.div>
 
-        {/* Center content */}
-        <div className="upsell-hero__content">
+        {/* Center: Title + Benefits */}
+        <motion.div className="upsell-hero__content" variants={itemVariants}>
           <div className="upsell-hero__header">
+            <span className="upsell-hero__label">Upgrade to</span>
             <h3 className="upsell-hero__title">{upsellItem.title}</h3>
-            {upsellItem.price && <span className="upsell-hero__price">{upsellItem.price}</span>}
           </div>
-          <p className="upsell-hero__body">{upsellItem.body}</p>
-        </div>
+          {upsellItem.bullets && upsellItem.bullets.length > 0 && (
+            <ul className="upsell-hero__benefits">
+              {upsellItem.bullets.slice(0, 2).map((bullet, idx) => (
+                <li key={idx} className="upsell-hero__benefit">
+                  <Check size={14} strokeWidth={3} />
+                  <span>{bullet}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </motion.div>
 
-        {/* Right CTA */}
-        <a className="upsell-hero__cta" href={checkoutUrl}>
-          <span>Upgrade</span>
+        {/* Right: CTA */}
+        <motion.a className="upsell-hero__cta" href={checkoutUrl} variants={badgeVariants}>
+          <span>Upgrade Now</span>
           <ArrowRight size={16} strokeWidth={2.5} />
-        </a>
-      </div>
+        </motion.a>
+      </motion.div>
     )
   }
 

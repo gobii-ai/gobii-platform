@@ -12,16 +12,9 @@
     let returnToPath = null;
     let lastHistoryPath = null;
 
-    const setCloseVisible = (visible) => {
-      closeButton.hidden = !visible;
-    };
-
     const setState = (state) => {
       overlay.dataset.state = state;
       overlay.setAttribute('aria-hidden', state === 'closed' ? 'true' : 'false');
-      if (state === 'closed') {
-        setCloseVisible(false);
-      }
     };
 
     const getCurrentPath = () => {
@@ -117,9 +110,6 @@
         return;
       }
       setState('ready');
-      if (isAppFrame()) {
-        setCloseVisible(true);
-      }
     });
 
     window.addEventListener('message', (event) => {
@@ -130,10 +120,16 @@
         return;
       }
       const data = event.data || {};
+
+      // Handle close request from iframe
+      if (data.type === 'gobii-immersive-close') {
+        closeOverlay(false);
+        return;
+      }
+
       if (data.type !== 'gobii-immersive-path' || typeof data.path !== 'string') {
         return;
       }
-      setCloseVisible(true);
       window.history.replaceState({ immersive: true }, '', data.path);
       lastHistoryPath = data.path;
     });

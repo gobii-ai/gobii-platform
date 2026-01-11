@@ -167,9 +167,9 @@ export function AgentComposer({
     }
   }, [hasMultipleInsights, onPauseChange])
 
-  // Update countdown progress for the timer indicator
+  // Update countdown progress for the timer indicator (only when processing)
   useEffect(() => {
-    if (!hasMultipleInsights || isInsightsPaused) {
+    if (!hasMultipleInsights || isInsightsPaused || !isProcessing) {
       setCountdownProgress(0)
       if (countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current)
@@ -194,7 +194,7 @@ export function AgentComposer({
         countdownIntervalRef.current = null
       }
     }
-  }, [hasMultipleInsights, isInsightsPaused])
+  }, [hasMultipleInsights, isInsightsPaused, isProcessing])
 
   // Reset countdown when insight changes
   useEffect(() => {
@@ -466,12 +466,12 @@ export function AgentComposer({
                           aria-label={`View ${insight.insightType.replace('_', ' ')} insight`}
                           style={{
                             '--tab-color': color,
-                            '--tab-progress': isActive && !isInsightsPaused ? `${countdownProgress}%` : '0%',
+                            '--tab-progress': isActive && !isInsightsPaused && isProcessing ? `${countdownProgress}%` : '0%',
                           } as React.CSSProperties}
                         >
                           <span className="composer-insight-tab-inner" />
                           <span className="composer-insight-tab-label">{label}</span>
-                          {isActive && !isInsightsPaused && (
+                          {isActive && !isInsightsPaused && isProcessing && (
                             <span className="composer-insight-tab-progress" />
                           )}
                         </button>
