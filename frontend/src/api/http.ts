@@ -30,6 +30,20 @@ function isLoginPath(url: string): boolean {
   }
 }
 
+export function scheduleLoginRedirect(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  if (loginRedirectScheduled) {
+    return
+  }
+  if (window.location.pathname.startsWith('/accounts/login')) {
+    return
+  }
+  loginRedirectScheduled = true
+  window.location.assign(buildLoginUrl())
+}
+
 function maybeRedirectToLogin(response: Response): void {
   if (typeof window === 'undefined') {
     return
@@ -41,11 +55,7 @@ function maybeRedirectToLogin(response: Response): void {
   if (!needsRedirect) {
     return
   }
-  if (window.location.pathname.startsWith('/accounts/login')) {
-    return
-  }
-  loginRedirectScheduled = true
-  window.location.assign(buildLoginUrl())
+  scheduleLoginRedirect()
 }
 
 export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {

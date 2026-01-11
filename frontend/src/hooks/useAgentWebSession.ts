@@ -7,12 +7,13 @@ import {
   type AgentWebSessionSnapshot,
 } from '../api/agentChat'
 import { HttpError } from '../api/http'
-import { usePageLifecycle } from './usePageLifecycle'
+import { usePageLifecycle, type PageLifecycleSuspendReason } from './usePageLifecycle'
 
 const MIN_HEARTBEAT_INTERVAL_MS = 15_000
 const START_RETRY_BASE_DELAY_MS = 2_000
 const START_RETRY_MAX_DELAY_MS = 60_000
 const RESUME_THROTTLE_MS = 4000
+const SESSION_IDLE_TIMEOUT_MS = 60_000
 
 type WebSessionStatus = 'idle' | 'starting' | 'active' | 'error'
 
@@ -66,6 +67,19 @@ function requireValidTtlSeconds(snapshot: AgentWebSessionSnapshot): number {
   return ttl
 }
 
+function isPageActive(): boolean {
+  if (typeof document === 'undefined') {
+    return true
+  }
+  if (document.visibilityState !== 'visible') {
+    return false
+  }
+  if (typeof document.hasFocus === 'function') {
+    return document.hasFocus()
+  }
+  return true
+}
+
 export function useAgentWebSession(agentId: string | null) {
   const [session, setSession] = useState<AgentWebSessionSnapshot | null>(null)
   const [status, setStatus] = useState<WebSessionStatus>('idle')
@@ -73,10 +87,13 @@ export function useAgentWebSession(agentId: string | null) {
 
   const heartbeatTimerRef = useRef<number | null>(null)
   const startRetryTimerRef = useRef<number | null>(null)
+  const idleTimerRef = useRef<number | null>(null)
   const snapshotRef = useRef<AgentWebSessionSnapshot | null>(null)
   const agentIdRef = useRef<string | null>(agentId)
   const unmountedRef = useRef(false)
   const startRetryAttemptsRef = useRef(0)
+  const requestIdRef = useRef(0)
+  const idleTriggeredRef = useRef(false)
 
   useEffect(() => {
     agentIdRef.current = agentId
@@ -107,6 +124,14 @@ export function useAgentWebSession(agentId: string | null) {
     }
   }, [])
 
+  const clearIdleTimeout = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current)
+      idleTimerRef.current = null
+    }
+    idleTriggeredRef.current = false
+  }, [])
+
   const performHeartbeatRef = useRef<() => Promise<void>>(async () => {})
   const performStartRef = useRef<() => Promise<void>>(async () => {})
 
@@ -128,17 +153,44 @@ export function useAgentWebSession(agentId: string | null) {
     [clearStartRetry],
   )
 
+  const scheduleIdleTimeout = useCallback(() => {
+    if (idleTimerRef.current !== null) {
+      return
+    }
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null
+      if (isPageActive()) {
+        return
+      }
+      idleTriggeredRef.current = true
+      requestIdRef.current += 1
+      clearHeartbeat()
+      clearStartRetry()
+      const currentAgentId = agentIdRef.current
+      const snapshot = snapshotRef.current
+      snapshotRef.current = null
+      setSession(null)
+      setStatus('idle')
+      setError(null)
+      if (currentAgentId && snapshot) {
+        void endAgentWebSession(currentAgentId, snapshot.session_key, { keepalive: true }).catch(() => undefined)
+      }
+    }, SESSION_IDLE_TIMEOUT_MS)
+  }, [clearHeartbeat, clearStartRetry])
+
   const performStart = useCallback(async () => {
     const currentAgentId = agentIdRef.current
     if (!currentAgentId) {
       return
     }
 
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     setStatus('starting')
 
     try {
       const created = await startAgentWebSession(currentAgentId)
-      if (unmountedRef.current) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
 
@@ -149,9 +201,10 @@ export function useAgentWebSession(agentId: string | null) {
       setSession(created)
       setStatus('active')
       setError(null)
+      clearIdleTimeout()
       scheduleNextHeartbeat(ttlSeconds)
     } catch (startError) {
-      if (unmountedRef.current) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
 
@@ -174,7 +227,7 @@ export function useAgentWebSession(agentId: string | null) {
       clearStartRetry()
       clearHeartbeat()
     }
-  }, [clearHeartbeat, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
+  }, [clearHeartbeat, clearIdleTimeout, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
 
   const performHeartbeat = useCallback(async () => {
     const currentAgentId = agentIdRef.current
@@ -183,9 +236,12 @@ export function useAgentWebSession(agentId: string | null) {
       return
     }
 
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+
     try {
       const next = await heartbeatAgentWebSession(currentAgentId, snapshot.session_key)
-      if (unmountedRef.current) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
       startRetryAttemptsRef.current = 0
@@ -193,9 +249,10 @@ export function useAgentWebSession(agentId: string | null) {
       setError(null)
       const ttlSeconds = requireValidTtlSeconds(next)
       setSession(next)
+      clearIdleTimeout()
       scheduleNextHeartbeat(ttlSeconds)
     } catch (heartbeatError) {
-      if (unmountedRef.current) {
+      if (unmountedRef.current || requestId !== requestIdRef.current || agentIdRef.current !== currentAgentId) {
         return
       }
 
@@ -221,7 +278,7 @@ export function useAgentWebSession(agentId: string | null) {
       setError(message)
       clearStartRetry()
     }
-  }, [clearHeartbeat, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
+  }, [clearHeartbeat, clearIdleTimeout, clearStartRetry, scheduleNextHeartbeat, scheduleStartRetry])
 
   useEffect(() => {
     performHeartbeatRef.current = performHeartbeat
@@ -235,16 +292,21 @@ export function useAgentWebSession(agentId: string | null) {
     if (!agentId) {
       clearHeartbeat()
       clearStartRetry()
+      clearIdleTimeout()
+      requestIdRef.current += 1
       setSession(null)
       setStatus('idle')
       setError(null)
       snapshotRef.current = null
+      idleTriggeredRef.current = false
       return
     }
 
     setError(null)
     setSession(null)
     snapshotRef.current = null
+    clearIdleTimeout()
+    idleTriggeredRef.current = false
 
     startRetryAttemptsRef.current = 0
     void performStart()
@@ -252,13 +314,14 @@ export function useAgentWebSession(agentId: string | null) {
     return () => {
       clearHeartbeat()
       clearStartRetry()
+      clearIdleTimeout()
       const previous = snapshotRef.current
       snapshotRef.current = null
       if (previous) {
         void endAgentWebSession(agentId, previous.session_key, { keepalive: true }).catch(() => undefined)
       }
     }
-  }, [agentId, clearHeartbeat, clearStartRetry, performStart])
+  }, [agentId, clearHeartbeat, clearIdleTimeout, clearStartRetry, performStart])
 
   useEffect(() => {
     if (!agentId) {
@@ -296,10 +359,15 @@ export function useAgentWebSession(agentId: string | null) {
   }, [agentId])
 
   const requestResume = useCallback(() => {
+    clearIdleTimeout()
+    idleTriggeredRef.current = false
     if (!agentIdRef.current) {
       return
     }
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      return
+    }
+    if (!isPageActive()) {
       return
     }
     if (snapshotRef.current) {
@@ -307,12 +375,15 @@ export function useAgentWebSession(agentId: string | null) {
       return
     }
     void performStartRef.current()
-  }, [])
+  }, [clearIdleTimeout])
 
-  const handleSuspend = useCallback(() => {
+  const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
     clearHeartbeat()
     clearStartRetry()
-  }, [clearHeartbeat, clearStartRetry])
+    if (reason !== 'offline') {
+      scheduleIdleTimeout()
+    }
+  }, [clearHeartbeat, clearStartRetry, scheduleIdleTimeout])
 
   usePageLifecycle(
     {

@@ -551,6 +551,27 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     const isPro = upsellItem.plan === 'pro'
     const accentClass = isPro ? 'upsell-hero--indigo' : 'upsell-hero--violet'
 
+    // Fallback benefits if backend doesn't provide enough
+    const proBenefits = [
+      'More monthly tasks',
+      'Priority support',
+      'Advanced features',
+      'Faster responses',
+    ]
+    const scaleBenefits = [
+      'Highest task limits',
+      'Lowest per-task rate',
+      'Advanced intelligence',
+      'Priority processing',
+    ]
+
+    const backendBullets = upsellItem.bullets ?? []
+    const fallbackBullets = isPro ? proBenefits : scaleBenefits
+    // Use backend bullets first, then fill with fallbacks up to 4 items
+    const displayBullets = backendBullets.length >= 3
+      ? backendBullets.slice(0, 4)
+      : [...backendBullets, ...fallbackBullets.filter((b) => !backendBullets.includes(b))].slice(0, 4)
+
     // Plan-specific icons for benefits
     const getBenefitIcon = (index: number) => {
       if (isPro) {
@@ -592,16 +613,14 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
             <h3 className="upsell-hero__title">{isPro ? 'Unlock more power' : 'Built for power users'}</h3>
             <p className="upsell-hero__subtitle">{upsellItem.subtitle || upsellItem.body}</p>
           </div>
-          {upsellItem.bullets && upsellItem.bullets.length > 0 && (
-            <ul className="upsell-hero__benefits">
-              {upsellItem.bullets.map((bullet, idx) => (
-                <li key={idx} className="upsell-hero__benefit">
-                  {getBenefitIcon(idx)}
-                  <span>{bullet}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <ul className="upsell-hero__benefits">
+            {displayBullets.map((bullet, idx) => (
+              <li key={idx} className="upsell-hero__benefit">
+                {getBenefitIcon(idx)}
+                <span>{bullet}</span>
+              </li>
+            ))}
+          </ul>
         </motion.div>
       </motion.div>
     )

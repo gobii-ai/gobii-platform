@@ -2625,22 +2625,32 @@
   height: 100%;
   min-height: 0;
   gap: 1rem;
-  padding: 1rem 0.5rem;
+  padding: 0 0.75rem;
 }
 
 .chat-sidebar--collapsed .chat-sidebar-inner {
-  padding: 1rem 0;
+  padding: 0;
   overflow: visible;
 }
 
+.chat-sidebar--collapsed .chat-sidebar-toggle {
+  position: absolute;
+  top: calc(var(--agent-chat-banner-height, 3.5rem) / 2);
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+
+
 .chat-sidebar-toggle {
+  position: absolute;
+  top: calc(var(--agent-chat-banner-height, 3.5rem) / 2);
+  right: 0.5rem;
+  transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
   width: 1.75rem;
   height: 1.75rem;
-  margin-bottom: 0.5rem;
-  margin-left: auto;
   border-radius: 0.375rem;
   background: transparent;
   border: none;
@@ -2677,6 +2687,7 @@
   gap: 0.75rem;
   flex: 1;
   min-height: 0;
+  margin-top: var(--agent-chat-banner-height, 3.5rem);
 }
 
 .chat-sidebar-section-header {
@@ -2718,6 +2729,14 @@
   padding: 0 0.25rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.4) transparent;
+}
+
+.chat-sidebar-agent-list::before,
+.chat-sidebar-agent-list::after {
+  content: '';
+  display: block;
+  flex-shrink: 0;
+  height: 0.375rem;
 }
 
 .chat-sidebar-agent-list::-webkit-scrollbar {
@@ -2918,6 +2937,15 @@
 .chat-sidebar-create-btn[data-collapsed='true'] .chat-sidebar-create-btn-icon {
   width: 2.375rem;
   height: 2.375rem;
+  background: transparent;
+  border: 2px dashed rgba(99, 102, 241, 0.4);
+  color: #6366f1;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.chat-sidebar-create-btn[data-collapsed='true']:hover .chat-sidebar-create-btn-icon {
+  border-color: rgba(99, 102, 241, 0.7);
+  background: rgba(99, 102, 241, 0.08);
 }
 
 /* Drawer variant of create button */
@@ -3035,9 +3063,17 @@
 .chat-sidebar--collapsed .chat-sidebar-agent-list {
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  overflow-x: visible;
+  padding: 0 0.75rem;
   overflow-y: auto;
+}
+
+.chat-sidebar--collapsed .chat-sidebar-agent-list::before,
+.chat-sidebar--collapsed .chat-sidebar-agent-list::after {
+  content: '';
+  display: block;
+  flex-shrink: 0;
+  width: 100%;
+  height: 0.5rem;
 }
 
 .chat-sidebar--collapsed .chat-sidebar-agent-empty {

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 
-export type PageLifecycleResumeReason = 'visibility' | 'focus' | 'pageshow' | 'online'
-export type PageLifecycleSuspendReason = 'visibility' | 'pagehide' | 'offline'
+export type PageLifecycleResumeReason = 'visibility' | 'focus' | 'pageshow' | 'online' | 'resume'
+export type PageLifecycleSuspendReason = 'visibility' | 'pagehide' | 'offline' | 'blur' | 'freeze'
 
 type PageLifecycleHandlers = {
   onResume?: (reason: PageLifecycleResumeReason) => void
@@ -60,6 +60,10 @@ export function usePageLifecycle(handlers: PageLifecycleHandlers, options: PageL
       }
     }
 
+    const handleBlur = () => {
+      triggerSuspend('blur')
+    }
+
     const handlePageShow = (event: PageTransitionEvent) => {
       if (event.persisted) {
         triggerResume('pageshow')
@@ -68,6 +72,14 @@ export function usePageLifecycle(handlers: PageLifecycleHandlers, options: PageL
 
     const handlePageHide = () => {
       triggerSuspend('pagehide')
+    }
+
+    const handleFreeze = () => {
+      triggerSuspend('freeze')
+    }
+
+    const handleResumeEvent = () => {
+      triggerResume('resume')
     }
 
     const handleOnline = () => {
@@ -80,16 +92,22 @@ export function usePageLifecycle(handlers: PageLifecycleHandlers, options: PageL
 
     document.addEventListener('visibilitychange', handleVisibility)
     window.addEventListener('focus', handleFocus)
+    window.addEventListener('blur', handleBlur)
     window.addEventListener('pageshow', handlePageShow)
     window.addEventListener('pagehide', handlePageHide)
+    document.addEventListener('freeze', handleFreeze as EventListener)
+    document.addEventListener('resume', handleResumeEvent as EventListener)
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibility)
       window.removeEventListener('focus', handleFocus)
+      window.removeEventListener('blur', handleBlur)
       window.removeEventListener('pageshow', handlePageShow)
       window.removeEventListener('pagehide', handlePageHide)
+      document.removeEventListener('freeze', handleFreeze as EventListener)
+      document.removeEventListener('resume', handleResumeEvent as EventListener)
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
     }
