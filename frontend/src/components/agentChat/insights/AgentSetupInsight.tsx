@@ -317,30 +317,43 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   )
 
   const renderSms = () => {
-    const statusText = smsError
-      ? smsError
-      : smsEnabled
-        ? 'You can chat with this agent via SMS.'
-        : phoneVerified
-          ? 'You can chat with this agent via SMS.'
-          : phone
-            ? 'Enter the code we sent to your phone.'
-            : 'Enter your phone number to chat with this agent via sms.'
+    const isComplete = smsEnabled && agentNumber
 
-    const statusClass = smsError ? 'agent-setup-panel__status agent-setup-panel__status--error' : 'agent-setup-panel__subtitle'
+    const getTitle = () => {
+      if (isComplete) return 'SMS Connected'
+      if (phoneVerified) return 'Enable SMS'
+      if (phone) return 'Verify Your Phone'
+      return 'Connect via SMS'
+    }
+
+    const getSubtitle = () => {
+      if (smsError) return smsError
+      if (isComplete) return 'Text this number anytime to chat with your agent.'
+      if (phoneVerified) return 'Your phone is verified. Enable SMS to start chatting.'
+      if (phone) return 'Enter the verification code we sent to your phone.'
+      return 'Get updates and chat with your agent via text message.'
+    }
 
     return (
-      <div className="agent-setup-panel agent-setup-panel--sms">
-        <div className="agent-setup-panel__icon">
-          <Phone size={18} strokeWidth={2} />
+      <div className="sms-hero">
+        {/* Left visual */}
+        <div className="sms-hero__visual">
+          <div className={`sms-hero__bubble sms-hero__bubble--1${isComplete ? ' sms-hero__bubble--active' : ''}`} />
+          <div className={`sms-hero__bubble sms-hero__bubble--2${isComplete ? ' sms-hero__bubble--active' : ''}`} />
+          <div className="sms-hero__icon">
+            {isComplete ? <MessageSquare size={26} strokeWidth={2} /> : <Phone size={26} strokeWidth={2} />}
+          </div>
         </div>
-        <div className="agent-setup-panel__content">
-          <div className="agent-setup-panel__title">SMS chat</div>
-          <div className={statusClass}>{statusText}</div>
+
+        {/* Center content */}
+        <div className="sms-hero__content">
+          <h3 className="sms-hero__title">{getTitle()}</h3>
+          <p className={`sms-hero__body${smsError ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
+
           {!phone ? (
-            <div className="agent-setup-panel__row">
+            <div className="sms-hero__form">
               <input
-                className="agent-setup-panel__input"
+                className="sms-hero__input"
                 type="tel"
                 autoComplete="tel"
                 placeholder="+1 415 555 0133"
@@ -349,98 +362,76 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
               />
               <button
                 type="button"
-                className="agent-setup-panel__button agent-setup-panel__button--primary"
+                className="sms-hero__button"
                 onClick={handleAddPhone}
                 disabled={smsBusy}
               >
-                {smsAction === 'add' ? 'Sending...' : 'Send code'}
+                {smsAction === 'add' ? 'Sending...' : 'Send Code'}
               </button>
             </div>
           ) : !phoneVerified ? (
-            <>
-              <div className="agent-setup-panel__row">
-                <input
-                  className="agent-setup-panel__input"
-                  type="text"
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  placeholder="Verification code"
-                  value={codeInput}
-                  onChange={(event) => setCodeInput(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="agent-setup-panel__button agent-setup-panel__button--primary"
-                  onClick={handleVerify}
-                  disabled={smsBusy}
-                >
-                  {smsAction === 'verify' ? 'Verifying...' : 'Verify'}
+            <div className="sms-hero__form">
+              <input
+                className="sms-hero__input"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="Enter code"
+                value={codeInput}
+                onChange={(event) => setCodeInput(event.target.value)}
+              />
+              <button
+                type="button"
+                className="sms-hero__button"
+                onClick={handleVerify}
+                disabled={smsBusy}
+              >
+                {smsAction === 'verify' ? 'Verifying...' : 'Verify'}
+              </button>
+              <div className="sms-hero__links">
+                <button type="button" className="sms-hero__link" onClick={handleResend} disabled={smsBusy || cooldown > 0}>
+                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend'}
+                </button>
+                <span className="sms-hero__link-sep">·</span>
+                <button type="button" className="sms-hero__link" onClick={handleDeletePhone} disabled={smsBusy}>
+                  Change
                 </button>
               </div>
-              <div className="agent-setup-panel__row agent-setup-panel__row--meta">
-                <button
-                  type="button"
-                  className="agent-setup-panel__link"
-                  onClick={handleResend}
-                  disabled={smsBusy || cooldown > 0}
-                >
-                  {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
-                </button>
-                <button
-                  type="button"
-                  className="agent-setup-panel__link"
-                  onClick={handleDeletePhone}
-                  disabled={smsBusy}
-                >
-                  Change number
-                </button>
-              </div>
-            </>
+            </div>
           ) : !smsEnabled ? (
-            <>
-              <div className="agent-setup-panel__row">
-                <div className="agent-setup-panel__pill">
-                  <CheckCircle2 size={14} strokeWidth={2.2} />
-                  <span>{phoneDisplay}</span>
-                </div>
-                <button
-                  type="button"
-                  className="agent-setup-panel__button agent-setup-panel__button--primary"
-                  onClick={handleEnableSms}
-                  disabled={smsBusy}
-                >
-                  {smsAction === 'enable' ? 'Enabling...' : 'Enable SMS'}
-                </button>
+            <div className="sms-hero__form">
+              <div className="sms-hero__verified">
+                <CheckCircle2 size={16} strokeWidth={2.2} />
+                <span>{phoneDisplay}</span>
               </div>
-              <div className="agent-setup-panel__row agent-setup-panel__row--meta">
-                <button
-                  type="button"
-                  className="agent-setup-panel__link"
-                  onClick={handleDeletePhone}
-                  disabled={smsBusy}
-                >
+              <button
+                type="button"
+                className="sms-hero__button"
+                onClick={handleEnableSms}
+                disabled={smsBusy}
+              >
+                {smsAction === 'enable' ? 'Enabling...' : 'Enable SMS'}
+              </button>
+              <div className="sms-hero__links">
+                <button type="button" className="sms-hero__link" onClick={handleDeletePhone} disabled={smsBusy}>
                   Change number
                 </button>
               </div>
-            </>
+            </div>
           ) : (
-            <>
-              <div className="agent-setup-panel__row">
-                <div className="agent-setup-panel__pill">
-                  <MessageSquare size={14} strokeWidth={2} />
-                  <span>{agentNumberDisplay}</span>
-                </div>
-                <button
-                  type="button"
-                  className="agent-setup-panel__button agent-setup-panel__button--ghost"
-                  onClick={() => handleCopy(agentNumber ?? '')}
-                >
-                  <Copy size={14} />
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
+            <div className="sms-hero__form">
+              <div className="sms-hero__number">
+                <span>{agentNumberDisplay}</span>
               </div>
-              <div className="agent-setup-panel__meta">Text this number to reach your agent.</div>
-            </>
+              <button
+                type="button"
+                className="sms-hero__button sms-hero__button--secondary"
+                onClick={() => handleCopy(agentNumber ?? '')}
+              >
+                <Copy size={14} />
+                {copied ? 'Copied!' : 'Copy Number'}
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -495,26 +486,32 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     }
 
     const checkoutUrl = upsellItem.plan === 'pro' ? checkoutUrls.pro : checkoutUrls.scale
-    const upsellTitle = upsellItem.price
-      ? `Upgrade to ${upsellItem.title} - ${upsellItem.price}`
-      : `Upgrade to ${upsellItem.title}`
-
-    const upsellNote = upsellItem.plan === 'pro' ? metadata.alwaysOn.note : null
-    const upsellSubtitle = [upsellItem.subtitle, upsellNote].filter(Boolean).join(' / ')
-    const ctaClass = `agent-setup-panel__cta agent-setup-panel__cta--${upsellItem.accent}`
+    const isPro = upsellItem.plan === 'pro'
+    const accentClass = isPro ? 'upsell-hero--indigo' : 'upsell-hero--violet'
 
     return (
-      <div className={`agent-setup-panel agent-setup-panel--upsell agent-setup-panel--${upsellItem.accent}`}>
-        <div className="agent-setup-panel__icon agent-setup-panel__icon--accent">
-          <Zap size={18} strokeWidth={2} />
+      <div className={`upsell-hero ${accentClass}`}>
+        {/* Left visual */}
+        <div className="upsell-hero__visual">
+          <div className="upsell-hero__glow" />
+          <div className="upsell-hero__icon">
+            <Zap size={28} strokeWidth={2} />
+          </div>
         </div>
-        <div className="agent-setup-panel__content">
-          <div className="agent-setup-panel__title">{upsellTitle}</div>
-          <div className="agent-setup-panel__subtitle agent-setup-panel__subtitle--clamp">{upsellSubtitle}</div>
+
+        {/* Center content */}
+        <div className="upsell-hero__content">
+          <div className="upsell-hero__header">
+            <h3 className="upsell-hero__title">{upsellItem.title}</h3>
+            {upsellItem.price && <span className="upsell-hero__price">{upsellItem.price}</span>}
+          </div>
+          <p className="upsell-hero__body">{upsellItem.body}</p>
         </div>
-        <a className={ctaClass} href={checkoutUrl}>
-          {upsellItem.ctaLabel}
-          <ArrowRight size={14} />
+
+        {/* Right CTA */}
+        <a className="upsell-hero__cta" href={checkoutUrl}>
+          <span>Upgrade</span>
+          <ArrowRight size={16} strokeWidth={2.5} />
         </a>
       </div>
     )

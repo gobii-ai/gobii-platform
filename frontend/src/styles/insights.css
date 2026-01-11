@@ -424,6 +424,444 @@
   }
 }
 
+/* ==========================================================================
+   SMS Hero Panel
+   ========================================================================== */
+
+.sms-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem 1.5rem;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.sms-hero__visual {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sms-hero__bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.sms-hero__bubble--1 {
+  width: 100%;
+  height: 100%;
+  animation: sms-bubble 3s ease-in-out infinite;
+}
+
+.sms-hero__bubble--2 {
+  width: 70%;
+  height: 70%;
+  background: rgba(34, 197, 94, 0.15);
+  animation: sms-bubble 3s ease-in-out infinite 0.5s;
+}
+
+.sms-hero__bubble--active {
+  background: rgba(34, 197, 94, 0.2);
+}
+
+.sms-hero__bubble--active.sms-hero__bubble--2 {
+  background: rgba(34, 197, 94, 0.25);
+}
+
+@keyframes sms-bubble {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+.sms-hero__icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #22c55e 0%, #16a34a 100%);
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(34, 197, 94, 0.4);
+  z-index: 1;
+}
+
+.sms-hero__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.sms-hero__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.sms-hero__body {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #475569;
+  line-height: 1.4;
+}
+
+.sms-hero__body--error {
+  color: #dc2626;
+}
+
+.sms-hero__form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 0.375rem;
+}
+
+.sms-hero__input {
+  flex: 1;
+  min-width: 140px;
+  max-width: 200px;
+  height: 36px;
+  padding: 0 0.75rem;
+  border-radius: 10px;
+  border: 1.5px solid rgba(34, 197, 94, 0.3);
+  background: rgba(255, 255, 255, 0.9);
+  font-size: 0.875rem;
+  color: #0f172a;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.sms-hero__input:focus {
+  outline: none;
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15);
+}
+
+.sms-hero__input::placeholder {
+  color: #94a3b8;
+}
+
+.sms-hero__button {
+  height: 36px;
+  padding: 0 1rem;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  transition: transform 0.15s, box-shadow 0.15s;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+.sms-hero__button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+}
+
+.sms-hero__button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.sms-hero__button--secondary {
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  box-shadow: none;
+  border: 1.5px solid rgba(34, 197, 94, 0.25);
+}
+
+.sms-hero__button--secondary:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.18);
+  box-shadow: none;
+}
+
+.sms-hero__verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.12);
+  color: #15803d;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.sms-hero__number {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.875rem;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.1);
+  color: #15803d;
+  font-size: 1rem;
+  font-weight: 700;
+  font-feature-settings: 'tnum';
+  letter-spacing: 0.02em;
+}
+
+.sms-hero__links {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  margin-top: 0.125rem;
+}
+
+.sms-hero__link {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+
+.sms-hero__link:hover:not(:disabled) {
+  color: #0f172a;
+}
+
+.sms-hero__link:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sms-hero__link-sep {
+  color: #cbd5e1;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .sms-hero {
+    padding: 0.75rem 1rem;
+    gap: 1rem;
+  }
+
+  .sms-hero__visual {
+    width: 70px;
+    height: 70px;
+  }
+
+  .sms-hero__icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .sms-hero__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .sms-hero__title {
+    font-size: 0.9375rem;
+  }
+
+  .sms-hero__input {
+    min-width: 120px;
+  }
+}
+
+/* ==========================================================================
+   Upsell Hero Panel
+   ========================================================================== */
+
+.upsell-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem 1.5rem;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.upsell-hero__visual {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.upsell-hero__glow {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  animation: upsell-glow 2.5s ease-in-out infinite;
+}
+
+.upsell-hero--indigo .upsell-hero__glow {
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, transparent 70%);
+}
+
+.upsell-hero--violet .upsell-hero__glow {
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.2) 0%, transparent 70%);
+}
+
+@keyframes upsell-glow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+.upsell-hero__icon {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  z-index: 1;
+}
+
+.upsell-hero--indigo .upsell-hero__icon {
+  background: linear-gradient(145deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+}
+
+.upsell-hero--violet .upsell-hero__icon {
+  background: linear-gradient(145deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 4px 16px rgba(139, 92, 246, 0.4);
+}
+
+.upsell-hero__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.upsell-hero__header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.upsell-hero__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.upsell-hero__price {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.upsell-hero__body {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.upsell-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 42px;
+  padding: 0 1.25rem;
+  border-radius: 12px;
+  text-decoration: none;
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.upsell-hero--indigo .upsell-hero__cta {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 4px 14px rgba(99, 102, 241, 0.35);
+}
+
+.upsell-hero--violet .upsell-hero__cta {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+}
+
+.upsell-hero__cta:hover {
+  transform: translateY(-2px);
+}
+
+.upsell-hero--indigo .upsell-hero__cta:hover {
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.45);
+}
+
+.upsell-hero--violet .upsell-hero__cta:hover {
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
+}
+
+@media (max-width: 640px) {
+  .upsell-hero {
+    padding: 0.75rem 1rem;
+    gap: 1rem;
+  }
+
+  .upsell-hero__visual {
+    width: 70px;
+    height: 70px;
+  }
+
+  .upsell-hero__icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .upsell-hero__icon svg {
+    width: 22px;
+    height: 22px;
+  }
+
+  .upsell-hero__title {
+    font-size: 0.9375rem;
+  }
+
+  .upsell-hero__cta {
+    height: 38px;
+    padding: 0 1rem;
+    font-size: 0.8125rem;
+  }
+}
+
 .agent-setup-panel {
   display: flex;
   align-items: center;
