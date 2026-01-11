@@ -14,12 +14,13 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
 django_asgi_app = get_asgi_application()
 
 
-from console.agent_chat.consumers import AgentChatConsumer, EchoConsumer  # noqa: E402  pylint: disable=wrong-import-position
+from console.agent_chat.consumers import AgentChatConsumer, AgentChatSessionConsumer, EchoConsumer  # noqa: E402  pylint: disable=wrong-import-position
 from console.agent_audit.consumers import StaffAgentAuditConsumer  # noqa: E402  pylint: disable=wrong-import-position
 from console.evals.consumers import EvalRunConsumer, EvalSuiteRunConsumer  # noqa: E402  pylint: disable=wrong-import-position
 
 
 websocket_urlpatterns = [
+    path("ws/agents/chat/", AgentChatSessionConsumer.as_asgi()),
     path("ws/agents/<uuid:agent_id>/chat/", AgentChatConsumer.as_asgi()),
     path("ws/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditConsumer.as_asgi()),
     path("ws/echo/", EchoConsumer.as_asgi()),

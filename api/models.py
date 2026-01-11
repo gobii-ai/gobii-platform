@@ -5229,6 +5229,111 @@ class PersistentAgentKanbanCard(models.Model):
         return f"Kanban<{self.title}> ({self.status})"
 
 
+class PersistentAgentKanbanEvent(models.Model):
+    """Persisted kanban timeline event for chat rehydration."""
+
+    class Action(models.TextChoices):
+        CREATED = "created", "Created"
+        STARTED = "started", "Started"
+        COMPLETED = "completed", "Completed"
+        UPDATED = "updated", "Updated"
+        DELETED = "deleted", "Deleted"
+        ARCHIVED = "archived", "Archived"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="kanban_events",
+    )
+    cursor_value = models.BigIntegerField()
+    cursor_identifier = models.UUIDField(unique=True)
+    display_text = models.TextField()
+    primary_action = models.CharField(max_length=16, choices=Action.choices)
+    todo_count = models.PositiveIntegerField(default=0)
+    doing_count = models.PositiveIntegerField(default=0)
+    done_count = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-cursor_value", "-cursor_identifier"]
+        indexes = [
+            models.Index(fields=["agent", "-cursor_value"], name="kanban_event_agent_recent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"KanbanEvent<{self.agent_id}> ({self.primary_action})"
+
+
+class PersistentAgentKanbanEventTitle(models.Model):
+    """Snapshot titles stored alongside a kanban event."""
+
+    class Status(models.TextChoices):
+        TODO = "todo", "To Do"
+        DOING = "doing", "Doing"
+        DONE = "done", "Done"
+
+    event = models.ForeignKey(
+        PersistentAgentKanbanEvent,
+        on_delete=models.CASCADE,
+        related_name="titles",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices)
+    position = models.PositiveSmallIntegerField()
+    title = models.CharField(max_length=255)
+
+    class Meta:
+        ordering = ["status", "position"]
+        indexes = [
+            models.Index(fields=["event", "status", "position"], name="kanban_event_title_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"KanbanEventTitle<{self.status}:{self.position}>"
+
+
+class PersistentAgentKanbanEventChange(models.Model):
+    """Stored kanban change metadata for a timeline event."""
+
+    class Action(models.TextChoices):
+        CREATED = "created", "Created"
+        STARTED = "started", "Started"
+        COMPLETED = "completed", "Completed"
+        UPDATED = "updated", "Updated"
+        DELETED = "deleted", "Deleted"
+        ARCHIVED = "archived", "Archived"
+
+    event = models.ForeignKey(
+        PersistentAgentKanbanEvent,
+        on_delete=models.CASCADE,
+        related_name="changes",
+    )
+    card_id = models.UUIDField()
+    title = models.CharField(max_length=255)
+    action = models.CharField(max_length=16, choices=Action.choices)
+    from_status = models.CharField(
+        max_length=16,
+        choices=PersistentAgentKanbanCard.Status.choices,
+        null=True,
+        blank=True,
+    )
+    to_status = models.CharField(
+        max_length=16,
+        choices=PersistentAgentKanbanCard.Status.choices,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        ordering = ["id"]
+        indexes = [
+            models.Index(fields=["event"], name="kanban_event_change_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"KanbanEventChange<{self.action}:{self.card_id}>"
+
+
 class MCPServerConfig(models.Model):
     """Configurable MCP server definition scoped to platform, org, or user."""
 

@@ -25,6 +25,7 @@ from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
     PersistentAgent,
+    PersistentAgentKanbanEvent,
     PersistentAgentCompletion,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
@@ -32,6 +33,8 @@ from api.models import (
     PersistentAgentToolCall,
     ToolFriendlyName,
 )
+
+from .kanban_events import ensure_kanban_baseline_event
 
 DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 100
@@ -93,7 +96,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step", "thinking"]
+    kind: Literal["message", "step", "thinking", "kanban"]
     identifier: str
 
     def encode(self) -> str:
@@ -131,6 +134,13 @@ class ThinkingEnvelope:
     cursor: CursorPayload
     completion: PersistentAgentCompletion
     reasoning: str
+
+
+@dataclass(slots=True)
+class KanbanEnvelope:
+    sort_key: tuple[int, str, str]
+    cursor: CursorPayload
+    event: PersistentAgentKanbanEvent
 
 
 @dataclass(slots=True)
@@ -509,6 +519,34 @@ def _thinking_queryset(
     return list(qs[:limit])
 
 
+def _kanban_queryset(
+    agent: PersistentAgent,
+    direction: TimelineDirection,
+    cursor: CursorPayload | None,
+) -> Sequence[PersistentAgentKanbanEvent]:
+    limit = MAX_PAGE_SIZE * 3
+    qs = (
+        PersistentAgentKanbanEvent.objects.filter(agent=agent)
+        .prefetch_related("changes", "titles")
+        .order_by("-cursor_value", "-cursor_identifier")
+    )
+    if direction == "older" and cursor is not None:
+        qs = qs.filter(cursor_value__lte=cursor.value)
+    elif direction == "newer" and cursor is not None:
+        if cursor.kind == "kanban":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(cursor_value__gt=cursor.value)
+                    | Q(cursor_value=cursor.value, cursor_identifier__gt=cursor_uuid)
+                )
+            except Exception:
+                qs = qs.filter(cursor_value__gt=cursor.value)
+        else:
+            qs = qs.filter(cursor_value__gt=cursor.value)
+    return list(qs[:limit])
+
+
 def _dt_from_cursor(cursor: CursorPayload) -> datetime:
     micros = cursor.value
     return datetime.fromtimestamp(micros / 1_000_000, tz=dt_timezone.utc)
@@ -568,15 +606,34 @@ def _envelop_thinking(completions: Iterable[PersistentAgentCompletion]) -> list[
     return envelopes
 
 
+def _envelop_kanban_events(events: Iterable[PersistentAgentKanbanEvent]) -> list[KanbanEnvelope]:
+    envelopes: list[KanbanEnvelope] = []
+    for event in events:
+        sort_value = event.cursor_value
+        cursor = CursorPayload(
+            value=sort_value,
+            kind="kanban",
+            identifier=str(event.cursor_identifier),
+        )
+        envelopes.append(
+            KanbanEnvelope(
+                sort_key=(sort_value, "kanban", str(event.cursor_identifier)),
+                cursor=cursor,
+                event=event,
+            )
+        )
+    return envelopes
+
+
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope] = []
+    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope] = []
     for env in envelopes:
         key = env.sort_key
         if direction == "older" and key < pivot:
@@ -587,10 +644,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -656,7 +713,23 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             )
         except Exception:
             pass
-    return message_exists or step_exists or completion_exists
+
+    kanban_exists = PersistentAgentKanbanEvent.objects.filter(
+        agent=agent,
+        cursor_value__lt=cursor.value,
+    ).exists()
+    if cursor.kind == "kanban":
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            kanban_exists = kanban_exists or PersistentAgentKanbanEvent.objects.filter(
+                agent=agent,
+                cursor_value=cursor.value,
+                cursor_identifier__lt=cursor_uuid,
+            ).exists()
+        except Exception:
+            pass
+
+    return message_exists or step_exists or completion_exists or kanban_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -716,8 +789,22 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             )
         except Exception:
             pass
+    kanban_exists = PersistentAgentKanbanEvent.objects.filter(
+        agent=agent,
+        cursor_value__gt=cursor.value,
+    ).exists()
+    if cursor.kind == "kanban":
+        try:
+            cursor_uuid = uuid.UUID(cursor.identifier)
+            kanban_exists = kanban_exists or PersistentAgentKanbanEvent.objects.filter(
+                agent=agent,
+                cursor_value=cursor.value,
+                cursor_identifier__gt=cursor_uuid,
+            ).exists()
+        except Exception:
+            pass
 
-    return message_exists or step_exists or completion_exists
+    return message_exists or step_exists or completion_exists or kanban_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -813,9 +900,14 @@ def fetch_timeline_window(
     message_envelopes = _envelop_messages(_messages_queryset(agent, direction, cursor_payload))
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
     thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
+    kanban_envelopes = _envelop_kanban_events(_kanban_queryset(agent, direction, cursor_payload))
+    if direction == "initial" and not kanban_envelopes:
+        baseline_event = ensure_kanban_baseline_event(agent)
+        if baseline_event:
+            kanban_envelopes = _envelop_kanban_events([baseline_event])
 
-    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes, *thinking_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *thinking_envelopes, *kanban_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -831,6 +923,9 @@ def fetch_timeline_window(
 
     timeline_events: list[dict] = []
     cluster_buffer: list[StepEnvelope] = []
+    agent_name = getattr(agent, "name", None) or "Agent"
+    if " " in agent_name:
+        agent_name = agent_name.split()[0]
     for env in truncated:
         if isinstance(env, StepEnvelope):
             cluster_buffer.append(env)
@@ -840,6 +935,8 @@ def fetch_timeline_window(
             cluster_buffer = []
         if isinstance(env, ThinkingEnvelope):
             timeline_events.append(_serialize_thinking(env))
+        elif isinstance(env, KanbanEnvelope):
+            timeline_events.append(serialize_persisted_kanban_event(env, agent_name))
         else:
             timeline_events.append(_serialize_message(env))
     if cluster_buffer:
@@ -898,6 +995,47 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
         env.tool_call.tool_name for env in envelopes if env.tool_call
     )
     return _build_cluster(envelopes, label_map)
+
+
+def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> dict:
+    event = env.event
+    timestamp = _format_timestamp(_dt_from_cursor(env.cursor))
+
+    titles_by_status = {"todo": [], "doing": [], "done": []}
+    for title in event.titles.all():
+        if title.status in titles_by_status:
+            titles_by_status[title.status].append(title.title)
+
+    serialized_changes = [
+        {
+            "cardId": str(change.card_id),
+            "title": change.title,
+            "action": change.action,
+            "fromStatus": change.from_status,
+            "toStatus": change.to_status,
+        }
+        for change in event.changes.all()
+    ]
+
+    serialized_snapshot = {
+        "todoCount": event.todo_count,
+        "doingCount": event.doing_count,
+        "doneCount": event.done_count,
+        "todoTitles": titles_by_status["todo"],
+        "doingTitles": titles_by_status["doing"],
+        "doneTitles": titles_by_status["done"],
+    }
+
+    return {
+        "kind": "kanban",
+        "cursor": env.cursor.encode(),
+        "timestamp": timestamp,
+        "agentName": agent_name,
+        "displayText": event.display_text,
+        "primaryAction": event.primary_action,
+        "changes": serialized_changes,
+        "snapshot": serialized_snapshot,
+    }
 
 
 def serialize_kanban_event(

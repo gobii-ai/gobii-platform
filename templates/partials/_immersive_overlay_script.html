@@ -1,0 +1,204 @@
+<script>
+  document.addEventListener('DOMContentLoaded', function () {
+    const overlay = document.getElementById('immersive-overlay');
+    const frame = document.getElementById('immersive-frame');
+    const closeButton = document.getElementById('immersive-close');
+
+    if (!overlay || !frame || !closeButton) {
+      return;
+    }
+
+    let isOpen = false;
+    let returnToPath = null;
+    let lastHistoryPath = null;
+
+    const setState = (state) => {
+      overlay.dataset.state = state;
+      overlay.setAttribute('aria-hidden', state === 'closed' ? 'true' : 'false');
+    };
+
+    const getCurrentPath = () => {
+      return `${window.location.pathname}${window.location.search}${window.location.hash}` || '/';
+    };
+
+    const buildLaunchPath = (returnTo) => {
+      return `/app?return_to=${encodeURIComponent(returnTo)}`;
+    };
+
+    const buildEmbedUrl = (rawUrl) => {
+      const url = new URL(rawUrl, window.location.origin);
+      url.searchParams.set('embed', '1');
+      const query = url.searchParams.toString();
+      return `${url.pathname}${query ? `?${query}` : ''}${url.hash}`;
+    };
+
+    const buildHistoryPath = (rawUrl) => {
+      const url = new URL(rawUrl, window.location.origin);
+      url.searchParams.delete('embed');
+      url.searchParams.delete('return_to');
+      const query = url.searchParams.toString();
+      return `${url.pathname}${query ? `?${query}` : ''}${url.hash}`;
+    };
+
+    const isAppFrame = () => {
+      try {
+        const frameLocation = frame.contentWindow && frame.contentWindow.location;
+        if (!frameLocation) {
+          return false;
+        }
+        return frameLocation.pathname.startsWith('/app');
+      } catch {
+        return false;
+      }
+    };
+
+    const openOverlay = ({ src, returnTo, historyPath } = {}) => {
+      const resolvedReturnTo = returnTo || returnToPath || getCurrentPath();
+      if (!returnToPath) {
+        returnToPath = resolvedReturnTo;
+      }
+
+      if (src) {
+        frame.src = buildEmbedUrl(src);
+      }
+
+      if (!isOpen) {
+        isOpen = true;
+        document.body.classList.add('immersive-open');
+        setState('loading');
+      }
+
+      const nextHistoryPath = historyPath || (src ? buildHistoryPath(src) : buildLaunchPath(resolvedReturnTo));
+      if (nextHistoryPath && nextHistoryPath !== lastHistoryPath) {
+        window.history.pushState({ immersive: true }, '', nextHistoryPath);
+        lastHistoryPath = nextHistoryPath;
+      }
+    };
+
+    const closeOverlay = (preserveHistory) => {
+      if (!isOpen) {
+        return;
+      }
+      isOpen = false;
+      document.body.classList.remove('immersive-open');
+      setState('closed');
+      frame.src = 'about:blank';
+      lastHistoryPath = null;
+      if (!preserveHistory && returnToPath) {
+        window.history.replaceState({}, '', returnToPath);
+      }
+      returnToPath = null;
+    };
+
+    closeButton.addEventListener('click', () => closeOverlay(false));
+
+    document.addEventListener('keydown', (event) => {
+      if (!isOpen || event.key !== 'Escape') {
+        return;
+      }
+      closeOverlay(false);
+    });
+
+    window.addEventListener('popstate', () => {
+      if (isOpen) {
+        closeOverlay(true);
+      }
+    });
+
+    frame.addEventListener('load', () => {
+      if (!isOpen) {
+        return;
+      }
+      setState('ready');
+    });
+
+    window.addEventListener('message', (event) => {
+      if (!isOpen) {
+        return;
+      }
+      if (event.origin !== window.location.origin) {
+        return;
+      }
+      const data = event.data || {};
+
+      // Handle close request from iframe
+      if (data.type === 'gobii-immersive-close') {
+        closeOverlay(false);
+        return;
+      }
+
+      if (data.type !== 'gobii-immersive-path' || typeof data.path !== 'string') {
+        return;
+      }
+      window.history.replaceState({ immersive: true }, '', data.path);
+      lastHistoryPath = data.path;
+    });
+
+    document.addEventListener('click', (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
+      if (!(event.target instanceof Element)) {
+        return;
+      }
+      const link = event.target.closest('[data-immersive-link]');
+      if (!link) {
+        return;
+      }
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const href = link.getAttribute('href');
+      if (!href) {
+        return;
+      }
+      event.preventDefault();
+      openOverlay({ src: href, returnTo: getCurrentPath() });
+    });
+
+    document.addEventListener('submit', (event) => {
+      if (!(event.target instanceof HTMLFormElement)) {
+        return;
+      }
+      const form = event.target;
+      if (!form.hasAttribute('data-immersive-form')) {
+        return;
+      }
+      const isAuthenticated = form.dataset.authenticated === 'true';
+      if (!isAuthenticated) {
+        form.removeAttribute('target');
+        return;
+      }
+      const charterInput =
+        form.querySelector('[data-immersive-charter]') ||
+        form.querySelector('textarea[name="charter"]') ||
+        form.querySelector('textarea');
+      if (charterInput && !charterInput.value.trim()) {
+        form.removeAttribute('target');
+        return;
+      }
+      const returnTo = getCurrentPath() || '/';
+      const returnToInput =
+        form.querySelector('[data-immersive-return-to]') ||
+        form.querySelector('#agent-return-to');
+      const embedInput =
+        form.querySelector('[data-immersive-embed]') ||
+        form.querySelector('#agent-embed');
+      if (returnToInput) {
+        returnToInput.value = returnTo;
+      }
+      if (embedInput) {
+        embedInput.value = '1';
+      }
+      const frameName = frame.getAttribute('name') || 'immersive-frame';
+      form.setAttribute('target', frameName);
+      openOverlay({ returnTo });
+    });
+
+    window.GobiiImmersiveOverlay = {
+      open: openOverlay,
+      close: () => closeOverlay(false),
+      isOpen: () => isOpen,
+    };
+  });
+</script>

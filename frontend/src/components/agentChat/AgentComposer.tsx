@@ -1,24 +1,209 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
 import { useCallback, useEffect, useId, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X } from 'lucide-react'
+import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
+
+import { InsightEventCard } from './insights'
+import type { ProcessingWebTask } from '../../types/agentChat'
+import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
+import { INSIGHT_TIMING } from '../../types/insight'
+
+// Get the color for an insight tab based on its type
+function getInsightTabColor(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return '#10b981' // emerald-500
+  }
+  if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const percent = meta.percentUsed
+    if (percent >= 90) return '#ef4444' // red-500
+    if (percent >= 70) return '#f59e0b' // amber-500
+    return '#8b5cf6' // violet-500
+  }
+  if (insight.insightType === 'agent_setup') {
+    return '#0ea5e9' // sky-500
+  }
+  return '#6b7280' // gray-500 fallback
+}
+
+// Get a short label for the insight tab
+function getInsightTabLabel(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return 'Time'
+  }
+  if (insight.insightType === 'burn_rate') {
+    return 'Usage'
+  }
+  if (insight.insightType === 'agent_setup') {
+    const meta = insight.metadata as AgentSetupMetadata
+    switch (meta.panel) {
+      case 'always_on':
+        return '24/7'
+      case 'sms':
+        return 'SMS'
+      case 'org_transfer':
+        return 'Org'
+      case 'upsell_pro':
+        return 'Go Pro'
+      case 'upsell_scale':
+        return 'Go Scale'
+      default:
+        return '24/7'
+    }
+  }
+  return 'Insight'
+}
+
+// Get background gradient for insight wrapper
+function getInsightBackground(insight: InsightEvent): string {
+  if (insight.insightType === 'time_saved') {
+    return 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%)'
+  }
+  if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const percent = meta.percentUsed
+    if (percent >= 90) return 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%)'
+    if (percent >= 70) return 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%)'
+    return 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%)'
+  }
+  if (insight.insightType === 'agent_setup') {
+    return 'linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%)'
+  }
+  return 'transparent'
+}
 
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
+  autoFocus?: boolean
+  // Key that triggers re-focus when changed (e.g., agentId for switching agents)
+  focusKey?: string | null
+  // Working panel props
+  agentFirstName?: string
+  isProcessing?: boolean
+  processingTasks?: ProcessingWebTask[]
+  insights?: InsightEvent[]
+  currentInsightIndex?: number
+  onDismissInsight?: (insightId: string) => void
+  onInsightIndexChange?: (index: number) => void
+  onPauseChange?: (paused: boolean) => void
+  isInsightsPaused?: boolean
 }
 
-export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps) {
+export function AgentComposer({
+  onSubmit,
+  disabled = false,
+  autoFocus = false,
+  focusKey,
+  agentFirstName = 'Agent',
+  isProcessing = false,
+  processingTasks = [],
+  insights = [],
+  currentInsightIndex = 0,
+  onDismissInsight,
+  onInsightIndexChange,
+  onPauseChange,
+  isInsightsPaused = false,
+}: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
+  const [isWorkingExpanded, setIsWorkingExpanded] = useState(true)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentInputId = useId()
   const dragCounter = useRef(0)
 
+  // Countdown timer state for auto-rotation indicator
+  const [countdownProgress, setCountdownProgress] = useState(0)
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const lastRotationTimeRef = useRef<number>(Date.now())
+
+  // Track previous processing state for auto-expand/collapse
+  const wasProcessingRef = useRef(isProcessing)
+
+  // Auto-expand when processing starts, auto-collapse when it ends
+  useEffect(() => {
+    if (!wasProcessingRef.current && isProcessing) {
+      // Processing just started - auto-expand
+      setIsWorkingExpanded(true)
+    } else if (wasProcessingRef.current && !isProcessing) {
+      // Processing just ended - auto-collapse
+      setIsWorkingExpanded(false)
+    }
+    wasProcessingRef.current = isProcessing
+  }, [isProcessing])
+
   const MAX_COMPOSER_HEIGHT = 320
+
+  // Insight carousel logic
+  const totalInsights = insights.length
+  const hasMultipleInsights = totalInsights > 1
+  const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
+  const hasInsights = totalInsights > 0
+
+  // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
+  const handleTabClick = useCallback((index: number) => {
+    // Expand panel if collapsed
+    if (!isWorkingExpanded) {
+      setIsWorkingExpanded(true)
+    }
+    onInsightIndexChange?.(index)
+    onPauseChange?.(true) // Pause when user manually selects
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [isWorkingExpanded, onInsightIndexChange, onPauseChange])
+
+  // Handle hover - pause auto-rotation
+  const handleInsightMouseEnter = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(true)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  const handleInsightMouseLeave = useCallback(() => {
+    if (hasMultipleInsights) {
+      onPauseChange?.(false)
+      lastRotationTimeRef.current = Date.now()
+      setCountdownProgress(0)
+    }
+  }, [hasMultipleInsights, onPauseChange])
+
+  // Update countdown progress for the timer indicator (only when processing)
+  useEffect(() => {
+    if (!hasMultipleInsights || isInsightsPaused || !isProcessing) {
+      setCountdownProgress(0)
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+      return
+    }
+
+    const updateProgress = () => {
+      const elapsed = Date.now() - lastRotationTimeRef.current
+      const progress = Math.min(100, (elapsed / INSIGHT_TIMING.rotationIntervalMs) * 100)
+      setCountdownProgress(progress)
+    }
+
+    // Update every 100ms for smooth animation
+    countdownIntervalRef.current = setInterval(updateProgress, 100)
+    updateProgress()
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current)
+        countdownIntervalRef.current = null
+      }
+    }
+  }, [hasMultipleInsights, isInsightsPaused, isProcessing])
+
+  // Reset countdown when insight changes
+  useEffect(() => {
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [currentInsightIndex])
 
   const adjustTextareaHeight = useCallback(
     (reset = false) => {
@@ -42,6 +227,16 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
   useEffect(() => {
     adjustTextareaHeight(true)
   }, [adjustTextareaHeight])
+
+  // Auto-focus the textarea when autoFocus prop is true or when focusKey changes (agent switch)
+  useEffect(() => {
+    if (!autoFocus) return
+    // Use a small delay to ensure the DOM is ready after navigation
+    const timer = setTimeout(() => {
+      textareaRef.current?.focus()
+    }, 100)
+    return () => clearTimeout(timer)
+  }, [autoFocus, focusKey])
 
   useEffect(() => {
     const node = shellRef.current
@@ -194,9 +389,128 @@ export function AgentComposer({ onSubmit, disabled = false }: AgentComposerProps
     }
   }, [addAttachments, disabled, isSending])
 
+  // Show the panel when processing OR when there are insights to display
+  const showWorkingPanel = isProcessing || hasInsights
+  const taskCount = processingTasks.length
+
   return (
-    <div className="composer-shell" id="agent-composer-shell" ref={shellRef}>
+    <div
+      className="composer-shell"
+      id="agent-composer-shell"
+      ref={shellRef}
+      data-processing={isProcessing ? 'true' : 'false'}
+      data-expanded={isWorkingExpanded ? 'true' : 'false'}
+      data-panel-visible={showWorkingPanel ? 'true' : 'false'}
+    >
       <div className="composer-surface">
+        {/* Working panel - integrated above input */}
+        {showWorkingPanel ? (
+          <div
+            className="composer-working-panel"
+            data-expanded={isWorkingExpanded ? 'true' : 'false'}
+            style={currentInsight ? { background: getInsightBackground(currentInsight) } : undefined}
+          >
+            {/* Header row - clickable to toggle, with tabs and chevron */}
+            <div
+              className="composer-working-header-row"
+              onClick={() => setIsWorkingExpanded(!isWorkingExpanded)}
+              role="button"
+              tabIndex={0}
+              aria-expanded={isWorkingExpanded}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setIsWorkingExpanded(!isWorkingExpanded)
+                }
+              }}
+            >
+              {isProcessing ? (
+                <>
+                  <span className="composer-working-pip" aria-hidden="true" />
+                  <span className="composer-working-status">
+                    <strong>{agentFirstName}</strong> is working
+                    <span className="composer-working-ellipsis" aria-label="working">
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                    </span>
+                  </span>
+                  {taskCount > 0 ? (
+                    <span className="composer-working-tasks-badge">
+                      {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
+                    </span>
+                  ) : null}
+                </>
+              ) : (
+                <span className="composer-working-status">
+                  <strong>Insights</strong>
+                </span>
+              )}
+
+              {/* Colored pill tabs in header */}
+              {hasMultipleInsights ? (
+                <div
+                  className="composer-insight-tabs"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => e.stopPropagation()}
+                >
+                  <div className="composer-insight-tabs-scroll">
+                    {insights.map((insight, index) => {
+                      const isActive = index === currentInsightIndex % totalInsights
+                      const color = getInsightTabColor(insight)
+                      const label = getInsightTabLabel(insight)
+                      return (
+                        <button
+                          key={insight.insightId}
+                          type="button"
+                          className="composer-insight-tab"
+                          data-active={isActive ? 'true' : 'false'}
+                          onClick={() => handleTabClick(index)}
+                          aria-label={`View ${insight.insightType.replace('_', ' ')} insight`}
+                          style={{
+                            '--tab-color': color,
+                            '--tab-progress': isActive && !isInsightsPaused && isProcessing ? `${countdownProgress}%` : '0%',
+                          } as React.CSSProperties}
+                        >
+                          <span className="composer-insight-tab-inner" />
+                          <span className="composer-insight-tab-label">{label}</span>
+                          {isActive && !isInsightsPaused && isProcessing && (
+                            <span className="composer-insight-tab-progress" />
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+              <span className="composer-working-toggle">
+                {isWorkingExpanded ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronUp className="h-4 w-4" />
+                )}
+              </span>
+            </div>
+
+            {/* Expanded content */}
+            {isWorkingExpanded && hasInsights ? (
+              <div
+                className="composer-working-content"
+                onMouseEnter={handleInsightMouseEnter}
+                onMouseLeave={handleInsightMouseLeave}
+              >
+                <div className="composer-working-insight" key={currentInsight?.insightId}>
+                  {currentInsight ? (
+                    <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+
+        {/* Main input form */}
         <form className="flex flex-col" onSubmit={handleSubmit}>
           {isDragActive ? (
             <div className="agent-chat-drop-overlay" aria-hidden="true">

@@ -16,6 +16,7 @@
     "dompurify": "^3.1.6",
     "echarts": "^6.0.0",
     "echarts-for-react": "^3.0.4",
+    "framer-motion": "^12.25.0",
     "highlight.js": "^11.10.0",
     "lucide-react": "^0.548.0",
     "react": "^19.2.0",

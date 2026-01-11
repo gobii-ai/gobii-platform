@@ -845,6 +845,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
 
     def get(self, request, *args, **kwargs):
         user = request.user
+        return_to = normalize_return_to(request, request.GET.get("return_to"))
+        if return_to:
+            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = return_to
+            request.session.modified = True
+
         plan = get_user_plan(user) or {}
         plan_id = str(plan.get("id") or "").lower()
         if plan_id and plan_id != PlanNames.FREE:
@@ -990,6 +995,10 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         stripe_settings = get_stripe_settings()
 
         user = request.user
+        return_to = normalize_return_to(request, request.GET.get("return_to"))
+        if return_to:
+            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = return_to
+            request.session.modified = True
 
         customer = get_or_create_stripe_customer(user)
 

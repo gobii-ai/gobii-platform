@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, Plus } from 'lucide-react'
 
+import { createAgent } from '../api/agents'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -34,6 +38,26 @@ function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot |
     }
   }
   return null
+}
+
+function compareRosterNames(left: string, right: string): number {
+  return left.localeCompare(right, undefined, { sensitivity: 'base' })
+}
+
+function insertRosterEntry(agents: AgentRosterEntry[], entry: AgentRosterEntry): AgentRosterEntry[] {
+  const insertionIndex = agents.findIndex((agent) => compareRosterNames(entry.name, agent.name) < 0)
+  if (insertionIndex === -1) {
+    return [...agents, entry]
+  }
+  return [...agents.slice(0, insertionIndex), entry, ...agents.slice(insertionIndex)]
+}
+
+function mergeRosterEntry(agents: AgentRosterEntry[] | undefined, entry: AgentRosterEntry): AgentRosterEntry[] {
+  const roster = agents ?? []
+  if (roster.some((agent) => agent.id === entry.id)) {
+    return roster
+  }
+  return insertRosterEntry(roster, entry)
 }
 
 type ConnectionIndicator = {
@@ -109,25 +133,56 @@ function deriveConnectionIndicator({
   return { status: 'connecting', label: 'Connecting', detail: 'Opening live connection.' }
 }
 
+type AgentNotFoundStateProps = {
+  hasOtherAgents: boolean
+  onCreateAgent: () => void
+}
+
+function AgentNotFoundState({ hasOtherAgents, onCreateAgent }: AgentNotFoundStateProps) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center px-4">
+      <div className="mb-6 flex size-16 items-center justify-center rounded-full bg-amber-100 text-amber-600">
+        <AlertTriangle className="size-8" aria-hidden="true" />
+      </div>
+      <h2 className="mb-2 text-xl font-semibold text-gray-800">Agent not found</h2>
+      <p className="mb-6 max-w-md text-center text-sm text-gray-600">
+        {hasOtherAgents
+          ? 'This agent may have been deleted or you may not have access to it. Select another agent from the sidebar or create a new one.'
+          : 'This agent may have been deleted or you may not have access to it. Create a new agent to get started.'}
+      </p>
+      <button
+        type="button"
+        onClick={onCreateAgent}
+        className="group inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+      >
+        <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+        Create New Agent
+      </button>
+    </div>
+  )
+}
+
 export type AgentChatPageProps = {
-  agentId: string
+  agentId: string | null
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
   onClose?: () => void
+  onCreateAgent?: () => void
+  onAgentCreated?: (agentId: string) => void
 }
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
+const SCROLL_END_TOLERANCE_PX = 4
+const BOTTOM_PANEL_GAP_PX = 20
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose }: AgentChatPageProps) {
+export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
+  const queryClient = useQueryClient()
+  const isNewAgent = agentId === null
   const timelineRef = useRef<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
     timelineRef.current = node
-  }, [])
-  const bottomSentinelRef = useRef<HTMLDivElement | null>(null)
-  const captureBottomSentinelRef = useCallback((node: HTMLDivElement | null) => {
-    bottomSentinelRef.current = node
   }, [])
 
   const [activeAgentId, setActiveAgentId] = useState(agentId)
@@ -152,6 +207,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const hasMoreNewer = useAgentChatStore((state) => state.hasMoreNewer)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
   const processingActive = useAgentChatStore((state) => state.processingActive)
+  const processingStartedAt = useAgentChatStore((state) => state.processingStartedAt)
   const awaitingResponse = useAgentChatStore((state) => state.awaitingResponse)
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
@@ -163,14 +219,26 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshLatest = useAgentChatStore((state) => state.refreshLatest)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
+  const fetchInsights = useAgentChatStore((state) => state.fetchInsights)
+  const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
+  const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
+  const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
+  const setInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
+  const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
+  const insights = useAgentChatStore((state) => state.insights)
+  const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
+  const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
+  const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
   const loading = useAgentChatStore((state) => state.loading)
   const loadingOlder = useAgentChatStore((state) => state.loadingOlder)
   const loadingNewer = useAgentChatStore((state) => state.loadingNewer)
   const error = useAgentChatStore((state) => state.error)
   const autoScrollPinned = useAgentChatStore((state) => state.autoScrollPinned)
-  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
-  const initialLoading = loading && events.length === 0
+  const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
+  const initialLoading = !isNewAgent && loading && events.length === 0
+
+  const [isNearBottom, setIsNearBottom] = useState(true)
 
   const socketSnapshot = useAgentChatSocket(activeAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
@@ -180,16 +248,28 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   useEffect(() => {
     autoScrollPinnedRef.current = autoScrollPinned
   }, [autoScrollPinned])
-
-  // Track if we should scroll on next content update (captured before DOM changes)
-  const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
-
   const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
   useEffect(() => {
     autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
   }, [autoScrollPinSuppressedUntil])
+  const forceScrollOnNextUpdateRef = useRef(false)
+  const didInitialScrollRef = useRef(false)
+  const isNearBottomRef = useRef(isNearBottom)
+
+  // Track if we should scroll on next content update (captured before DOM changes)
+  const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
 
   useEffect(() => {
+    didInitialScrollRef.current = false
+  }, [activeAgentId])
+
+  useEffect(() => {
+    isNearBottomRef.current = isNearBottom
+  }, [isNearBottom])
+
+  useEffect(() => {
+    // Skip initialization for new agent (null agentId)
+    if (!activeAgentId) return
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     pendingAgentMetaRef.current = null
@@ -198,9 +278,51 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       agentName: resolvedPendingMeta?.agentName ?? agentName,
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
     })
-  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize])
+    // Fetch insights when agent initializes
+    void fetchInsights()
+  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize, fetchInsights])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
+  const getScrollDistanceToBottom = useCallback(() => {
+    const target = getScrollContainer()
+    // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    const documentHeight = target.scrollHeight
+    const scrollTop = target.scrollTop
+    // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
+    const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
+    return documentHeight - effectiveClientHeight - scrollTop
+  }, [getScrollContainer])
+  const getBottomGapOffset = useCallback(() => {
+    const timeline = timelineRef.current
+    if (!timeline) return 0
+    const timelineStyle = window.getComputedStyle(timeline)
+    const paddingBottom = parseFloat(timelineStyle.paddingBottom) || 0
+
+    const rootStyle = window.getComputedStyle(document.documentElement)
+    const composerHeightRaw = rootStyle.getPropertyValue('--composer-height')
+    let composerHeight = composerHeightRaw ? parseFloat(composerHeightRaw) : 0
+
+    if (!composerHeight) {
+      const composer = document.getElementById('agent-composer-shell')
+      composerHeight = composer?.getBoundingClientRect().height ?? 0
+    }
+
+    return Math.max(0, paddingBottom - composerHeight)
+  }, [])
+  const getAdjustedDistanceToBottom = useCallback(() => {
+    const scrollDistance = getScrollDistanceToBottom()
+    const bottomGapOffset = getBottomGapOffset()
+    const visualGap = bottomGapOffset > 0 ? BOTTOM_PANEL_GAP_PX : 0
+    return scrollDistance - bottomGapOffset + visualGap
+  }, [getBottomGapOffset, getScrollDistanceToBottom])
+  const updateIsNearBottom = useCallback(() => {
+    const adjustedDistance = getAdjustedDistanceToBottom()
+    const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
+    isNearBottomRef.current = nextIsNearBottom
+    setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
+    return adjustedDistance
+  }, [getAdjustedDistanceToBottom])
 
   useEffect(() => {
     const scroller = getScrollContainer()
@@ -211,16 +333,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     // Use larger thresholds on mobile to account for browser chrome changes (address bar, keyboard)
     const restickThreshold = isTouchDevice ? 80 : 20
     const touchScrollThreshold = 40 // More intentional gesture required to unpin
-
-    const getDistanceToBottom = () => {
-      const target = scroller || document.documentElement || document.body
-      // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-      const documentHeight = target.scrollHeight
-      const scrollTop = target.scrollTop
-      // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
-      const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
-      return documentHeight - effectiveClientHeight - scrollTop
+    const isAutoPinSuppressed = () => {
+      const suppressedUntil = autoScrollPinSuppressedUntilRef.current
+      return typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
     }
 
     // Detect user scrolling UP via wheel - immediately unstick
@@ -257,36 +372,29 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
       }
     }
 
-    // Check if user has scrolled back to bottom (for re-sticking)
+    // Track scroll direction - only restick when user scrolls DOWN to bottom
+    let lastScrollTop = scroller?.scrollTop ?? window.scrollY
     let scrollTicking = false
-    const checkAndRestick = () => {
-      const distanceToBottom = getDistanceToBottom()
-      const currentlyPinned = autoScrollPinnedRef.current
-      const suppressedUntil = autoScrollPinSuppressedUntilRef.current
-      const suppressionActive = typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
-
-      if (!currentlyPinned && !suppressionActive && distanceToBottom <= restickThreshold) {
-        setAutoScrollPinned(true)
-      }
-    }
 
     const handleScroll = () => {
       if (scrollTicking) return
       scrollTicking = true
       requestAnimationFrame(() => {
         scrollTicking = false
-        checkAndRestick()
-      })
-    }
+        const target = scroller || document.documentElement || document.body
+        const currentScrollTop = target.scrollTop
+        const scrolledDown = currentScrollTop > lastScrollTop
+        lastScrollTop = currentScrollTop
+        const adjustedDistance = getAdjustedDistanceToBottom()
+        const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
+        const nearBottomForRestick = adjustedDistance <= restickThreshold
+        isNearBottomRef.current = nextIsNearBottom
+        setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
 
-    // Handle viewport resize (keyboard show/hide, browser chrome changes on mobile)
-    let resizeTicking = false
-    const handleViewportResize = () => {
-      if (resizeTicking) return
-      resizeTicking = true
-      requestAnimationFrame(() => {
-        resizeTicking = false
-        checkAndRestick()
+        // Only restick if user actively scrolled down to the bottom
+        if (!autoScrollPinnedRef.current && scrolledDown && nearBottomForRestick && !isAutoPinSuppressed()) {
+          setAutoScrollPinned(true)
+        }
       })
     }
 
@@ -296,44 +404,50 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     window.addEventListener('keydown', handleKeyDown)
     window.addEventListener('scroll', handleScroll, { passive: true })
 
-    // Listen to visualViewport resize for mobile browser chrome changes
-    const vv = window.visualViewport
-    if (vv) {
-      vv.addEventListener('resize', handleViewportResize)
-      vv.addEventListener('scroll', handleViewportResize)
-    }
-    window.addEventListener('resize', handleViewportResize)
-
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('scroll', handleScroll)
-      if (vv) {
-        vv.removeEventListener('resize', handleViewportResize)
-        vv.removeEventListener('scroll', handleViewportResize)
-      }
-      window.removeEventListener('resize', handleViewportResize)
     }
-  }, [getScrollContainer, setAutoScrollPinned])
+  }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
+
+  useEffect(() => {
+    updateIsNearBottom()
+    const handleResize = () => {
+      updateIsNearBottom()
+    }
+
+    window.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('resize', handleResize)
+    window.visualViewport?.addEventListener('scroll', handleResize)
+
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('resize', handleResize)
+      window.visualViewport?.removeEventListener('scroll', handleResize)
+    }
+  }, [updateIsNearBottom])
+
+  // Unpin auto-scroll when processing ends so user's reading position is preserved
+  const prevProcessingRef = useRef(processingActive)
+  useEffect(() => {
+    const wasProcessing = prevProcessingRef.current
+    prevProcessingRef.current = processingActive
+    if (wasProcessing && !processingActive && !isNearBottomRef.current) {
+      setAutoScrollPinned(false)
+    }
+  }, [processingActive, setAutoScrollPinned])
 
   // Capture scroll decision BEFORE content changes to avoid race with scroll handler
   const prevEventsRef = useRef(events)
   const prevStreamingRef = useRef(streaming)
-  const prevProcessingActiveRef = useRef(processingActive)
 
-  // Before render, capture whether we should scroll (based on current scroll position)
-  if (
-    events !== prevEventsRef.current ||
-    streaming !== prevStreamingRef.current ||
-    processingActive !== prevProcessingActiveRef.current
-  ) {
-    // Content is about to change - capture scroll decision NOW before DOM updates
-    shouldScrollOnNextUpdateRef.current = autoScrollPinnedRef.current
+  if (events !== prevEventsRef.current || streaming !== prevStreamingRef.current) {
+    shouldScrollOnNextUpdateRef.current = autoScrollPinned
     prevEventsRef.current = events
     prevStreamingRef.current = streaming
-    prevProcessingActiveRef.current = processingActive
   }
 
   const pendingScrollFrameRef = useRef<number | null>(null)
@@ -342,18 +456,35 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     if (pendingScrollFrameRef.current !== null) {
       return
     }
-    const scroller = getScrollContainer()
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      // Calculate max scroll accounting for visualViewport on mobile
-      const documentHeight = scroller.scrollHeight
-      const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-      // On mobile with visualViewport, we need to account for the offset from page top
-      const vvOffsetTop = window.visualViewport?.offsetTop ?? 0
-      const scrollTarget = documentHeight - viewportHeight + vvOffsetTop
-      window.scrollTo({ top: Math.max(0, scrollTarget) })
+      const adjustedDistance = getAdjustedDistanceToBottom()
+      if (adjustedDistance > 0) {
+        window.scrollBy({ top: adjustedDistance })
+      }
+      updateIsNearBottom()
     })
-  }, [getScrollContainer])
+  }, [getAdjustedDistanceToBottom, updateIsNearBottom])
+
+  useEffect(() => {
+    const composer = document.getElementById('agent-composer-shell')
+    if (!composer || typeof ResizeObserver === 'undefined') {
+      return () => undefined
+    }
+
+    const observer = new ResizeObserver(() => {
+      if (autoScrollPinnedRef.current) {
+        scrollToBottom()
+        return
+      }
+      updateIsNearBottom()
+    })
+
+    observer.observe(composer)
+    return () => {
+      observer.disconnect()
+    }
+  }, [scrollToBottom, updateIsNearBottom])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -361,12 +492,38 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     }
   }, [])
 
-  useLayoutEffect(() => {
-    // Use the captured decision from before the DOM update
-    if (shouldScrollOnNextUpdateRef.current) {
+  useEffect(() => {
+    if (isNewAgent) {
+      didInitialScrollRef.current = true
+      return
+    }
+    if (!initialLoading && events.length && !didInitialScrollRef.current) {
+      didInitialScrollRef.current = true
+      setAutoScrollPinned(true)
       scrollToBottom()
     }
-  }, [scrollToBottom, events, processingActive, streaming])
+  }, [events.length, initialLoading, isNewAgent, scrollToBottom, setAutoScrollPinned])
+
+  useLayoutEffect(() => {
+    if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
+      forceScrollOnNextUpdateRef.current = false
+      scrollToBottom()
+      return
+    }
+    updateIsNearBottom()
+  }, [
+    scrollToBottom,
+    updateIsNearBottom,
+    events,
+    streaming,
+    loadingOlder,
+    loadingNewer,
+    hasMoreNewer,
+    hasUnseenActivity,
+    initialLoading,
+    processingActive,
+    awaitingResponse,
+  ])
 
   const rosterAgents = useMemo(() => rosterQuery.data ?? [], [rosterQuery.data])
   const activeRosterMeta = useMemo(
@@ -381,21 +538,26 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const connectionIndicator = useMemo(
-    () =>
-      deriveConnectionIndicator({
+    () => {
+      // For new agent, show ready state since there's no socket/session yet
+      if (isNewAgent) {
+        return { status: 'connected' as const, label: 'Ready', detail: 'Describe your new agent to get started.' }
+      }
+      return deriveConnectionIndicator({
         socketStatus: socketSnapshot.status,
         socketError: socketSnapshot.lastError,
         sessionStatus,
         sessionError,
-      }),
-    [sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
+      })
+    },
+    [isNewAgent, sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
 
   // Update document title when agent changes
   useEffect(() => {
-    const name = resolvedAgentName || 'Agent'
+    const name = isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')
     document.title = `${name} · Gobii`
-  }, [resolvedAgentName])
+  }, [isNewAgent, resolvedAgentName])
 
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
@@ -425,6 +587,22 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     }
     return [fallbackAgent, ...rosterAgents]
   }, [activeAgentId, fallbackAgent, rosterAgents])
+
+  // Detect if the requested agent doesn't exist (deleted or never existed)
+  const agentNotFound = useMemo(() => {
+    // Not applicable for new agent creation
+    if (isNewAgent) return false
+    // Wait for both roster and initial load to complete
+    if (rosterQuery.isLoading || initialLoading) return false
+    // Check if agent exists in roster
+    const agentInRoster = rosterAgents.some((agent) => agent.id === activeAgentId)
+    // If there's an error loading the agent AND it's not in the roster, it's not found
+    // Also consider not found if roster loaded but agent isn't there and we have an error
+    if (!agentInRoster && error) return true
+    // If roster loaded, agent isn't in roster, and we have no events (failed to load), mark as not found
+    if (!agentInRoster && !loading && events.length === 0) return true
+    return false
+  }, [isNewAgent, rosterQuery.isLoading, initialLoading, rosterAgents, activeAgentId, error, loading, events.length])
 
   useEffect(() => {
     if (!switchingAgentId) {
@@ -456,14 +634,50 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     [activeAgentId],
   )
 
+  const handleCreateAgent = useCallback(() => {
+    // Use the prop callback if provided (for client-side navigation in ImmersiveApp)
+    if (onCreateAgent) {
+      onCreateAgent()
+      return
+    }
+    // Fall back to full page navigation for console mode
+    window.location.assign('/console/agents/create/quick/')
+  }, [onCreateAgent])
 
   const handleJumpToLatest = async () => {
+    forceScrollOnNextUpdateRef.current = true
     await jumpToLatest()
-    scrollToBottom()
     setAutoScrollPinned(true)
+    scrollToBottom()
   }
 
   const handleSend = async (body: string, attachments: File[] = []) => {
+    // If this is a new agent, create it first then navigate to it
+    if (isNewAgent) {
+      try {
+        const result = await createAgent(body)
+        const createdAgentName = result.agent_name?.trim() || 'Agent'
+        pendingAgentMetaRef.current = {
+          agentId: result.agent_id,
+          agentName: createdAgentName,
+        }
+        queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
+          mergeRosterEntry(current, {
+            id: result.agent_id,
+            name: createdAgentName,
+            avatarUrl: null,
+            displayColorHex: null,
+            isActive: true,
+            shortDescription: '',
+          }),
+        )
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+        onAgentCreated?.(result.agent_id)
+      } catch (err) {
+        console.error('Failed to create agent:', err)
+      }
+      return
+    }
     await sendMessage(body, attachments)
     if (!autoScrollPinned) return
     scrollToBottom()
@@ -479,6 +693,23 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
+
+  // Start/stop insight rotation based on processing state
+  const isProcessing = processingActive || awaitingResponse || (streaming && !streaming.done)
+  useEffect(() => {
+    if (isProcessing) {
+      startInsightRotation()
+    } else {
+      stopInsightRotation()
+    }
+  }, [isProcessing, startInsightRotation, stopInsightRotation])
+
+  // Get available insights (filtered for dismissed)
+  const availableInsights = useMemo(() => {
+    return insights.filter(
+      (insight) => !dismissedInsightIds.has(insight.insightId)
+    )
+  }, [insights, dismissedInsightIds])
 
   useEffect(() => {
     if (!streaming || streaming.done) {
@@ -520,16 +751,38 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     streamingLastUpdatedAt,
   ])
 
+  // Show a dedicated not-found state with sidebar still accessible
+  if (agentNotFound) {
+    return (
+      <div className="agent-chat-page min-h-screen">
+        <ChatSidebar
+          agents={rosterAgents}
+          activeAgentId={null}
+          loading={rosterQuery.isLoading}
+          errorMessage={rosterErrorMessage}
+          onSelectAgent={handleSelectAgent}
+          onCreateAgent={handleCreateAgent}
+        />
+        <main className="has-sidebar has-sidebar--collapsed min-h-screen">
+          <AgentNotFoundState
+            hasOtherAgents={rosterAgents.length > 0}
+            onCreateAgent={handleCreateAgent}
+          />
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="agent-chat-page min-h-screen">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout
-        agentFirstName={agentFirstName}
+        agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
-        agentName={resolvedAgentName || 'Agent'}
+        agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
@@ -540,31 +793,39 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         rosterLoading={rosterQuery.isLoading}
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
+        onCreateAgent={handleCreateAgent}
         onClose={onClose}
-        events={events}
-        hasMoreOlder={hasMoreOlder}
-        hasMoreNewer={hasMoreNewer}
-        oldestCursor={events.length ? events[0].cursor : null}
-        newestCursor={events.length ? events[events.length - 1].cursor : null}
-        processingActive={processingActive}
-        awaitingResponse={awaitingResponse}
-        processingWebTasks={processingWebTasks}
-        streaming={streaming}
-        thinkingCollapsedByCursor={thinkingCollapsedByCursor}
+        events={isNewAgent ? [] : events}
+        hasMoreOlder={isNewAgent ? false : hasMoreOlder}
+        hasMoreNewer={isNewAgent ? false : hasMoreNewer}
+        oldestCursor={isNewAgent ? null : (events.length ? events[0].cursor : null)}
+        newestCursor={isNewAgent ? null : (events.length ? events[events.length - 1].cursor : null)}
+        processingActive={isNewAgent ? false : processingActive}
+        processingStartedAt={isNewAgent ? null : processingStartedAt}
+        awaitingResponse={isNewAgent ? false : awaitingResponse}
+        processingWebTasks={isNewAgent ? [] : processingWebTasks}
+        streaming={isNewAgent ? null : streaming}
+        thinkingCollapsedByCursor={isNewAgent ? {} : thinkingCollapsedByCursor}
         onToggleThinking={handleToggleThinking}
         streamingThinkingCollapsed={streamingThinkingCollapsed}
         onToggleStreamingThinking={handleToggleStreamingThinking}
-        onLoadOlder={hasMoreOlder ? loadOlder : undefined}
-        onLoadNewer={hasMoreNewer ? loadNewer : undefined}
+        onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}
+        onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
-        autoScrollPinned={autoScrollPinned}
-        hasUnseenActivity={hasUnseenActivity}
+        autoFocusComposer
+        isNearBottom={isNearBottom}
+        hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}
         timelineRef={captureTimelineRef}
-        bottomSentinelRef={captureBottomSentinelRef}
-        loadingOlder={loadingOlder}
-        loadingNewer={loadingNewer}
+        loadingOlder={isNewAgent ? false : loadingOlder}
+        loadingNewer={isNewAgent ? false : loadingNewer}
         initialLoading={initialLoading}
+        insights={isNewAgent ? [] : availableInsights}
+        currentInsightIndex={currentInsightIndex}
+        onDismissInsight={dismissInsight}
+        onInsightIndexChange={setCurrentInsightIndex}
+        onPauseChange={setInsightsPaused}
+        isInsightsPaused={insightsPaused}
       />
     </div>
   )
