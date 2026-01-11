@@ -390,7 +390,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
           <div className={`sms-hero__bubble sms-hero__bubble--1${isComplete ? ' sms-hero__bubble--active' : ''}`} />
           <div className={`sms-hero__bubble sms-hero__bubble--2${isComplete ? ' sms-hero__bubble--active' : ''}`} />
           <div className="sms-hero__icon">
-            {isComplete ? <MessageSquare size={26} strokeWidth={2} /> : <Phone size={26} strokeWidth={2} />}
+            {isComplete ? <MessageSquare size={20} strokeWidth={2} /> : <Phone size={20} strokeWidth={2} />}
           </div>
         </motion.div>
 
