@@ -31,6 +31,8 @@ export type BurnRateMetadata = {
   percentUsed: number
 }
 
+export type AgentSetupPanel = 'always_on' | 'sms' | 'org_transfer' | 'upsell_pro' | 'upsell_scale'
+
 export type AgentSetupPhone = {
   number: string
   isVerified: boolean
@@ -51,6 +53,7 @@ export type AgentSetupUpsellItem = {
 
 export type AgentSetupMetadata = {
   agentId: string
+  panel?: AgentSetupPanel
   alwaysOn: {
     title: string
     body: string

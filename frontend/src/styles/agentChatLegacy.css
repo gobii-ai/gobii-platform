@@ -819,8 +819,22 @@
 }
 
 .composer-working-insight {
+  --composer-insight-height: 128px;
+  display: flex;
+  align-items: stretch;
   overflow: hidden;
+  height: var(--composer-insight-height);
   animation: composerInsightFadeIn 0.25s ease-out;
+}
+
+.composer-working-insight .insight-card-v2 {
+  height: 100%;
+}
+
+@media (max-width: 640px) {
+  .composer-working-insight {
+    --composer-insight-height: 148px;
+  }
 }
 
 @keyframes composerInsightFadeIn {

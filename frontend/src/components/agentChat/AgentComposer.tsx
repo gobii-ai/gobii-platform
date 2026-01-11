@@ -4,7 +4,7 @@ import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import type { ProcessingWebTask } from '../../types/agentChat'
-import type { InsightEvent, BurnRateMetadata } from '../../types/insight'
+import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 
 // Get the color for an insight tab based on its type
@@ -34,7 +34,21 @@ function getInsightTabLabel(insight: InsightEvent): string {
     return 'Usage'
   }
   if (insight.insightType === 'agent_setup') {
-    return 'Setup'
+    const meta = insight.metadata as AgentSetupMetadata
+    switch (meta.panel) {
+      case 'always_on':
+        return '24/7'
+      case 'sms':
+        return 'SMS'
+      case 'org_transfer':
+        return 'Org'
+      case 'upsell_pro':
+        return 'Go Pro'
+      case 'upsell_scale':
+        return 'Go Scale'
+      default:
+        return '24/7'
+    }
   }
   return 'Insight'
 }

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Building2, CheckCircle2, Copy, MessageSquare, Phone, Sparkles } from 'lucide-react'
+import { ArrowRight, Building2, CheckCircle2, Copy, MessageSquare, Phone, Sparkles, Zap } from 'lucide-react'
 
-import type { AgentSetupMetadata, AgentSetupPhone, InsightEvent } from '../../../types/insight'
+import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
   addUserPhone,
   deleteUserPhone,
@@ -86,16 +86,9 @@ function formatPhoneE164(raw: string, region: string): string {
   }
 }
 
-function formatPlanLabel(planId: string): string {
-  const normalized = planId.toLowerCase()
-  if (normalized === 'free') return 'Free'
-  if (normalized === 'startup') return 'Pro'
-  if (normalized === 'scale') return 'Scale'
-  return planId.toUpperCase()
-}
-
 export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
+  const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
   const region = useMemo(() => getDefaultRegion(), [])
 
   const [phone, setPhone] = useState<AgentSetupPhone | null>(metadata.sms.userPhone ?? null)
@@ -143,12 +136,12 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   const phoneVerified = Boolean(phone?.isVerified)
   const smsBusy = smsAction !== null
 
-  const showOrgSection = metadata.organization.options.length > 0
   const orgCurrentId = orgCurrent?.id ?? null
   const orgHasChange = selectedOrgId !== orgCurrentId
 
   const upsellItems = metadata.upsell?.items ?? []
-  const planBadge = metadata.upsell?.planId ? `Current plan: ${formatPlanLabel(metadata.upsell.planId)}` : null
+  const upsellPlan = panel === 'upsell_pro' ? 'pro' : panel === 'upsell_scale' ? 'scale' : null
+  const upsellItem = upsellPlan ? upsellItems.find((item) => item.plan === upsellPlan) : null
 
   const buildCheckoutUrl = useCallback((baseUrl?: string) => {
     if (!baseUrl) {
@@ -297,73 +290,64 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     }
   }, [metadata.agentId, selectedOrgId])
 
-  return (
-    <motion.div
-      className="insight-card-v2 insight-card-v2--agent-setup"
-      style={{ background: 'transparent', borderRadius: 0 }}
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.35 }}
-    >
-      <div className="agent-setup-header">
-        <div className="agent-setup-header-text">
-          <span className="agent-setup-eyebrow">Always-on setup</span>
-          <h3 className="agent-setup-title">{metadata.alwaysOn.title}</h3>
-          <p className="agent-setup-body">{metadata.alwaysOn.body}</p>
-          {metadata.alwaysOn.note ? (
-            <div className="agent-setup-note">
-              <Sparkles size={14} strokeWidth={2} />
-              <span>{metadata.alwaysOn.note}</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="agent-setup-pulse">
-          <span>24/7</span>
-        </div>
+  const renderAlwaysOn = () => (
+    <div className="agent-setup-panel agent-setup-panel--always-on">
+      <div className="agent-setup-panel__icon">
+        <Sparkles size={18} strokeWidth={2} />
       </div>
+      <div className="agent-setup-panel__content">
+        <div className="agent-setup-panel__title">{metadata.alwaysOn.title}</div>
+        <div className="agent-setup-panel__subtitle">{metadata.alwaysOn.body}</div>
+      </div>
+      <div className="agent-setup-panel__badge">24/7</div>
+    </div>
+  )
 
-      <div className="agent-setup-sections">
-        <section className="agent-setup-section">
-          <div className="agent-setup-section-heading">
-            <Phone size={18} strokeWidth={2} />
-            <div>
-              <div className="agent-setup-section-title">SMS updates</div>
-              <div className="agent-setup-section-subtitle">
-                Optional real-time updates by text.
-              </div>
-            </div>
-          </div>
+  const renderSms = () => {
+    const statusText = smsError
+      ? smsError
+      : smsEnabled
+        ? 'You can chat with this agent via SMS.'
+        : phoneVerified
+          ? 'You can chat with this agent via SMS.'
+          : phone
+            ? 'Enter the code we sent to your phone.'
+            : 'Enter your phone number to chat with this agent via sms.'
 
-          {smsError ? <div className="agent-setup-error">{smsError}</div> : null}
+    const statusClass = smsError ? 'agent-setup-panel__status agent-setup-panel__status--error' : 'agent-setup-panel__subtitle'
 
+    return (
+      <div className="agent-setup-panel agent-setup-panel--sms">
+        <div className="agent-setup-panel__icon">
+          <Phone size={18} strokeWidth={2} />
+        </div>
+        <div className="agent-setup-panel__content">
+          <div className="agent-setup-panel__title">SMS chat</div>
+          <div className={statusClass}>{statusText}</div>
           {!phone ? (
-            <>
-              <div className="agent-setup-form-row">
-                <input
-                  className="agent-setup-input"
-                  type="tel"
-                  autoComplete="tel"
-                  placeholder="+1 415 555 0133"
-                  value={phoneInput}
-                  onChange={(event) => setPhoneInput(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="agent-setup-button agent-setup-button--primary"
-                  onClick={handleAddPhone}
-                  disabled={smsBusy}
-                >
-                  {smsAction === 'add' ? 'Sending...' : 'Send code'}
-                </button>
-              </div>
-              <div className="agent-setup-hint">Include country code for verification.</div>
-            </>
+            <div className="agent-setup-panel__row">
+              <input
+                className="agent-setup-panel__input"
+                type="tel"
+                autoComplete="tel"
+                placeholder="+1 415 555 0133"
+                value={phoneInput}
+                onChange={(event) => setPhoneInput(event.target.value)}
+              />
+              <button
+                type="button"
+                className="agent-setup-panel__button agent-setup-panel__button--primary"
+                onClick={handleAddPhone}
+                disabled={smsBusy}
+              >
+                {smsAction === 'add' ? 'Sending...' : 'Send code'}
+              </button>
+            </div>
           ) : !phoneVerified ? (
             <>
-              <div className="agent-setup-phone-pill">{phoneDisplay}</div>
-              <div className="agent-setup-form-row">
+              <div className="agent-setup-panel__row">
                 <input
-                  className="agent-setup-input"
+                  className="agent-setup-panel__input"
                   type="text"
                   inputMode="numeric"
                   autoComplete="one-time-code"
@@ -373,17 +357,17 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
                 />
                 <button
                   type="button"
-                  className="agent-setup-button agent-setup-button--primary"
+                  className="agent-setup-panel__button agent-setup-panel__button--primary"
                   onClick={handleVerify}
                   disabled={smsBusy}
                 >
                   {smsAction === 'verify' ? 'Verifying...' : 'Verify'}
                 </button>
               </div>
-              <div className="agent-setup-inline-actions">
+              <div className="agent-setup-panel__row agent-setup-panel__row--meta">
                 <button
                   type="button"
-                  className="agent-setup-button agent-setup-button--ghost"
+                  className="agent-setup-panel__link"
                   onClick={handleResend}
                   disabled={smsBusy || cooldown > 0}
                 >
@@ -391,7 +375,34 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
                 </button>
                 <button
                   type="button"
-                  className="agent-setup-button agent-setup-button--ghost"
+                  className="agent-setup-panel__link"
+                  onClick={handleDeletePhone}
+                  disabled={smsBusy}
+                >
+                  Change number
+                </button>
+              </div>
+            </>
+          ) : !smsEnabled ? (
+            <>
+              <div className="agent-setup-panel__row">
+                <div className="agent-setup-panel__pill">
+                  <CheckCircle2 size={14} strokeWidth={2.2} />
+                  <span>{phoneDisplay}</span>
+                </div>
+                <button
+                  type="button"
+                  className="agent-setup-panel__button agent-setup-panel__button--primary"
+                  onClick={handleEnableSms}
+                  disabled={smsBusy}
+                >
+                  {smsAction === 'enable' ? 'Enabling...' : 'Enable SMS'}
+                </button>
+              </div>
+              <div className="agent-setup-panel__row agent-setup-panel__row--meta">
+                <button
+                  type="button"
+                  className="agent-setup-panel__link"
                   onClick={handleDeletePhone}
                   disabled={smsBusy}
                 >
@@ -401,143 +412,121 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
             </>
           ) : (
             <>
-              <div className="agent-setup-phone-verified">
-                <CheckCircle2 size={16} strokeWidth={2.2} />
-                <span>{phoneDisplay}</span>
-              </div>
-              <div className="agent-setup-inline-actions">
+              <div className="agent-setup-panel__row">
+                <div className="agent-setup-panel__pill">
+                  <MessageSquare size={14} strokeWidth={2} />
+                  <span>{agentNumberDisplay}</span>
+                </div>
                 <button
                   type="button"
-                  className="agent-setup-button agent-setup-button--ghost"
-                  onClick={handleDeletePhone}
-                  disabled={smsBusy}
+                  className="agent-setup-panel__button agent-setup-panel__button--ghost"
+                  onClick={() => handleCopy(agentNumber ?? '')}
                 >
-                  Change number
+                  <Copy size={14} />
+                  {copied ? 'Copied' : 'Copy'}
                 </button>
-                {!smsEnabled ? (
-                  <button
-                    type="button"
-                    className="agent-setup-button agent-setup-button--primary"
-                    onClick={handleEnableSms}
-                    disabled={smsBusy}
-                  >
-                    {smsAction === 'enable' ? 'Enabling...' : 'Enable SMS'}
-                  </button>
-                ) : null}
               </div>
+              <div className="agent-setup-panel__meta">Text this number to reach your agent.</div>
             </>
           )}
-
-          {smsEnabled ? (
-            <div className="agent-setup-sms-live">
-              <div className="agent-setup-sms-live-title">
-                <MessageSquare size={16} strokeWidth={2} />
-                <span>SMS live</span>
-              </div>
-              {agentNumberDisplay ? (
-                <div className="agent-setup-agent-number">
-                  <code>{agentNumberDisplay}</code>
-                  <button
-                    type="button"
-                    className="agent-setup-copy"
-                    onClick={() => handleCopy(agentNumber ?? '')}
-                  >
-                    <Copy size={14} />
-                    {copied ? 'Copied' : 'Copy'}
-                  </button>
-                </div>
-              ) : null}
-              <div className="agent-setup-hint">Text this number to start a conversation.</div>
-            </div>
-          ) : null}
-        </section>
-
-        {showOrgSection ? (
-          <section className="agent-setup-section">
-            <div className="agent-setup-section-heading">
-              <Building2 size={18} strokeWidth={2} />
-              <div>
-                <div className="agent-setup-section-title">Organization ownership</div>
-                <div className="agent-setup-section-subtitle">
-                  Move this agent into a workspace you manage.
-                </div>
-              </div>
-            </div>
-
-            {orgError ? <div className="agent-setup-error">{orgError}</div> : null}
-
-            <div className="agent-setup-form-row">
-              <select
-                className="agent-setup-select"
-                value={selectedOrgId ?? 'personal'}
-                onChange={(event) => {
-                  const value = event.target.value
-                  setSelectedOrgId(value === 'personal' ? null : value)
-                }}
-              >
-                <option value="personal">Personal workspace</option>
-                {metadata.organization.options.map((org) => (
-                  <option key={org.id} value={org.id}>
-                    {org.name}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className="agent-setup-button agent-setup-button--primary"
-                onClick={handleOrgMove}
-                disabled={!orgHasChange || orgBusy}
-              >
-                {orgBusy ? 'Moving...' : 'Move'}
-              </button>
-            </div>
-          </section>
-        ) : null}
-
-        {upsellItems.length > 0 ? (
-          <section className="agent-setup-section">
-            <div className="agent-setup-section-heading agent-setup-section-heading--upsell">
-              <div>
-                <div className="agent-setup-section-title">Upgrade this agent</div>
-                <div className="agent-setup-section-subtitle">
-                  Unlock higher limits and faster routing.
-                </div>
-              </div>
-              {planBadge ? <span className="agent-setup-plan-badge">{planBadge}</span> : null}
-            </div>
-
-            <div className="agent-setup-upsell-grid">
-              {upsellItems.map((item) => {
-                const checkoutUrl = item.plan === 'pro' ? checkoutUrls.pro : checkoutUrls.scale
-                return (
-                  <div key={item.plan} className={`agent-setup-upsell agent-setup-upsell--${item.accent}`}>
-                    <div className="agent-setup-upsell-header">
-                      <div>
-                        <div className="agent-setup-upsell-title">{item.title}</div>
-                        <div className="agent-setup-upsell-subtitle">{item.subtitle}</div>
-                      </div>
-                      {item.price ? <div className="agent-setup-upsell-price">{item.price}</div> : null}
-                    </div>
-                    <div className="agent-setup-upsell-body">{item.body}</div>
-                    <ul className="agent-setup-upsell-list">
-                      {item.bullets.map((bullet, idx) => (
-                        <li key={`${item.plan}-bullet-${idx}`}>
-                          <span className="agent-setup-upsell-dot" />
-                          {bullet}
-                        </li>
-                      ))}
-                    </ul>
-                    <a className={`agent-setup-upsell-cta agent-setup-upsell-cta--${item.accent}`} href={checkoutUrl}>
-                      {item.ctaLabel}
-                      <ArrowRight size={16} />
-                    </a>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-        ) : null}
+        </div>
       </div>
+    )
+  }
+
+  const renderOrgTransfer = () => {
+    const statusText = orgError || `Current: ${orgCurrent?.name || 'Personal'}`
+    const statusClass = orgError ? 'agent-setup-panel__status agent-setup-panel__status--error' : 'agent-setup-panel__subtitle'
+
+    return (
+      <div className="agent-setup-panel agent-setup-panel--org">
+        <div className="agent-setup-panel__icon">
+          <Building2 size={18} strokeWidth={2} />
+        </div>
+        <div className="agent-setup-panel__content">
+          <div className="agent-setup-panel__title">Organization ownership</div>
+          <div className={statusClass}>{statusText}</div>
+          <div className="agent-setup-panel__row">
+            <select
+              className="agent-setup-panel__select"
+              value={selectedOrgId ?? 'personal'}
+              onChange={(event) => {
+                const value = event.target.value
+                setSelectedOrgId(value === 'personal' ? null : value)
+              }}
+            >
+              <option value="personal">Personal workspace</option>
+              {metadata.organization.options.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="agent-setup-panel__button agent-setup-panel__button--primary"
+              onClick={handleOrgMove}
+              disabled={!orgHasChange || orgBusy}
+            >
+              {orgBusy ? 'Moving...' : 'Move'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  const renderUpsell = () => {
+    if (!upsellItem) {
+      return null
+    }
+
+    const checkoutUrl = upsellItem.plan === 'pro' ? checkoutUrls.pro : checkoutUrls.scale
+    const upsellTitle = upsellItem.price
+      ? `Upgrade to ${upsellItem.title} - ${upsellItem.price}`
+      : `Upgrade to ${upsellItem.title}`
+
+    const upsellNote = upsellItem.plan === 'pro' ? metadata.alwaysOn.note : null
+    const upsellSubtitle = [upsellItem.subtitle, upsellNote].filter(Boolean).join(' / ')
+    const ctaClass = `agent-setup-panel__cta agent-setup-panel__cta--${upsellItem.accent}`
+
+    return (
+      <div className={`agent-setup-panel agent-setup-panel--upsell agent-setup-panel--${upsellItem.accent}`}>
+        <div className="agent-setup-panel__icon agent-setup-panel__icon--accent">
+          <Zap size={18} strokeWidth={2} />
+        </div>
+        <div className="agent-setup-panel__content">
+          <div className="agent-setup-panel__title">{upsellTitle}</div>
+          <div className="agent-setup-panel__subtitle agent-setup-panel__subtitle--clamp">{upsellSubtitle}</div>
+        </div>
+        <a className={ctaClass} href={checkoutUrl}>
+          {upsellItem.ctaLabel}
+          <ArrowRight size={14} />
+        </a>
+      </div>
+    )
+  }
+
+  if (panel === 'org_transfer' && metadata.organization.options.length === 0) {
+    return null
+  }
+
+  if ((panel === 'upsell_pro' || panel === 'upsell_scale') && !upsellItem) {
+    return null
+  }
+
+  return (
+    <motion.div
+      className="insight-card-v2 insight-card-v2--agent-setup"
+      style={{ background: 'transparent', borderRadius: 0 }}
+      initial={{ opacity: 0, y: 4 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35 }}
+    >
+      {panel === 'always_on' && renderAlwaysOn()}
+      {panel === 'sms' && renderSms()}
+      {panel === 'org_transfer' && renderOrgTransfer()}
+      {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
     </motion.div>
   )
 }

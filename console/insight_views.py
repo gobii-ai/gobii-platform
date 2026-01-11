@@ -125,7 +125,11 @@ def _get_plan_price_labels() -> tuple[str | None, str | None]:
     )
 
 
-def _get_agent_setup_insight(request: HttpRequest, agent: PersistentAgent, organization: Optional[Any]) -> dict:
+def _build_agent_setup_metadata(
+    request: HttpRequest,
+    agent: PersistentAgent,
+    organization: Optional[Any],
+) -> dict:
     phone = get_primary_phone(request.user)
     phone_payload = serialize_phone(phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
@@ -194,7 +198,7 @@ def _get_agent_setup_insight(request: HttpRequest, agent: PersistentAgent, organ
             })
 
         if plan_id == PlanNamesChoices.FREE.value:
-            always_on_note = "Free plan always-on runs up to 30 days."
+            always_on_note = "Free plan: 30-day always-on."
 
     checkout = {}
     if settings.GOBII_PROPRIETARY_MODE:
@@ -206,36 +210,88 @@ def _get_agent_setup_insight(request: HttpRequest, agent: PersistentAgent, organ
     utm_querystring = request.session.get("utm_querystring") or ""
 
     return {
-        "insightId": f"agent_setup_{agent.id}",
-        "insightType": "agent_setup",
-        "priority": 100,
-        "title": "Always-on setup",
-        "body": "Keep the agent running and stay in the loop.",
-        "metadata": {
-            "agentId": str(agent.id),
-            "alwaysOn": {
-                "title": "You can close this tab",
-                "body": "Your agent keeps working 24/7 in the background and will message you when it has updates.",
-                "note": always_on_note,
-            },
-            "sms": {
-                "enabled": bool(agent_sms),
-                "agentNumber": agent_sms.address if agent_sms else None,
-                "userPhone": phone_payload,
-            },
-            "organization": {
-                "currentOrg": current_org,
-                "options": org_options,
-            },
-            "upsell": {
-                "items": upsell_items,
-                "planId": plan_id,
-            } if upsell_items else None,
-            "checkout": checkout,
-            "utmQuerystring": utm_querystring,
+        "agentId": str(agent.id),
+        "alwaysOn": {
+            "title": "You can close this tab",
+            "body": "Your agent keeps working 24/7 in the background and will message you when it has updates.",
+            "note": always_on_note,
         },
-        "dismissible": False,
+        "sms": {
+            "enabled": bool(agent_sms),
+            "agentNumber": agent_sms.address if agent_sms else None,
+            "userPhone": phone_payload,
+        },
+        "organization": {
+            "currentOrg": current_org,
+            "options": org_options,
+        },
+        "upsell": {
+            "items": upsell_items,
+            "planId": plan_id,
+        } if upsell_items else None,
+        "checkout": checkout,
+        "utmQuerystring": utm_querystring,
     }
+
+
+def _get_agent_setup_insights(
+    request: HttpRequest,
+    agent: PersistentAgent,
+    organization: Optional[Any],
+) -> list[dict]:
+    metadata = _build_agent_setup_metadata(request, agent, organization)
+    insights: list[dict] = []
+
+    def add_panel(panel: str, priority: int, title: str, body: str) -> None:
+        insights.append({
+            "insightId": f"agent_setup_{panel}_{agent.id}",
+            "insightType": "agent_setup",
+            "priority": priority,
+            "title": title,
+            "body": body,
+            "metadata": {
+                **metadata,
+                "panel": panel,
+            },
+            "dismissible": False,
+        })
+
+    add_panel(
+        "always_on",
+        100,
+        "Always-on",
+        "Keep the agent running and stay in the loop.",
+    )
+    add_panel(
+        "sms",
+        95,
+        "SMS chat",
+        "Chat with your agent over SMS.",
+    )
+
+    org_options = metadata.get("organization", {}).get("options") or []
+    if org_options:
+        add_panel(
+            "org_transfer",
+            92,
+            "Organization ownership",
+            "Move this agent into a workspace you manage.",
+        )
+
+    upsell = metadata.get("upsell") or {}
+    upsell_items = upsell.get("items") or []
+    for item in upsell_items:
+        plan = item.get("plan")
+        if not plan:
+            continue
+        add_panel(
+            f"upsell_{plan}",
+            88 if plan == "pro" else 86,
+            f"Upgrade to {item.get('title') or plan.title()}",
+            item.get("subtitle") or "Unlock higher limits and faster routing.",
+        )
+
+    return insights
 
 
 def _estimate_time_saved_minutes(tasks_completed: int, credits_used: Decimal) -> float:
@@ -451,9 +507,8 @@ def generate_insights_for_agent(
         period_end=period_end,
     )
 
-    insights: list[dict] = [
-        _get_agent_setup_insight(request, agent, organization),
-    ]
+    insights: list[dict] = []
+    insights.extend(_get_agent_setup_insights(request, agent, organization))
 
     time_saved = _get_time_saved_insight(ctx)
     if time_saved:
