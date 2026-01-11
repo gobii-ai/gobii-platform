@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Building2, Check, CheckCircle2, Copy, MessageSquare, Phone, Sparkles, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -551,6 +551,19 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     const isPro = upsellItem.plan === 'pro'
     const accentClass = isPro ? 'upsell-hero--indigo' : 'upsell-hero--violet'
 
+    // Plan-specific icons for benefits
+    const getBenefitIcon = (index: number) => {
+      if (isPro) {
+        const icons = [Zap, Rocket, Sparkles, Check]
+        const Icon = icons[index % icons.length]
+        return <Icon size={14} strokeWidth={2.5} />
+      }
+      // Scale icons emphasize bulk/power
+      const icons = [Rocket, TrendingDown, Brain, Zap]
+      const Icon = icons[index % icons.length]
+      return <Icon size={14} strokeWidth={2.5} />
+    }
+
     return (
       <motion.div
         className={`upsell-hero ${accentClass}`}
@@ -558,41 +571,38 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
         initial="hidden"
         animate="visible"
       >
-        {/* Left: Icon + Price */}
-        <motion.div className="upsell-hero__left" variants={visualVariants}>
-          <div className="upsell-hero__icon">
-            <Zap size={24} strokeWidth={2.5} />
-          </div>
+        {/* Left: Pricing card */}
+        <motion.div className="upsell-hero__pricing" variants={visualVariants}>
+          <div className="upsell-hero__plan-badge">{upsellItem.title}</div>
           {upsellItem.price && (
-            <div className="upsell-hero__price-tag">
+            <div className="upsell-hero__price">
               <span className="upsell-hero__price-amount">{upsellItem.price}</span>
+              <span className="upsell-hero__price-period">/month</span>
             </div>
           )}
+          <motion.a className="upsell-hero__cta" href={checkoutUrl} variants={badgeVariants}>
+            <span>{upsellItem.ctaLabel || 'Upgrade Now'}</span>
+            <ArrowRight size={15} strokeWidth={2.5} />
+          </motion.a>
         </motion.div>
 
-        {/* Center: Title + Benefits */}
+        {/* Right: Benefits */}
         <motion.div className="upsell-hero__content" variants={itemVariants}>
           <div className="upsell-hero__header">
-            <span className="upsell-hero__label">Upgrade to</span>
-            <h3 className="upsell-hero__title">{upsellItem.title}</h3>
+            <h3 className="upsell-hero__title">{isPro ? 'Unlock more power' : 'Built for power users'}</h3>
+            <p className="upsell-hero__subtitle">{upsellItem.subtitle || upsellItem.body}</p>
           </div>
           {upsellItem.bullets && upsellItem.bullets.length > 0 && (
             <ul className="upsell-hero__benefits">
-              {upsellItem.bullets.slice(0, 2).map((bullet, idx) => (
+              {upsellItem.bullets.map((bullet, idx) => (
                 <li key={idx} className="upsell-hero__benefit">
-                  <Check size={14} strokeWidth={3} />
+                  {getBenefitIcon(idx)}
                   <span>{bullet}</span>
                 </li>
               ))}
             </ul>
           )}
         </motion.div>
-
-        {/* Right: CTA */}
-        <motion.a className="upsell-hero__cta" href={checkoutUrl} variants={badgeVariants}>
-          <span>Upgrade Now</span>
-          <ArrowRight size={16} strokeWidth={2.5} />
-        </motion.a>
       </motion.div>
     )
   }

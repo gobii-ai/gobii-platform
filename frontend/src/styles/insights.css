@@ -873,124 +873,184 @@
 }
 
 /* ==========================================================================
-   Upsell Hero Panel - Conversion-focused design
+   Upsell Hero Panel - Mini Pricing Page Design
    ========================================================================== */
 
 .upsell-hero {
   display: flex;
-  align-items: center;
-  gap: 1.25rem;
+  align-items: stretch;
+  gap: 1.5rem;
   width: 100%;
-  height: 100%;
-  padding: 0.625rem 1.25rem;
+  padding: 1rem 1.5rem;
   position: relative;
   box-sizing: border-box;
 }
 
-/* Left section: Icon + Price */
-.upsell-hero__left {
+/* Left section: Pricing card */
+.upsell-hero__pricing {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
+  justify-content: center;
+  gap: 0.625rem;
+  padding: 1rem 1.25rem;
+  border-radius: 14px;
   flex-shrink: 0;
+  min-width: 140px;
 }
 
-.upsell-hero__icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  display: grid;
-  place-items: center;
+.upsell-hero--indigo .upsell-hero__pricing {
+  background: linear-gradient(145deg, rgba(99, 102, 241, 0.08) 0%, rgba(79, 70, 229, 0.12) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.15);
+}
+
+.upsell-hero--violet .upsell-hero__pricing {
+  background: linear-gradient(145deg, rgba(139, 92, 246, 0.08) 0%, rgba(124, 58, 237, 0.12) 100%);
+  border: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+.upsell-hero__plan-badge {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+}
+
+.upsell-hero--indigo .upsell-hero__plan-badge {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: #ffffff;
 }
 
-.upsell-hero--indigo .upsell-hero__icon {
-  background: linear-gradient(145deg, #6366f1 0%, #4f46e5 100%);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
+.upsell-hero--violet .upsell-hero__plan-badge {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #ffffff;
 }
 
-.upsell-hero--violet .upsell-hero__icon {
-  background: linear-gradient(145deg, #8b5cf6 0%, #7c3aed 100%);
-  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.35);
-}
-
-.upsell-hero__price-tag {
-  text-align: center;
+.upsell-hero__price {
+  display: flex;
+  align-items: baseline;
+  gap: 0.125rem;
 }
 
 .upsell-hero__price-amount {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  white-space: nowrap;
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1;
 }
 
 .upsell-hero--indigo .upsell-hero__price-amount {
-  color: #4f46e5;
+  color: #4338ca;
 }
 
 .upsell-hero--violet .upsell-hero__price-amount {
-  color: #7c3aed;
+  color: #6d28d9;
 }
 
-/* Center section: Title + Benefits */
-.upsell-hero__content {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.375rem;
-}
-
-.upsell-hero__header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.375rem;
-}
-
-.upsell-hero__label {
+.upsell-hero__price-period {
   font-size: 0.75rem;
   font-weight: 500;
   color: #64748b;
 }
 
+/* CTA Button */
+.upsell-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  width: 100%;
+  height: 36px;
+  padding: 0 1rem;
+  border-radius: 10px;
+  text-decoration: none;
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.upsell-hero--indigo .upsell-hero__cta {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.35);
+}
+
+.upsell-hero--violet .upsell-hero__cta {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  box-shadow: 0 3px 10px rgba(139, 92, 246, 0.35);
+}
+
+.upsell-hero__cta:hover {
+  transform: translateY(-1px);
+}
+
+.upsell-hero--indigo .upsell-hero__cta:hover {
+  box-shadow: 0 6px 16px rgba(99, 102, 241, 0.45);
+}
+
+.upsell-hero--violet .upsell-hero__cta:hover {
+  box-shadow: 0 6px 16px rgba(139, 92, 246, 0.45);
+}
+
+.upsell-hero__cta:active {
+  transform: translateY(0);
+}
+
+/* Right section: Content + Benefits */
+.upsell-hero__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.upsell-hero__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
 .upsell-hero__title {
   margin: 0;
-  font-size: 1.125rem;
-  font-weight: 500;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #0f172a;
   letter-spacing: -0.01em;
 }
 
-.upsell-hero--indigo .upsell-hero__title {
-  color: #4338ca;
-}
-
-.upsell-hero--violet .upsell-hero__title {
-  color: #6d28d9;
+.upsell-hero__subtitle {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  line-height: 1.4;
 }
 
 .upsell-hero__benefits {
   list-style: none;
   margin: 0;
   padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.375rem 1rem;
 }
 
 .upsell-hero__benefit {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 0.375rem;
-  font-size: 0.75rem;
-  color: #475569;
-  line-height: 1.35;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: #334155;
+  line-height: 1.3;
 }
 
 .upsell-hero__benefit svg {
   flex-shrink: 0;
-  margin-top: 0.125rem;
 }
 
 .upsell-hero--indigo .upsell-hero__benefit svg {
@@ -1001,89 +1061,41 @@
   color: #8b5cf6;
 }
 
-/* Right section: CTA Button */
-.upsell-hero__cta {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  height: 44px;
-  padding: 0 1.25rem;
-  border-radius: 12px;
-  text-decoration: none;
-  color: #ffffff;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  letter-spacing: 0.01em;
-  flex-shrink: 0;
-  transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.upsell-hero--indigo .upsell-hero__cta {
-  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-  box-shadow:
-    0 4px 14px rgba(99, 102, 241, 0.4),
-    0 0 0 1px rgba(99, 102, 241, 0.1) inset;
-}
-
-.upsell-hero--violet .upsell-hero__cta {
-  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
-  box-shadow:
-    0 4px 14px rgba(139, 92, 246, 0.4),
-    0 0 0 1px rgba(139, 92, 246, 0.1) inset;
-}
-
-.upsell-hero__cta:hover {
-  transform: translateY(-2px) scale(1.02);
-}
-
-.upsell-hero--indigo .upsell-hero__cta:hover {
-  box-shadow:
-    0 8px 24px rgba(99, 102, 241, 0.5),
-    0 0 0 1px rgba(99, 102, 241, 0.2) inset;
-}
-
-.upsell-hero--violet .upsell-hero__cta:hover {
-  box-shadow:
-    0 8px 24px rgba(139, 92, 246, 0.5),
-    0 0 0 1px rgba(139, 92, 246, 0.2) inset;
-}
-
-.upsell-hero__cta:active {
-  transform: translateY(0) scale(0.98);
+@media (max-width: 768px) {
+  .upsell-hero__benefits {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
   .upsell-hero {
-    padding: 0.5rem 1rem;
-    gap: 0.875rem;
+    flex-direction: column;
+    padding: 1rem;
+    gap: 1rem;
   }
 
-  .upsell-hero__icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 10px;
+  .upsell-hero__pricing {
+    flex-direction: row;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    gap: 1rem;
+    justify-content: space-between;
   }
 
-  .upsell-hero__icon svg {
-    width: 18px;
-    height: 18px;
-  }
-
-  .upsell-hero__price-amount {
-    font-size: 0.6875rem;
-  }
-
-  .upsell-hero__title {
-    font-size: 1rem;
-  }
-
-  .upsell-hero__benefit {
-    font-size: 0.6875rem;
+  .upsell-hero__price {
+    order: -1;
   }
 
   .upsell-hero__cta {
-    height: 40px;
-    padding: 0 1rem;
+    width: auto;
+    min-width: 120px;
+  }
+
+  .upsell-hero__title {
+    font-size: 0.9375rem;
+  }
+
+  .upsell-hero__benefit {
     font-size: 0.75rem;
   }
 }
