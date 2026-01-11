@@ -244,9 +244,184 @@
 
 .insight-card-v2--agent-setup {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   height: 100%;
-  padding: 0.5rem 1.25rem;
+  padding: 0;
+}
+
+/* ==========================================================================
+   Always-On Hero Panel - Beautiful, satisfying design
+   ========================================================================== */
+
+.always-on-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  height: 100%;
+  padding: 0.75rem 1.5rem;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* Left visual element - animated rings like a gauge */
+.always-on-hero__visual {
+  position: relative;
+  width: 90px;
+  height: 90px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.always-on-hero__ring {
+  position: absolute;
+  border-radius: 50%;
+  border: 2px solid transparent;
+}
+
+.always-on-hero__ring--outer {
+  inset: 0;
+  border-color: rgba(14, 165, 233, 0.15);
+  animation: ring-pulse 3s ease-in-out infinite;
+}
+
+.always-on-hero__ring--middle {
+  inset: 10px;
+  border-color: rgba(14, 165, 233, 0.25);
+  animation: ring-pulse 3s ease-in-out infinite 0.5s;
+}
+
+.always-on-hero__ring--inner {
+  inset: 20px;
+  border-color: rgba(14, 165, 233, 0.4);
+  animation: ring-pulse 3s ease-in-out infinite 1s;
+}
+
+@keyframes ring-pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.05);
+    opacity: 1;
+  }
+}
+
+.always-on-hero__icon {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #0ea5e9 0%, #0284c7 100%);
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(14, 165, 233, 0.4);
+  z-index: 1;
+}
+
+.always-on-hero__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.always-on-hero__title {
+  margin: 0;
+  font-size: 1.125rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.always-on-hero__body {
+  margin: 0;
+  font-size: 0.875rem;
+  color: #475569;
+  line-height: 1.45;
+}
+
+.always-on-hero__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1.125rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
+}
+
+.always-on-hero__badge-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a7f3d0;
+  box-shadow: 0 0 8px rgba(167, 243, 208, 0.9);
+  animation: always-on-pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes always-on-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(0.85);
+  }
+}
+
+@media (max-width: 640px) {
+  .always-on-hero {
+    padding: 0.75rem 1rem;
+    gap: 1rem;
+  }
+
+  .always-on-hero__visual {
+    width: 70px;
+    height: 70px;
+  }
+
+  .always-on-hero__ring--middle {
+    inset: 8px;
+  }
+
+  .always-on-hero__ring--inner {
+    inset: 16px;
+  }
+
+  .always-on-hero__icon {
+    width: 38px;
+    height: 38px;
+  }
+
+  .always-on-hero__icon svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  .always-on-hero__title {
+    font-size: 0.9375rem;
+  }
+
+  .always-on-hero__body {
+    font-size: 0.75rem;
+  }
+
+  .always-on-hero__badge {
+    padding: 0.5rem 0.875rem;
+    font-size: 0.6875rem;
+  }
 }
 
 .agent-setup-panel {

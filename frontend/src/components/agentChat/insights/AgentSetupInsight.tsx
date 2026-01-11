@@ -291,15 +291,28 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   }, [metadata.agentId, selectedOrgId])
 
   const renderAlwaysOn = () => (
-    <div className="agent-setup-panel agent-setup-panel--always-on">
-      <div className="agent-setup-panel__icon">
-        <Sparkles size={18} strokeWidth={2} />
+    <div className="always-on-hero">
+      {/* Left visual - animated rings */}
+      <div className="always-on-hero__visual">
+        <div className="always-on-hero__ring always-on-hero__ring--outer" />
+        <div className="always-on-hero__ring always-on-hero__ring--middle" />
+        <div className="always-on-hero__ring always-on-hero__ring--inner" />
+        <div className="always-on-hero__icon">
+          <Sparkles size={28} strokeWidth={2} />
+        </div>
       </div>
-      <div className="agent-setup-panel__content">
-        <div className="agent-setup-panel__title">{metadata.alwaysOn.title}</div>
-        <div className="agent-setup-panel__subtitle">{metadata.alwaysOn.body}</div>
+
+      {/* Center content */}
+      <div className="always-on-hero__content">
+        <h3 className="always-on-hero__title">{metadata.alwaysOn.title}</h3>
+        <p className="always-on-hero__body">{metadata.alwaysOn.body}</p>
       </div>
-      <div className="agent-setup-panel__badge">24/7</div>
+
+      {/* Right badge */}
+      <div className="always-on-hero__badge">
+        <span className="always-on-hero__badge-dot" />
+        <span>Always On</span>
+      </div>
     </div>
   )
 
