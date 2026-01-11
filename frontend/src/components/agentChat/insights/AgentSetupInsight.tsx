@@ -488,44 +488,57 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   }
 
   const renderOrgTransfer = () => {
-    const statusText = orgError || `Current: ${orgCurrent?.name || 'Personal'}`
-    const statusClass = orgError ? 'agent-setup-panel__status agent-setup-panel__status--error' : 'agent-setup-panel__subtitle'
+    const statusText = orgError || `Currently owned by ${orgCurrent?.name || 'your personal workspace'}`
 
     return (
-      <div className="agent-setup-panel agent-setup-panel--org">
-        <div className="agent-setup-panel__icon">
-          <Building2 size={18} strokeWidth={2} />
-        </div>
-        <div className="agent-setup-panel__content">
-          <div className="agent-setup-panel__title">Organization ownership</div>
-          <div className={statusClass}>{statusText}</div>
-          <div className="agent-setup-panel__row">
-            <select
-              className="agent-setup-panel__select"
-              value={selectedOrgId ?? 'personal'}
-              onChange={(event) => {
-                const value = event.target.value
-                setSelectedOrgId(value === 'personal' ? null : value)
-              }}
-            >
-              <option value="personal">Personal workspace</option>
-              {metadata.organization.options.map((org) => (
-                <option key={org.id} value={org.id}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="agent-setup-panel__button agent-setup-panel__button--primary"
-              onClick={handleOrgMove}
-              disabled={!orgHasChange || orgBusy}
-            >
-              {orgBusy ? 'Moving...' : 'Move'}
-            </button>
+      <motion.div
+        className="org-hero"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Left visual */}
+        <motion.div className="org-hero__visual" variants={visualVariants}>
+          <div className="org-hero__ring org-hero__ring--outer" />
+          <div className="org-hero__ring org-hero__ring--inner" />
+          <div className="org-hero__icon">
+            <Building2 size={24} strokeWidth={2} />
           </div>
-        </div>
-      </div>
+        </motion.div>
+
+        {/* Center content */}
+        <motion.div className="org-hero__content" variants={itemVariants}>
+          <h3 className="org-hero__title">Organization</h3>
+          <p className={`org-hero__body${orgError ? ' org-hero__body--error' : ''}`}>{statusText}</p>
+        </motion.div>
+
+        {/* Right controls */}
+        <motion.div className="org-hero__controls" variants={badgeVariants}>
+          <select
+            className="org-hero__select"
+            value={selectedOrgId ?? 'personal'}
+            onChange={(event) => {
+              const value = event.target.value
+              setSelectedOrgId(value === 'personal' ? null : value)
+            }}
+          >
+            <option value="personal">Personal workspace</option>
+            {metadata.organization.options.map((org) => (
+              <option key={org.id} value={org.id}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            className="org-hero__button"
+            onClick={handleOrgMove}
+            disabled={!orgHasChange || orgBusy}
+          >
+            {orgBusy ? 'Moving...' : 'Move'}
+          </button>
+        </motion.div>
+      </motion.div>
     )
   }
 
