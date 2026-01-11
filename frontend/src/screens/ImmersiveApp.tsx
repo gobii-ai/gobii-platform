@@ -242,7 +242,17 @@ export function ImmersiveApp() {
     return () => controller.abort()
   }, [route.kind])
 
-  const handleClose = () => window.location.assign(returnTo)
+  const handleClose = useCallback(() => {
+    window.location.assign(returnTo)
+  }, [returnTo])
+
+  const handleEmbeddedClose = useCallback(() => {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'gobii-immersive-close' }, window.location.origin)
+      return
+    }
+    handleClose()
+  }, [handleClose])
 
   const handleNavigateToNewAgent = useCallback(() => {
     navigateTo('/app/agents/new')
@@ -258,7 +268,7 @@ export function ImmersiveApp() {
         {route.kind === 'agent-chat' ? (
           <AgentChatPage
             agentId={route.agentId}
-            onClose={!embed ? handleClose : undefined}
+            onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
           />
