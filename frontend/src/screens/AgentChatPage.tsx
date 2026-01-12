@@ -789,6 +789,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         kanbanSnapshot={latestKanbanSnapshot}
         agentRoster={sidebarAgents}
         activeAgentId={activeAgentId}
+        insightsPanelStorageKey={activeAgentId}
         switchingAgentId={switchingAgentId}
         rosterLoading={rosterQuery.isLoading}
         rosterError={rosterErrorMessage}
