@@ -47,7 +47,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND you've finished coordination. Set true only if you have more work after this message. Omitting this wastes credits.",
+                        "description": "Set true if you still need to mark kanban cards done after this message. Omit or set false to STOP when: all kanban cards are done AND coordination complete.",
                     },
                 },
                 "required": ["peer_agent_id", "message"],

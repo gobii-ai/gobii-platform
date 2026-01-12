@@ -54,7 +54,7 @@ def get_send_webhook_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND this is your final delivery. Set true only if you have more work after this webhook. Omitting this wastes credits.",
+                        "description": "Set false to STOP when: all kanban cards are done AND you've sent your final report. Omitting defaults to continue. Always set false on your final tool call.",
                     },
                 },
                 "required": ["webhook_id", "payload"],

@@ -562,16 +562,22 @@ No schedule + no incoming message = you never run again. Your work dies with you
 
 **If you're running low on credits:** Set a schedule BEFORE you stop. Otherwise you'll be terminated mid-task with no way to resume.
 
-### MANDATORY: will_continue_work on EVERY tool call
+### will_continue_work Controls Stopping
 
-**You MUST include `will_continue_work` on every tool call.** This flag controls whether you get another turn or stop immediately. Omitting it wastes credits by keeping you running unnecessarily.
+This flag controls whether you get another turn or stop immediately:
 
 ```
 will_continue_work=true  → "I need another turn" — work remains or report not yet sent
-will_continue_work=false → "I'm DONE, STOP NOW" — all work complete, report sent, kanban clear
+will_continue_work=false → "I'm DONE, STOP NOW" — all kanban cards done, report sent
 ```
 
-**STOP IMMEDIATELY when ALL are true:**
+**Default behavior differs by tool type:**
+- **Message tools** (send_chat_message, send_email, send_sms): omit = STOP (you sent your message, you're done)
+- **Data tools** (http_request, sqlite_batch, search_tools): omit = CONTINUE (you need to process the result)
+
+**For data tools, always set will_continue_work explicitly.** Omitting it on data tools keeps you running.
+
+**STOP (will_continue_work=false) when ALL are true:**
 1. All kanban cards are marked 'done' (no todo/doing cards remain)
 2. You've already sent your final report to the user
 3. There's nothing more to fetch, analyze, or compute
@@ -579,19 +585,18 @@ will_continue_work=false → "I'm DONE, STOP NOW" — all work complete, report 
 **The decision:**
 ```
 if all_kanban_cards_done AND final_report_sent:
-    will_continue_work = false  # STOP NOW. Do not take another turn.
+    will_continue_work = false  # STOP NOW
 else:
     will_continue_work = true   # Keep working
 ```
 
-**Use `will_continue_work=true` only when:**
+**Keep working (will_continue_work=true) when:**
 - You just fetched data and haven't reported it yet
 - You have more URLs to scrape in your queue
-- You need to run another query to answer the question
 - You have kanban cards still in todo/doing status
 - You haven't sent your findings to the user yet
 
-**Use `will_continue_work=false` when ALL are true:**
+**Stop (will_continue_work=false) when:**
 - All kanban cards are 'done' (or deferred with schedule)
 - You've already delivered final findings to the user
 - There's nothing more to fetch, analyze, or compute
@@ -3245,20 +3250,21 @@ def _get_system_instruction(
         else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
     )
     stop_continue_examples = (
-        "## When to stop vs continue (ALWAYS include will_continue_work)\n\n"
-        "**STOP IMMEDIATELY (will_continue_work=false)** — all kanban cards done AND report sent:\n"
-        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
-        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
+        "## When to stop vs continue\n\n"
+        "**Defaults:** Message tools (send_chat, send_email, send_sms) stop when omitted. Data tools (http_request, sqlite_batch) continue when omitted.\n\n"
+        "**STOP (will_continue_work=false)** — all kanban cards done AND report sent:\n"
+        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} → STOP (message tools stop by default).\n"
+        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
         f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
-        "- Research complete, report sent, all cards done → will_continue_work=false → STOP.\n\n"
+        "- Research complete, report sent, all cards done → will_continue_work=false on final tool → STOP.\n\n"
         "**CONTINUE (will_continue_work=true)** — still have work or report not sent:\n"
-        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → need to report → {reply_short}(will_continue_work=false) → STOP.\n"
-        "- 'what's on HN?' → http_request(will_continue_work=true) → report(will_continue_work=false) → STOP.\n"
-        "- 'research competitors' → search_tools(will_continue_work=true) → keep working until done.\n"
-        f"- Fetched data but {fetched_note} → will_continue_work=true → keep going.\n"
-        "- Kanban cards still in todo/doing → will_continue_work=true → keep going.\n"
+        f"- 'what's bitcoin?' → http_request → process result → {reply_short} → STOP.\n"
+        "- 'what's on HN?' → http_request → process → send report → STOP.\n"
+        "- 'research competitors' → search_tools → keep working until all kanban cards done.\n"
+        f"- Fetched data but {fetched_note} → keep going.\n"
+        "- Kanban cards still in todo/doing → keep going.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
@@ -3267,18 +3273,20 @@ def _get_system_instruction(
         "**CRITICAL: Before your last tool call, verify:**\n"
         "1. All kanban cards are 'done' (no todo/doing remain)\n"
         "2. You've sent your final report to the user\n"
-        "3. If BOTH are true → will_continue_work=false → STOP IMMEDIATELY\n"
-        "4. If EITHER is false → will_continue_work=true → keep working\n\n"
+        "3. If BOTH are true → will_continue_work=false on your final tool call → STOP\n"
+        "4. If EITHER is false → keep working\n\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
     if implied_send_active:
         will_continue_guidance = (
-            "**Stopping:** Text-only replies auto-send and stop. End with \"CONTINUE_WORK_SIGNAL\" to request another turn.\n"
+            "**Stopping:** Text-only replies auto-send and stop by default. "
+            "Before stopping, verify all kanban cards are done. "
+            "End with \"CONTINUE_WORK_SIGNAL\" on its own line if you still have cards to mark done.\n"
         )
     else:
         will_continue_guidance = (
-            "**Stopping:** When all kanban cards are done AND you've sent your final report, use will_continue_work=false on your last tool call to STOP IMMEDIATELY. Do not take extra turns.\n"
+            "**Stopping:** When all kanban cards are done AND you've sent your final report, use will_continue_work=false on your last tool call to STOP. Do not take extra turns.\n"
         )
 
     delivery_instructions = (
