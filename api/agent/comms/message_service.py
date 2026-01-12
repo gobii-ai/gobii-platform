@@ -575,7 +575,8 @@ def ingest_inbound_message(
                     from tasks.services import TaskCreditService
 
                     if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
-                        available = TaskCreditService.calculate_available_tasks(agent_obj.user)
+                        owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                         if available != TASKS_UNLIMITED and available <= 0:
                                 # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:

@@ -12,6 +12,8 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     DeliveryStatus,
+    Organization,
+    OrganizationMembership,
     UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
@@ -51,7 +53,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
     @tag("batch_email")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("tasks.services.TaskCreditService.calculate_available_tasks", return_value=0)
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_reply_sent_and_processing_skipped_when_out_of_credits(self, mock_calc, mock_delay):
         sender = self.owner.email  # owner is whitelisted by default
         parsed = ParsedMessage(
@@ -77,7 +79,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
     @tag("batch_email")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("tasks.services.TaskCreditService.calculate_available_tasks", return_value=10)
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=10)
     def test_no_reply_and_processing_runs_when_has_credits(self, mock_calc, mock_delay):
         sender = self.owner.email
         parsed = ParsedMessage(
@@ -101,7 +103,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
     @tag("batch_email")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("tasks.services.TaskCreditService.calculate_available_tasks", return_value=10)
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=10)
     def test_daily_limit_reply_sent_to_sender(self, mock_calc, mock_delay):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
@@ -131,6 +133,54 @@ class InboundOutOfCreditsReplyTests(TestCase):
         self.assertEqual(mail.outbox[0].subject, f"{self.agent.name} hit today's task limit")
         mock_calc.assert_called_once()
         mock_delay.assert_not_called()
+
+    @tag("batch_email")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
+    def test_org_owned_reply_sent_to_sender_and_owner_when_out_of_credits(self, mock_calc, mock_delay):
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=self.owner)
+        org_billing = org.billing
+        org_billing.purchased_seats = 1
+        org_billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        member = User.objects.create_user(
+            username="member",
+            email="member@example.com",
+            password="pw",
+        )
+        OrganizationMembership.objects.create(
+            org=org,
+            user=member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.agent.organization = org
+        self.agent.save(update_fields=["organization"])
+
+        parsed = ParsedMessage(
+            sender=member.email,
+            recipient=self.agent_email.address,
+            subject="Org Subject",
+            body="Hello from org",
+            attachments=[],
+            raw_payload={"provider": "test"},
+            msg_channel=CommsChannel.EMAIL,
+        )
+
+        mail.outbox.clear()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            ingest_inbound_message(CommsChannel.EMAIL, parsed)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
+        mock_delay.assert_not_called()
+        mock_calc.assert_called_once()
 
 
 @tag("batch_sms")
