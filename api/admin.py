@@ -2289,7 +2289,14 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
         }),
         ('Configuration', {
-            'fields': ('browser_use_agent', 'browser_use_agent_link', 'schedule', 'is_active', 'execution_environment')
+            'fields': (
+                'browser_use_agent',
+                'browser_use_agent_link',
+                'preferred_llm_tier',
+                'schedule',
+                'is_active',
+                'execution_environment',
+            )
         }),
         ('Soft Expiration (Testing)', {
             'description': 'Override last_interaction_at to simulate inactivity windows. last_expired_at and notices are read-only for audit.',
