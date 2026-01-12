@@ -552,7 +552,7 @@ Categorized data is perfect for visualization—a pie chart of categories tells 
 
 ---
 
-## Continuity
+## Continuity & Stopping (CRITICAL)
 
 **Stopping is permanent.** When you stop, you are terminated until:
 - Your next scheduled trigger (only if you set a schedule), OR
@@ -562,34 +562,40 @@ No schedule + no incoming message = you never run again. Your work dies with you
 
 **If you're running low on credits:** Set a schedule BEFORE you stop. Otherwise you'll be terminated mid-task with no way to resume.
 
-`will_continue_work` tells the system whether you need another turn:
+### MANDATORY: will_continue_work on EVERY tool call
+
+**You MUST include `will_continue_work` on every tool call.** This flag controls whether you get another turn or stop immediately. Omitting it wastes credits by keeping you running unnecessarily.
 
 ```
-true  → "I need another turn" — use when work remains or report not yet sent
-false → "I'm done" — use ONLY after delivering final output to user and ready to sleep
+will_continue_work=true  → "I need another turn" — work remains or report not yet sent
+will_continue_work=false → "I'm DONE, STOP NOW" — all work complete, report sent, kanban clear
 ```
 
-**The logic:**
+**STOP IMMEDIATELY when ALL are true:**
+1. All kanban cards are marked 'done' (no todo/doing cards remain)
+2. You've already sent your final report to the user
+3. There's nothing more to fetch, analyze, or compute
+
+**The decision:**
 ```
-if final_report_sent:
-    will_continue_work = false  # Safe to stop, go to sleep
+if all_kanban_cards_done AND final_report_sent:
+    will_continue_work = false  # STOP NOW. Do not take another turn.
 else:
-    will_continue_work = true   # Must send report before stopping
+    will_continue_work = true   # Keep working
 ```
 
-**Rules:**
-
-Use `true` when:
+**Use `will_continue_work=true` only when:**
 - You just fetched data and haven't reported it yet
 - You have more URLs to scrape in your queue
 - You need to run another query to answer the question
-- You're uncertain whether you're done
+- You have kanban cards still in todo/doing status
 - You haven't sent your findings to the user yet
 
-Use `false` only when ALL are true:
-- All kanban cards are done (or deferred with schedule)
-- You've already delivered final findings to the user in this response
+**Use `will_continue_work=false` when ALL are true:**
+- All kanban cards are 'done' (or deferred with schedule)
+- You've already delivered final findings to the user
 - There's nothing more to fetch, analyze, or compute
+- **→ STOP. Do not continue. Your work is done.**
 
 Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
@@ -3239,24 +3245,30 @@ def _get_system_instruction(
         else "- Text-only replies are not delivered without an active web chat session—use explicit send tools.\n\n"
     )
     stop_continue_examples = (
-        "## When to stop vs continue\n\n"
-        "**Stop** — request fully handled AND kanban clear (no todo/doing cards):\n"
-        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} — done.\n"
-        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} — done.\n"
-        f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Got it!')} — done.\n"
-        f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1') + {reply.replace('Message', 'Updated!')} — done.\n"
-        "- Cron fires, nothing new → (empty response) — done.\n\n"
-        "**Continue** — still have work:\n"
-        f"- 'what's bitcoin?' → http_request (has API) → {reply_short} — done.\n"
-        "- 'what's on HN?' → http_request (has API) → report — done.\n"
-        "- 'research competitors' → search_tools → keep working.\n"
-        f"- Fetched data but {fetched_note} → will_continue_work=true.\n"
+        "## When to stop vs continue (ALWAYS include will_continue_work)\n\n"
+        "**STOP IMMEDIATELY (will_continue_work=false)** — all kanban cards done AND report sent:\n"
+        f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
+        f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
+        f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
+        f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
+        "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
+        "- Research complete, report sent, all cards done → will_continue_work=false → STOP.\n\n"
+        "**CONTINUE (will_continue_work=true)** — still have work or report not sent:\n"
+        f"- 'what's bitcoin?' → http_request(will_continue_work=true) → need to report → {reply_short}(will_continue_work=false) → STOP.\n"
+        "- 'what's on HN?' → http_request(will_continue_work=true) → report(will_continue_work=false) → STOP.\n"
+        "- 'research competitors' → search_tools(will_continue_work=true) → keep working until done.\n"
+        f"- Fetched data but {fetched_note} → will_continue_work=true → keep going.\n"
+        "- Kanban cards still in todo/doing → will_continue_work=true → keep going.\n"
         f"{text_only_guidance}"
-        "**Mid-conversation updates** — update eagerly when user hints:\n"
-        f"- 'shorter next time' → sqlite_batch(UPDATE charter) + {reply.replace('Message', 'Will do!')}\n"
-        f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
+        "**Mid-conversation updates:**\n"
+        f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
+        f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
-        "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule. Running low on credits? Set a schedule NOW or you'll be terminated with no way to resume.\n"
+        "**CRITICAL: Before your last tool call, verify:**\n"
+        "1. All kanban cards are 'done' (no todo/doing remain)\n"
+        "2. You've sent your final report to the user\n"
+        "3. If BOTH are true → will_continue_work=false → STOP IMMEDIATELY\n"
+        "4. If EITHER is false → will_continue_work=true → keep working\n\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
@@ -3266,7 +3278,7 @@ def _get_system_instruction(
         )
     else:
         will_continue_guidance = (
-            "**Stopping:** When done, send report first, then mark last card complete with will_continue_work=false.\n"
+            "**Stopping:** When all kanban cards are done AND you've sent your final report, use will_continue_work=false on your last tool call to STOP IMMEDIATELY. Do not take extra turns.\n"
         )
 
     delivery_instructions = (
@@ -3379,7 +3391,8 @@ def _get_system_instruction(
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done. This ensures your report is delivered.\n\n"
+        "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done.\n"
+        "- **All cards 'done' + report sent = STOP.** Use will_continue_work=false on your final tool call to stop immediately. Do not take extra turns.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
@@ -3799,7 +3812,7 @@ def _get_system_instruction(
         "Text output is for RESULTS, not narration. Tools execute silently—no commentary.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
         "## Kanban Tracking (MANDATORY)\n\n"
-        "Kanban (__kanban_cards) tracks your work. The sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE.\n\n"
+        "Kanban (__kanban_cards) tracks your work. The sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
         "Cards should cover the FULL workflow—not just research/fetching, but also the deliverable:\n"
         "- 'Research competitor pricing' (the work)\n"
         "- 'Send pricing comparison report' (the deliverable)\n\n"
@@ -3808,10 +3821,12 @@ def _get_system_instruction(
         "2. Set status='doing' on the card you're actively working on\n"
         "3. DO THE ACTUAL WORK (tool calls, analysis, etc.)\n"
         "4. VERIFY the work succeeded (check tool results)\n"
-        "5. THEN mark status='done'—never before the work is complete\n\n"
+        "5. THEN mark status='done'—never before the work is complete\n"
+        "6. **When ALL cards are 'done' AND you've sent your final report → will_continue_work=false → STOP IMMEDIATELY**\n\n"
         "WRONG: Mark card done → then do the work (or skip it entirely)\n"
-        "RIGHT: Do the work → verify success → mark done\n\n"
-        "No cards = no memory. Unmarked work = invisible progress. Premature 'done' = lying.\n\n"
+        "WRONG: All cards done but keep taking turns without will_continue_work=false\n"
+        "RIGHT: Do the work → verify success → mark done → when all done + report sent → STOP\n\n"
+        "No cards = no memory. Unmarked work = invisible progress. Premature 'done' = lying. Forgetting to stop = wasting credits.\n\n"
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "

@@ -907,30 +907,30 @@ class SafeJsonPathTests(SimpleTestCase):
         self.assertEqual(_safe_json_path("firstName"), "$.firstName")
 
     def test_column_with_dot(self):
-        """Column names with dots should use bracket notation."""
-        self.assertEqual(_safe_json_path("sepal.length"), '$["sepal.length"]')
-        self.assertEqual(_safe_json_path("user.name"), '$["user.name"]')
-        self.assertEqual(_safe_json_path("a.b.c"), '$["a.b.c"]')
+        """Column names with dots should use quoted dot notation."""
+        self.assertEqual(_safe_json_path("sepal.length"), '$."sepal.length"')
+        self.assertEqual(_safe_json_path("user.name"), '$."user.name"')
+        self.assertEqual(_safe_json_path("a.b.c"), '$."a.b.c"')
 
     def test_column_with_space(self):
-        """Column names with spaces should use bracket notation."""
-        self.assertEqual(_safe_json_path("first name"), '$["first name"]')
-        self.assertEqual(_safe_json_path("user id"), '$["user id"]')
+        """Column names with spaces should use quoted dot notation."""
+        self.assertEqual(_safe_json_path("first name"), '$."first name"')
+        self.assertEqual(_safe_json_path("user id"), '$."user id"')
 
     def test_column_with_brackets(self):
-        """Column names with brackets should use bracket notation."""
-        self.assertEqual(_safe_json_path("data[0]"), '$["data[0]"]')
-        self.assertEqual(_safe_json_path("items[]"), '$["items[]"]')
+        """Column names with brackets should use quoted dot notation."""
+        self.assertEqual(_safe_json_path("data[0]"), '$."data[0]"')
+        self.assertEqual(_safe_json_path("items[]"), '$."items[]"')
 
     def test_column_with_quotes(self):
         """Column names with quotes should be escaped."""
-        self.assertEqual(_safe_json_path('col"name'), '$["col\\"name"]')
-        self.assertEqual(_safe_json_path("col'name"), '$["col\'name"]')
+        self.assertEqual(_safe_json_path('col"name'), '$."col\\"name"')
+        self.assertEqual(_safe_json_path("col'name"), '$.\"col\'name\"')
 
     def test_column_with_dollar(self):
-        """Column names with $ should use bracket notation."""
-        self.assertEqual(_safe_json_path("$price"), '$["$price"]')
-        self.assertEqual(_safe_json_path("amount$"), '$["amount$"]')
+        """Column names with $ should use quoted dot notation."""
+        self.assertEqual(_safe_json_path("$price"), '$."$price"')
+        self.assertEqual(_safe_json_path("amount$"), '$."amount$"')
 
     def test_column_with_backslash(self):
         """Column names with backslashes use dot notation (not JSON path special)."""
@@ -939,5 +939,5 @@ class SafeJsonPathTests(SimpleTestCase):
 
     def test_column_with_multiple_special_chars(self):
         """Column names with multiple special characters."""
-        self.assertEqual(_safe_json_path("user.first name"), '$["user.first name"]')
-        self.assertEqual(_safe_json_path("data[0].value"), '$["data[0].value"]')
+        self.assertEqual(_safe_json_path("user.first name"), '$."user.first name"')
+        self.assertEqual(_safe_json_path("data[0].value"), '$."data[0].value"')

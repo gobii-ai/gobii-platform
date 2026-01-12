@@ -71,7 +71,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you are sending an update but will continue working immediately afterward.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND this is your final report. Set true only if you have more work to do after this email. Omitting this wastes credits.",
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html"],

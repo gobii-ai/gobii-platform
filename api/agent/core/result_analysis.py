@@ -75,23 +75,25 @@ _PREFERRED_ARRAY_KEYS = {
     # not the primary data the user wants. Let object_ratio scoring handle it.
 }
 
-# Characters that require bracket notation in JSON paths
+# Characters that require quoted notation in JSON paths
 _JSON_PATH_SPECIAL_CHARS = frozenset('.[]"\' $')
 
 
 def _safe_json_path(col: str) -> str:
     """Escape column name for JSON path if it contains special characters.
 
-    Column names with dots, brackets, quotes, spaces, or $ need bracket notation.
+    SQLite JSON path uses QUOTED DOT NOTATION for special characters, NOT bracket notation.
     For example:
-        - "sepal.length" -> '$["sepal.length"]'
+        - "sepal.length" -> '$."sepal.length"'
         - "normal_col" -> "$.normal_col"
-        - "has space" -> '$["has space"]'
+        - "has space" -> '$."has space"'
+
+    Note: Bracket notation like $["key"] does NOT work in SQLite for property access.
     """
     if any(c in _JSON_PATH_SPECIAL_CHARS for c in col):
-        # Use bracket notation with escaped quotes
-        escaped = col.replace("\\", "\\\\").replace('"', '\\"')
-        return f'$["{escaped}"]'
+        # Use quoted dot notation - escape any embedded double quotes
+        escaped = col.replace('"', '\\"')
+        return f'$."{escaped}"'
     return f"$.{col}"
 
 
@@ -2271,7 +2273,7 @@ def _generate_compact_summary(
                                 f"WHERE result_id='{result_id}'"
                             )
                         parts.append(f"→ QUERY: {parse_query}")
-                        parts.append("  (use r2.value->>'$[\"COLUMN_NAME\"]' for columns with dots/spaces)")
+                        parts.append("  (use r2.value->>'$.\"COLUMN_NAME\"' for columns with dots/spaces)")
                     else:
                         # No header
                         if parent_path:
@@ -2399,7 +2401,7 @@ def _generate_compact_summary(
                         f"WHERE t.result_id='{result_id}'"
                     )
                     parts.append(f"→ QUERY: {extract_query}")
-                    parts.append("  (use r.value->>'$[\"COLUMN_NAME\"]' for columns with dots/spaces)")
+                    parts.append("  (use r.value->>'$.\"COLUMN_NAME\"' for columns with dots/spaces)")
                 else:
                     # No header - use array indices
                     parse_query = (

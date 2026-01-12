@@ -47,7 +47,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you're coordinating but still have outstanding work this cycle.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND you've finished coordination. Set true only if you have more work after this message. Omitting this wastes credits.",
                     },
                 },
                 "required": ["peer_agent_id", "message"],

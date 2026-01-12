@@ -503,7 +503,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set false when search_tools is the final action this cycle; enables auto-sleep.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND you've sent your final report. Set true if you'll use these tools for more work. Omitting this wastes credits.",
                     }
                 },
                 "required": ["query"],

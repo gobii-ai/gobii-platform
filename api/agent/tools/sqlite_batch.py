@@ -1766,7 +1766,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND you've sent your final report. Set true only if you have more work to do. Omitting this wastes credits.",
                     },
                 },
                 "required": ["sql"],

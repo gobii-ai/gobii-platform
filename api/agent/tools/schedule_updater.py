@@ -147,7 +147,7 @@ def get_update_schedule_tool() -> dict:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you're updating your schedule but will continue working immediately afterward.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND you've sent your final report. Set true only if you have more work after updating schedule. Omitting this wastes credits.",
                     },
                 },
             },

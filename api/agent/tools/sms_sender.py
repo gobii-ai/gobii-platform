@@ -74,7 +74,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you're just updating the user and will continue working immediately.",
+                        "description": "REQUIRED. Set false to STOP when: all kanban cards are done AND this is your final report. Set true only if you have more work to do after this SMS. Omitting this wastes credits.",
                     },
                 },
                 "required": ["to_number", "body"],
