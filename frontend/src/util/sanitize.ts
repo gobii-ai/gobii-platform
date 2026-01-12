@@ -13,9 +13,18 @@ export function sanitizeHtml(value: string): string {
   })
 }
 
+/**
+ * Check if content appears to be HTML rather than markdown.
+ *
+ * Only returns true for content with block-level HTML tags (p, div, table, etc.),
+ * NOT for inline elements like <br>, <a>, <img> which are commonly used within markdown.
+ * This prevents markdown content with <br> tags from being incorrectly treated as HTML.
+ */
 export function looksLikeHtml(value: string | null | undefined): boolean {
   if (!value) return false
-  return /<([a-z][\w-]*)(?:\s[^>]*)?>/i.test(value.trim())
+  // Block-level tags that indicate actual HTML content
+  const blockTagPattern = /<(p|div|table|thead|tbody|tr|td|th|ul|ol|li|blockquote|pre|h[1-6]|section|article|header|footer|nav|main|form|dl|dt|dd|figure|figcaption|hr|address)(?:\s[^>]*)?>/i
+  return blockTagPattern.test(value.trim())
 }
 
 // Quote characters that might wrap blockquote content redundantly

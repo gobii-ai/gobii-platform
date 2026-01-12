@@ -646,3 +646,65 @@ class PreviewByteLimitTests(SimpleTestCase):
         # Should be truncated since it's not fresh
         self.assertFalse(is_inline)
         self.assertLess(len(preview), len(medium_text))
+
+
+@tag("batch_tool_results")
+class CsvAutoLoadTests(SimpleTestCase):
+    """Tests for CSV auto-loading helper functions."""
+
+    def test_sanitize_column_name_with_dot(self):
+        """Dots should be replaced with underscores."""
+        from api.agent.core.tool_results import _sanitize_column_name
+
+        self.assertEqual(_sanitize_column_name("sepal.length"), "sepal_length")
+        self.assertEqual(_sanitize_column_name("a.b.c"), "a_b_c")
+
+    def test_sanitize_column_name_with_space(self):
+        """Spaces should be replaced with underscores."""
+        from api.agent.core.tool_results import _sanitize_column_name
+
+        self.assertEqual(_sanitize_column_name("first name"), "first_name")
+        self.assertEqual(_sanitize_column_name("user id"), "user_id")
+
+    def test_sanitize_column_name_with_multiple_specials(self):
+        """Multiple special characters should be collapsed."""
+        from api.agent.core.tool_results import _sanitize_column_name
+
+        self.assertEqual(_sanitize_column_name("col...name"), "col_name")
+        self.assertEqual(_sanitize_column_name("a  b  c"), "a_b_c")
+        self.assertEqual(_sanitize_column_name("user.first name"), "user_first_name")
+
+    def test_sanitize_column_name_leading_digit(self):
+        """Column names starting with digits should be prefixed."""
+        from api.agent.core.tool_results import _sanitize_column_name
+
+        self.assertEqual(_sanitize_column_name("123"), "col_123")
+        self.assertEqual(_sanitize_column_name("1st_column"), "col_1st_column")
+
+    def test_sanitize_column_name_empty(self):
+        """Empty column names should have a fallback."""
+        from api.agent.core.tool_results import _sanitize_column_name
+
+        self.assertEqual(_sanitize_column_name(""), "col")
+        self.assertEqual(_sanitize_column_name("..."), "col")
+
+    def test_dedupe_column_names(self):
+        """Duplicate column names should be numbered."""
+        from api.agent.core.tool_results import _dedupe_column_names
+
+        result = _dedupe_column_names(["name", "name", "name"])
+        self.assertEqual(result, ["name", "name_2", "name_3"])
+
+    def test_dedupe_column_names_mixed(self):
+        """Mixed column names should only dedupe duplicates."""
+        from api.agent.core.tool_results import _dedupe_column_names
+
+        result = _dedupe_column_names(["id", "name", "id", "value", "name"])
+        self.assertEqual(result, ["id", "name", "id_2", "value", "name_2"])
+
+    def test_dedupe_column_names_unique(self):
+        """Unique column names should pass through unchanged."""
+        from api.agent.core.tool_results import _dedupe_column_names
+
+        result = _dedupe_column_names(["id", "name", "value"])
+        self.assertEqual(result, ["id", "name", "value"])

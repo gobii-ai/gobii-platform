@@ -75,6 +75,25 @@ _PREFERRED_ARRAY_KEYS = {
     # not the primary data the user wants. Let object_ratio scoring handle it.
 }
 
+# Characters that require bracket notation in JSON paths
+_JSON_PATH_SPECIAL_CHARS = frozenset('.[]"\' $')
+
+
+def _safe_json_path(col: str) -> str:
+    """Escape column name for JSON path if it contains special characters.
+
+    Column names with dots, brackets, quotes, spaces, or $ need bracket notation.
+    For example:
+        - "sepal.length" -> '$["sepal.length"]'
+        - "normal_col" -> "$.normal_col"
+        - "has space" -> '$["has space"]'
+    """
+    if any(c in _JSON_PATH_SPECIAL_CHARS for c in col):
+        # Use bracket notation with escaped quotes
+        escaped = col.replace("\\", "\\\\").replace('"', '\\"')
+        return f'$["{escaped}"]'
+    return f"$.{col}"
+
 
 @dataclass
 class TableInfo:
@@ -2235,7 +2254,7 @@ def _generate_compact_summary(
                     parse_suffix = "" if csv.has_header else ", 0"
                     if csv.columns and csv.has_header:
                         sample_cols = csv.columns[:3]
-                        extracts = ", ".join(f"r2.value->>'$.{col}'" for col in sample_cols)
+                        extracts = ", ".join(f"r2.value->>'{_safe_json_path(col)}'" for col in sample_cols)
                         if parent_path:
                             csv_expr = f"json_extract(r.value,'{item_path}')"
                             parse_query = (
@@ -2252,7 +2271,7 @@ def _generate_compact_summary(
                                 f"WHERE result_id='{result_id}'"
                             )
                         parts.append(f"→ QUERY: {parse_query}")
-                        parts.append("  (use r2.value->>'$.COLUMN_NAME' with exact column names above)")
+                        parts.append("  (use r2.value->>'$[\"COLUMN_NAME\"]' for columns with dots/spaces)")
                     else:
                         # No header
                         if parent_path:
@@ -2372,7 +2391,7 @@ def _generate_compact_summary(
                     # Show extraction with actual column names (first 2-3 columns)
                     sample_cols = csv.columns[:3]
                     extracts = ", ".join(
-                        f"r.value->>'$.{col}'" for col in sample_cols
+                        f"r.value->>'{_safe_json_path(col)}'" for col in sample_cols
                     )
                     extract_query = (
                         f"SELECT {extracts} "
@@ -2380,7 +2399,7 @@ def _generate_compact_summary(
                         f"WHERE t.result_id='{result_id}'"
                     )
                     parts.append(f"→ QUERY: {extract_query}")
-                    parts.append(f"  (use r.value->>'$.COLUMN_NAME' with exact column names above)")
+                    parts.append("  (use r.value->>'$[\"COLUMN_NAME\"]' for columns with dots/spaces)")
                 else:
                     # No header - use array indices
                     parse_query = (
