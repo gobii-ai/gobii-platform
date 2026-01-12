@@ -3214,7 +3214,6 @@ def _get_system_instruction(
             f"## Implied Send → {display_name}\n\n"
             "Your text goes directly to the user—no buffer, no 'compile' step. Whatever you write is what they see.\n"
             "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
-            "**Stopping is permanent**: When all cards are done and you send a message, you're terminated until next scheduled trigger or incoming message. Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report.\n"
             "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
@@ -3304,26 +3303,16 @@ def _get_system_instruction(
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *') + {reply.replace('Message', 'Hourly now!')}\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**Before stopping:** verify no todo/doing cards remain—if they do, keep working or set a schedule. Running low on credits? Set a schedule NOW or you'll be terminated with no way to resume.\n"
-        "**Stopping is permanent:** When all kanban cards are done and you send your final report, you're terminated until next scheduled trigger or incoming message. "
-        "Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report. "
-        "If you mark the last card done without sending output, you'll be prompted to send it.\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
     if implied_send_active:
         will_continue_guidance = (
-            "**How stopping works (implied send mode):**\n"
-            "- Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)\n"
-            "- Stopping is permanent: all cards done + final report sent = terminated until next trigger/message\n"
-            "- Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending final report\n"
-            "- If you mark kanban complete without a user-facing message, you'll be prompted to send it\n"
+            "**Stopping:** Text-only replies auto-send and stop. End with \"CONTINUE_WORK_SIGNAL\" to request another turn.\n"
         )
     else:
         will_continue_guidance = (
-            "**Stopping is permanent.** "
-            "All cards done + final report sent = terminated until next scheduled trigger or incoming message. "
-            "Open todo/doing cards = you continue (system enforces this). "
-            "Use `will_continue_work=true` for progress updates; `will_continue_work=false` when sending your final report.\n"
+            "**Stopping:** All cards done + final report sent = terminated until next trigger/message.\n"
         )
 
     delivery_instructions = (
@@ -3837,18 +3826,25 @@ def _get_system_instruction(
         "A thin summary of rich data is a missed opportunity. "
         "When you find a list of things to investigate, investigate all of them—add a kanban card for each.\n\n"
 
-        "will_continue_work=true when:\n"
-        "- Fetched data but haven't reported it\n"
-        "- Cards in todo/doing remain\n"
-        "- More tool calls needed\n\n"
-
-        "When all cards are done (or deferred with schedule), your final report terminates you—permanently, until next trigger or incoming message. "
-        "WRONG: seeing a todo card, doing work you *think* addresses it, then sending a message without marking it done → orphans the card. "
-        "RIGHT: UPDATE card to done FIRST, then send your final report with `will_continue_work=false`.\n\n"
+        "## Silent Work vs Messaging\n\n"
+        "**Work silently by default.** Tool calls need no announcement:\n"
+        "```\n"
+        "SILENT (just call the tool, no message):\n"
+        "  searching, querying, fetching, enabling tools, updating charter/kanban\n"
+        "\n"
+        "MESSAGE (when you have actual content):\n"
+        "  findings to share, complete deliverable, blocking question, final report\n"
+        "```\n\n"
+        "**Anti-patterns that waste turns:**\n"
+        "```\n"
+        "WRONG: 'Let me search for...'  → tool     # announcing work\n"
+        "WRONG: 'Perfect! Found...'     → tool     # celebrating then continuing\n"
+        "WRONG: 'Let me compile...'     → query    # promising then querying\n"
+        "RIGHT: [no message]            → tool     # just do it\n"
+        "RIGHT: '## Report\\n|data|'    → done     # content in message\n"
+        "```\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps. "
-        "Kanban (__kanban_cards) is always there—if you have work, you should have cards. No cards = no memory of what you're doing. "
-
-        "Contact the user only with new, valuable information. Check history before messaging or repeating work. "
+        "Kanban (__kanban_cards) is always there—if you have work, you should have cards. No cards = no memory of what you're doing.\n\n"
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
