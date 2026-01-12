@@ -16,6 +16,7 @@ from opentelemetry import trace
 from pydantic import BaseModel, ConfigDict
 
 from config import settings
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -354,7 +355,64 @@ def _build_task_payload(
     return task_payload, None
 
 
-def register_captcha_actions(controller) -> None:
+def _track_captcha_event(
+    *,
+    event: AnalyticsEvent,
+    persistent_agent_id: Optional[str],
+    user_id: Optional[str],
+    organization: object | None = None,
+    properties: Optional[dict[str, object]] = None,
+) -> None:
+    if not persistent_agent_id or not user_id:
+        return
+
+    props: dict[str, object] = {
+        "persistent_agent_id": str(persistent_agent_id),
+        "user_id": str(user_id),
+    }
+    if properties:
+        props.update(properties)
+
+    props = Analytics.with_org_properties(props, organization=organization)
+    Analytics.track_event(
+        user_id=str(user_id),
+        event=event,
+        source=AnalyticsSource.AGENT,
+        properties=props,
+    )
+
+
+def _captcha_failure_result(
+    message: str,
+    reason_code: str,
+    *,
+    persistent_agent_id: Optional[str],
+    user_id: Optional[str],
+    organization: object | None = None,
+) -> ActionResult:
+    _track_captcha_event(
+        event=AnalyticsEvent.PERSISTENT_AGENT_CAPTCHA_FAILED,
+        persistent_agent_id=persistent_agent_id,
+        user_id=user_id,
+        organization=organization,
+        properties={
+            "captcha_provider": "capsolver",
+            "reason_code": reason_code,
+        },
+    )
+    return ActionResult(
+        extracted_content=message,
+        include_in_memory=False,
+    )
+
+
+def register_captcha_actions(
+    controller,
+    *,
+    persistent_agent_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    organization: object | None = None,
+) -> None:
     """Register the CAPTCHA solver action with the given controller."""
 
     @controller.action("Solve CAPTCHA using CapSolver API.")
@@ -365,18 +423,31 @@ def register_captcha_actions(controller) -> None:
     ) -> ActionResult:
         """Solve CAPTCHA using CapSolver and inject the solution token."""
         with tracer.start_as_current_span("Browser Agent Solve Captcha") as span:
+            _track_captcha_event(
+                event=AnalyticsEvent.PERSISTENT_AGENT_CAPTCHA_ATTEMPTED,
+                persistent_agent_id=persistent_agent_id,
+                user_id=user_id,
+                organization=organization,
+                properties={"captcha_provider": "capsolver"},
+            )
             api_key = getattr(settings, "CAPSOLVER_API_KEY", "")
             if not api_key:
-                return ActionResult(
-                    extracted_content="Error: CAPSOLVER_API_KEY is not configured.",
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    "Error: CAPSOLVER_API_KEY is not configured.",
+                    "missing_api_key",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             detect_timeout_ms, error_message = _parse_detect_timeout_ms(detect_timeout_ms)
             if error_message:
-                return ActionResult(
-                    extracted_content=error_message,
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    error_message,
+                    "invalid_detect_timeout_ms",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             span.set_attribute("captcha.detect_timeout_ms", detect_timeout_ms or 0)
@@ -385,27 +456,36 @@ def register_captcha_actions(controller) -> None:
 
             page = await browser_session.get_current_page()
             if page is None:
-                return ActionResult(
-                    extracted_content="Error: No active page available to solve CAPTCHA.",
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    "Error: No active page available to solve CAPTCHA.",
+                    "no_active_page",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             detection = await _detect_captcha_with_timeout(page, detect_timeout_ms)
 
             options_payload, options_error = _build_options_payload(options)
             if options_error:
-                return ActionResult(
-                    extracted_content=options_error,
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    options_error,
+                    "options_invalid",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             selected_task_payload = _select_task_payload(options_payload)
             page_url = await page.get_url()
             task_payload, task_error = _build_task_payload(detection, page_url, selected_task_payload)
             if task_error:
-                return ActionResult(
-                    extracted_content=task_error,
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    task_error,
+                    "task_payload_error",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             span.set_attribute("captcha.task_type", task_payload.get("type"))
@@ -419,23 +499,32 @@ def register_captcha_actions(controller) -> None:
                     create_payload = await _capsolver_create_task(client, api_key, task_payload)
                 except httpx.HTTPError as exc:
                     logger.exception("CapSolver createTask request failed")
-                    return ActionResult(
-                        extracted_content=f"CapSolver createTask failed: {exc}",
-                        include_in_memory=False,
+                    return _captcha_failure_result(
+                        f"CapSolver createTask failed: {exc}",
+                        "capsolver_create_task_http_error",
+                        persistent_agent_id=persistent_agent_id,
+                        user_id=user_id,
+                        organization=organization,
                     )
 
                 error_message = _capsolver_error_message(create_payload)
                 if error_message:
-                    return ActionResult(
-                        extracted_content=f"CapSolver createTask error: {error_message}",
-                        include_in_memory=False,
+                    return _captcha_failure_result(
+                        f"CapSolver createTask error: {error_message}",
+                        "capsolver_create_task_error",
+                        persistent_agent_id=persistent_agent_id,
+                        user_id=user_id,
+                        organization=organization,
                     )
 
                 task_id = create_payload.get("taskId") if isinstance(create_payload, dict) else None
                 if not task_id:
-                    return ActionResult(
-                        extracted_content="CapSolver did not return a taskId.",
-                        include_in_memory=False,
+                    return _captcha_failure_result(
+                        "CapSolver did not return a taskId.",
+                        "capsolver_task_id_missing",
+                        persistent_agent_id=persistent_agent_id,
+                        user_id=user_id,
+                        organization=organization,
                     )
                 span.set_attribute("captcha.task_id", str(task_id))
 
@@ -449,16 +538,22 @@ def register_captcha_actions(controller) -> None:
                     )
                 except httpx.HTTPError as exc:
                     logger.exception("CapSolver getTaskResult request failed")
-                    return ActionResult(
-                        extracted_content=f"CapSolver getTaskResult failed: {exc}",
-                        include_in_memory=False,
+                    return _captcha_failure_result(
+                        f"CapSolver getTaskResult failed: {exc}",
+                        "capsolver_get_task_result_http_error",
+                        persistent_agent_id=persistent_agent_id,
+                        user_id=user_id,
+                        organization=organization,
                     )
 
                 error_message = _capsolver_error_message(result_payload)
                 if error_message:
-                    return ActionResult(
-                        extracted_content=f"CapSolver getTaskResult error: {error_message}",
-                        include_in_memory=False,
+                    return _captcha_failure_result(
+                        f"CapSolver getTaskResult error: {error_message}",
+                        "capsolver_get_task_result_error",
+                        persistent_agent_id=persistent_agent_id,
+                        user_id=user_id,
+                        organization=organization,
                     )
 
             status = result_payload.get("status") if isinstance(result_payload, dict) else None
@@ -467,9 +562,12 @@ def register_captcha_actions(controller) -> None:
                 message = f"CapSolver status: {status or 'unknown'}"
                 if error_detail:
                     message = f"{message}; error: {error_detail}"
-                return ActionResult(
-                    extracted_content=message,
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    message,
+                    "capsolver_status_not_ready",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
             solution = None
@@ -484,12 +582,25 @@ def register_captcha_actions(controller) -> None:
                 )
 
             if not token:
-                return ActionResult(
-                    extracted_content="CapSolver returned no solution token.",
-                    include_in_memory=False,
+                return _captcha_failure_result(
+                    "CapSolver returned no solution token.",
+                    "capsolver_token_missing",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
                 )
 
-            updated_fields = await _inject_captcha_token(page, token)
+            try:
+                updated_fields = await _inject_captcha_token(page, token)
+            except Exception as exc:
+                logger.exception("Failed to inject CAPTCHA token")
+                return _captcha_failure_result(
+                    f"Failed to inject CAPTCHA token: {exc}",
+                    "inject_token_failed",
+                    persistent_agent_id=persistent_agent_id,
+                    user_id=user_id,
+                    organization=organization,
+                )
             span.set_attribute("captcha.token_fields_updated", updated_fields)
 
             message_parts = ["Captcha solved via CapSolver"]
@@ -497,6 +608,17 @@ def register_captcha_actions(controller) -> None:
                 message_parts.append(f"type: {detection.captcha_type}")
             message_parts.append(f"token_fields_updated: {updated_fields}")
 
+            _track_captcha_event(
+                event=AnalyticsEvent.PERSISTENT_AGENT_CAPTCHA_SUCCEEDED,
+                persistent_agent_id=persistent_agent_id,
+                user_id=user_id,
+                organization=organization,
+                properties={
+                    "captcha_provider": "capsolver",
+                    "captcha_type": detection.captcha_type if detection else None,
+                    "token_fields_updated": updated_fields,
+                },
+            )
             return ActionResult(
                 extracted_content="; ".join(message_parts),
                 include_in_memory=True,

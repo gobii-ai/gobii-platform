@@ -1826,7 +1826,19 @@ def _process_browser_use_task_core(
                     captcha_enabled = _has_advanced_captcha_resolution(owner)
                     agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                     if captcha_enabled:
-                        register_captcha_actions(controller)
+                        captcha_user_id = None
+                        if getattr(agent_context, "user_id", None):
+                            captcha_user_id = str(agent_context.user_id)
+                        elif task_obj.user_id:
+                            captcha_user_id = str(task_obj.user_id)
+
+                        captcha_org = getattr(agent_context, "organization", None) or task_obj.organization
+                        register_captcha_actions(
+                            controller,
+                            persistent_agent_id=str(persistent_agent_id) if persistent_agent_id else None,
+                            user_id=captcha_user_id,
+                            organization=captcha_org,
+                        )
                         actions.append('solve_captcha')
                     if persistent_agent_id is not None and settings.ALLOW_FILE_UPLOAD:
                         from ..agent.browser_actions import register_upload_actions
