@@ -593,59 +593,22 @@ Use `false` only when ALL are true:
 
 Mark each card done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
 
+**Critical: Send report BEFORE marking complete.** When wrapping up, always send your findings first, then mark the last card done. This ensures your report is delivered before you stop.
+
 Example wrap-up (single response with tools):
 ```
-sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id IN ('step-1', 'step-2');",
-             will_continue_work=false)  # false because final message is in same response
+send_chat_message(body="Here's what I found: [full detailed report]",
+                  will_continue_work=true)  # true because still need to mark done
 
-send_chat_message(body="All done. Here's what I found: ...",
-                  will_continue_work=false)  # false because this IS the final report
+sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='final-task';",
+             will_continue_work=false)  # false: report sent, now done
 ```
-
-## The Terminal Condition
-
-You stop when: **all kanban cards are done** + **you sent a message**. Both conditions together trigger termination.
-
-This means your final response must contain both:
-1. The complete report (your actual findings, not "let me send...")
-2. The sqlite_batch marking cards done
-
-If you only do one, something breaks:
-- Report without marking done → you stop, but cards are orphaned
-- Mark done without report → you stop, but user got nothing useful
-
-**Critical failure mode:**
-
-```
-[Wrong: announce instead of deliver]
-You: sqlite_batch(UPDATE status='done') + "I have all the data! Here's what I'll send you..."
-→ Result: You stopped. That announcement was your final output. No report was ever sent.
-
-[Right: deliver the actual report]
-You: sqlite_batch(UPDATE status='done') + "Here's what I found:
-- Company founded 2023, 15 employees, Series A ($8M)
-- Key people: Jane Smith (CEO), Bob Lee (CTO)
-[full detailed report continues]"
-→ Result: User received complete report. Cards closed. Success.
-```
-
-The message you write IS what the user receives. There's no "compile" step after.
-
-**Forbidden phrases in final messages:**
-These announce intent instead of delivering results. Each one terminates you before delivery:
-- "Let me compile the findings..."
-- "Let me send you the report..."
-- "I'll summarize what I found..."
-- "Here's what I'll share with you..."
-- Any future-tense promise about what you're about to do
-
-If you catch yourself writing these → stop → write the actual content instead.
 
 **When to mark a card done:**
 - After tool call succeeds and you've verified the result (next turn, not same turn as the call)
 - After you've processed/delivered the output
 - Never optimistically before seeing results
-- On your final turn: mark done in the same response as delivering the report
+- Send your report FIRST, then mark the last card done
 
 ---
 
@@ -670,15 +633,15 @@ sqlite_batch(sql="
   INSERT INTO findings SELECT ... WHERE result_id='abc123';
 ", will_continue_work=true)
 
-[Turn N+1: finish remaining work, wrap up]
+[Turn N+1: finish remaining work, wrap up - SEND REPORT FIRST]
 → All data processed
-sqlite_batch(sql="
-  UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
-", will_continue_work=false)  # false: final report is in this same response
 
 send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...",
-                  will_continue_work=false)  # false: THIS is the final report
-// Kanban complete + final report sent → terminated until next trigger/message
+                  will_continue_work=true)  # true: still need to mark last card done
+
+sqlite_batch(sql="
+  UPDATE __kanban_cards SET status='done' WHERE friendly_id='analyze-findings';
+", will_continue_work=false)  # false: report already sent, now done
 ```
 
 **The pattern:**
@@ -686,7 +649,7 @@ send_chat_message(body="Found 12 competitors with pricing data. Here's the summa
 2. See the result - verify success
 3. Only then mark that specific card done
 4. Repeat for each task
-5. Final turn: mark last card done + send report, both with `will_continue_work=false`
+5. Final turn: send report FIRST, then mark last card done
 
 **WRONG patterns:**
 ```sql
@@ -3214,7 +3177,7 @@ def _get_system_instruction(
             f"## Implied Send → {display_name}\n\n"
             "Your text goes directly to the user—no buffer, no 'compile' step. Whatever you write is what they see.\n"
             "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
-            "If you mark kanban complete without a user-facing message, you'll be prompted to send it.\n\n"
+            "When wrapping up, send your report FIRST, then mark the last card done.\n\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -3229,7 +3192,7 @@ def _get_system_instruction(
             "  → 'Nothing to do right now' → auto-sleep until next trigger\n"
             "  Use when: schedule fired but nothing to report\n\n"
             "Message only (no tools)\n"
-            "  → Message sends, then you stop (if kanban complete)\n"
+            "  → Message sends, then you stop\n"
             "  'Let me send the report' = you never send it. Include actual content, not promises.\n"
             "  To continue: end message with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)\n\n"
             "Message + tools\n"
@@ -3312,7 +3275,7 @@ def _get_system_instruction(
         )
     else:
         will_continue_guidance = (
-            "**Stopping:** All cards done + final report sent = terminated until next trigger/message.\n"
+            "**Stopping:** When done, send report first, then mark last card complete with will_continue_work=false.\n"
         )
 
     delivery_instructions = (
@@ -3424,8 +3387,7 @@ def _get_system_instruction(
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
-        "- **Share before marking done.** Never say 'let me send the report'—that message terminates you and the report is never sent. Include the actual findings in your message, not a promise to send them.\n"
-        "- **Keep a 'doing' card while working.** System auto-stops when todo=0 and doing=0. Close out atomically: send complete report + mark last card done, all in one response.\n\n"
+        "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done. This ensures your report is delivered.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
