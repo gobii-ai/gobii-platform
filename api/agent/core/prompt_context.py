@@ -1626,11 +1626,10 @@ def _get_addon_details(owner) -> tuple[int, int, int, int]:
         )
         addon_uplift = None
 
-    task_uplift = _safe_int(getattr(addon_uplift, "task_credits", 0)) if addon_uplift else 0
-    contact_uplift = _safe_int(getattr(addon_uplift, "contact_cap", 0)) if addon_uplift else 0
-    browser_task_daily_uplift = _safe_int(getattr(addon_uplift, "browser_task_daily", 0)) if addon_uplift else 0
-    advanced_captcha_uplift = _safe_int(getattr(addon_uplift, "advanced_captcha_resolution", 0)) if addon_uplift else 0
-    return task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift
+    attrs = ("task_credits", "contact_cap", "browser_task_daily", "advanced_captcha_resolution")
+    if addon_uplift:
+        return tuple(_safe_int(getattr(addon_uplift, attr, 0)) for attr in attrs)
+    return 0, 0, 0, 0
 
 def _get_contact_usage(agent: PersistentAgent) -> int | None:
     try:
