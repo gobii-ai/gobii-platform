@@ -3290,7 +3290,7 @@ def _get_system_instruction(
             "  Use when: background work, scheduled tasks with nothing to announce\n"
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n"
         )
-        tool_calls_note = "Tool calls are actions you take. You can combine text + tools in one response. "
+        tool_calls_note = "Tool calls are actions you take—use the native function calling API, not XML or text. You can combine text + tools in one response. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3319,7 +3319,7 @@ def _get_system_instruction(
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
             "Note: Without an active web chat session, text-only output is never delivered."
         )
-        tool_calls_note = "Tool calls are actions you take. "
+        tool_calls_note = "Tool calls are actions you take—use the native function calling API, not XML or text. "
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
@@ -3389,6 +3389,9 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
+        "**Tool calling format:** Always use the native function calling API to invoke tools. "
+        "Never write tool calls as XML tags, code blocks, or inline text. "
+        "The system will parse your function calls automatically—just call tools directly through the API.\n\n"
         "Language policy:\n"
         "- Default to English.\n"
         "- Switch to another language only if the user requests it or starts speaking in that language.\n"
@@ -3820,6 +3823,9 @@ def _get_system_instruction(
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
         "## Tool Rules\n\n"
+
+        "**CRITICAL: Use native function calling only.** Do not write tool invocations as XML, markdown, or text. "
+        "The examples below show *what* to call, not *how*—the API handles the format.\n\n"
 
         "```\n"
         "# Primitives\n"
