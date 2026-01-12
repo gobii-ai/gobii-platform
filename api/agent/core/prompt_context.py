@@ -2106,7 +2106,7 @@ def build_prompt_context(
     )
     if reasoning_streak_text:
         critical_group.section_text(
-            "tool_usage_warning",
+            "reasoning_only_warning",
             reasoning_streak_text,
             weight=5,
             non_shrinkable=True
