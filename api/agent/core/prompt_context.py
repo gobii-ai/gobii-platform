@@ -600,13 +600,13 @@ No schedule + no incoming message = you never run again. Your work dies with you
 
 ```
 true  → "I need another turn" — use when work remains or report not yet sent
-false → "I'm done" — use ONLY after delivering final output to user
+false → "I'm done" — use ONLY after delivering final output to user and ready to sleep
 ```
 
 **The logic:**
 ```
 if final_report_sent:
-    will_continue_work = false  # Safe to stop
+    will_continue_work = false  # Safe to stop, go to sleep
 else:
     will_continue_work = true   # Must send report before stopping
 ```
