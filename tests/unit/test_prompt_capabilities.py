@@ -43,7 +43,12 @@ class AgentCapabilitiesPromptTests(TestCase):
             "name": "Pro",
             "max_contacts_per_agent": 20,
         }
-        uplift_mock.return_value = AddonUplift(task_credits=2000, contact_cap=10)
+        uplift_mock.return_value = AddonUplift(
+            task_credits=2000,
+            contact_cap=10,
+            browser_task_daily=5,
+            advanced_captcha_resolution=1,
+        )
 
         CommsAllowlistEntry.objects.create(
             agent=self.agent,
@@ -57,6 +62,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         sections = _build_agent_capabilities_sections(self.agent)
         capabilities_note = sections.get("agent_capabilities_note", "")
         plan_info = sections.get("plan_info", "")
+        agent_addons = sections.get("agent_addons", "")
         agent_settings = sections.get("agent_settings", "")
         email_settings = sections.get("agent_email_settings", "")
 
@@ -66,12 +72,21 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Plan: Pro", plan_info)
         self.assertIn("Available plans", plan_info)
         self.assertIn("Intelligence selection available", plan_info)
-        self.assertIn("Add-ons: +2000 credits; +10 contacts.", plan_info)
+        self.assertIn(
+            "Add-ons: +2000 credits; +10 contacts; +5 browser tasks/day; Advanced CAPTCHA resolution enabled.",
+            plan_info,
+        )
         self.assertIn("Per-agent contact cap: 30 (20 included in plan + add-ons", plan_info)
         self.assertIn("Contact usage: 1/30", plan_info)
         self.assertIn("Dedicated IPs purchased: 2", plan_info)
         self.assertIn("/console/billing/", plan_info)
         self.assertNotIn(f"/console/agents/{self.agent.id}/", plan_info)
+
+        self.assertIn("Agent add-ons:", agent_addons)
+        self.assertIn("Task pack: adds extra task credits", agent_addons)
+        self.assertIn("Contact pack: increases the per-agent contact cap", agent_addons)
+        self.assertIn("Browser task pack: increases the per-agent daily browser task limit", agent_addons)
+        self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 
         self.assertIn(f"/console/agents/{self.agent.id}/", agent_settings)
         self.assertIn("Agent email settings", email_settings)

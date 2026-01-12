@@ -1617,7 +1617,7 @@ def _get_plan_details(owner) -> tuple[dict[str, int | str], str, str, int, str]:
     available_plans = ", ".join(cfg.get("name") or name for name, cfg in PLAN_CONFIG.items())
     return plan, plan_id, plan_name, base_contact_cap, available_plans
 
-def _get_addon_details(owner) -> tuple[int, int]:
+def _get_addon_details(owner) -> tuple[int, int, int, int]:
     try:
         addon_uplift = AddonEntitlementService.get_uplift(owner)
     except DatabaseError:
@@ -1626,9 +1626,10 @@ def _get_addon_details(owner) -> tuple[int, int]:
         )
         addon_uplift = None
 
-    task_uplift = _safe_int(getattr(addon_uplift, "task_credits", 0)) if addon_uplift else 0
-    contact_uplift = _safe_int(getattr(addon_uplift, "contact_cap", 0)) if addon_uplift else 0
-    return task_uplift, contact_uplift
+    attrs = ("task_credits", "contact_cap", "browser_task_daily", "advanced_captcha_resolution")
+    if addon_uplift:
+        return tuple(_safe_int(getattr(addon_uplift, attr, 0)) for attr in attrs)
+    return 0, 0, 0, 0
 
 def _get_contact_usage(agent: PersistentAgent) -> int | None:
     try:
@@ -1664,7 +1665,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     owner = agent.organization or agent.user
     _plan, plan_id, plan_name, base_contact_cap, available_plans = _get_plan_details(owner)
-    task_uplift, contact_uplift = _get_addon_details(owner)
+    task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift = _get_addon_details(owner)
     effective_contact_cap = base_contact_cap + contact_uplift
 
     dedicated_total = _get_dedicated_ip_count(owner)
@@ -1697,6 +1698,11 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         addon_parts.append(f"+{task_uplift} credits")
     if contact_uplift:
         addon_parts.append(f"+{contact_uplift} contacts")
+    if browser_task_daily_uplift:
+        unit = "task" if browser_task_daily_uplift == 1 else "tasks"
+        addon_parts.append(f"+{browser_task_daily_uplift} browser {unit}/day")
+    if advanced_captcha_uplift:
+        addon_parts.append("Advanced CAPTCHA resolution enabled")
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:
@@ -1720,9 +1726,21 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     return {
         "agent_capabilities_note": capabilities_note,
         "plan_info": "\n".join(lines),
+        "agent_addons": _build_agent_addons_section(),
         "agent_settings": _build_agent_settings_section(agent),
         "agent_email_settings": _build_agent_email_settings_section(agent),
     }
+
+
+def _build_agent_addons_section() -> str:
+    """Return a short description of the available add-ons."""
+    lines: list[str] = [
+        "Task pack: adds extra task credits for the current billing period.",
+        "Contact pack: increases the per-agent contact cap.",
+        "Browser task pack: increases the per-agent daily browser task limit.",
+        "Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving during browser tasks.",
+    ]
+    return "Agent add-ons:\n- " + "\n- ".join(lines)
 
 
 def _build_agent_settings_section(agent: PersistentAgent) -> str:
@@ -1939,6 +1957,9 @@ def build_prompt_context(
         plan_info_text = capabilities_sections.get("plan_info")
         if plan_info_text:
             cap_group.section_text("plan_info", plan_info_text, weight=2, non_shrinkable=True)
+        addons_text = capabilities_sections.get("agent_addons")
+        if addons_text:
+            cap_group.section_text("agent_addons", addons_text, weight=1, non_shrinkable=True)
         settings_text = capabilities_sections.get("agent_settings")
         if settings_text:
             cap_group.section_text("agent_settings", settings_text, weight=1, non_shrinkable=True)
