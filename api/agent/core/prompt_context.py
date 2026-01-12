@@ -240,9 +240,14 @@ never: use(assumed) | use(remembered) | use(guessed)
 guess(identifier) → error   # you ARE about to get "no such column"
 
 # Two-step pattern (critical for complex queries)
+# BOTH STEPS IN ONE sqlite_batch CALL — never split across calls
 unknown(structure) → step1: inspect → step2: use(inspected)
-step1: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='{id}'
-step2: use exact paths/fields revealed by step1
+sqlite_batch(sql="
+  SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='{id}';  -- step1: get enough context
+  SELECT regexp_extract(result_text, 'pattern1'), ...  -- step2: use paths from step1
+  FROM __tool_results WHERE result_id='{id}'")
+one_result_id = one_sqlite_batch   # never query same result_id in separate calls
+budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
 
 # Identifiers: copy, never construct
 result_id    → copy_verbatim(tool_result.result_id)
@@ -263,7 +268,7 @@ do not invent columns; only use those listed above
 # JSON: path from hint, field from hint
 hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
 hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
-hint absent → query first: SELECT substr(result_text, 1, 500) FROM __tool_results WHERE result_id='...'
+hint absent → query first: SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='...'
 
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})
@@ -324,27 +329,6 @@ When you don't have data: say so. Don't fill the gap with plausible-sounding fab
 
 ---
 
-## Reading Hints
-
-Every tool result includes metadata. Use it exactly:
-
-```
-Result shows:
-  result_id='7f3a2b1c'
-  → PATH: $.content.hits (30 items)
-  → FIELDS: title, points, url
-  → QUERY: SELECT json_extract(r.value,'$.title')...
-
-Your query uses:
-  WHERE result_id='7f3a2b1c'           -- copy exactly
-  json_each(result_json,'$.content.hits')  -- path from hint
-  json_extract(r.value,'$.title')      -- fields from hint
-```
-
-Common mistakes: guessing `$.hits` when hint shows `$.content.hits`. Using `point` when field is `points`. Every identifier must trace to its source.
-
----
-
 ## Modular Patterns
 
 Each module shows: **when** to use it, **what** to do, and **what comes next**.
@@ -385,16 +369,6 @@ then:
   if succeeded → M5 (store in table)
   if failed or empty → M4 (fall back to scrape)
   if need different data types → M1 again
-```
-
-Example:
-```
-# Parallel calls for company research
-mcp_brightdata_web_data_linkedin_company_profile(url="linkedin.com/company/acme")
-mcp_brightdata_web_data_crunchbase_company(url="crunchbase.com/organization/acme")
-
-# Result: clean JSON with employees, funding, headquarters
-→ Store in table (M5)
 ```
 
 ---
@@ -502,14 +476,6 @@ then:
   if have multiple tables → M6 (cross-reference)
   if need categorization → M7 (classify)
   if analysis complete → deliver findings (structured, complete, grounded in data)
-```
-
-Defensive patterns:
-```sql
-COALESCE(x, 'default')           -- handle nulls
-NULLIF(TRIM(x), '')              -- empty string → null
-CAST(x AS REAL)                  -- ensure numeric
-COALESCE(NULLIF(TRIM(x),''), y)  -- chain fallbacks
 ```
 
 ---
@@ -648,33 +614,19 @@ If you only do one, something breaks:
 - Report without marking done → you stop, but cards are orphaned
 - Mark done without report → you stop, but user got nothing useful
 
-**Micro trajectories:**
+**Critical failure mode:**
 
 ```
-[Wrong: report only]
-You: "Here's what I found about the Gobii team: Andrew is the founder..."
-     (no sqlite_batch to mark cards done)
-→ Result: You stopped. Cards still open. Work appears incomplete.
-
-[Wrong: mark done only]
-You: sqlite_batch(UPDATE status='done') + "Great, let me compile the findings..."
-→ Result: You stopped. User received "let me compile..." Cards closed but no actual report delivered.
-
 [Wrong: announce instead of deliver]
 You: sqlite_batch(UPDATE status='done') + "I have all the data! Here's what I'll send you..."
 → Result: You stopped. That announcement was your final output. No report was ever sent.
 
-[Right: both together]
-You: sqlite_batch(UPDATE status='done') + "Here's the complete Gobii team analysis:
-
-**Team Members:**
-- Andrew Christianson (Founder) - Ex-NSA, created RA.Aid...
-- Will Bonde (Growth) - 20 years enterprise software...
-
-**Company Background:**
-- Founded 2024, browser-native AI agents...
+[Right: deliver the actual report]
+You: sqlite_batch(UPDATE status='done') + "Here's what I found:
+- Company founded 2023, 15 employees, Series A ($8M)
+- Key people: Jane Smith (CEO), Bob Lee (CTO)
 [full detailed report continues]"
-→ Result: You stopped. User received complete report. Cards closed. Success.
+→ Result: User received complete report. Cards closed. Success.
 ```
 
 The message you write IS what the user receives. There's no "compile" step after.
@@ -3290,7 +3242,7 @@ def _get_system_instruction(
             "  Use when: background work, scheduled tasks with nothing to announce\n"
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n"
         )
-        tool_calls_note = "Tool calls are actions you take—use the native function calling API, not XML or text. You can combine text + tools in one response. "
+        tool_calls_note = "Tool calls use OpenAI-compatible JSON in the tool_calls array—never XML or text. You can combine text + tools in one response. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3319,7 +3271,7 @@ def _get_system_instruction(
             "  Example: sqlite_batch(sql=\"UPDATE __agent_config SET charter='...' WHERE id=1;\")\n\n"
             "Note: Without an active web chat session, text-only output is never delivered."
         )
-        tool_calls_note = "Tool calls are actions you take—use the native function calling API, not XML or text. "
+        tool_calls_note = "Tool calls use OpenAI-compatible JSON in the tool_calls array—never XML or text. "
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
@@ -3389,9 +3341,13 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
-        "**Tool calling format:** Always use the native function calling API to invoke tools. "
-        "Never write tool calls as XML tags, code blocks, or inline text. "
-        "The system will parse your function calls automatically—just call tools directly through the API.\n\n"
+        "## CRITICAL: Tool Call Format\n\n"
+        "You MUST use OpenAI-compatible JSON function calling. Your tool calls go in the `tool_calls` array of your response, NOT in your message text.\n\n"
+        "WRONG (these do nothing):\n"
+        "- XML: `<function_calls><invoke name=\"...\">` or `<function_calls>`\n"
+        "- Text: `sqlite_batch(sql=\"...\")` written in your message\n\n"
+        "RIGHT: Use the API's tool_calls mechanism with JSON arguments like `{\"sql\": \"SELECT ...\"}`\n\n"
+        "If you output XML or text tool syntax, it will NOT execute and your task will fail.\n\n"
         "Language policy:\n"
         "- Default to English.\n"
         "- Switch to another language only if the user requests it or starts speaking in that language.\n"
@@ -3824,8 +3780,9 @@ def _get_system_instruction(
 
         "## Tool Rules\n\n"
 
-        "**CRITICAL: Use native function calling only.** Do not write tool invocations as XML, markdown, or text. "
-        "The examples below show *what* to call, not *how*—the API handles the format.\n\n"
+        "**FORMAT: OpenAI-compatible JSON in tool_calls array.** "
+        "XML like `<invoke>` or `<function_calls>` in your text does NOTHING. "
+        "Examples below show *what* to call; use the API's tool_calls mechanism with JSON arguments.\n\n"
 
         "```\n"
         "# Primitives\n"
