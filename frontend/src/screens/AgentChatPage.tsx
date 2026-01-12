@@ -181,9 +181,6 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
-    timelineRef.current = node
-  }, [])
 
   const [activeAgentId, setActiveAgentId] = useState(agentId)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
@@ -466,25 +463,66 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     })
   }, [getAdjustedDistanceToBottom, updateIsNearBottom])
 
+  // Keep track of composer height to adjust scroll when it changes
+  const prevComposerHeight = useRef<number | null>(null)
+
+  const jumpToBottom = useCallback(() => {
+    const target = document.scrollingElement ?? document.documentElement ?? document.body
+    // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
+    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'instant' })
+    updateIsNearBottom()
+  }, [updateIsNearBottom])
+
   useEffect(() => {
     const composer = document.getElementById('agent-composer-shell')
-    if (!composer || typeof ResizeObserver === 'undefined') {
-      return () => undefined
-    }
+    if (!composer) return
 
-    const observer = new ResizeObserver(() => {
-      if (autoScrollPinnedRef.current) {
-        scrollToBottom()
-        return
+    const observer = new ResizeObserver((entries) => {
+      const height = entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height
+
+      if (prevComposerHeight.current !== null) {
+        const delta = height - prevComposerHeight.current
+        // If composer grew and we're at the bottom, scroll down to keep content visible
+        if (delta > 0 && (autoScrollPinnedRef.current || isNearBottomRef.current)) {
+          window.scrollBy({ top: delta })
+        }
       }
-      updateIsNearBottom()
+
+      prevComposerHeight.current = height
+
+      if (autoScrollPinnedRef.current) {
+        // Ensure we stay pinned if we were pinned
+        jumpToBottom()
+      } else {
+        updateIsNearBottom()
+      }
     })
 
     observer.observe(composer)
-    return () => {
-      observer.disconnect()
-    }
-  }, [scrollToBottom, updateIsNearBottom])
+    return () => observer.disconnect()
+  }, [jumpToBottom, updateIsNearBottom])
+
+  const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
+  const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
+    timelineRef.current = node
+    setTimelineNode(node)
+  }, [])
+
+  // Observe timeline changes (e.g. images loading) to keep pinned to bottom
+  useEffect(() => {
+    if (!timelineNode) return
+
+    const observer = new ResizeObserver(() => {
+      if (autoScrollPinnedRef.current) {
+        jumpToBottom()
+      } else {
+        updateIsNearBottom()
+      }
+    })
+
+    observer.observe(timelineNode)
+    return () => observer.disconnect()
+  }, [timelineNode, jumpToBottom, updateIsNearBottom])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -500,9 +538,10 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     if (!initialLoading && events.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
-      scrollToBottom()
+      // Use a small timeout to allow layout to settle before jumping
+      requestAnimationFrame(() => jumpToBottom())
     }
-  }, [events.length, initialLoading, isNewAgent, scrollToBottom, setAutoScrollPinned])
+  }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
     if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
