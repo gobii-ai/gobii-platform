@@ -302,8 +302,8 @@ def _get_uidnext(client: imaplib.IMAP4) -> Optional[int]:
         typ, data = client.response("UIDNEXT")
         if typ == "OK" and data and isinstance(data, list) and data[0]:
             return _parse_uidnext_value(data[0])
-    except Exception:
-        pass
+    except (imaplib.IMAP4.abort, imaplib.IMAP4.error) as exc:
+        logger.warning("Failed to get UIDNEXT: %s", exc)
     return None
 
 
@@ -316,12 +316,12 @@ def _uid_search_unseen_fallback(client: imaplib.IMAP4, start: int) -> List[str]:
     try:
         min_uid = start + 1 if start > 0 else 1
         uids = [u for u in uids if int(u) >= min_uid]
-    except Exception:
-        pass
-    try:
         uids = sorted(uids, key=lambda s: int(s))
-    except Exception:
-        pass
+    except ValueError as exc:
+        logger.warning(
+            "Error processing UIDs in fallback search: %s. Results may be incomplete or unsorted.",
+            exc,
+        )
     return uids
 
 
@@ -339,19 +339,18 @@ def _uid_search_new_chunked(client: imaplib.IMAP4, start: int) -> List[str]:
         query = f"(UNSEEN UID {cursor}:{chunk_end})"
         typ, data = client.uid("SEARCH", None, query)
         if typ != "OK":
-            logger.warning("IMAP UID SEARCH chunk returned %s for %s", typ, query)
-        else:
-            uids.extend(_parse_uid_list(data))
+            logger.warning(
+                "IMAP UID SEARCH chunk returned %s for %s; falling back to UNSEEN search",
+                typ,
+                query,
+            )
+            return _uid_search_unseen_fallback(client, start)
+        uids.extend(_parse_uid_list(data))
         cursor = chunk_end + 1
     try:
-        min_uid = start + 1 if start > 0 else 1
-        uids = [u for u in uids if int(u) >= min_uid]
-    except Exception:
-        pass
-    try:
         uids = sorted(set(uids), key=lambda s: int(s))
-    except Exception:
-        pass
+    except ValueError as exc:
+        logger.warning("Error sorting UIDs in chunked search: %s", exc)
     return uids
 
 
@@ -433,14 +432,14 @@ def _poll_account_locked(acct: AgentEmailAccount) -> None:
                     acct.endpoint.address,
                     exc,
                 )
-                try:
-                    if client is not None:
+                if client is not None:
+                    try:
+                        client.logout()
+                    except Exception:
                         try:
-                            client.logout()
-                        except Exception:
                             client.shutdown()  # type: ignore[attr-defined]
-                except Exception:
-                    pass
+                        except Exception:
+                            pass
                 client = _connect_imap(acct)
                 uids = _uid_search_new_chunked(client, stored_uid)
             # Align with plan: new_uid_count; keep prior metric name minimal
