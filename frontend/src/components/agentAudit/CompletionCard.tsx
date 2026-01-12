@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Cpu } from 'lucide-react'
 
 import type { AuditCompletionEvent, PromptArchive } from '../../types/agentAudit'
@@ -32,9 +32,8 @@ export function CompletionCard({
   const systemPrompt = promptPayload?.system_prompt
   const userPrompt = promptPayload?.user_prompt
   const [expanded, setExpanded] = useState(false)
-  const [responseIdCopied, setResponseIdCopied] = useState(false)
-  const responseCopyTimeout = useRef<number | null>(null)
   const responseId = completion.response_id
+  const openRouterUrl = responseId ? `https://openrouter.ai/api/v1/generation?id=${responseId}` : null
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -44,28 +43,6 @@ export function CompletionCard({
       console.error('Copy failed', err)
     }
   }
-
-  const handleCopyResponseId = async () => {
-    if (!responseId) return
-    try {
-      await navigator.clipboard.writeText(responseId)
-      setResponseIdCopied(true)
-      if (responseCopyTimeout.current) {
-        window.clearTimeout(responseCopyTimeout.current)
-      }
-      responseCopyTimeout.current = window.setTimeout(() => setResponseIdCopied(false), 1400)
-    } catch (err) {
-      console.error('Copy failed', err)
-    }
-  }
-
-  useEffect(() => {
-    return () => {
-      if (responseCopyTimeout.current) {
-        window.clearTimeout(responseCopyTimeout.current)
-      }
-    }
-  }, [])
 
   const completionLabel = useMemo(() => {
     const key = (completion.completion_type || '').toLowerCase()
@@ -117,18 +94,16 @@ export function CompletionCard({
             <TokenPill label="Output" value={completion.completion_tokens} />
             <TokenPill label="Total" value={completion.total_tokens} />
             <TokenPill label="Cached" value={completion.cached_tokens} />
-            {responseId ? (
-              <button
-                type="button"
-                onClick={handleCopyResponseId}
-                title="Copy response id"
+            {openRouterUrl ? (
+              <a
+                href={openRouterUrl}
+                target="_blank"
+                rel="noreferrer"
+                title="View OpenRouter response"
                 className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-indigo-200"
               >
-                Copy Response ID
-              </button>
-            ) : null}
-            {responseIdCopied ? (
-              <span className="text-[11px] text-emerald-600 transition-opacity">Copied</span>
+                OpenRouter Response
+              </a>
             ) : null}
           </div>
 
