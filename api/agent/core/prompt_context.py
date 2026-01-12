@@ -1617,7 +1617,7 @@ def _get_plan_details(owner) -> tuple[dict[str, int | str], str, str, int, str]:
     available_plans = ", ".join(cfg.get("name") or name for name, cfg in PLAN_CONFIG.items())
     return plan, plan_id, plan_name, base_contact_cap, available_plans
 
-def _get_addon_details(owner) -> tuple[int, int]:
+def _get_addon_details(owner) -> tuple[int, int, int, int]:
     try:
         addon_uplift = AddonEntitlementService.get_uplift(owner)
     except DatabaseError:
@@ -1628,7 +1628,9 @@ def _get_addon_details(owner) -> tuple[int, int]:
 
     task_uplift = _safe_int(getattr(addon_uplift, "task_credits", 0)) if addon_uplift else 0
     contact_uplift = _safe_int(getattr(addon_uplift, "contact_cap", 0)) if addon_uplift else 0
-    return task_uplift, contact_uplift
+    browser_task_daily_uplift = _safe_int(getattr(addon_uplift, "browser_task_daily", 0)) if addon_uplift else 0
+    advanced_captcha_uplift = _safe_int(getattr(addon_uplift, "advanced_captcha_resolution", 0)) if addon_uplift else 0
+    return task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift
 
 def _get_contact_usage(agent: PersistentAgent) -> int | None:
     try:
@@ -1664,7 +1666,7 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
 
     owner = agent.organization or agent.user
     _plan, plan_id, plan_name, base_contact_cap, available_plans = _get_plan_details(owner)
-    task_uplift, contact_uplift = _get_addon_details(owner)
+    task_uplift, contact_uplift, browser_task_daily_uplift, advanced_captcha_uplift = _get_addon_details(owner)
     effective_contact_cap = base_contact_cap + contact_uplift
 
     dedicated_total = _get_dedicated_ip_count(owner)
@@ -1697,6 +1699,11 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
         addon_parts.append(f"+{task_uplift} credits")
     if contact_uplift:
         addon_parts.append(f"+{contact_uplift} contacts")
+    if browser_task_daily_uplift:
+        unit = "task" if browser_task_daily_uplift == 1 else "tasks"
+        addon_parts.append(f"+{browser_task_daily_uplift} browser {unit}/day")
+    if advanced_captcha_uplift:
+        addon_parts.append("Advanced CAPTCHA resolution enabled")
     lines.append(f"Add-ons: {'; '.join(addon_parts)}." if addon_parts else "Add-ons: none active.")
 
     if effective_contact_cap or contact_uplift:

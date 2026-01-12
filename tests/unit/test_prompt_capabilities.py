@@ -43,7 +43,12 @@ class AgentCapabilitiesPromptTests(TestCase):
             "name": "Pro",
             "max_contacts_per_agent": 20,
         }
-        uplift_mock.return_value = AddonUplift(task_credits=2000, contact_cap=10)
+        uplift_mock.return_value = AddonUplift(
+            task_credits=2000,
+            contact_cap=10,
+            browser_task_daily=5,
+            advanced_captcha_resolution=1,
+        )
 
         CommsAllowlistEntry.objects.create(
             agent=self.agent,
@@ -66,7 +71,10 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Plan: Pro", plan_info)
         self.assertIn("Available plans", plan_info)
         self.assertIn("Intelligence selection available", plan_info)
-        self.assertIn("Add-ons: +2000 credits; +10 contacts.", plan_info)
+        self.assertIn(
+            "Add-ons: +2000 credits; +10 contacts; +5 browser tasks/day; Advanced CAPTCHA resolution enabled.",
+            plan_info,
+        )
         self.assertIn("Per-agent contact cap: 30 (20 included in plan + add-ons", plan_info)
         self.assertIn("Contact usage: 1/30", plan_info)
         self.assertIn("Dedicated IPs purchased: 2", plan_info)
