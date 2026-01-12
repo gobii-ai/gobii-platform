@@ -56,16 +56,16 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             ).order_by("timestamp")
         )
 
-        second_or_third = [msg for idx, msg in enumerate(outbound) if idx in (1, 2)]
-        job_messages_judged = [msg for msg in second_or_third if self._is_job_message(msg.body or "")]
+        first_three = outbound[:3]
+        job_messages_judged = [msg for msg in first_three if self._is_job_message(msg.body or "")]
 
-        if not second_or_third:
+        if not first_three:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.FAILED,
                 task_name="verify_three_sources",
-                observed_summary="No second/third outbound message to judge for job listings.",
+                observed_summary="No first/second/third outbound message to judge for job listings.",
             )
             self.record_task_result(
                 run_id,
@@ -77,7 +77,7 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             return
 
         judged_results = []
-        for idx, msg in enumerate(second_or_third, start=2):
+        for idx, msg in enumerate(first_three, start=1):
             domains = self._extract_domains(msg.body or "")
             job_item_count = self._estimate_job_item_count(msg.body or "")
 

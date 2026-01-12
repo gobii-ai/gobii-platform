@@ -600,13 +600,13 @@ No schedule + no incoming message = you never run again. Your work dies with you
 
 ```
 true  → "I need another turn" — use when work remains or report not yet sent
-false → "I'm done" — use ONLY after delivering final output to user
+false → "I'm done" — use ONLY after delivering final output to user and ready to sleep
 ```
 
 **The logic:**
 ```
 if final_report_sent:
-    will_continue_work = false  # Safe to stop
+    will_continue_work = false  # Safe to stop, go to sleep
 else:
     will_continue_work = true   # Must send report before stopping
 ```
@@ -2106,7 +2106,7 @@ def build_prompt_context(
     )
     if reasoning_streak_text:
         critical_group.section_text(
-            "tool_usage_warning",
+            "reasoning_only_warning",
             reasoning_streak_text,
             weight=5,
             non_shrinkable=True

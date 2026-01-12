@@ -2914,7 +2914,6 @@ def _run_agent_loop(
                         agent.id,
                         implied_error or "unknown error",
                     )
-                    _persist_reasoning_step(thinking_content)
                     try:
                         step_kwargs = {
                             "agent": agent,
