@@ -62,6 +62,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         sections = _build_agent_capabilities_sections(self.agent)
         capabilities_note = sections.get("agent_capabilities_note", "")
         plan_info = sections.get("plan_info", "")
+        agent_addons = sections.get("agent_addons", "")
         agent_settings = sections.get("agent_settings", "")
         email_settings = sections.get("agent_email_settings", "")
 
@@ -80,6 +81,12 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Dedicated IPs purchased: 2", plan_info)
         self.assertIn("/console/billing/", plan_info)
         self.assertNotIn(f"/console/agents/{self.agent.id}/", plan_info)
+
+        self.assertIn("Agent add-ons:", agent_addons)
+        self.assertIn("Task pack: adds extra task credits", agent_addons)
+        self.assertIn("Contact pack: increases the per-agent contact cap", agent_addons)
+        self.assertIn("Browser task pack: increases the per-agent daily browser task limit", agent_addons)
+        self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 
         self.assertIn(f"/console/agents/{self.agent.id}/", agent_settings)
         self.assertIn("Agent email settings", email_settings)

@@ -1727,9 +1727,21 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     return {
         "agent_capabilities_note": capabilities_note,
         "plan_info": "\n".join(lines),
+        "agent_addons": _build_agent_addons_section(),
         "agent_settings": _build_agent_settings_section(agent),
         "agent_email_settings": _build_agent_email_settings_section(agent),
     }
+
+
+def _build_agent_addons_section() -> str:
+    """Return a short description of the available add-ons."""
+    lines: list[str] = [
+        "Task pack: adds extra task credits for the current billing period.",
+        "Contact pack: increases the per-agent contact cap.",
+        "Browser task pack: increases the per-agent daily browser task limit.",
+        "Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving during browser tasks.",
+    ]
+    return "Agent add-ons:\n- " + "\n- ".join(lines)
 
 
 def _build_agent_settings_section(agent: PersistentAgent) -> str:
@@ -1946,6 +1958,9 @@ def build_prompt_context(
         plan_info_text = capabilities_sections.get("plan_info")
         if plan_info_text:
             cap_group.section_text("plan_info", plan_info_text, weight=2, non_shrinkable=True)
+        addons_text = capabilities_sections.get("agent_addons")
+        if addons_text:
+            cap_group.section_text("agent_addons", addons_text, weight=1, non_shrinkable=True)
         settings_text = capabilities_sections.get("agent_settings")
         if settings_text:
             cap_group.section_text("agent_settings", settings_text, weight=1, non_shrinkable=True)
