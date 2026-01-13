@@ -11,6 +11,7 @@ const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 
 type AppRoute =
   | { kind: 'command-center' }
+  | { kind: 'agent-select' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
@@ -70,7 +71,7 @@ function parseRoute(pathname: string): AppRoute {
   }
 
   if (parts[0] === 'agents') {
-    return { kind: 'command-center' }
+    return { kind: 'agent-select' }
   }
 
   return { kind: 'not-found' }
@@ -264,7 +265,7 @@ export function ImmersiveApp() {
   }, [])
 
   const handleContextSwitch = useCallback((_context: ConsoleContext) => {
-    navigateTo('/app')
+    navigateTo('/app/agents')
   }, [])
 
   return (
@@ -273,6 +274,15 @@ export function ImmersiveApp() {
         {route.kind === 'agent-chat' ? (
           <AgentChatPage
             agentId={route.agentId}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            onContextSwitch={handleContextSwitch}
+          />
+        ) : null}
+        {route.kind === 'agent-select' ? (
+          <AgentChatPage
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}

@@ -28,6 +28,14 @@ def _resolve_org_from_agent(user, queryset: QuerySet, agent_id: str | None) -> U
     return None
 
 
+def _sync_session_context(session, membership: OrganizationMembership) -> None:
+    if session is None or membership is None:
+        return
+    session["context_type"] = "organization"
+    session["context_id"] = str(membership.org.id)
+    session["context_name"] = membership.org.name
+
+
 def agent_queryset_for(user, session, agent_id: str | None = None) -> QuerySet:
     """Return queryset of agents visible to the user within the console context."""
     qs = PersistentAgent.objects.non_eval().select_related("browser_use_agent").all()
@@ -41,6 +49,13 @@ def agent_queryset_for(user, session, agent_id: str | None = None) -> QuerySet:
 
     fallback_org_id = _resolve_org_from_agent(user, qs, agent_id)
     if fallback_org_id:
+        membership = OrganizationMembership.objects.select_related("org").filter(
+            user=user,
+            org_id=fallback_org_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).first()
+        if membership:
+            _sync_session_context(session, membership)
         return qs.filter(organization_id=fallback_org_id)
 
     return qs.filter(user=user, organization__isnull=True)

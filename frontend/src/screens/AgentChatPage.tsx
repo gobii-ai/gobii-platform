@@ -164,8 +164,39 @@ function AgentNotFoundState({ hasOtherAgents, onCreateAgent }: AgentNotFoundStat
   )
 }
 
+type AgentSelectStateProps = {
+  hasAgents: boolean
+  onCreateAgent?: () => void
+}
+
+function AgentSelectState({ hasAgents, onCreateAgent }: AgentSelectStateProps) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Agent workspace</p>
+      <h2 className="text-2xl font-semibold text-slate-900">
+        {hasAgents ? 'Select a conversation' : 'No agents yet'}
+      </h2>
+      <p className="max-w-lg text-sm text-slate-500">
+        {hasAgents
+          ? 'Pick an agent from the list to continue the conversation.'
+          : 'Create your first agent to start a new conversation.'}
+      </p>
+      {!hasAgents && onCreateAgent ? (
+        <button
+          type="button"
+          onClick={onCreateAgent}
+          className="group mt-2 inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+          Create Your First Agent
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 export type AgentChatPageProps = {
-  agentId: string | null
+  agentId?: string | null
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
@@ -194,6 +225,7 @@ export function AgentChatPage({
 }: AgentChatPageProps) {
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
+  const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -215,17 +247,19 @@ export function AgentChatPage({
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
+    refresh: refreshContext,
   } = useConsoleContextSwitcher({
     enabled: showContextSwitcher,
     onSwitched: handleContextSwitched,
   })
 
-  const [activeAgentId, setActiveAgentId] = useState(agentId)
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
 
   useEffect(() => {
-    setActiveAgentId(agentId)
+    setActiveAgentId(agentId ?? null)
   }, [agentId])
 
   const initialize = useAgentChatStore((state) => state.initialize)
@@ -614,6 +648,7 @@ export function AgentChatPage({
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
+  const hasSelectedAgent = Boolean(activeAgentId)
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
@@ -645,9 +680,13 @@ export function AgentChatPage({
 
   // Update document title when agent changes
   useEffect(() => {
-    const name = isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')
+    const name = isSelectionView
+      ? 'Select a conversation'
+      : isNewAgent
+        ? 'New Agent'
+        : (resolvedAgentName || 'Agent')
     document.title = `${name} · Gobii`
-  }, [isNewAgent, resolvedAgentName])
+  }, [isNewAgent, isSelectionView, resolvedAgentName])
 
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
@@ -742,6 +781,9 @@ export function AgentChatPage({
   }
 
   const handleSend = async (body: string, attachments: File[] = []) => {
+    if (!activeAgentId && !isNewAgent) {
+      return
+    }
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       try {
@@ -785,7 +827,7 @@ export function AgentChatPage({
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
 
   // Start/stop insight rotation based on processing state
-  const isProcessing = processingActive || awaitingResponse || (streaming && !streaming.done)
+  const isProcessing = hasSelectedAgent && (processingActive || awaitingResponse || (streaming && !streaming.done))
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -810,6 +852,13 @@ export function AgentChatPage({
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [refreshProcessing, streaming])
+
+  useEffect(() => {
+    if (!showContextSwitcher || !activeAgentId || !rosterQuery.isSuccess) {
+      return
+    }
+    void refreshContext()
+  }, [activeAgentId, refreshContext, rosterQuery.dataUpdatedAt, rosterQuery.isSuccess, showContextSwitcher])
 
   useEffect(() => {
     if (!streaming || streaming.done) {
@@ -841,8 +890,8 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
-  // Show a dedicated not-found state with sidebar still accessible
-  if (agentNotFound) {
+  if (isSelectionView) {
+    const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
     return (
       <div className="agent-chat-page min-h-screen">
         <ChatSidebar
@@ -852,9 +901,37 @@ export function AgentChatPage({
           errorMessage={rosterErrorMessage}
           onSelectAgent={handleSelectAgent}
           onCreateAgent={handleCreateAgent}
+          defaultCollapsed={selectionSidebarCollapsed}
+          onToggle={setSelectionSidebarCollapsed}
           contextSwitcher={contextSwitcher ?? undefined}
         />
-        <main className="has-sidebar has-sidebar--collapsed min-h-screen">
+        <main className={selectionMainClassName}>
+          <AgentSelectState
+            hasAgents={rosterAgents.length > 0}
+            onCreateAgent={handleCreateAgent}
+          />
+        </main>
+      </div>
+    )
+  }
+
+  // Show a dedicated not-found state with sidebar still accessible
+  if (agentNotFound) {
+    const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
+    return (
+      <div className="agent-chat-page min-h-screen">
+        <ChatSidebar
+          agents={rosterAgents}
+          activeAgentId={null}
+          loading={rosterQuery.isLoading}
+          errorMessage={rosterErrorMessage}
+          onSelectAgent={handleSelectAgent}
+          onCreateAgent={handleCreateAgent}
+          defaultCollapsed={selectionSidebarCollapsed}
+          onToggle={setSelectionSidebarCollapsed}
+          contextSwitcher={contextSwitcher ?? undefined}
+        />
+        <main className={selectionMainClassName}>
           <AgentNotFoundState
             hasOtherAgents={rosterAgents.length > 0}
             onCreateAgent={handleCreateAgent}

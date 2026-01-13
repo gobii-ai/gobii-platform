@@ -18,6 +18,7 @@ type UseConsoleContextSwitcherResult = {
   isSwitching: boolean
   error: string | null
   switchContext: (context: ConsoleContext) => Promise<void>
+  refresh: () => Promise<void>
 }
 
 function storeContext(context: ConsoleContext) {
@@ -38,6 +39,7 @@ export function useConsoleContextSwitcher({
   const [isSwitching, setIsSwitching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const requestIdRef = useRef(0)
 
   useEffect(() => {
     mountedRef.current = true
@@ -46,30 +48,34 @@ export function useConsoleContextSwitcher({
     }
   }, [])
 
-  useEffect(() => {
+  const refresh = useCallback(async () => {
     if (!enabled) {
       return
     }
-    let active = true
+    const requestId = ++requestIdRef.current
     setIsLoading(true)
     setError(null)
-    fetchConsoleContext()
-      .then((payload) => {
-        if (!active) return
-        setData(payload)
-        setIsLoading(false)
-        storeContext(payload.context)
-      })
-      .catch((err) => {
-        if (!active) return
-        console.error('Failed to load context switcher data:', err)
-        setError('Unable to load workspace contexts.')
-        setIsLoading(false)
-      })
-    return () => {
-      active = false
+    try {
+      const payload = await fetchConsoleContext()
+      if (!mountedRef.current || requestId !== requestIdRef.current) {
+        return
+      }
+      setData(payload)
+      setIsLoading(false)
+      storeContext(payload.context)
+    } catch (err) {
+      if (!mountedRef.current || requestId !== requestIdRef.current) {
+        return
+      }
+      console.error('Failed to load context switcher data:', err)
+      setError('Unable to load workspace contexts.')
+      setIsLoading(false)
     }
   }, [enabled])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   const switchContext = useCallback(
     async (context: ConsoleContext) => {
@@ -112,5 +118,6 @@ export function useConsoleContextSwitcher({
     isSwitching,
     error,
     switchContext,
+    refresh,
   }
 }
