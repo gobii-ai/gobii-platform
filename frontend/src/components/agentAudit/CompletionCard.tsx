@@ -6,6 +6,8 @@ import { EventHeader } from './EventHeader'
 import { IconCircle, TokenPill } from './eventPrimitives'
 import { ToolCallRow } from './EventRows'
 
+const OPENROUTER_GENERATION_URL = 'https://openrouter.ai/api/v1/generation'
+
 export type PromptState = {
   loading: boolean
   data?: PromptArchive
@@ -33,7 +35,9 @@ export function CompletionCard({
   const userPrompt = promptPayload?.user_prompt
   const [expanded, setExpanded] = useState(false)
   const responseId = completion.response_id
-  const openRouterUrl = responseId ? `https://openrouter.ai/api/v1/generation?id=${responseId}` : null
+  const isOpenRouter = completion.llm_model?.toLowerCase().startsWith('openrouter')
+  const openRouterUrl =
+    responseId && isOpenRouter ? `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(String(responseId))}` : null
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -98,7 +102,7 @@ export function CompletionCard({
               <a
                 href={openRouterUrl}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 title="View OpenRouter response"
                 className="inline-flex items-center gap-2 rounded-full bg-indigo-100 px-2 py-1 text-xs font-medium text-slate-800 transition hover:bg-indigo-200"
               >
