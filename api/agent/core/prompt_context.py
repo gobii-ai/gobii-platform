@@ -227,6 +227,25 @@ def _get_sqlite_examples() -> str:
 
 ---
 
+## Tool Calls vs SQL Queries
+
+**To get information → Call the tool.** Don't query __tool_results to find data you don't have—call the tool that gets it.
+
+```
+need(data) → call_tool → have(result)           # RIGHT
+need(data) → SELECT FROM __tool_results → ???   # WRONG (data isn't there yet)
+```
+
+**SQLite is for exploring large results you already have.** When a tool returns thousands of rows or a complex structure, query it. When the result is small enough to read, just read it.
+
+```
+have(large_result) → sqlite_batch(extract/filter/aggregate) → insight   # RIGHT
+have(small_result) → read it directly → insight                         # RIGHT
+have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
+```
+
+---
+
 ## Query Rules
 
 **You will hallucinate column names.** You will guess paths. You will "remember" field names that don't exist. This causes SQL errors. Every identifier must trace to something you actually saw.
@@ -3940,16 +3959,19 @@ def _get_system_instruction(
                     f"Before ANY tool calls, you MUST call send_{channel} to introduce yourself to the user.\n"
                     "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
 
-                    "## Then sqlite_batch: charter + kanban cards together\n\n"
+                    "## Then sqlite_batch: charter + kanban cards + everything else\n\n"
 
-                    "Your first sqlite_batch sets up both your charter and your work plan:\n"
+                    "**Batch aggressively.** Every sqlite_batch call has overhead—combine as many operations as possible into one call.\n"
+                    "Your first sqlite_batch sets up your charter, work plan, and anything else you need to persist:\n"
                     "```sql\n"
                     "UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\n"
                     "INSERT INTO __kanban_cards (title, status) VALUES\n"
                     "  ('Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tier details for CRM cost comparison', 'doing'),\n"
                     "  ('Build comparison table: CRM × tier × price × user-limits × key features — user choosing CRM for 10-person sales team', 'todo'),\n"
                     "  ('Email pricing report with best-value rec under $500/mo to user — final deliverable for CRM research', 'todo');\n"
+                    "INSERT INTO __kv (key, value) VALUES ('competitors', '[\"Salesforce\", \"HubSpot\", \"Pipedrive\"]');\n"
                     "```\n"
+                    "One sqlite_batch with 5 statements beats 5 separate calls. Always batch.\n"
                     "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
                     "Don't provide IDs—they auto-generate. Just title + status.\n"
                     "Charter without cards leaves you with no memory of what to do. Always include both.\n\n"
