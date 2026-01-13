@@ -1210,7 +1210,12 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     doing_preview = doing_by_priority[:KANBAN_DOING_DETAIL_LIMIT]
     doing_text = "No cards in doing."
     if doing_preview:
-        doing_text = "\n\n".join(_format_kanban_card_detail(card) for card in doing_preview)
+        doing_header = (
+            "🎯 ACTIVE TASK — Complete this, mark done, move on:\n\n"
+            if len(doing_preview) == 1
+            else "🎯 ACTIVE TASKS — Complete these, mark each done as you finish:\n\n"
+        )
+        doing_text = doing_header + "\n\n".join(_format_kanban_card_detail(card) for card in doing_preview)
         remaining = len(doing_by_priority) - len(doing_preview)
         if remaining > 0:
             doing_text = f"{doing_text}\n\n... +{remaining} more doing cards."
@@ -1253,7 +1258,11 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
     if doing_cards or todo_cards:
         kanban_group.section_text(
             "kanban_completion_hint",
-            "Cards in doing/todo means that work remains. When ready: write the actual report (not 'let me compile...') + mark done together.",
+            (
+                "⚡ Work cycle: Do the task → verify success → UPDATE status='done' → next card. "
+                "Don't leave cards in 'doing' — finish and mark done immediately. "
+                "Batch the done-UPDATE with your next action when possible."
+            ),
             weight=1,
             non_shrinkable=True,
         )
@@ -2037,7 +2046,7 @@ def build_prompt_context(
     )
     kanban_note = (
         f"Kanban ({KANBAN_CARDS_TABLE}): your memory across sessions. Credits reset daily; your board doesn't. "
-        "Use it for any multi-step work—break big tasks into small cards, track what you're doing, mark done when finished. "
+        "Use for multi-step work (research, investigations, 3+ tool calls). Skip for simple tasks (quick lookups, single questions)—just do those directly. "
         "Status: todo/doing/done. Priority: higher = more urgent. "
         "Each card has a friendly_id (slug of the title) alongside id—use friendly_id in WHERE clauses. "
         "Copy friendly_id exactly from the kanban_snapshot above—don't guess or assume values. "
@@ -3412,15 +3421,28 @@ def _get_system_instruction(
         "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
 
-        "**Golden rule**: New work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a task, track it.\n\n"
+        "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
 
-        "### Charter + Kanban work together:\n"
+        "### When to use kanban cards:\n"
+        "**USE CARDS** for multi-step work: research tasks, investigations with multiple sources, anything requiring 3+ tool calls, work that spans multiple turns, or tasks where you might lose your place.\n"
+        "**SKIP CARDS** for simple tasks: quick lookups (weather, price, single fact), one-shot questions, simple greetings, direct answers that need just 1-2 tool calls. Just do the work and respond—no planning overhead.\n\n"
+        "Examples of NO cards needed:\n"
+        "- 'What's Bitcoin at?' → fetch price → respond. Done.\n"
+        "- 'What time is it in Tokyo?' → calculate → respond. Done.\n"
+        "- 'Summarize this article' → scrape → summarize → respond. Done.\n"
+        "- 'Hi!' → greet back. Done.\n\n"
+        "Examples of YES cards needed:\n"
+        "- 'Research competitors' → multiple searches, multiple scrapes, analysis, report\n"
+        "- 'Monitor this daily' → ongoing work across sessions\n"
+        "- 'Build me a comparison of X, Y, Z' → structured multi-source research\n\n"
+
+        "### Charter + Kanban work together (for multi-step work):\n"
         "- Charter = what you're doing (your purpose)\n"
         "- Kanban = what steps you see (your progress)\n"
-        "- **Default: create cards.** Any task worth doing is worth tracking. Almost all tasks need multiple steps—start with cards.\n"
+        "- **For multi-step work: create cards.** Complex tasks need tracking to avoid losing your place.\n"
         "- **Cards must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
         "- **Always include a reporting step.** The final card must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
-        "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+        "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
@@ -3822,7 +3844,7 @@ def _get_system_instruction(
         "Fetching is not the finish line—a substantive report is. "
         "If you fetched 10 items, show all 10. If you found 5 data points, present all 5. "
         "A thin summary of rich data is a missed opportunity. "
-        "When you find a list of things to investigate, investigate all of them—add a kanban card for each.\n\n"
+        "For multi-step research: when you find a list of things to investigate, investigate all of them—add a kanban card for each.\n\n"
 
         "## Silent Work (CRITICAL)\n\n"
         "**DO NOT announce what you're about to do.** Just make the tool call.\n\n"
@@ -3848,8 +3870,9 @@ def _get_system_instruction(
         "```\n"
         "Text output is for RESULTS, not narration. Tools execute silently—no commentary.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
-        "## Kanban Tracking (MANDATORY)\n\n"
-        "Kanban (__kanban_cards) tracks your work. The sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
+        "## Kanban Tracking (for multi-step work)\n\n"
+        "Use kanban for complex tasks needing 3+ tool calls or spanning multiple turns. Skip it for simple lookups and one-shot questions—just do the work directly.\n\n"
+        "When you DO use kanban, the sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
         "**Card quality:** Each card must be ultra-specific, info-dense, and fully self-contained. Include the high-level goal so context survives across long sessions.\n"
         "- BAD: 'Do research' / 'Step 1' / 'Analyze data' (vague, useless without context)\n"
         "- BAD: 'Get pricing info' (which products? for what purpose?)\n"

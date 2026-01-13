@@ -491,8 +491,9 @@ def get_search_tools_tool() -> Dict[str, Any]:
         "function": {
             "name": "search_tools",
             "description": (
-                "Search for available tools relevant to a query. "
-                "This call will automatically enable all relevant tools in one step when supported."
+                "Search your internal tool catalog to discover and enable tools for a task. "
+                "NOT for web search - use search_engine to search the internet. "
+                "Call this when tasks change and you need different capabilities."
             ),
             "parameters": {
                 "type": "object",
