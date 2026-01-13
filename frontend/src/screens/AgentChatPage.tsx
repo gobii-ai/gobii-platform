@@ -469,7 +469,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   const jumpToBottom = useCallback(() => {
     const target = document.scrollingElement ?? document.documentElement ?? document.body
     // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
-    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'instant' })
+    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
     updateIsNearBottom()
   }, [updateIsNearBottom])
 

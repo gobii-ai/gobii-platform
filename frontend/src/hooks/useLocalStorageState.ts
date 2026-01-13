@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 type LocalStorageOptions<T> = {
   serialize?: (value: T) => string
@@ -34,12 +34,19 @@ export function useLocalStorageState<T>(
 ) {
   const serialize = options.serialize ?? (defaultSerialize as (value: T) => string)
   const deserialize = options.deserialize ?? (defaultDeserialize as (raw: string) => T)
+  const fallbackValueRef = useRef(fallbackValue)
+  const deserializeRef = useRef(deserialize)
+  const serializeRef = useRef(serialize)
+
+  fallbackValueRef.current = fallbackValue
+  deserializeRef.current = deserialize
+  serializeRef.current = serialize
 
   const [value, setValue] = useState<T>(() => readStoredValue(key, fallbackValue, deserialize))
 
   useEffect(() => {
-    setValue(readStoredValue(key, fallbackValue, deserialize))
-  }, [key, fallbackValue, deserialize])
+    setValue(readStoredValue(key, fallbackValueRef.current, deserializeRef.current))
+  }, [key])
 
   const setStoredValue = useCallback((nextValue: T | ((current: T) => T)) => {
     setValue((current) => {
@@ -53,14 +60,14 @@ export function useLocalStorageState<T>(
         if (resolved === null) {
           window.localStorage.removeItem(key)
         } else {
-          window.localStorage.setItem(key, serialize(resolved))
+          window.localStorage.setItem(key, serializeRef.current(resolved))
         }
       } catch {
         return resolved
       }
       return resolved
     })
-  }, [key, serialize])
+  }, [key])
 
   return [value, setStoredValue] as const
 }
