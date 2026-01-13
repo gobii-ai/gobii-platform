@@ -420,6 +420,57 @@ def _fix_unbalanced_parens(sql: str) -> tuple[str, str | None]:
     return sql, None
 
 
+def _fix_trailing_commas(sql: str) -> tuple[str, str | None]:
+    """Fix trailing commas before closing parentheses.
+
+    Example: VALUES (1, 2, 3,) -> VALUES (1, 2, 3)
+    This is a common LLM mistake in multi-row INSERT statements.
+    """
+    # Pattern: comma followed by optional whitespace then closing paren
+    # But only outside of string literals
+    original = sql
+    result = []
+    i = 0
+    in_string = False
+    string_char = None
+
+    while i < len(sql):
+        char = sql[i]
+
+        if in_string:
+            result.append(char)
+            if char == string_char:
+                # Check for escaped quote (doubled)
+                if i + 1 < len(sql) and sql[i + 1] == string_char:
+                    i += 1
+                    result.append(sql[i])
+                else:
+                    in_string = False
+        else:
+            if char in ("'", '"'):
+                in_string = True
+                string_char = char
+                result.append(char)
+            elif char == ',':
+                # Look ahead for optional whitespace then ')'
+                j = i + 1
+                while j < len(sql) and sql[j] in ' \t\n\r':
+                    j += 1
+                if j < len(sql) and sql[j] == ')':
+                    # Skip this comma (don't append it)
+                    pass
+                else:
+                    result.append(char)
+            else:
+                result.append(char)
+        i += 1
+
+    fixed = ''.join(result)
+    if fixed != original:
+        return fixed, "removed trailing comma before ')'"
+    return sql, None
+
+
 def _fix_singular_plural_tables(sql: str, error_msg: str) -> tuple[str, str | None]:
     """Fix singular/plural table name mismatches based on error message.
 
@@ -559,6 +610,10 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_unbalanced_parens(sql)
+    if fix:
+        corrections.append(fix)
+
+    sql, fix = _fix_trailing_commas(sql)
     if fix:
         corrections.append(fix)
 
@@ -1375,6 +1430,13 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
         return " FIX: Check parentheses in nested function calls - a ')' is likely misplaced."
     if "unique constraint" in error_lower:
         return " FIX: Use INSERT OR REPLACE or INSERT OR IGNORE to handle duplicate keys."
+    if "malformed json" in error_lower:
+        # Check if they're misusing grep_context_all or similar functions
+        if "grep_context" in sql.lower():
+            return " FIX: grep_context_all returns array of STRINGS, not objects. Use: SELECT ctx.value FROM json_each(grep_context_all(...)) ctx"
+        if "split_sections" in sql.lower():
+            return " FIX: split_sections returns array of STRINGS. Use: SELECT s.value FROM json_each(split_sections(...)) s"
+        return " FIX: json_extract requires valid JSON. Check that the column/expression contains JSON, not plain text."
     return ""
 
 
@@ -1759,7 +1821,8 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "description": (
                 "Durable SQLite memory for structured data. "
                 "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
-                "REMEMBER TO PROPERLY ESCAPE STRINGS IN SQL STATEMENTS. "
+                "ESCAPE single quotes by DOUBLING them: 'O''Brien' (NOT backslash). "
+                "grep_context_all/split_sections return STRING arrays: use json_each(...) then ctx.value directly, NOT json_extract. "
             ),
             "parameters": {
                 "type": "object",

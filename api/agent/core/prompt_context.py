@@ -1900,12 +1900,20 @@ def build_prompt_context(
         schedule_str,
         weight=2
     )
-    important_group.section_text(
-        "schedule_note",
-        "Remember, you can and should update your schedule to best suit your charter. And remember, you don't have to contact the user on every schedule trigger. Only contact them when it makes sense.",
-        weight=1,
-        non_shrinkable=True
-    )
+    if agent.schedule:
+        important_group.section_text(
+            "schedule_note",
+            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match.",
+            weight=1,
+            non_shrinkable=True
+        )
+    else:
+        important_group.section_text(
+            "schedule_note",
+            "⚠️ NO SCHEDULE SET. If this task involves recurring work, monitoring, or follow-up, SET A SCHEDULE NOW via sqlite_batch. Without a schedule, you won't come back—this work dies when you stop.",
+            weight=1,
+            non_shrinkable=True
+        )
 
     _build_kanban_sections(agent, important_group)
 
@@ -1967,8 +1975,15 @@ def build_prompt_context(
         )
         important_group.section_text(
             "charter_note",
-            "Remember, you can and should evolve this over time, especially if the user gives you feedback or new instructions.",
+            "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new.",
             weight=2,
+            non_shrinkable=True
+        )
+    else:
+        important_group.section_text(
+            "charter_missing",
+            "⚠️ NO CHARTER SET. Your FIRST action should be to set your charter via sqlite_batch. Without a charter, you have no persistent identity. Capture your purpose immediately based on what the user wants.",
+            weight=5,
             non_shrinkable=True
         )
 
