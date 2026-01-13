@@ -174,18 +174,23 @@ def _prepare_stripe_or_404() -> None:
     stripe.api_key = key
 
 
-def _build_checkout_success_url(request, *, event_id: str, price: float) -> tuple[str, bool]:
+def _build_checkout_success_url(request, *, event_id: str, price: float, plan: str) -> tuple[str, bool]:
     ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
     ltv_price = price * ltv_multiple
     success_params = {
         "subscribe_success": 1,
         "p": f"{ltv_price:.2f}",
         "eid": event_id,
+        "plan": plan,
     }
-    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     redirect_path = _pop_post_checkout_redirect(request)
     if redirect_path:
-        return request.build_absolute_uri(redirect_path), True
+        # Append tracking params to custom redirect path, preserving any fragment
+        path_part, frag_sep, fragment = redirect_path.partition('#')
+        separator = '&' if '?' in path_part else '?'
+        redirect_with_params = f"{path_part}{separator}{urlencode(success_params)}{frag_sep}{fragment}"
+        return request.build_absolute_uri(redirect_with_params), True
+    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     return default_url, False
 
 
@@ -879,12 +884,13 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         except Exception as e:
             logger.error(f"An unexpected error occurred while fetching price: {e}")
 
-        event_id = f"sub-{uuid.uuid4()}"
+        event_id = f"startup-sub-{uuid.uuid4()}"
 
         success_url, post_checkout_redirect_used = _build_checkout_success_url(
             request,
             event_id=event_id,
             price=price,
+            plan=PlanNames.STARTUP,
         )
 
         line_items = [
@@ -1025,6 +1031,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             request,
             event_id=event_id,
             price=price,
+            plan=PlanNames.SCALE,
         )
 
         line_items = [
