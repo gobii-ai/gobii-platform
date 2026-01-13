@@ -445,7 +445,7 @@ do:
   # STOP: Is this a data file or API endpoint?
   # .csv, .json, .xml, .txt, /api/, /feed → use http_request instead!
 
-  scrape_as_markdown(url="<url>", will_continue_work=true)
+  mcp_brightdata_scrape_as_markdown(url="<url>", will_continue_work=true)
 
   # Extract patterns with context:
   sqlite_batch(sql="
@@ -657,7 +657,7 @@ Only mark a task done after you've verified its completion:
 
 ```
 [Turn N-1: do the work]
-→ scrape_as_markdown(url="...") with will_continue_work=true
+→ mcp_brightdata_scrape_as_markdown(url="...") with will_continue_work=true
    (DON'T mark done yet - haven't seen result)
 
 [Turn N: verify result, then mark done]
@@ -693,7 +693,7 @@ sqlite_batch(sql="
 **WRONG patterns:**
 ```sql
 -- WRONG: Mark done in same turn as the tool call (haven't seen result yet)
-scrape_as_markdown(url="...")
+mcp_brightdata_scrape_as_markdown(url="...")
 sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='scrape-site'")
 -- ^ Don't know if scrape succeeded!
 
@@ -702,7 +702,7 @@ UPDATE __kanban_cards SET status='done' WHERE status IN ('todo','doing');
 -- ^ Some of these might not actually be done!
 
 -- WRONG: Assume work "counts" without explicit UPDATE after verification
-scrape_as_markdown(url="...") + will_continue_work=false
+mcp_brightdata_scrape_as_markdown(url="...") + will_continue_work=false
 -- ^ Orphans the card even if scrape succeeds
 
 -- WRONG: UPDATE status, then INSERT the same cards again
@@ -974,7 +974,7 @@ Avoid these:
 - Using `json_each` on CSV/TEXT content (it only works on JSON)
 - Constructing URLs instead of using extracted ones
 - Describing charts instead of showing them
-- Using scrape_as_markdown for data files (.csv, .json, .xml) — use http_request
+- Using mcp_brightdata_scrape_as_markdown for data files (.csv, .json, .xml) — use http_request
 - Summarizing 10 items as "several" — show all 10 in a table
 - Stopping after fetching data without presenting it in full
 - Writing numbers in prose when they could be a chart — visualize them
@@ -3808,13 +3808,13 @@ def _get_system_instruction(
         "url.path contains {/api/, /feed, /rss, /data}     → http_request\n"
         "url.content_type ∈ {json, csv, xml, rss, text}    → http_request\n"
         "url = download_link | raw_data_url               → http_request\n"
-        "url = html_page ∧ need(rendered_content)         → scrape_as_markdown\n"
+        "url = html_page ∧ need(rendered_content)         → mcp_brightdata_scrape_as_markdown\n"
         "url = html_page ∧ need(structured_extraction)    → extractor | scrape\n"
         "\n"
         "# Examples:\n"
         "# example.com/data.csv           → http_request (data file)\n"
         "# api.example.com/v1/users       → http_request (API)\n"
-        "# example.com/about              → scrape_as_markdown (HTML page)\n"
+        "# example.com/about              → mcp_brightdata_scrape_as_markdown (HTML page)\n"
         "\n"
         "# Priority\n"
         "api | feed | data → http_request  # check for public APIs first\n"
@@ -3863,7 +3863,7 @@ def _get_system_instruction(
         "# Research task\n"
         "User: 'Research Acme Corp'\n"
         "Turn 1: → search_tools('company info')     # NO TEXT\n"
-        "Turn 2: → scrape_as_markdown('...')        # NO TEXT\n"
+        "Turn 2: → mcp_brightdata_scrape_as_markdown('...')        # NO TEXT\n"
         "Turn 3: → sqlite_batch('CREATE TABLE...')  # NO TEXT\n"
         "Turn 4: '## Acme Corp\\n| Founded |...'    # FINDINGS → speak\n"
         "\n"

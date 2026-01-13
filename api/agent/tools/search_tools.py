@@ -110,6 +110,102 @@ def _fallback_builtin_selection(
     return candidates
 
 
+def _find_tool_by_suffix(
+    available_names: Iterable[str],
+    suffix: str,
+    *,
+    exclude_suffixes: Optional[Iterable[str]] = None,
+) -> Optional[str]:
+    exclude_suffixes = set(exclude_suffixes or [])
+    candidates = []
+    for name in available_names:
+        if name == suffix or name.endswith(f"_{suffix}"):
+            if any(name.endswith(f"_{exclude}") or name == exclude for exclude in exclude_suffixes):
+                continue
+            candidates.append(name)
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda v: (len(v), v))[0]
+
+
+def _build_tool_examples(available_names: set[str]) -> str:
+    def example(query_text: str, suffixes: List[str]) -> Optional[str]:
+        tools: List[str] = []
+        for suffix in suffixes:
+            tool_name = _find_tool_by_suffix(
+                available_names,
+                suffix,
+                exclude_suffixes=["search_engine_batch"] if suffix == "search_engine" else None,
+            )
+            if tool_name:
+                tools.append(tool_name)
+        if len(tools) < 2:
+            return None
+        tool_list = ", ".join(f"`{name}`" for name in tools)
+        return f"**Query:** \"{query_text}\"\n**Tools:** {tool_list}\n"
+
+    examples = [
+        example(
+            "Research Stripe as a company",
+            [
+                "search_engine",
+                "scrape_as_markdown",
+                "web_data_linkedin_company_profile",
+                "web_data_crunchbase_company",
+                "web_data_yahoo_finance_business",
+            ],
+        ),
+        example(
+            "Find info about Elon Musk",
+            [
+                "search_engine",
+                "scrape_as_markdown",
+                "web_data_linkedin_person_profile",
+                "web_data_x_posts",
+                "web_data_instagram_profiles",
+            ],
+        ),
+        example(
+            "Analyze sentiment on Nike products",
+            [
+                "search_engine",
+                "scrape_as_markdown",
+                "web_data_amazon_product",
+                "web_data_amazon_product_reviews",
+                "web_data_reddit_posts",
+                "web_data_x_posts",
+            ],
+        ),
+        example(
+            "Job openings at Google",
+            [
+                "search_engine",
+                "scrape_as_markdown",
+                "web_data_linkedin_job_listings",
+                "web_data_linkedin_company_profile",
+            ],
+        ),
+        example(
+            "Bitcoin price and trends",
+            [
+                "search_engine",
+                "scrape_as_markdown",
+                "web_data_yahoo_finance_business",
+                "web_data_reddit_posts",
+            ],
+        ),
+        example(
+            "GitHub repository file details",
+            [
+                "web_data_github_repository_file",
+                "search_engine",
+            ],
+        ),
+    ]
+    example_text = "\n".join(item.strip() for item in examples if item)
+    return example_text
+
+
 def _search_with_llm(
     agent: PersistentAgent,
     query: str,
@@ -160,45 +256,20 @@ def _search_with_llm(
     except Exception:  # pragma: no cover - defensive logging
         logger.exception("search_tools.%s: failed to log compact catalog preview", provider_name)
 
+    examples_text = _build_tool_examples(available_names)
+    examples_block = f"## Examples\n\n{examples_text}\n\n" if examples_text else ""
+
     system_prompt = (
         "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
-        "CRITICAL: Use EXACT tool names from the Available tools list. Never shorten or modify names.\n\n"
-        "## Examples\n\n"
-        "**Query:** \"Research Stripe as a company\"\n"
-        "**Tools:** `mcp_brightdata_search_engine`, `mcp_brightdata_scrape_as_markdown`, "
-        "`mcp_brightdata_web_data_linkedin_company_profile`, "
-        "`mcp_brightdata_web_data_crunchbase_company`, `mcp_brightdata_web_data_yahoo_finance_business`\n"
-        "**External resources:**\n"
-        "- Stripe Developer Docs | Official API documentation | https://stripe.com/docs/api\n"
-        "- Stripe Status | Service status page | https://status.stripe.com\n\n"
-        "**Query:** \"Find info about Elon Musk\"\n"
-        "**Tools:** `mcp_brightdata_search_engine`, `mcp_brightdata_scrape_as_markdown`, "
-        "`mcp_brightdata_web_data_linkedin_person_profile`, "
-        "`mcp_brightdata_web_data_x_posts`, `mcp_brightdata_web_data_instagram_profiles`\n"
-        "**External resources:**\n"
-        "- Wikipedia | Elon Musk biography | https://en.wikipedia.org/wiki/Elon_Musk\n\n"
-        "**Query:** \"Analyze sentiment on Nike products\"\n"
-        "**Tools:** `mcp_brightdata_search_engine`, `mcp_brightdata_scrape_as_markdown`, "
-        "`mcp_brightdata_web_data_amazon_product`, "
-        "`mcp_brightdata_web_data_amazon_product_reviews`, `mcp_brightdata_web_data_reddit_posts`, "
-        "`mcp_brightdata_web_data_x_posts`\n"
-        "**External resources:**\n"
-        "- Nike Investor Relations | Official financial data | https://investors.nike.com\n\n"
-        "**Query:** \"Job openings at Google\"\n"
-        "**Tools:** `mcp_brightdata_search_engine`, `mcp_brightdata_scrape_as_markdown`, "
-        "`mcp_brightdata_web_data_linkedin_job_listings`, "
-        "`mcp_brightdata_web_data_linkedin_company_profile`\n"
-        "**External resources:**\n"
-        "- Google Careers | Official job board | https://careers.google.com\n\n"
-        "**Query:** \"Bitcoin price and trends\"\n"
-        "**Tools:** `mcp_brightdata_search_engine`, `mcp_brightdata_scrape_as_markdown`, "
-        "`mcp_brightdata_web_data_yahoo_finance_business`, `mcp_brightdata_web_data_reddit_posts`\n"
-        "**External resources:**\n"
-        "- CoinGecko API | Free crypto prices API | https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd\n"
-        "- CoinMarketCap | Crypto market data | https://coinmarketcap.com/currencies/bitcoin/\n\n"
+        "CRITICAL: Use EXACT tool names from the Available tools list below. Never invent or modify names.\n"
+        "If no tools match, do NOT call enable_tools.\n\n"
+        f"{examples_block}"
+        "## Format\n"
+        "Call enable_tools with tool_names copied verbatim from the Available tools list.\n"
+        "Example (placeholders, do not copy names):\n"
+        "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n\n"
         "## Rules\n"
-        "- Skip `mcp_brightdata_search_engine` if query mentions a source with a known public API\n"
-        "- `mcp_brightdata_scrape_as_markdown` only when you expect page scraping\n"
+        "- Only include tools that appear in Available tools.\n"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
@@ -206,7 +277,7 @@ def _search_with_llm(
         f"Query: {query}\n\n"
         "Available tools:\n"
         + "\n".join(tool_lines)
-        + "\n\nCall enable_tools with the matching tool names. Do not reply with text."
+        + "\n\nUse ONLY tool names from the list above. If none match, do not call enable_tools."
     )
 
     try:
@@ -338,6 +409,16 @@ def _search_with_llm(
                     except Exception:  # pragma: no cover - defensive parsing
                         logger.exception("search_tools.%s: failed to parse tool call; skipping", provider_name)
 
+                valid_requested = [name for name in requested if name in available_names]
+                invalid_requested = [name for name in requested if name not in available_names]
+                if invalid_requested:
+                    logger.info(
+                        "search_tools.%s: ignoring invalid tool names: %s",
+                        provider_name,
+                        ", ".join(invalid_requested[:10]) + ("..." if len(invalid_requested) > 10 else ""),
+                    )
+
+                requested = valid_requested
                 enabled_result = None
                 if requested:
                     try:
@@ -373,6 +454,7 @@ def _search_with_llm(
                 # Fallback: if the LLM did not call enable_tools, heuristically enable core built-ins
                 if not requested:
                     fallback = _fallback_builtin_selection(query or "", content_text or "", available_names)
+                    fallback = [name for name in fallback if name in available_names]
                     if fallback:
                         try:
                             enabled_result = enable_callback(agent, fallback)
@@ -406,7 +488,7 @@ def _search_with_llm(
                     message_lines.append(
                         "No matching tools found for your query. "
                         "Try a more specific query like 'linkedin profile' or 'crunchbase company', "
-                        "or use search_engine/scrape_as_markdown for general web research."
+                        "or use the web search/scrape tools from the available list."
                     )
 
                 response_payload: ToolSearchResult = {
@@ -499,7 +581,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
             "name": "search_tools",
             "description": (
                 "Search your internal tool catalog to discover and enable tools for a task. "
-                "NOT for web search - use search_engine to search the internet. "
+                "NOT for web search - use the web search tool from the catalog (e.g., mcp_brightdata_search_engine). "
                 "Call this when tasks change and you need different capabilities."
             ),
             "parameters": {

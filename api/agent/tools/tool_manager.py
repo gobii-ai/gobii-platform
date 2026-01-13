@@ -319,23 +319,33 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
     evicted: List[str] = []
     invalid: List[str] = []
 
+    resolved_seen: Set[str] = set()
     for name in requested:
         entry = catalog.get(name)
+        resolved_name = name
+        if not entry:
+            resolved_name = _normalize_mcp_tool_name(name, catalog) or name
+            entry = catalog.get(resolved_name)
+            if entry and resolved_name != name:
+                logger.info("Normalized tool name '%s' -> '%s' during enable_tools", name, resolved_name)
         if not entry:
             invalid.append(name)
             continue
+        if resolved_name in resolved_seen:
+            continue
+        resolved_seen.add(resolved_name)
 
-        if entry.provider == "mcp" and manager.is_tool_blacklisted(name):
+        if entry.provider == "mcp" and manager.is_tool_blacklisted(resolved_name):
             invalid.append(name)
             continue
 
         try:
             row, created = PersistentAgentEnabledTool.objects.get_or_create(
                 agent=agent,
-                tool_full_name=name,
+                tool_full_name=resolved_name,
             )
         except Exception:
-            logger.exception("Failed enabling tool %s", name)
+            logger.exception("Failed enabling tool %s", resolved_name)
             invalid.append(name)
             continue
 
@@ -343,12 +353,12 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
-            enabled.append(name)
+            enabled.append(resolved_name)
         else:
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
-            already_enabled.append(name)
+            already_enabled.append(resolved_name)
 
     if enabled or already_enabled:
         evicted = _evict_surplus_tools(agent, limit=limit)
@@ -673,7 +683,7 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
                 tool_name, normalized_name
             )
             return catalog.get(normalized_name)
-
+    if tool_name.startswith("mcp_"):
         # Last resort: try MCP manager's resolve_tool_info which can discover tools
         manager = _get_manager()
         info = manager.resolve_tool_info(tool_name)
