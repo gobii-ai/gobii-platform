@@ -182,10 +182,13 @@ def _build_checkout_success_url(request, *, event_id: str, price: float) -> tupl
         "p": f"{ltv_price:.2f}",
         "eid": event_id,
     }
-    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     redirect_path = _pop_post_checkout_redirect(request)
     if redirect_path:
-        return request.build_absolute_uri(redirect_path), True
+        # Append tracking params to custom redirect path
+        separator = "&" if "?" in redirect_path else "?"
+        redirect_with_params = f"{redirect_path}{separator}{urlencode(success_params)}"
+        return request.build_absolute_uri(redirect_with_params), True
+    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     return default_url, False
 
 
@@ -879,7 +882,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         except Exception as e:
             logger.error(f"An unexpected error occurred while fetching price: {e}")
 
-        event_id = f"sub-{uuid.uuid4()}"
+        event_id = f"startup-sub-{uuid.uuid4()}"
 
         success_url, post_checkout_redirect_used = _build_checkout_success_url(
             request,
