@@ -23,6 +23,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   connectionDetail?: string | null
   agentRoster?: AgentRosterEntry[]
   activeAgentId?: string | null
+  insightsPanelStorageKey?: string | null
   switchingAgentId?: string | null
   rosterLoading?: boolean
   rosterError?: string | null
@@ -69,6 +70,7 @@ export function AgentChatLayout({
   connectionDetail,
   agentRoster,
   activeAgentId,
+  insightsPanelStorageKey,
   switchingAgentId,
   rosterLoading,
   rosterError,
@@ -268,6 +270,7 @@ export function AgentChatLayout({
               processingTasks={processingWebTasks}
               autoFocus={autoFocusComposer}
               focusKey={activeAgentId}
+              insightsPanelStorageKey={insightsPanelStorageKey}
               insights={insights}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}

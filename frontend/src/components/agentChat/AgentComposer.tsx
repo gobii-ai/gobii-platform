@@ -6,6 +6,7 @@ import { InsightEventCard } from './insights'
 import type { ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
+import { useLocalStorageState } from '../../hooks/useLocalStorageState'
 
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
@@ -71,12 +72,27 @@ function getInsightBackground(insight: InsightEvent): string {
   return 'transparent'
 }
 
+const workingPanelStorageCodec = {
+  serialize: (value: boolean | null) => (value ? 'expanded' : 'collapsed'),
+  deserialize: (raw: string): boolean | null => {
+    if (raw === 'expanded') return true
+    if (raw === 'collapsed') return false
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      return typeof parsed === 'boolean' ? parsed : null
+    } catch {
+      return null
+    }
+  },
+}
+
 type AgentComposerProps = {
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   disabled?: boolean
   autoFocus?: boolean
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
   focusKey?: string | null
+  insightsPanelStorageKey?: string | null
   // Working panel props
   agentFirstName?: string
   isProcessing?: boolean
@@ -94,6 +110,7 @@ export function AgentComposer({
   disabled = false,
   autoFocus = false,
   focusKey,
+  insightsPanelStorageKey,
   agentFirstName = 'Agent',
   isProcessing = false,
   processingTasks = [],
@@ -108,7 +125,7 @@ export function AgentComposer({
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
-  const [isWorkingExpanded, setIsWorkingExpanded] = useState(true)
+  const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -122,18 +139,42 @@ export function AgentComposer({
 
   // Track previous processing state for auto-expand/collapse
   const wasProcessingRef = useRef(isProcessing)
+  const isProcessingRef = useRef(isProcessing)
+
+  const workingPanelStorageKey = insightsPanelStorageKey
+    ? `agent-chat:insights-panel:${insightsPanelStorageKey}`
+    : null
+
+  const [isWorkingExpanded, setIsWorkingExpanded] = useLocalStorageState<boolean | null>(
+    workingPanelStorageKey,
+    null,
+    workingPanelStorageCodec,
+  )
+
+  const resolvedWorkingExpanded = isWorkingExpanded ?? autoWorkingExpanded
+
+  useEffect(() => {
+    isProcessingRef.current = isProcessing
+  }, [isProcessing])
+
+  useEffect(() => {
+    setAutoWorkingExpanded(true)
+    wasProcessingRef.current = isProcessingRef.current
+  }, [workingPanelStorageKey])
 
   // Auto-expand when processing starts, auto-collapse when it ends
   useEffect(() => {
-    if (!wasProcessingRef.current && isProcessing) {
-      // Processing just started - auto-expand
-      setIsWorkingExpanded(true)
-    } else if (wasProcessingRef.current && !isProcessing) {
-      // Processing just ended - auto-collapse
-      setIsWorkingExpanded(false)
+    if (isWorkingExpanded === null) {
+      if (!wasProcessingRef.current && isProcessing) {
+        // Processing just started - auto-expand
+        setAutoWorkingExpanded(true)
+      } else if (wasProcessingRef.current && !isProcessing) {
+        // Processing just ended - auto-collapse
+        setAutoWorkingExpanded(false)
+      }
     }
     wasProcessingRef.current = isProcessing
-  }, [isProcessing])
+  }, [isProcessing, isWorkingExpanded])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -146,14 +187,14 @@ export function AgentComposer({
   // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
   const handleTabClick = useCallback((index: number) => {
     // Expand panel if collapsed
-    if (!isWorkingExpanded) {
+    if (!resolvedWorkingExpanded) {
       setIsWorkingExpanded(true)
     }
     onInsightIndexChange?.(index)
     onPauseChange?.(true) // Pause when user manually selects
     lastRotationTimeRef.current = Date.now()
     setCountdownProgress(0)
-  }, [isWorkingExpanded, onInsightIndexChange, onPauseChange])
+  }, [onInsightIndexChange, onPauseChange, resolvedWorkingExpanded, setIsWorkingExpanded])
 
   // Handle hover - pause auto-rotation
   const handleInsightMouseEnter = useCallback(() => {
@@ -399,7 +440,7 @@ export function AgentComposer({
       id="agent-composer-shell"
       ref={shellRef}
       data-processing={isProcessing ? 'true' : 'false'}
-      data-expanded={isWorkingExpanded ? 'true' : 'false'}
+      data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
       data-panel-visible={showWorkingPanel ? 'true' : 'false'}
     >
       <div className="composer-surface">
@@ -407,20 +448,20 @@ export function AgentComposer({
         {showWorkingPanel ? (
           <div
             className="composer-working-panel"
-            data-expanded={isWorkingExpanded ? 'true' : 'false'}
+            data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
             style={currentInsight ? { background: getInsightBackground(currentInsight) } : undefined}
           >
             {/* Header row - clickable to toggle, with tabs and chevron */}
             <div
               className="composer-working-header-row"
-              onClick={() => setIsWorkingExpanded(!isWorkingExpanded)}
+              onClick={() => setIsWorkingExpanded(!resolvedWorkingExpanded)}
               role="button"
               tabIndex={0}
-              aria-expanded={isWorkingExpanded}
+              aria-expanded={resolvedWorkingExpanded}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  setIsWorkingExpanded(!isWorkingExpanded)
+                  setIsWorkingExpanded(!resolvedWorkingExpanded)
                 }
               }}
             >
@@ -485,7 +526,7 @@ export function AgentComposer({
               ) : null}
 
               <span className="composer-working-toggle">
-                {isWorkingExpanded ? (
+                {resolvedWorkingExpanded ? (
                   <ChevronDown className="h-4 w-4" />
                 ) : (
                   <ChevronUp className="h-4 w-4" />
@@ -494,7 +535,7 @@ export function AgentComposer({
             </div>
 
             {/* Expanded content */}
-            {isWorkingExpanded && hasInsights ? (
+            {resolvedWorkingExpanded && hasInsights ? (
               <div
                 className="composer-working-content"
                 onMouseEnter={handleInsightMouseEnter}
