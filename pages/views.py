@@ -174,13 +174,14 @@ def _prepare_stripe_or_404() -> None:
     stripe.api_key = key
 
 
-def _build_checkout_success_url(request, *, event_id: str, price: float) -> tuple[str, bool]:
+def _build_checkout_success_url(request, *, event_id: str, price: float, plan: str) -> tuple[str, bool]:
     ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
     ltv_price = price * ltv_multiple
     success_params = {
         "subscribe_success": 1,
         "p": f"{ltv_price:.2f}",
         "eid": event_id,
+        "plan": plan,
     }
     redirect_path = _pop_post_checkout_redirect(request)
     if redirect_path:
@@ -888,6 +889,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             request,
             event_id=event_id,
             price=price,
+            plan=PlanNames.STARTUP,
         )
 
         line_items = [
@@ -1028,6 +1030,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             request,
             event_id=event_id,
             price=price,
+            plan=PlanNames.SCALE,
         )
 
         line_items = [

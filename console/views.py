@@ -642,8 +642,14 @@ def _apply_subscribe_success_context(request, context: dict, plan_id: str | None
         else:
             context["subscribe_event_id"] = ""
 
-        resolved_plan = plan_id
-        if resolved_plan is None:
+        # Prefer plan from URL params (set at checkout time) over current DB state
+        # to avoid race conditions with webhook processing
+        url_plan = (request.GET.get("plan") or "").strip()
+        if url_plan:
+            resolved_plan = url_plan
+        elif plan_id:
+            resolved_plan = plan_id
+        else:
             plan_config = context.get("subscription_plan") or {}
             resolved_plan = plan_config.get("id") if isinstance(plan_config, dict) else None
 
