@@ -91,7 +91,7 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     updated_properties = dict(properties)
     updated_properties["will_continue_work"] = {
         "type": "boolean",
-        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+        "description": "Set false to STOP when: all kanban cards are done AND you've sent your final report. Omitting defaults to continue. Always set false on your final tool call.",
     }
     updated_parameters["properties"] = updated_properties
     return updated_parameters

@@ -259,7 +259,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set false when no immediate follow-up work is needed; enables auto-sleep.",
+                        "description": "Set false to STOP when: all kanban cards are done AND you've sent your final report. Omitting defaults to continue (for processing response). Always set false on your final tool call.",
                     },
                 },
                 "required": ["method", "url"],

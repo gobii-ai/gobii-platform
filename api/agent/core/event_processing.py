@@ -3197,12 +3197,8 @@ def _run_agent_loop(
                             if found_phrase:
                                 tool_params[body_key] = cleaned_body
                                 tool_params["will_continue_work"] = True
-                        if (
-                            tool_name == "send_chat_message"
-                            and call_id != "implied_send"
-                            and "will_continue_work" not in tool_params
-                        ):
-                            tool_params["will_continue_work"] = True
+                        # Note: explicit send_chat_message without will_continue_work defaults to STOP
+                        # (consistent with other message tools). Agent must set will_continue_work=true to continue.
                     tool_span.set_attribute("tool.params", json.dumps(tool_params))
                     logger.info("Agent %s: %s params=%s", agent.id, tool_name, json.dumps(tool_params)[:ARG_LOG_MAX_CHARS])
 
@@ -3321,59 +3317,8 @@ def _run_agent_loop(
                     executed_calls += 1
 
             config_had_errors = _apply_agent_config_updates()
-            kanban_had_errors, kanban_board_snapshot = _apply_kanban_updates()
+            kanban_had_errors, _ = _apply_kanban_updates()
             if config_had_errors or kanban_had_errors:
-                followup_required = True
-
-            # Kanban completion override: once final output is delivered, force auto-sleep.
-            # If no user-facing message was sent, keep the agent alive to send it.
-            kanban_all_done = (
-                kanban_board_snapshot is not None
-                and kanban_board_snapshot.todo_count == 0
-                and kanban_board_snapshot.doing_count == 0
-                and kanban_board_snapshot.done_count > 0
-            )
-            kanban_has_work = (
-                kanban_board_snapshot is not None
-                and (kanban_board_snapshot.todo_count > 0 or kanban_board_snapshot.doing_count > 0)
-            )
-            if kanban_all_done:
-                if message_delivery_ok:
-                    if any_explicit_continuation:
-                        # Agent sent will_continue_work=true on the message - respect it.
-                        # The message was a progress update, not final output.
-                        logger.info(
-                            "Agent %s: kanban complete but message had will_continue_work=true; continuing.",
-                            agent.id,
-                        )
-                        followup_required = True
-                    else:
-                        # Message with will_continue_work=false (or unset) = final output
-                        logger.info(
-                            "Agent %s: kanban complete and final message sent; auto-sleeping.",
-                            agent.id,
-                        )
-                        followup_required = False
-                elif not all_calls_sleep:
-                    if not followup_required:
-                        logger.info(
-                            "Agent %s: kanban complete but no user message sent; forcing continuation.",
-                            agent.id,
-                        )
-                    followup_required = True
-                    continuation_notice = (
-                        "Kanban is complete but no user-facing message was sent. "
-                        "Send the final output now, then stop."
-                    )
-            # Kanban unfinished override: if work remains and no explicit sleep, force continuation
-            # This prevents premature termination when tools return auto_sleep_ok but kanban has tasks
-            elif kanban_has_work and not followup_required and not all_calls_sleep:
-                logger.warning(
-                    "Agent %s: kanban has unfinished work (todo=%d, doing=%d) but tools signaled auto-sleep; forcing continuation.",
-                    agent.id,
-                    kanban_board_snapshot.todo_count,
-                    kanban_board_snapshot.doing_count,
-                )
                 followup_required = True
 
             if all_calls_sleep:

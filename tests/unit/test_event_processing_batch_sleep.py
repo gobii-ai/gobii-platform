@@ -18,7 +18,6 @@ from api.models import (
     UserQuota,
 )
 from api.agent.tools.tool_manager import enable_tools
-from api.agent.tools.sqlite_kanban import KanbanApplyResult, KanbanBoardSnapshot
 
 
 @tag("batch_event_parallel")
@@ -432,113 +431,23 @@ class TestBatchToolCallsWithSleep(TestCase):
         self.assertIsNone(notices[0])
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
-    @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True})
-    @patch('api.agent.core.event_processing.apply_sqlite_kanban_updates')
+    @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_kanban_done_without_message_prompts_followup(
+    def test_message_with_auto_sleep_ok_stops(
         self,
         mock_completion,
         mock_build_prompt,
-        mock_apply_kanban,
-        _mock_execute_enabled,
-        _mock_credit,
-    ):
-        notices = []
-
-        def build_prompt_side_effect(*_args, **kwargs):
-            notices.append(kwargs.get("continuation_notice"))
-            return ([{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}], 1000, None)
-
-        mock_build_prompt.side_effect = build_prompt_side_effect
-
-        mock_apply_kanban.return_value = KanbanApplyResult(
-            created_ids=(),
-            updated_ids=(),
-            errors=(),
-            changes=(),
-            snapshot=KanbanBoardSnapshot(
-                todo_count=0,
-                doing_count=0,
-                done_count=1,
-                todo_titles=(),
-                doing_titles=(),
-                done_titles=("Ship final report",),
-            ),
-        )
-
-        def mk_tc(name, args):
-            tc = MagicMock()
-            tc.function = MagicMock()
-            tc.function.name = name
-            tc.function.arguments = args
-            return tc
-
-        tc_sqlite = mk_tc('sqlite_batch', '{"sql": "select 1"}')
-
-        msg = MagicMock()
-        msg.tool_calls = [tc_sqlite]
-        msg.content = None
-        choice = MagicMock(); choice.message = msg
-        resp = MagicMock(); resp.choices = [choice]
-        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
-
-        msg_followup = MagicMock()
-        msg_followup.tool_calls = None
-        msg_followup.function_call = None
-        msg_followup.content = None
-        followup_choice = MagicMock(); followup_choice.message = msg_followup
-        followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
-        followup_resp.model_extra = {"usage": MagicMock(prompt_tokens=4, completion_tokens=2, total_tokens=6, prompt_tokens_details=MagicMock(cached_tokens=0))}
-
-        mock_completion.side_effect = [
-            (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
-            (followup_resp, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6, "model": "m", "provider": "p"}),
-        ]
-
-        from api.agent.core import event_processing as ep
-        with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
-            ep._run_agent_loop(self.agent, is_first_run=False)
-
-        self.assertEqual(mock_completion.call_count, 2)
-        self.assertGreaterEqual(len(notices), 2)
-        self.assertIsNotNone(notices[1])
-
-    @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
-    @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": False})
-    @patch('api.agent.core.event_processing.apply_sqlite_kanban_updates')
-    @patch('api.agent.core.event_processing.build_prompt_context')
-    @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_kanban_done_with_message_stops(
-        self,
-        mock_completion,
-        mock_build_prompt,
-        mock_apply_kanban,
         mock_send_chat,
         _mock_credit,
     ):
-        """When kanban is complete and a final message is sent (will_continue_work=false), agent stops."""
+        """When a message is sent with auto_sleep_ok=True (will_continue_work=false), agent stops."""
         mock_build_prompt.return_value = (
             [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
             1000,
             None,
         )
 
-        mock_apply_kanban.return_value = KanbanApplyResult(
-            created_ids=(),
-            updated_ids=(),
-            errors=(),
-            changes=(),
-            snapshot=KanbanBoardSnapshot(
-                todo_count=0,
-                doing_count=0,
-                done_count=1,
-                todo_titles=(),
-                doing_titles=(),
-                done_titles=("Finalize summary",),
-            ),
-        )
-
         def mk_tc(name, args):
             tc = MagicMock()
             tc.function = MagicMock()
@@ -546,7 +455,7 @@ class TestBatchToolCallsWithSleep(TestCase):
             tc.function.arguments = args
             return tc
 
-        # Explicit will_continue_work=false marks a final message
+        # will_continue_work=false means auto_sleep_ok=True from send_chat_message
         tc_message = mk_tc('send_chat_message', '{"body": "Done.", "will_continue_work": false}')
 
         msg = MagicMock()

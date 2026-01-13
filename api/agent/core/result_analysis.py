@@ -40,7 +40,7 @@ SIZE_LARGE = 500 * 1024      # 500KB - aggregate first
 MAX_ARRAY_SCAN = 1000        # Max items to scan in an array
 MAX_DEPTH = 10               # Max nesting depth to analyze
 MAX_FIELDS = 50              # Max fields to report
-MAX_SAMPLE_BYTES = 300       # Max bytes for sample values
+MAX_SAMPLE_BYTES = 500       # Max bytes for sample values - enough to show first item keys
 MAX_EMBEDDED_SCAN_DEPTH = 6
 MAX_EMBEDDED_SCAN_LIST_ITEMS = 25
 MAX_EMBEDDED_CANDIDATES = 50
@@ -74,6 +74,27 @@ _PREFERRED_ARRAY_KEYS = {
     # Note: "children" removed - often refers to nested IDs (like HN comment IDs),
     # not the primary data the user wants. Let object_ratio scoring handle it.
 }
+
+# Characters that require quoted notation in JSON paths
+_JSON_PATH_SPECIAL_CHARS = frozenset('.[]"\' $')
+
+
+def _safe_json_path(col: str) -> str:
+    """Escape column name for JSON path if it contains special characters.
+
+    SQLite JSON path uses QUOTED DOT NOTATION for special characters, NOT bracket notation.
+    For example:
+        - "sepal.length" -> '$."sepal.length"'
+        - "normal_col" -> "$.normal_col"
+        - "has space" -> '$."has space"'
+
+    Note: Bracket notation like $["key"] does NOT work in SQLite for property access.
+    """
+    if any(c in _JSON_PATH_SPECIAL_CHARS for c in col):
+        # Use quoted dot notation - escape any embedded double quotes
+        escaped = col.replace('"', '\\"')
+        return f'$."{escaped}"'
+    return f"$.{col}"
 
 
 @dataclass
@@ -216,6 +237,7 @@ class EmbeddedJsonInfo:
     primary_array_path: Optional[str] = None
     primary_array_length: Optional[int] = None
     primary_array_fields: List[str] = field(default_factory=list)
+    primary_array_sample: Optional[str] = None  # First item sample for embedded arrays
     object_fields: List[str] = field(default_factory=list)
 
 
@@ -1222,6 +1244,7 @@ def _summarize_embedded_json(parsed: Any) -> EmbeddedJsonInfo:
         info.primary_array_path = analysis.primary_array.path
         info.primary_array_length = analysis.primary_array.length
         info.primary_array_fields = analysis.primary_array.item_fields[:10]
+        info.primary_array_sample = analysis.primary_array.item_sample
     elif analysis.field_types:
         info.object_fields = [ft.name for ft in analysis.field_types[:10]]
     return info
@@ -2108,6 +2131,10 @@ def _generate_compact_summary(
                     fields_preview += ", ..."
                 parts.append(f"→ FIELDS: {fields_preview}")
 
+            # SAMPLE - show actual first item structure (eliminates guessing)
+            if arr.item_sample:
+                parts.append(f"→ SAMPLE: {arr.item_sample}")
+
             # QUERY - ready-to-use example (limited fields for clarity)
             if query_patterns and query_patterns.list_all:
                 parts.append(f"→ QUERY: {query_patterns.list_all}")
@@ -2235,7 +2262,7 @@ def _generate_compact_summary(
                     parse_suffix = "" if csv.has_header else ", 0"
                     if csv.columns and csv.has_header:
                         sample_cols = csv.columns[:3]
-                        extracts = ", ".join(f"r2.value->>'$.{col}'" for col in sample_cols)
+                        extracts = ", ".join(f"r2.value->>'{_safe_json_path(col)}'" for col in sample_cols)
                         if parent_path:
                             csv_expr = f"json_extract(r.value,'{item_path}')"
                             parse_query = (
@@ -2252,7 +2279,7 @@ def _generate_compact_summary(
                                 f"WHERE result_id='{result_id}'"
                             )
                         parts.append(f"→ QUERY: {parse_query}")
-                        parts.append("  (use r2.value->>'$.COLUMN_NAME' with exact column names above)")
+                        parts.append("  (use r2.value->>'$.\"COLUMN_NAME\"' for columns with dots/spaces)")
                     else:
                         # No header
                         if parent_path:
@@ -2299,6 +2326,9 @@ def _generate_compact_summary(
                                 f"  → QUERY: SELECT {extracts} "
                                 f"FROM __tool_results WHERE result_id='{result_id}'"
                             )
+                        # SAMPLE - show actual first item structure (eliminates guessing)
+                        if emb.json_info.primary_array_sample:
+                            parts.append(f"  → SAMPLE: {emb.json_info.primary_array_sample}")
                     if emb.json_digest:
                         parts.append(f"  JSON_DIGEST: {emb.json_digest.summary_line()}")
 
@@ -2372,7 +2402,7 @@ def _generate_compact_summary(
                     # Show extraction with actual column names (first 2-3 columns)
                     sample_cols = csv.columns[:3]
                     extracts = ", ".join(
-                        f"r.value->>'$.{col}'" for col in sample_cols
+                        f"r.value->>'{_safe_json_path(col)}'" for col in sample_cols
                     )
                     extract_query = (
                         f"SELECT {extracts} "
@@ -2380,7 +2410,7 @@ def _generate_compact_summary(
                         f"WHERE t.result_id='{result_id}'"
                     )
                     parts.append(f"→ QUERY: {extract_query}")
-                    parts.append(f"  (use r.value->>'$.COLUMN_NAME' with exact column names above)")
+                    parts.append("  (use r.value->>'$.\"COLUMN_NAME\"' for columns with dots/spaces)")
                 else:
                     # No header - use array indices
                     parse_query = (

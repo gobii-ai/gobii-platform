@@ -41,9 +41,6 @@ MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
 
-HTML_TAG_PATTERN = re.compile(r"<([a-z][\w-]*)(?:\s[^>]*)?>", re.IGNORECASE)
-
-
 def _build_html_cleaner() -> Cleaner:
     """Create a Bleach cleaner that preserves common email formatting."""
 
@@ -163,11 +160,13 @@ class TimelineWindow:
         return self.processing_snapshot.active
 
 
-def _looks_like_html(body: str) -> bool:
-    return bool(HTML_TAG_PATTERN.search(body))
-
-
 def _humanize_body(body: str, channel: str | None = None) -> str:
+    """Convert message body to sanitized HTML for display.
+
+    For email channel: Converts markdown to HTML for email client rendering.
+    For all other channels: Returns empty string - the frontend's markdown
+    renderer handles the content, including inline HTML like <br> tags.
+    """
     body = body or ""
     if channel and channel.lower() == "email":
         try:
@@ -175,8 +174,7 @@ def _humanize_body(body: str, channel: str | None = None) -> str:
         except Exception:
             html_snippet = body
         return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
-    if _looks_like_html(body):
-        return HTML_CLEANER.clean(body)
+    # Non-email channels: Let frontend render markdown (handles <br> naturally)
     return ""
 
 

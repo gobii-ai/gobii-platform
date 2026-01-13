@@ -9,7 +9,7 @@ from ..tools.context_hints import extract_context_hint, hint_from_unstructured_t
 from ..tools.sqlite_guardrails import clear_guarded_connection, open_guarded_sqlite_connection
 from ..tools.sqlite_state import TOOL_RESULTS_TABLE, get_sqlite_db_path
 from ..tools.tool_manager import SQLITE_TOOL_NAME
-from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict
+from .result_analysis import ResultAnalysis, analyze_result, analysis_to_dict, _safe_json_path
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +25,13 @@ PREVIEW_TIERS_EXTERNAL = [
     # Position 3+: None (meta only - use query)
 ]
 
-# For large external results, reduce preview to force query usage
-LARGE_RESULT_THRESHOLD = 5_000   # 5KB - start capping early
-LARGE_RESULT_PREVIEW_CAP = 200   # Max 200 bytes for large external results
+# For large external results, reduce preview but keep enough to show structure
+LARGE_RESULT_THRESHOLD = 15_000   # 15KB - start capping here
+LARGE_RESULT_PREVIEW_CAP = 1500   # 1.5KB - enough for first array item structure
 
-# For very large results, be aggressive - minimal structure hint only
-HUGE_RESULT_THRESHOLD = 15_000   # 15KB - this is already a lot of text
-HUGE_RESULT_PREVIEW_CAP = 100    # Minimal preview - rely on analysis hints
+# For very large results, still show meaningful structure
+HUGE_RESULT_THRESHOLD = 50_000    # 50KB - truly large results
+HUGE_RESULT_PREVIEW_CAP = 800     # 800 bytes - still shows keys and sample values
 
 # For fresh (most recent) tool call results, inline if under this threshold
 # to avoid requiring a separate inspection step. ~10K tokens ≈ 40KB.
@@ -131,6 +131,7 @@ def prepare_tool_results_for_prompt(
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
+    csv_candidates: List[Tuple[str, str, ResultAnalysis]] = []
     short_id_map = _build_short_result_id_map(
         [record.step_id for record in records if record.result_text]
     )
@@ -241,7 +242,20 @@ def prepare_tool_results_for_prompt(
                 )
             )
 
+            # Collect CSV candidates for auto-loading
+            if analysis and is_analysis_eligible:
+                csv_info = None
+                if analysis.text_analysis and analysis.text_analysis.csv_info:
+                    csv_info = analysis.text_analysis.csv_info
+                if csv_info and csv_info.has_header and csv_info.columns:
+                    csv_candidates.append((result_id, stored_text or result_text, analysis))
+
     _store_tool_results(rows)
+
+    # Auto-load CSV data into tables when safe
+    if csv_candidates:
+        _auto_load_csv_tables(csv_candidates)
+
     return prompt_info
 
 
@@ -376,6 +390,153 @@ def _ensure_tool_results_columns(conn) -> None:
         )
 
 
+# CSV auto-loading constants
+CSV_AUTO_LOAD_MAX_BYTES = 5_000_000  # 5MB
+CSV_AUTO_LOAD_MAX_ROWS = 10_000
+CSV_AUTO_LOAD_MAX_COLUMNS = 100
+
+
+def _sanitize_column_name(col: str) -> str:
+    """Sanitize column name for use as SQL identifier."""
+    # Replace special characters with underscores
+    sanitized = re.sub(r'[.\s\[\]\'"$,;:!@#%^&*()\-+=<>?/\\|`~{}]', '_', col)
+    # Collapse multiple underscores
+    sanitized = re.sub(r'_+', '_', sanitized).strip('_')
+    # Ensure it's not empty
+    if not sanitized:
+        return 'col'
+    # Ensure it doesn't start with a digit
+    if sanitized[0].isdigit():
+        sanitized = 'col_' + sanitized
+    return sanitized
+
+
+def _dedupe_column_names(columns: List[str]) -> List[str]:
+    """Deduplicate column names by appending numeric suffixes."""
+    seen: Dict[str, int] = {}
+    deduped: List[str] = []
+    for col in columns:
+        if col in seen:
+            seen[col] += 1
+            deduped.append(f"{col}_{seen[col]}")
+        else:
+            seen[col] = 1
+            deduped.append(col)
+    return deduped
+
+
+def _auto_load_csv_tables(
+    csv_candidates: List[Tuple[str, str, ResultAnalysis]],
+) -> Dict[str, str]:
+    """Auto-load CSV data into SQLite tables when safe.
+
+    Args:
+        csv_candidates: List of (result_id, result_text, analysis) tuples
+
+    Returns:
+        Dict mapping result_id to auto-loaded table name
+    """
+    if not csv_candidates:
+        return {}
+
+    db_path = get_sqlite_db_path()
+    if not db_path:
+        return {}
+
+    auto_loaded: Dict[str, str] = {}
+    conn = None
+    try:
+        conn = open_guarded_sqlite_connection(db_path)
+
+        for result_id, result_text, analysis in csv_candidates:
+            table_name = _maybe_auto_load_csv(conn, result_id, result_text, analysis)
+            if table_name:
+                auto_loaded[result_id] = table_name
+
+        if auto_loaded:
+            conn.commit()
+
+    except Exception:
+        logger.exception("Failed to auto-load CSV tables")
+    finally:
+        if conn is not None:
+            try:
+                clear_guarded_connection(conn)
+                conn.close()
+            except Exception:
+                pass
+
+    return auto_loaded
+
+
+def _maybe_auto_load_csv(
+    conn,
+    result_id: str,
+    result_text: str,
+    analysis: ResultAnalysis,
+) -> Optional[str]:
+    """Auto-load CSV into SQLite table if safe. Returns table name or None."""
+    # Check if this is eligible CSV data
+    csv_info = None
+    if analysis.text_analysis and analysis.text_analysis.csv_info:
+        csv_info = analysis.text_analysis.csv_info
+
+    if not csv_info:
+        return None
+    if not csv_info.has_header:
+        return None
+    if not csv_info.columns:
+        return None
+    if len(result_text) > CSV_AUTO_LOAD_MAX_BYTES:
+        return None
+    if csv_info.row_count_estimate > CSV_AUTO_LOAD_MAX_ROWS:
+        return None
+    if len(csv_info.columns) > CSV_AUTO_LOAD_MAX_COLUMNS:
+        return None
+
+    # Generate table name from short result_id
+    short_id = result_id[:6]
+    table_name = f"_csv_{short_id}"
+
+    # Check if table already exists
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    if cur.fetchone():
+        return None
+
+    # Sanitize and dedupe column names
+    sanitized_cols = [_sanitize_column_name(c) for c in csv_info.columns]
+    deduped_cols = _dedupe_column_names(sanitized_cols)
+
+    # Infer SQL types from column_types
+    col_types = csv_info.column_types or []
+    sql_types: List[str] = []
+    for i in range(len(deduped_cols)):
+        ctype = col_types[i] if i < len(col_types) else "text"
+        sql_types.append("REAL" if ctype in ("int", "float") else "TEXT")
+
+    # Build CREATE TABLE AS SELECT
+    extracts = ", ".join(
+        f"CAST(r.value->>'{_safe_json_path(orig)}' AS {stype}) AS \"{san}\""
+        for orig, san, stype in zip(csv_info.columns, deduped_cols, sql_types)
+    )
+
+    create_sql = f'''
+        CREATE TABLE "{table_name}" AS
+        SELECT {extracts}
+        FROM "{TOOL_RESULTS_TABLE}" t, json_each(csv_parse(t.result_text)) r
+        WHERE t.result_id = '{result_id}'
+    '''
+
+    try:
+        conn.execute(create_sql)
+        logger.debug(f"Auto-loaded CSV to table {table_name} for result {result_id}")
+        return table_name
+    except Exception as e:
+        logger.warning(f"CSV auto-load failed for {result_id}: {e}")
+        return None
+
+
 def _summarize_result(
     result_text: str,
     result_id: str,
@@ -481,11 +642,14 @@ def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
 
     This primes the agent's mental model that the inspection step is already
     done, avoiding a redundant query for reasonable-sized results.
+
+    IMPORTANT: We also warn that this full view is ONE-TIME only - next turn
+    they'll only see a truncated preview. Agent must save key info now or
+    note the result_id for future queries via __tool_results.
     """
-    # Format like: SELECT substr(result_text,1,40000) FROM __tool_results
-    char_limit = min(full_bytes, FRESH_RESULT_INLINE_THRESHOLD)
     return (
-        f"[Auto-inspected: SELECT substr(result_text,1,{char_limit}) → {full_bytes} chars]\n"
+        f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
+        f"Next turn shows only preview. Save key data now or query later via __tool_results]\n"
         f"{result_text}"
     )
 

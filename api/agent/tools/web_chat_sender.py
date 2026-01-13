@@ -72,7 +72,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true when this is just a quick update and you'll keep working immediately.",
+                        "description": "CRITICAL: Set true unless this is your FINAL report with all kanban cards done. Intro/greeting, progress updates, questions = always true. Only omit/false after delivering final results.",
                     },
                 },
                 "required": ["body"],

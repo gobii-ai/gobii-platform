@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef } from 'react'
 
-import { looksLikeHtml, sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
+import { sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 
 type MessageContentProps = {
@@ -68,15 +68,14 @@ function useFastReveal(content: string, enabled: boolean) {
 }
 
 export function MessageContent({ bodyHtml, bodyText, showEmptyState = true, animateIn = false }: MessageContentProps) {
+  // Only use HTML rendering if backend explicitly provided bodyHtml (e.g., for email channel).
+  // For other channels, bodyText may contain inline HTML like <br> which the markdown renderer handles.
   const htmlSource = useMemo(() => {
     if (bodyHtml && bodyHtml.trim().length > 0) {
       return sanitizeHtml(bodyHtml)
     }
-    if (bodyText && looksLikeHtml(bodyText)) {
-      return sanitizeHtml(bodyText)
-    }
     return null
-  }, [bodyHtml, bodyText])
+  }, [bodyHtml])
 
   // Strip redundant quotes from blockquotes (e.g., > "text" → > text)
   const normalizedText = useMemo(() => {

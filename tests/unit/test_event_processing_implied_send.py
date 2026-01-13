@@ -471,13 +471,14 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_explicit_send_defaults_to_continue(
+    def test_explicit_send_defaults_to_stop(
         self,
         mock_completion,
         mock_build_prompt,
         mock_send_chat,
         _mock_credit,
     ):
+        """Explicit send_chat_message without will_continue_work defaults to STOP."""
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
 
         tool_call = MagicMock()
@@ -515,7 +516,8 @@ class ImpliedSendTests(TestCase):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         params = mock_send_chat.call_args[0][1]
-        self.assertTrue(params.get("will_continue_work"))
+        # Explicit sends without will_continue_work default to STOP (no key set)
+        self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
