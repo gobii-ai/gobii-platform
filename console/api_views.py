@@ -4944,7 +4944,7 @@ class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent(request.user, request.session, agent_id, sync_session=False)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -4970,7 +4970,7 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent(request.user, request.session, agent_id, sync_session=False)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:

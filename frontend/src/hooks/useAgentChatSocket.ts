@@ -210,6 +210,9 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return
     }
+    if (!agentIdRef.current) {
+      return
+    }
     const now = Date.now()
     if (now - lastSyncAtRef.current < RESYNC_THROTTLE_MS) {
       return

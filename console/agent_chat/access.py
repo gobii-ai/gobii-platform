@@ -36,7 +36,7 @@ def _sync_session_context(session, membership: OrganizationMembership) -> None:
     session["context_name"] = membership.org.name
 
 
-def agent_queryset_for(user, session, agent_id: str | None = None) -> QuerySet:
+def agent_queryset_for(user, session, agent_id: str | None = None, sync_session: bool = True) -> QuerySet:
     """Return queryset of agents visible to the user within the console context."""
     qs = PersistentAgent.objects.non_eval().select_related("browser_use_agent").all()
     context_type = (session or {}).get("context_type", "personal") if session is not None else "personal"
@@ -54,15 +54,15 @@ def agent_queryset_for(user, session, agent_id: str | None = None) -> QuerySet:
             org_id=fallback_org_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         ).first()
-        if membership:
+        if membership and sync_session:
             _sync_session_context(session, membership)
         return qs.filter(organization_id=fallback_org_id)
 
     return qs.filter(user=user, organization__isnull=True)
 
 
-def resolve_agent(user, session, agent_id: str) -> PersistentAgent:
-    queryset = agent_queryset_for(user, session, agent_id=agent_id)
+def resolve_agent(user, session, agent_id: str, sync_session: bool = True) -> PersistentAgent:
+    queryset = agent_queryset_for(user, session, agent_id=agent_id, sync_session=sync_session)
     try:
         return queryset.get(pk=agent_id)
     except PersistentAgent.DoesNotExist as exc:  # pragma: no cover - defensive guard

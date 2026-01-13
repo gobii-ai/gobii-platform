@@ -230,7 +230,7 @@ export function AgentChatPage({
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster', null], exact: true })
       if (onContextSwitch) {
         onContextSwitch(context)
         return
@@ -257,6 +257,7 @@ export function AgentChatPage({
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const liveAgentId = contextSwitching ? null : activeAgentId
 
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
@@ -309,9 +310,9 @@ export function AgentChatPage({
 
   const [isNearBottom, setIsNearBottom] = useState(true)
 
-  const socketSnapshot = useAgentChatSocket(activeAgentId)
-  const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
-  const rosterQuery = useAgentRoster(activeAgentId)
+  const socketSnapshot = useAgentChatSocket(liveAgentId)
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
+  const rosterQuery = useAgentRoster(liveAgentId)
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -649,6 +650,7 @@ export function AgentChatPage({
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
+  const allowAgentRefresh = hasSelectedAgent && !contextSwitching
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
@@ -827,7 +829,7 @@ export function AgentChatPage({
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
 
   // Start/stop insight rotation based on processing state
-  const isProcessing = hasSelectedAgent && (processingActive || awaitingResponse || (streaming && !streaming.done))
+  const isProcessing = allowAgentRefresh && (processingActive || awaitingResponse || (streaming && !streaming.done))
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -844,24 +846,31 @@ export function AgentChatPage({
   }, [insights, dismissedInsightIds])
 
   useEffect(() => {
-    if (!streaming || streaming.done) {
+    if (!allowAgentRefresh || !streaming || streaming.done) {
       return () => undefined
     }
     const interval = window.setInterval(() => {
       void refreshProcessing()
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [refreshProcessing, streaming])
+  }, [allowAgentRefresh, refreshProcessing, streaming])
 
   useEffect(() => {
-    if (!showContextSwitcher || !activeAgentId || !rosterQuery.isSuccess) {
+    if (contextSwitching || !showContextSwitcher || !activeAgentId || !rosterQuery.isSuccess) {
       return
     }
     void refreshContext()
-  }, [activeAgentId, refreshContext, rosterQuery.dataUpdatedAt, rosterQuery.isSuccess, showContextSwitcher])
+  }, [
+    activeAgentId,
+    contextSwitching,
+    refreshContext,
+    rosterQuery.dataUpdatedAt,
+    rosterQuery.isSuccess,
+    showContextSwitcher,
+  ])
 
   useEffect(() => {
-    if (!streaming || streaming.done) {
+    if (!allowAgentRefresh || !streaming || streaming.done) {
       return () => undefined
     }
     if (processingActive) {
@@ -883,6 +892,7 @@ export function AgentChatPage({
     const timeout = window.setTimeout(handleTimeout, timeoutMs)
     return () => window.clearTimeout(timeout)
   }, [
+    allowAgentRefresh,
     finalizeStreaming,
     processingActive,
     refreshLatest,
