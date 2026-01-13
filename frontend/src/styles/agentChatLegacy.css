@@ -840,30 +840,26 @@
 
 .composer-working-insight {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   overflow: hidden;
-  min-height: 100px;
-  max-height: 160px;
+  height: 150px;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
 .composer-working-insight .insight-card-v2 {
-  height: auto;
-  min-height: 100%;
+  width: 100%;
 }
 
 @media (max-width: 640px) {
   .composer-working-insight {
-    min-height: 90px;
-    max-height: 140px;
+    height: 115px;
     overflow-y: auto;
   }
 }
 
 @media (max-width: 420px) {
   .composer-working-insight {
-    min-height: 80px;
-    max-height: 120px;
+    height: 100px;
   }
 }
 
