@@ -185,9 +185,10 @@ def _build_checkout_success_url(request, *, event_id: str, price: float, plan: s
     }
     redirect_path = _pop_post_checkout_redirect(request)
     if redirect_path:
-        # Append tracking params to custom redirect path
-        separator = "&" if "?" in redirect_path else "?"
-        redirect_with_params = f"{redirect_path}{separator}{urlencode(success_params)}"
+        # Append tracking params to custom redirect path, preserving any fragment
+        path_part, frag_sep, fragment = redirect_path.partition('#')
+        separator = '&' if '?' in path_part else '?'
+        redirect_with_params = f"{path_part}{separator}{urlencode(success_params)}{frag_sep}{fragment}"
         return request.build_absolute_uri(redirect_with_params), True
     default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
     return default_url, False
