@@ -3,12 +3,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
+import type { ConsoleContext } from '../api/context'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
+import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
@@ -170,6 +172,8 @@ export type AgentChatPageProps = {
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
+  showContextSwitcher?: boolean
+  onContextSwitch?: (context: ConsoleContext) => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -177,10 +181,44 @@ const STREAMING_REFRESH_INTERVAL_MS = 6000
 const SCROLL_END_TOLERANCE_PX = 4
 const BOTTOM_PANEL_GAP_PX = 20
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
+export function AgentChatPage({
+  agentId,
+  agentName,
+  agentColor,
+  agentAvatarUrl,
+  onClose,
+  onCreateAgent,
+  onAgentCreated,
+  showContextSwitcher = false,
+  onContextSwitch,
+}: AgentChatPageProps) {
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
   const timelineRef = useRef<HTMLDivElement | null>(null)
+
+  const handleContextSwitched = useCallback(
+    (context: ConsoleContext) => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+      if (onContextSwitch) {
+        onContextSwitch(context)
+        return
+      }
+      if (typeof window !== 'undefined') {
+        window.location.reload()
+      }
+    },
+    [onContextSwitch, queryClient],
+  )
+
+  const {
+    data: contextData,
+    isSwitching: contextSwitching,
+    error: contextError,
+    switchContext,
+  } = useConsoleContextSwitcher({
+    enabled: showContextSwitcher,
+    onSwitched: handleContextSwitched,
+  })
 
   const [activeAgentId, setActiveAgentId] = useState(agentId)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
@@ -576,6 +614,19 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
+  const contextSwitcher = useMemo(() => {
+    if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
+      return null
+    }
+    return {
+      current: contextData.context,
+      personal: contextData.personal,
+      organizations: contextData.organizations,
+      onSwitch: switchContext,
+      isBusy: contextSwitching,
+      errorMessage: contextError,
+    }
+  }, [contextData, contextError, contextSwitching, switchContext])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
@@ -801,6 +852,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
           errorMessage={rosterErrorMessage}
           onSelectAgent={handleSelectAgent}
           onCreateAgent={handleCreateAgent}
+          contextSwitcher={contextSwitcher ?? undefined}
         />
         <main className="has-sidebar has-sidebar--collapsed min-h-screen">
           <AgentNotFoundState
@@ -834,6 +886,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
+        contextSwitcher={contextSwitcher ?? undefined}
         onClose={onClose}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}

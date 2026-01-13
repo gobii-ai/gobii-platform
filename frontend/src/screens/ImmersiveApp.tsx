@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
+import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
@@ -262,6 +263,10 @@ export function ImmersiveApp() {
     navigateTo(`/app/agents/${agentId}`)
   }, [])
 
+  const handleContextSwitch = useCallback((_context: ConsoleContext) => {
+    navigateTo('/app')
+  }, [])
+
   return (
     <div className="immersive-shell">
       <div className="immersive-shell__content">
@@ -271,6 +276,8 @@ export function ImmersiveApp() {
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            onContextSwitch={handleContextSwitch}
           />
         ) : null}
         {route.kind === 'command-center' ? (
