@@ -1191,6 +1191,22 @@
   }
 }
 
+@media (max-width: 420px) {
+  .upsell-hero__pricing {
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .upsell-hero__price {
+    order: 0;
+  }
+
+  .upsell-hero__cta {
+    width: 100%;
+  }
+}
+
 .agent-setup-panel {
   display: flex;
   align-items: center;
