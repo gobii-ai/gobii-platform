@@ -3936,7 +3936,11 @@ def _get_system_instruction(
                     "This is your first run.\n"
                     f"Contact channel: {channel} at {address}.\n\n"
 
-                    "## First sqlite_batch: charter + kanban cards together\n\n"
+                    "## REQUIRED: Your very first action must be sending a welcome message\n\n"
+                    f"Before ANY tool calls, you MUST call send_{channel} to introduce yourself to the user.\n"
+                    "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
+
+                    "## Then sqlite_batch: charter + kanban cards together\n\n"
 
                     "Your first sqlite_batch sets up both your charter and your work plan:\n"
                     "```sql\n"
