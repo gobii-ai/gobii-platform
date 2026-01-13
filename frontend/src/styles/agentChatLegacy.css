@@ -842,7 +842,7 @@
   display: flex;
   align-items: center;
   overflow: hidden;
-  height: 130px;
+  height: 150px;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
