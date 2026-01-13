@@ -40,7 +40,7 @@ SIZE_LARGE = 500 * 1024      # 500KB - aggregate first
 MAX_ARRAY_SCAN = 1000        # Max items to scan in an array
 MAX_DEPTH = 10               # Max nesting depth to analyze
 MAX_FIELDS = 50              # Max fields to report
-MAX_SAMPLE_BYTES = 300       # Max bytes for sample values
+MAX_SAMPLE_BYTES = 500       # Max bytes for sample values - enough to show first item keys
 MAX_EMBEDDED_SCAN_DEPTH = 6
 MAX_EMBEDDED_SCAN_LIST_ITEMS = 25
 MAX_EMBEDDED_CANDIDATES = 50
@@ -237,6 +237,7 @@ class EmbeddedJsonInfo:
     primary_array_path: Optional[str] = None
     primary_array_length: Optional[int] = None
     primary_array_fields: List[str] = field(default_factory=list)
+    primary_array_sample: Optional[str] = None  # First item sample for embedded arrays
     object_fields: List[str] = field(default_factory=list)
 
 
@@ -1243,6 +1244,7 @@ def _summarize_embedded_json(parsed: Any) -> EmbeddedJsonInfo:
         info.primary_array_path = analysis.primary_array.path
         info.primary_array_length = analysis.primary_array.length
         info.primary_array_fields = analysis.primary_array.item_fields[:10]
+        info.primary_array_sample = analysis.primary_array.item_sample
     elif analysis.field_types:
         info.object_fields = [ft.name for ft in analysis.field_types[:10]]
     return info
@@ -2129,6 +2131,10 @@ def _generate_compact_summary(
                     fields_preview += ", ..."
                 parts.append(f"→ FIELDS: {fields_preview}")
 
+            # SAMPLE - show actual first item structure (eliminates guessing)
+            if arr.item_sample:
+                parts.append(f"→ SAMPLE: {arr.item_sample}")
+
             # QUERY - ready-to-use example (limited fields for clarity)
             if query_patterns and query_patterns.list_all:
                 parts.append(f"→ QUERY: {query_patterns.list_all}")
@@ -2320,6 +2326,9 @@ def _generate_compact_summary(
                                 f"  → QUERY: SELECT {extracts} "
                                 f"FROM __tool_results WHERE result_id='{result_id}'"
                             )
+                        # SAMPLE - show actual first item structure (eliminates guessing)
+                        if emb.json_info.primary_array_sample:
+                            parts.append(f"  → SAMPLE: {emb.json_info.primary_array_sample}")
                     if emb.json_digest:
                         parts.append(f"  JSON_DIGEST: {emb.json_digest.summary_line()}")
 

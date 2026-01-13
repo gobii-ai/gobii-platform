@@ -25,13 +25,13 @@ PREVIEW_TIERS_EXTERNAL = [
     # Position 3+: None (meta only - use query)
 ]
 
-# For large external results, reduce preview to force query usage
-LARGE_RESULT_THRESHOLD = 5_000   # 5KB - start capping early
-LARGE_RESULT_PREVIEW_CAP = 200   # Max 200 bytes for large external results
+# For large external results, reduce preview but keep enough to show structure
+LARGE_RESULT_THRESHOLD = 15_000   # 15KB - start capping here
+LARGE_RESULT_PREVIEW_CAP = 1500   # 1.5KB - enough for first array item structure
 
-# For very large results, be aggressive - minimal structure hint only
-HUGE_RESULT_THRESHOLD = 15_000   # 15KB - this is already a lot of text
-HUGE_RESULT_PREVIEW_CAP = 100    # Minimal preview - rely on analysis hints
+# For very large results, still show meaningful structure
+HUGE_RESULT_THRESHOLD = 50_000    # 50KB - truly large results
+HUGE_RESULT_PREVIEW_CAP = 800     # 800 bytes - still shows keys and sample values
 
 # For fresh (most recent) tool call results, inline if under this threshold
 # to avoid requiring a separate inspection step. ~10K tokens ≈ 40KB.
