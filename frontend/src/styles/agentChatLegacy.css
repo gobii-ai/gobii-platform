@@ -852,14 +852,14 @@
 
 @media (max-width: 640px) {
   .composer-working-insight {
-    height: 115px;
-    overflow-y: auto;
+    height: auto;
+    min-height: 140px;
   }
 }
 
 @media (max-width: 420px) {
   .composer-working-insight {
-    height: 100px;
+    min-height: 140px;
   }
 }
 
