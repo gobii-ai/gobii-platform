@@ -1206,8 +1206,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        agent_id = request.GET.get("agent_id")
         agents = (
-            agent_queryset_for(request.user, request.session)
+            agent_queryset_for(request.user, request.session, agent_id=agent_id)
             .select_related("agent_color")
             .order_by("name")
         )

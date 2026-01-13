@@ -21,8 +21,13 @@ type AgentRosterPayload = {
   }[]
 }
 
-export async function fetchAgentRoster(): Promise<AgentRosterEntry[]> {
-  const payload = await jsonFetch<AgentRosterPayload>('/console/api/agents/roster/')
+export async function fetchAgentRoster(agentId?: string | null): Promise<AgentRosterEntry[]> {
+  const params = new URLSearchParams()
+  if (agentId) {
+    params.set('agent_id', agentId)
+  }
+  const url = params.toString() ? `/console/api/agents/roster/?${params.toString()}` : '/console/api/agents/roster/'
+  const payload = await jsonFetch<AgentRosterPayload>(url)
   return payload.agents.map((agent) => ({
     id: agent.id,
     name: agent.name,

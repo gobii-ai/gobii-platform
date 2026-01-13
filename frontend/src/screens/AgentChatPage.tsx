@@ -239,7 +239,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
 
   const socketSnapshot = useAgentChatSocket(activeAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
-  const rosterQuery = useAgentRoster()
+  const rosterQuery = useAgentRoster(activeAgentId)
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
