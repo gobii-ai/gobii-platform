@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from 'react'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
@@ -115,6 +115,24 @@ export function AgentChatLayout({
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
+  }, [])
+
+  // Fix for mobile GPU context invalidation: force repaint when page becomes visible
+  // after device sleep/wake cycles that can cause composited layers to disappear
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const timeline = document.getElementById('timeline-shell')
+        if (timeline) {
+          timeline.style.display = 'none'
+          timeline.offsetHeight // Force sync reflow
+          timeline.style.display = ''
+        }
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
   }, [])
 
   const isStreaming = Boolean(streaming && !streaming.done)
