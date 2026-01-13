@@ -1367,6 +1367,9 @@ def _get_error_hint(error_msg: str, sql: str = "") -> str:
                     return f" FIX: Typo? You defined CTE '{cte}' but referenced '{missing}'."
         return " FIX: Create the table first with CREATE TABLE before querying it."
     if "syntax error" in error_lower:
+        # Check if it might be a quote escaping issue
+        if "'" in sql and ("regexp" in sql.lower() or "pattern" in sql.lower()):
+            return " FIX: Quote escaping issue. Use extract_urls()/extract_emails() for URLs/emails, or escape ' as '' in regex patterns."
         return " FIX: Check SQL syntax - common issues: missing quotes, commas, or parentheses."
     if "wrong number of arguments" in error_lower:
         return " FIX: Check parentheses in nested function calls - a ')' is likely misplaced."
@@ -1705,7 +1708,8 @@ def _execute_sqlite_batch_inner(
             if all_corrections:
                 msg = (
                     f"[!] AUTO-CORRECTED: {', '.join(all_corrections)}. "
-                    "Fix your shit: review before/after SQL in results and update your query. "
+                    "STOP making this mistake. Use extract_urls()/extract_emails() instead of regexp for URLs/emails. "
+                    "For other patterns: escape single quotes as '' in SQL strings. "
                     + msg
                 )
 

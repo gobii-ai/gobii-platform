@@ -270,6 +270,11 @@ hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
 hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
 hint absent → query first: SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='...'
 
+# result_meta hints (read BEFORE querying)
+🔍 line shows "→ https://..." → use that URL directly (no extraction needed!)
+DIGEST shows parsed_from/fields → those are the correct paths
+CHECK hints FIRST → saves queries and avoids regex escaping errors
+
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})
 empty_string     → NULLIF(TRIM(x), '')
@@ -738,10 +743,10 @@ The `csv_parse` function uses Python's csv module internally—it handles edge c
 | `clean_text(text)` | String | Normalize whitespace, unicode, quotes |
 | `url_extract(url, part)` | String | Extract 'domain', 'host', 'path', 'query' |
 | `extract_json(text)` | String | Find valid JSON in surrounding text |
-| `extract_emails(text)` | JSON array | Find all emails in text |
-| `extract_urls(text)` | JSON array | Find all URLs in text |
+| `extract_emails(text)` | JSON array | **Use this for emails** (not regexp) |
+| `extract_urls(text)` | JSON array | **Use this for URLs** (not regexp) |
 | `grep_context_all(text, pat, chars, max)` | JSON array | Context around regex matches |
-| `regexp_extract(text, pattern)` | String | First regex match |
+| `regexp_extract(text, pattern)` | String | First regex match (escape `'` as `''`) |
 | `split_sections(text, delim)` | JSON array | Split by delimiter |
 
 ```sql
@@ -757,8 +762,11 @@ SELECT html_to_text(raw_html) as clean FROM pages;
 -- Group URLs by domain
 SELECT url_extract(link, 'domain') as domain, COUNT(*) FROM data GROUP BY 1;
 
--- Iterate JSON arrays
-SELECT v.value FROM json_each(extract_emails(text)) v;
+-- Extract all URLs from text (PREFERRED over regexp_extract for URLs)
+SELECT v.value as url FROM json_each(extract_urls(result_text)) v;
+
+-- Extract all emails from text (PREFERRED over regexp_extract for emails)
+SELECT v.value as email FROM json_each(extract_emails(result_text)) v;
 ```
 
 ---
@@ -3391,7 +3399,9 @@ def _get_system_instruction(
         "- Charter = what you're doing (your purpose)\n"
         "- Kanban = what steps you see (your progress)\n"
         "- **Default: create cards.** Any task worth doing is worth tracking. Almost all tasks need multiple steps—start with cards.\n"
-        "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES (<step1>, 'doing'), (<step2>, 'todo'), ...\")`\n"
+        "- **Cards must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
+        "- **Always include a reporting step.** The final card must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
+        "- **First response to any task:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
@@ -3821,11 +3831,20 @@ def _get_system_instruction(
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
         "## Kanban Tracking (MANDATORY)\n\n"
         "Kanban (__kanban_cards) tracks your work. The sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
-        "Cards should cover the FULL workflow—not just research/fetching, but also the deliverable:\n"
-        "- 'Research competitor pricing' (the work)\n"
-        "- 'Send pricing comparison report' (the deliverable)\n\n"
+        "**Card quality:** Each card must be ultra-specific, info-dense, and fully self-contained. Include the high-level goal so context survives across long sessions.\n"
+        "- BAD: 'Do research' / 'Step 1' / 'Analyze data' (vague, useless without context)\n"
+        "- BAD: 'Get pricing info' (which products? for what purpose?)\n"
+        "- GOOD: 'Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tiers for CRM comparison report'\n"
+        "- GOOD: 'Build comparison table: CRM × tier × price × key limits — user evaluating which CRM to buy'\n"
+        "- GOOD: 'Email CRM pricing report to user with rec for 10-person sales team under $500/mo'\n\n"
+        "**Pattern:** `<action> — <context about why / high-level goal>`\n"
+        "The dash-context reminds future-you what this is all for when you've lost the thread.\n\n"
+        "**Every plan MUST end with a reporting step.** The final card delivers results to the user:\n"
+        "- 'Email competitor analysis with top 3 ranked picks to user'\n"
+        "- 'Send weekly startup digest to user — include funding, team size, and why each matters'\n"
+        "- 'Message user with final recommendations + supporting evidence from research'\n\n"
         "Steps:\n"
-        "1. Create cards for each task AND each deliverable when work begins\n"
+        "1. Create cards for each task AND a final reporting/delivery card when work begins\n"
         "2. Set status='doing' on the card you're actively working on\n"
         "3. DO THE ACTUAL WORK (tool calls, analysis, etc.)\n"
         "4. VERIFY the work succeeded (check tool results)\n"
@@ -3833,7 +3852,8 @@ def _get_system_instruction(
         "6. **When ALL cards are 'done' AND you've sent your final report → will_continue_work=false → STOP IMMEDIATELY**\n\n"
         "WRONG: Mark card done → then do the work (or skip it entirely)\n"
         "WRONG: All cards done but keep taking turns without will_continue_work=false\n"
-        "RIGHT: Do the work → verify success → mark done → when all done + report sent → STOP\n\n"
+        "WRONG: No reporting card—work done but user never gets results\n"
+        "RIGHT: Do the work → verify success → mark done → send report → STOP\n\n"
         "No cards = no memory. Unmarked work = invisible progress. Premature 'done' = lying. Forgetting to stop = wasting credits.\n\n"
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
@@ -3920,15 +3940,22 @@ def _get_system_instruction(
 
                     "Your first sqlite_batch sets up both your charter and your work plan:\n"
                     "```sql\n"
-                    "UPDATE __agent_config SET charter='Research X', schedule=NULL WHERE id=1;\n"
+                    "UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\n"
                     "INSERT INTO __kanban_cards (title, status) VALUES\n"
-                    "  ('Find relevant sources', 'doing'),\n"
-                    "  ('Analyze findings', 'todo'),\n"
-                    "  ('Write up results', 'todo');\n"
+                    "  ('Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tier details for CRM cost comparison', 'doing'),\n"
+                    "  ('Build comparison table: CRM × tier × price × user-limits × key features — user choosing CRM for 10-person sales team', 'todo'),\n"
+                    "  ('Email pricing report with best-value rec under $500/mo to user — final deliverable for CRM research', 'todo');\n"
                     "```\n"
                     "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
                     "Don't provide IDs—they auto-generate. Just title + status.\n"
                     "Charter without cards leaves you with no memory of what to do. Always include both.\n\n"
+                    "**Card quality:** Cards must be ultra-specific and embed the high-level goal. Pattern: `<action> — <context/why>`\n"
+                    "The dash-context ensures future-you knows what this is all for even if you lose the thread.\n"
+                    "- BAD: 'Research competitors' (vague, no targets, useless alone)\n"
+                    "- BAD: 'Get founder info' (which founders? for what purpose?)\n"
+                    "- GOOD: 'Scrape LinkedIn for Acme, Betaco, Gamma founders — need roles + backgrounds for investor due diligence report'\n"
+                    "- GOOD: 'Find AI agent repos on GitHub with 100+ stars added this week — building weekly emerging-tools digest for user'\n"
+                    "- GOOD: 'Email startup scouting report: 10 companies × funding × team size × product stage — user evaluating investment targets'\n\n"
 
                     "## Your welcome message should:\n"
                     "- Introduce yourself by first name\n"
@@ -4023,11 +4050,13 @@ def _get_system_instruction(
                     "```sql\n"
                     "-- Include in the SAME sqlite_batch as your charter update:\n"
                     "-- IDs auto-generate, just provide title + status\n"
+                    "-- Pattern: '<action> — <context/why>' so each card is self-contained\n"
                     "INSERT INTO __kanban_cards (title, status) VALUES\n"
-                    "  ('First step', 'doing'),\n"
-                    "  ('Next step', 'todo'),\n"
-                    "  ('Another step', 'todo');\n"
-                    "```\n\n"
+                    "  ('Find top 10 AI startups on Crunchbase with Series A+ funding — building investor scouting report', 'doing'),\n"
+                    "  ('Scrape founder LinkedIn for each startup — need backgrounds, prior exits, domain expertise for diligence', 'todo'),\n"
+                    "  ('Email scouting report: 10 startups × funding × team × product maturity × rec — user evaluating where to invest', 'todo');\n"
+                    "```\n"
+                    "ALWAYS end with a reporting/delivery step. The last card sends results to user and restates what they asked for.\n\n"
 
                     "### R5: Continuation Logic\n"
                     "```\n"
