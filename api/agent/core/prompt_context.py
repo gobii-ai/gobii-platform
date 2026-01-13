@@ -258,8 +258,8 @@ verified(X) → seen(X) ∈ {schema, hint, result, own_CREATE, inspection}
 never: use(assumed) | use(remembered) | use(guessed)
 guess(identifier) → error   # you ARE about to get "no such column"
 
-# Two-step pattern (critical for complex queries)
-# BOTH STEPS IN ONE sqlite_batch CALL — never split across calls
+# Simple queries win. Fancy queries break.
+# Only use two-step patterns when structure is truly unknown.
 unknown(structure) → step1: inspect → step2: use(inspected)
 sqlite_batch(sql="
   SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='{id}';  -- step1: get enough context
