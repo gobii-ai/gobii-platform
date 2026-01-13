@@ -71,7 +71,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you still need to mark kanban cards done after this email. Omit or set false to STOP when: all kanban cards are done AND this is your final report.",
+                        "description": "CRITICAL: Set true unless this is your FINAL report with all kanban cards done. Intro/greeting, progress updates, questions = always true. Only omit/false after delivering final results.",
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html"],

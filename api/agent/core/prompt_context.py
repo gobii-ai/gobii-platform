@@ -599,7 +599,11 @@ will_continue_work=false → "I'm DONE, STOP NOW" — all kanban cards done, rep
 - **Message tools** (send_chat_message, send_email, send_sms): omit = STOP (you sent your message, you're done)
 - **Data tools** (http_request, sqlite_batch, search_tools): omit = CONTINUE (you need to process the result)
 
-**For data tools, always set will_continue_work explicitly.** Omitting it on data tools keeps you running.
+**CRITICAL: Set will_continue_work=true on messages unless it's your FINAL report:**
+- Intro/greeting message? → will_continue_work=true (you haven't started yet!)
+- Progress update? → will_continue_work=true (work remains)
+- Asking a question? → will_continue_work=true (you need their answer)
+- Final report with all cards done? → will_continue_work=false or omit
 
 **STOP (will_continue_work=false) when ALL are true:**
 1. All kanban cards are marked 'done' (no todo/doing cards remain)
