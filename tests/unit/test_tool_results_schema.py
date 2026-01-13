@@ -541,7 +541,7 @@ class PreviewByteLimitTests(SimpleTestCase):
             HUGE_RESULT_PREVIEW_CAP,
         )
 
-        huge_text = "y" * 20000  # 20KB
+        huge_text = "y" * 50000  # 50KB - must exceed HUGE_RESULT_THRESHOLD
         preview, is_inline = _build_prompt_preview(
             huge_text,
             len(huge_text),
@@ -603,10 +603,9 @@ class PreviewByteLimitTests(SimpleTestCase):
         )
 
         self.assertTrue(is_inline)
-        # Should be wrapped as sqlite result
-        self.assertIn("[Auto-inspected:", preview)
-        self.assertIn("substr(result_text,1,30000)", preview)
-        self.assertIn("30000 chars", preview)
+        # Should be wrapped with one-time view warning
+        self.assertIn("[FULL RESULT (30000 chars) - ONE-TIME VIEW", preview)
+        self.assertIn("Save key data now or query later via __tool_results", preview)
         self.assertIn(medium_text, preview)
 
     def test_fresh_tool_call_over_threshold_truncated(self):
