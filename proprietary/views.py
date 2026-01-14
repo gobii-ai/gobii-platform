@@ -15,7 +15,7 @@ from proprietary.forms import SupportForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
 from constants.plans import PlanNames
-from config.plans import PLAN_CONFIG
+from config.plans import PLAN_CONFIG, get_plan_config
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +85,12 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             limit = PLAN_CONFIG.get(plan_name, {}).get("max_contacts_per_agent")
             return f"{limit} contacts/agent" if limit is not None else "Contacts/agent: —"
 
+        # Get plan prices from config (refreshed from StripeConfig)
+        startup_config = get_plan_config(PlanNames.STARTUP) or {}
+        scale_config = get_plan_config(PlanNames.SCALE) or {}
+        startup_price = startup_config.get("price", 50)
+        scale_price = scale_config.get("price", 250)
+
         # Pricing cards data - new 3-tier structure
         context["pricing_plans"] = [
             {
@@ -115,8 +121,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             {
                 "code": PlanNames.STARTUP,
                 "name": "Pro",
-                "price": 50,
-                "price_label": "$50",
+                "price": startup_price,
+                "price_label": f"${startup_price}",
                 "desc": "For growing teams",
                 "tasks": "500",
                 "pricing_model": "Billed monthly",
@@ -140,8 +146,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             {
                 "code": PlanNames.SCALE,
                 "name": "Scale",
-                "price": 250,
-                "price_label": "$250",
+                "price": scale_price,
+                "price_label": f"${scale_price}",
                 "desc": "For teams scaling fast",
                 "tasks": "10,000",
                 "pricing_model": "Billed monthly",
