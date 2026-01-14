@@ -390,14 +390,16 @@ def proxy_health_check_nightly(self):
         for proxy in proxy_sample:
             try:
                 result = _perform_proxy_health_check(proxy)
-                if result and result.passed:
-                    successful_checks += 1
-                    logger.info(f"Health check passed for proxy {proxy.host}:{proxy.port}")
+                if result:
+                    deactivated = proxy.record_health_check(result.passed)
+                    if result.passed:
+                        successful_checks += 1
+                    else:
+                        failed_checks += 1
+                        if deactivated:
+                            logger.warning(f"Proxy {proxy.host}:{proxy.port} auto-deactivated after {proxy.consecutive_health_failures} consecutive failures")
                 else:
                     failed_checks += 1
-                    status = result.status if result else "UNKNOWN"
-                    logger.warning(f"Health check failed for proxy {proxy.host}:{proxy.port} with status {status}")
-                    # TODO: Consider marking proxy as inactive after repeated failures
             except Exception as e:
                 failed_checks += 1
                 logger.error(f"Health check error for proxy {proxy.host}:{proxy.port}: {e}")
@@ -420,11 +422,10 @@ def proxy_health_check_single(self, proxy_id: str):
 
             result = _perform_proxy_health_check(proxy_server)
 
-            if result and result.passed:
-                logger.info(f"On-demand health check passed for proxy {proxy_server.host}:{proxy_server.port}")
-            else:
-                status = result.status if result else "UNKNOWN"
-                logger.warning(f"On-demand health check failed for proxy {proxy_server.host}:{proxy_server.port} with status {status}")
+            if result:
+                deactivated = proxy_server.record_health_check(result.passed)
+                if deactivated:
+                    logger.warning(f"Proxy {proxy_server.host}:{proxy_server.port} auto-deactivated after {proxy_server.consecutive_health_failures} consecutive failures")
 
         except ProxyServer.DoesNotExist:
             logger.error(f"Proxy server {proxy_id} not found for health check")

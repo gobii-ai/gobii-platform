@@ -87,6 +87,8 @@ LITELLM_TIMEOUT_SECONDS = env.int("LITELLM_TIMEOUT_SECONDS", default=300)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)
+# Proxy health check: deactivate after N consecutive failures
+PROXY_CONSECUTIVE_FAILURE_THRESHOLD = env.int("PROXY_CONSECUTIVE_FAILURE_THRESHOLD", default=3)
 
 try:
     from proprietary import defaults as _proprietary_defaults_module

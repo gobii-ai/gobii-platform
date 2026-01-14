@@ -2053,6 +2053,27 @@ class ProxyServer(models.Model):
     )
     notes = models.TextField(blank=True, help_text="Additional notes about this proxy server")
 
+    # Health check failure tracking
+    consecutive_health_failures = models.PositiveIntegerField(
+        default=0,
+        help_text="Count of consecutive health check failures"
+    )
+    last_health_check_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent health check"
+    )
+    auto_deactivated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this proxy was automatically deactivated due to failures"
+    )
+    deactivation_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="Reason for deactivation (e.g., 'repeated_health_check_failures')"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2102,6 +2123,40 @@ class ProxyServer(models.Model):
         except AttributeError:
             return False
         return allocation is not None
+
+    def record_health_check(self, passed: bool) -> bool:
+        """
+        Record the result of a health check and potentially deactivate the proxy.
+
+        Args:
+            passed: Whether the health check passed
+
+        Returns:
+            True if the proxy was deactivated as a result of this check
+        """
+        from django.conf import settings
+
+        self.last_health_check_at = timezone.now()
+
+        if passed:
+            self.consecutive_health_failures = 0
+            self.save(update_fields=['last_health_check_at', 'consecutive_health_failures'])
+            return False
+
+        self.consecutive_health_failures += 1
+        deactivated = self.consecutive_health_failures >= settings.PROXY_CONSECUTIVE_FAILURE_THRESHOLD
+
+        if deactivated:
+            self.is_active = False
+            self.auto_deactivated_at = timezone.now()
+            self.deactivation_reason = "repeated_health_check_failures"
+
+        self.save(update_fields=[
+            'last_health_check_at',
+            'consecutive_health_failures',
+            *(['is_active', 'auto_deactivated_at', 'deactivation_reason'] if deactivated else [])
+        ])
+        return deactivated
 
     def set_dedicated_state(self, *, dedicated: bool, save: bool = True) -> None:
         """Toggle dedicated state with optional persistence hook."""
