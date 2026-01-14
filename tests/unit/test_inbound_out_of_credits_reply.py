@@ -148,6 +148,13 @@ class InboundOutOfCreditsReplyTests(TestCase):
             role=OrganizationMembership.OrgRole.OWNER,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        agent_creator = User.objects.create_user(
+            username="creator",
+            email="creator@example.com",
+            password="pw",
+        )
+        self.agent.user = agent_creator
+        self.agent.save(update_fields=["user"])
         member = User.objects.create_user(
             username="member",
             email="member@example.com",
@@ -179,6 +186,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
 
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
+        self.assertNotIn(agent_creator.email, mail.outbox[0].to)
         mock_delay.assert_not_called()
         mock_calc.assert_called_once()
 
