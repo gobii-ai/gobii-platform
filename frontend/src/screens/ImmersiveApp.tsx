@@ -210,7 +210,7 @@ export function ImmersiveApp() {
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
   const embed = useMemo(() => parseBooleanFlag(new URLSearchParams(location.search).get('embed')), [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
-  const rosterQuery = useAgentRoster(route.kind === 'agent-chat' ? route.agentId : null)
+  const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.length ?? 0) > 0
 
   useEffect(() => {

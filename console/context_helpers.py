@@ -6,14 +6,14 @@ module centralises the logic for resolving that context so template views and
 other helpers can consume the same data shape.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Optional
 
 from django.contrib.auth.models import AbstractBaseUser
+from django.core.exceptions import PermissionDenied
 
 from api.models import OrganizationMembership
+from console.context_overrides import get_context_override
 
 
 @dataclass(frozen=True)
@@ -36,74 +36,67 @@ _ALLOWED_MANAGE_ROLES = {
 }
 
 
-def build_console_context(request) -> ConsoleContextInfo:
-    """Resolve the active console context for a request.
+def _get_active_membership(user: AbstractBaseUser, org_id: str | None) -> Optional[OrganizationMembership]:
+    if not org_id:
+        return None
+    return OrganizationMembership.objects.select_related("org").filter(
+        user=user,
+        org_id=org_id,
+        status=OrganizationMembership.OrgStatus.ACTIVE,
+    ).first()
 
-    Fallback rules mirror ``ConsoleContextMixin`` so views outside the console
-    (e.g. the home page) can surface the same ownership information.
-    """
-    user: AbstractBaseUser = request.user
+
+def resolve_console_context(
+    user: AbstractBaseUser,
+    session,
+    override: dict | None = None,
+) -> ConsoleContextInfo:
     default_name = user.get_full_name() or user.username or user.email or "Personal"
 
-    override = getattr(request.session, "_context_override", None) if hasattr(request, "session") else None
-    if isinstance(override, dict):
-        override_type = str(override.get("type") or "").strip().lower()
-        override_id = str(override.get("id") or "").strip()
-        if override_type == "personal" and override_id == str(user.id):
-            current_context = ConsoleContext(
-                type="personal",
-                id=str(user.id),
-                name=default_name,
-            )
+    if override:
+        context_type = str(override.get("type") or "").strip().lower()
+        context_id = str(override.get("id") or "").strip()
+        if not context_type or not context_id:
+            raise PermissionDenied("Invalid context override.")
+        if context_type == "personal":
+            if str(user.id) != context_id:
+                raise PermissionDenied("Invalid personal context override.")
+            context = ConsoleContext(type="personal", id=str(user.id), name=default_name)
             return ConsoleContextInfo(
-                current_context=current_context,
+                current_context=context,
                 current_membership=None,
                 can_manage_org_agents=True,
             )
-        if override_type == "organization" and override_id:
-            membership = (
-                OrganizationMembership.objects.select_related("org")
-                .filter(
-                    user=user,
-                    org_id=override_id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-                .first()
+        if context_type == "organization":
+            membership = _get_active_membership(user, context_id)
+            if not membership:
+                raise PermissionDenied("Invalid organization context override.")
+            context = ConsoleContext(
+                type="organization",
+                id=str(membership.org.id),
+                name=membership.org.name,
             )
-            if membership:
-                current_context = ConsoleContext(
-                    type="organization",
-                    id=str(membership.org.id),
-                    name=membership.org.name,
-                )
-                return ConsoleContextInfo(
-                    current_context=current_context,
-                    current_membership=membership,
-                    can_manage_org_agents=membership.role in _ALLOWED_MANAGE_ROLES,
-                )
+            return ConsoleContextInfo(
+                current_context=context,
+                current_membership=membership,
+                can_manage_org_agents=membership.role in _ALLOWED_MANAGE_ROLES,
+            )
+        raise PermissionDenied("Invalid context override.")
 
-    context_type = request.session.get("context_type", "personal")
-    context_id = request.session.get("context_id", str(user.id))
-    context_name = request.session.get("context_name", default_name)
+    context_type = (session or {}).get("context_type", "personal") if session is not None else "personal"
+    context_id = (session or {}).get("context_id", str(user.id))
+    context_name = (session or {}).get("context_name", default_name)
 
     membership: Optional[OrganizationMembership] = None
     can_manage_org_agents = True
 
     if context_type == "organization":
-        try:
-            membership = (
-                OrganizationMembership.objects.select_related("org")
-                .get(
-                    user=user,
-                    org_id=context_id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-            )
+        membership = _get_active_membership(user, context_id)
+        if membership:
             context_name = membership.org.name
             context_id = str(membership.org.id)
             can_manage_org_agents = membership.role in _ALLOWED_MANAGE_ROLES
-        except OrganizationMembership.DoesNotExist:
-            # Fallback to personal context when membership is no longer valid.
+        else:
             context_type = "personal"
             context_id = str(user.id)
             context_name = default_name
@@ -121,3 +114,19 @@ def build_console_context(request) -> ConsoleContextInfo:
         current_membership=membership,
         can_manage_org_agents=can_manage_org_agents,
     )
+
+
+def build_console_context(request) -> ConsoleContextInfo:
+    """Resolve the active console context for a request.
+
+    Fallback rules mirror ``ConsoleContextMixin`` so views outside the console
+    (e.g. the home page) can surface the same ownership information.
+    """
+    user: AbstractBaseUser = request.user
+    override = get_context_override(request)
+    if override:
+        try:
+            return resolve_console_context(user, request.session, override=override)
+        except PermissionDenied:
+            pass
+    return resolve_console_context(user, request.session)

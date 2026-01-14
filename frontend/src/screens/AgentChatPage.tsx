@@ -232,7 +232,7 @@ export function AgentChatPage({
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
-      void queryClient.invalidateQueries({ queryKey: ['agent-roster', null], exact: true })
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: true })
       if (onContextSwitch) {
         onContextSwitch(context)
         return
@@ -315,7 +315,7 @@ export function AgentChatPage({
 
   const socketSnapshot = useAgentChatSocket(liveAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
-  const rosterQuery = useAgentRoster(liveAgentId)
+  const rosterQuery = useAgentRoster()
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -351,7 +351,6 @@ export function AgentChatPage({
         agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
         agentName: resolvedPendingMeta?.agentName ?? agentName,
         agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-        syncContext: persistContextSession,
       })
       if (showContextSwitcher) {
         void refreshContext()
@@ -920,54 +919,41 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
+  const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
+  const selectionSidebarProps = {
+    agents: rosterAgents,
+    activeAgentId: null,
+    loading: rosterQuery.isLoading,
+    errorMessage: rosterErrorMessage,
+    onSelectAgent: handleSelectAgent,
+    onCreateAgent: handleCreateAgent,
+    defaultCollapsed: selectionSidebarCollapsed,
+    onToggle: setSelectionSidebarCollapsed,
+    contextSwitcher: contextSwitcher ?? undefined,
+  }
+  const renderSelectionLayout = (content: JSX.Element) => (
+    <div className="agent-chat-page min-h-screen">
+      <ChatSidebar {...selectionSidebarProps} />
+      <main className={selectionMainClassName}>{content}</main>
+    </div>
+  )
+
   if (isSelectionView) {
-    const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-    return (
-      <div className="agent-chat-page min-h-screen">
-        <ChatSidebar
-          agents={rosterAgents}
-          activeAgentId={null}
-          loading={rosterQuery.isLoading}
-          errorMessage={rosterErrorMessage}
-          onSelectAgent={handleSelectAgent}
-          onCreateAgent={handleCreateAgent}
-          defaultCollapsed={selectionSidebarCollapsed}
-          onToggle={setSelectionSidebarCollapsed}
-          contextSwitcher={contextSwitcher ?? undefined}
-        />
-        <main className={selectionMainClassName}>
-          <AgentSelectState
-            hasAgents={rosterAgents.length > 0}
-            onCreateAgent={handleCreateAgent}
-          />
-        </main>
-      </div>
+    return renderSelectionLayout(
+      <AgentSelectState
+        hasAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
     )
   }
 
   // Show a dedicated not-found state with sidebar still accessible
   if (agentNotFound) {
-    const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-    return (
-      <div className="agent-chat-page min-h-screen">
-        <ChatSidebar
-          agents={rosterAgents}
-          activeAgentId={null}
-          loading={rosterQuery.isLoading}
-          errorMessage={rosterErrorMessage}
-          onSelectAgent={handleSelectAgent}
-          onCreateAgent={handleCreateAgent}
-          defaultCollapsed={selectionSidebarCollapsed}
-          onToggle={setSelectionSidebarCollapsed}
-          contextSwitcher={contextSwitcher ?? undefined}
-        />
-        <main className={selectionMainClassName}>
-          <AgentNotFoundState
-            hasOtherAgents={rosterAgents.length > 0}
-            onCreateAgent={handleCreateAgent}
-          />
-        </main>
-      </div>
+    return renderSelectionLayout(
+      <AgentNotFoundState
+        hasOtherAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
     )
   }
 

@@ -57,8 +57,14 @@ class AgentChatAccessTests(TestCase):
         session["context_name"] = self.user.get_full_name() or self.user.username
         session.save()
 
-    def test_resolve_agent_allows_org_agent_in_personal_context(self):
-        agent = resolve_agent(self.user, self.client.session, str(self.org_agent.id))
+    def test_resolve_agent_allows_org_agent_with_override(self):
+        override = {"type": "organization", "id": str(self.org.id)}
+        agent = resolve_agent(
+            self.user,
+            self.client.session,
+            str(self.org_agent.id),
+            context_override=override,
+        )
         self.assertEqual(agent.id, self.org_agent.id)
 
     def test_resolve_agent_denies_org_agent_without_membership(self):
@@ -73,7 +79,11 @@ class AgentChatAccessTests(TestCase):
 
     def test_roster_uses_org_agents_for_active_org_agent(self):
         url = reverse("console_agent_roster")
-        response = self.client.get(f"{url}?agent_id={self.org_agent.id}")
+        response = self.client.get(
+            url,
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}

@@ -6,8 +6,8 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from waffle import flag_is_active
 
 from api.models import OrganizationMembership
-from console.context_helpers import build_console_context
-from console.context_overrides import get_context_override, resolve_context_override
+from console.context_helpers import build_console_context, resolve_console_context
+from console.context_overrides import get_context_override
 
 
 class SwitchContextView(LoginRequiredMixin, View):
@@ -17,12 +17,12 @@ class SwitchContextView(LoginRequiredMixin, View):
         override = get_context_override(request)
         if override:
             try:
-                current_context, _ = resolve_context_override(request.user, override)
+                resolved = resolve_console_context(request.user, request.session, override=override)
             except PermissionDenied:
                 return JsonResponse({"error": "Invalid context override."}, status=403)
         else:
             resolved = build_console_context(request)
-            current_context = resolved.current_context
+        current_context = resolved.current_context
 
         if not override:
             session_context = {
