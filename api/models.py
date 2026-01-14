@@ -2071,6 +2071,7 @@ class ProxyServer(models.Model):
     deactivation_reason = models.CharField(
         max_length=64,
         blank=True,
+        default='',
         help_text="Reason for deactivation (e.g., 'repeated_health_check_failures')"
     )
 

@@ -23,7 +23,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='proxyserver',
             name='deactivation_reason',
-            field=models.CharField(blank=True, help_text="Reason for deactivation (e.g., 'repeated_health_check_failures')", max_length=64),
+            field=models.CharField(blank=True, default='', help_text="Reason for deactivation (e.g., 'repeated_health_check_failures')", max_length=64),
         ),
         migrations.AddField(
             model_name='proxyserver',
