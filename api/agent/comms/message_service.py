@@ -575,9 +575,10 @@ def ingest_inbound_message(
                     from tasks.services import TaskCreditService
 
                     if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
-                        available = TaskCreditService.calculate_available_tasks(agent_obj.user)
+                        owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                         if available != TASKS_UNLIMITED and available <= 0:
-                                # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
+                            # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:
                                 context = {
                                     "agent": agent_obj,
@@ -597,16 +598,33 @@ def ingest_inbound_message(
                                 )
                                 recipients = {parsed.sender}
                                 try:
-                                    owner_email = (agent_obj.user.email or "").strip()
-                                    if owner_email:
-                                        recipients.add(owner_email)
+                                    if agent_obj.organization_id:
+                                        from api.models import OrganizationMembership
+
+                                        owner_memberships = OrganizationMembership.objects.filter(
+                                            org=agent_obj.organization,
+                                            role=OrganizationMembership.OrgRole.OWNER,
+                                            status=OrganizationMembership.OrgStatus.ACTIVE,
+                                        ).select_related("user")
+                                        for membership in owner_memberships:
+                                            owner_email = (membership.user.email or "").strip()
+                                            if owner_email:
+                                                recipients.add(owner_email)
+                                    else:
+                                        owner_email = (agent_obj.user.email or "").strip()
+                                        if owner_email:
+                                            recipients.add(owner_email)
                                 except Exception:
-                                        logging.warning(f"Failed to add owner's email to recipients for agent {agent_obj.id}", exc_info=True)
+                                    logging.warning(
+                                        "Failed to add owner emails to recipients for agent %s",
+                                        agent_obj.id,
+                                        exc_info=True,
+                                    )
 
                                 send_mail(
                                     subject,
                                     text_body,
-                                        None,  # use DEFAULT_FROM_EMAIL
+                                    None,  # use DEFAULT_FROM_EMAIL
                                     list(recipients),
                                     html_message=html_body,
                                     fail_silently=True,
@@ -627,10 +645,10 @@ def ingest_inbound_message(
                                     ),
                                 )
                             except Exception:
-                                    # Do not block on email failures
+                                # Do not block on email failures
                                 logging.exception("Failed sending out-of-credits reply email")
 
-                                # Skip processing by the agent
+                            # Skip processing by the agent
                             should_skip_processing = True
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check")
