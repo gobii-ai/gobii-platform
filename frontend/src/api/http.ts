@@ -1,3 +1,5 @@
+import { readStoredConsoleContext } from '../util/consoleContextStorage'
+
 export class HttpError extends Error {
   public readonly status: number
   public readonly statusText: string
@@ -12,6 +14,19 @@ export class HttpError extends Error {
 }
 
 let loginRedirectScheduled = false
+
+function applyConsoleContextHeaders(headers: Headers): void {
+  const context = readStoredConsoleContext()
+  if (!context) {
+    return
+  }
+  if (!headers.has('X-Gobii-Context-Type')) {
+    headers.set('X-Gobii-Context-Type', context.type)
+  }
+  if (!headers.has('X-Gobii-Context-Id')) {
+    headers.set('X-Gobii-Context-Id', context.id)
+  }
+}
 
 function buildLoginUrl(): string {
   if (typeof window === 'undefined') {
@@ -65,6 +80,7 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit =
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json')
   }
+  applyConsoleContextHeaders(headers)
 
   const response = await fetch(input, {
     credentials: 'same-origin',

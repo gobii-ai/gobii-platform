@@ -1457,13 +1457,15 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
-
         direction_raw = (request.GET.get("direction") or "initial").lower()
         direction: TimelineDirection
         if direction_raw not in {"initial", "older", "newer"}:
             return HttpResponseBadRequest("Invalid direction parameter")
         direction = direction_raw  # type: ignore[assignment]
+        sync_context_raw = (request.GET.get("sync_context") or "").lower()
+        sync_context = direction == "initial" and sync_context_raw in {"1", "true", "yes", "on"}
+
+        agent = resolve_agent(request.user, request.session, agent_id, sync_session=sync_context)
 
         cursor = request.GET.get("cursor") or None
         try:

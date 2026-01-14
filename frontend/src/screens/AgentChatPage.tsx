@@ -204,6 +204,7 @@ export type AgentChatPageProps = {
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
   showContextSwitcher?: boolean
+  persistContextSession?: boolean
   onContextSwitch?: (context: ConsoleContext) => void
 }
 
@@ -221,6 +222,7 @@ export function AgentChatPage({
   onCreateAgent,
   onAgentCreated,
   showContextSwitcher = false,
+  persistContextSession = true,
   onContextSwitch,
 }: AgentChatPageProps) {
   const queryClient = useQueryClient()
@@ -251,6 +253,7 @@ export function AgentChatPage({
   } = useConsoleContextSwitcher({
     enabled: showContextSwitcher,
     onSwitched: handleContextSwitched,
+    persistSession: persistContextSession,
   })
 
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
@@ -343,14 +346,31 @@ export function AgentChatPage({
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     pendingAgentMetaRef.current = null
-    initialize(activeAgentId, {
-      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
-      agentName: resolvedPendingMeta?.agentName ?? agentName,
-      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-    })
+    const run = async () => {
+      await initialize(activeAgentId, {
+        agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
+        agentName: resolvedPendingMeta?.agentName ?? agentName,
+        agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
+        syncContext: persistContextSession,
+      })
+      if (showContextSwitcher) {
+        void refreshContext()
+      }
+    }
+    void run()
     // Fetch insights when agent initializes
     void fetchInsights()
-  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize, fetchInsights])
+  }, [
+    activeAgentId,
+    agentAvatarUrl,
+    agentColor,
+    agentName,
+    fetchInsights,
+    initialize,
+    persistContextSession,
+    refreshContext,
+    showContextSwitcher,
+  ])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
   const getScrollDistanceToBottom = useCallback(() => {

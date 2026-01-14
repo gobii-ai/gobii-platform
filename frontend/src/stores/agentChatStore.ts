@@ -255,6 +255,7 @@ export type AgentChatState = {
       agentColorHex?: string | null
       agentName?: string | null
       agentAvatarUrl?: string | null
+      syncContext?: boolean
     },
   ) => Promise<void>
   refreshProcessing: () => Promise<void>
@@ -402,7 +403,11 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     const currentAgentId = agentId
     try {
-      const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
+      const snapshot = await fetchAgentTimeline(agentId, {
+        direction: 'initial',
+        limit: TIMELINE_WINDOW_SIZE,
+        syncContext: options?.syncContext,
+      })
       if (get().agentId !== currentAgentId) {
         return
       }

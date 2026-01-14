@@ -45,6 +45,43 @@ def build_console_context(request) -> ConsoleContextInfo:
     user: AbstractBaseUser = request.user
     default_name = user.get_full_name() or user.username or user.email or "Personal"
 
+    override = getattr(request.session, "_context_override", None) if hasattr(request, "session") else None
+    if isinstance(override, dict):
+        override_type = str(override.get("type") or "").strip().lower()
+        override_id = str(override.get("id") or "").strip()
+        if override_type == "personal" and override_id == str(user.id):
+            current_context = ConsoleContext(
+                type="personal",
+                id=str(user.id),
+                name=default_name,
+            )
+            return ConsoleContextInfo(
+                current_context=current_context,
+                current_membership=None,
+                can_manage_org_agents=True,
+            )
+        if override_type == "organization" and override_id:
+            membership = (
+                OrganizationMembership.objects.select_related("org")
+                .filter(
+                    user=user,
+                    org_id=override_id,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                .first()
+            )
+            if membership:
+                current_context = ConsoleContext(
+                    type="organization",
+                    id=str(membership.org.id),
+                    name=membership.org.name,
+                )
+                return ConsoleContextInfo(
+                    current_context=current_context,
+                    current_membership=membership,
+                    can_manage_org_agents=membership.role in _ALLOWED_MANAGE_ROLES,
+                )
+
     context_type = request.session.get("context_type", "personal")
     context_id = request.session.get("context_id", str(user.id))
     context_name = request.session.get("context_name", default_name)

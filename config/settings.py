@@ -273,6 +273,7 @@ MIDDLEWARE = [
     "middleware.app_shell.AppShellMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "middleware.context_override.ContextOverrideMiddleware",
     "django.middleware.common.CommonMiddleware",
     "setup.middleware.FirstRunSetupMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",

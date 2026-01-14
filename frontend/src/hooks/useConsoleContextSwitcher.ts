@@ -6,10 +6,12 @@ import {
   type ConsoleContext,
   type ConsoleContextData,
 } from '../api/context'
+import { storeConsoleContext } from '../util/consoleContextStorage'
 
 type UseConsoleContextSwitcherOptions = {
   enabled?: boolean
   onSwitched?: (context: ConsoleContext) => void
+  persistSession?: boolean
 }
 
 type UseConsoleContextSwitcherResult = {
@@ -21,18 +23,10 @@ type UseConsoleContextSwitcherResult = {
   refresh: () => Promise<void>
 }
 
-function storeContext(context: ConsoleContext) {
-  if (typeof window === 'undefined') {
-    return
-  }
-  localStorage.setItem('contextType', context.type)
-  localStorage.setItem('contextId', context.id)
-  localStorage.setItem('contextName', context.name)
-}
-
 export function useConsoleContextSwitcher({
   enabled = false,
   onSwitched,
+  persistSession = true,
 }: UseConsoleContextSwitcherOptions): UseConsoleContextSwitcherResult {
   const [data, setData] = useState<ConsoleContextData | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -62,7 +56,7 @@ export function useConsoleContextSwitcher({
       }
       setData(payload)
       setIsLoading(false)
-      storeContext(payload.context)
+      storeConsoleContext(payload.context)
     } catch (err) {
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return
@@ -86,14 +80,14 @@ export function useConsoleContextSwitcher({
       setIsSwitching(true)
       setError(null)
       setData({ ...data, context })
-      storeContext(context)
+      storeConsoleContext(context)
       try {
-        const updated = await switchConsoleContext(context)
+        const updated = await switchConsoleContext(context, { persistSession })
         if (!mountedRef.current) {
           return
         }
         setData((prev) => (prev ? { ...prev, context: updated } : prev))
-        storeContext(updated)
+        storeConsoleContext(updated)
         onSwitched?.(updated)
       } catch (err) {
         if (!mountedRef.current) {
@@ -101,7 +95,7 @@ export function useConsoleContextSwitcher({
         }
         console.error('Failed to switch context:', err)
         setData((prev) => (prev ? { ...prev, context: previousContext } : prev))
-        storeContext(previousContext)
+        storeConsoleContext(previousContext)
         setError('Unable to switch context.')
       } finally {
         if (mountedRef.current) {
@@ -109,7 +103,7 @@ export function useConsoleContextSwitcher({
         }
       }
     },
-    [data, isSwitching, onSwitched],
+    [data, isSwitching, onSwitched, persistSession],
   )
 
   return {

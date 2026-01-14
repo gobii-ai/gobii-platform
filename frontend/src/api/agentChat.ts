@@ -28,12 +28,13 @@ export type AgentWebSessionSnapshot = {
 
 export async function fetchAgentTimeline(
   agentId: string,
-  params: { cursor?: string | null; direction?: TimelineDirection; limit?: number } = {},
+  params: { cursor?: string | null; direction?: TimelineDirection; limit?: number; syncContext?: boolean } = {},
 ): Promise<TimelineResponse> {
   const query = new URLSearchParams()
   if (params.cursor) query.set('cursor', params.cursor)
   if (params.direction) query.set('direction', params.direction)
   if (params.limit) query.set('limit', params.limit.toString())
+  if (params.syncContext) query.set('sync_context', '1')
 
   const url = `/console/api/agents/${agentId}/timeline/${query.toString() ? `?${query.toString()}` : ''}`
   return jsonFetch<TimelineResponse>(url)

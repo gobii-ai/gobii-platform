@@ -278,6 +278,7 @@ export function ImmersiveApp() {
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
             showContextSwitcher
+            persistContextSession={false}
             onContextSwitch={handleContextSwitch}
           />
         ) : null}
@@ -287,6 +288,7 @@ export function ImmersiveApp() {
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
             showContextSwitcher
+            persistContextSession={false}
             onContextSwitch={handleContextSwitch}
           />
         ) : null}

@@ -57,10 +57,15 @@ export async function fetchConsoleContext(): Promise<ConsoleContextData> {
   }
 }
 
-export async function switchConsoleContext(context: ConsoleContext): Promise<ConsoleContext> {
+export async function switchConsoleContext(
+  context: ConsoleContext,
+  options: { persistSession?: boolean } = {},
+): Promise<ConsoleContext> {
+  const persistSession = options.persistSession !== false
+  const body = persistSession ? context : { ...context, persist: false }
   const payload = await jsonRequest<SwitchContextResponsePayload>('/console/switch-context/', {
     method: 'POST',
-    json: context,
+    json: body,
     includeCsrf: true,
   })
   if (!payload.success) {

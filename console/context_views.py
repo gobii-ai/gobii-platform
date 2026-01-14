@@ -1,4 +1,5 @@
 import json
+from django.core.exceptions import PermissionDenied
 from django.http import JsonResponse
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -6,28 +7,37 @@ from waffle import flag_is_active
 
 from api.models import OrganizationMembership
 from console.context_helpers import build_console_context
+from console.context_overrides import get_context_override, resolve_context_override
 
 
 class SwitchContextView(LoginRequiredMixin, View):
     """Handle switching between personal and organization contexts."""
 
     def get(self, request):
-        resolved = build_console_context(request)
-        current_context = resolved.current_context
+        override = get_context_override(request)
+        if override:
+            try:
+                current_context, _ = resolve_context_override(request.user, override)
+            except PermissionDenied:
+                return JsonResponse({"error": "Invalid context override."}, status=403)
+        else:
+            resolved = build_console_context(request)
+            current_context = resolved.current_context
 
-        session_context = {
-            "type": request.session.get("context_type"),
-            "id": request.session.get("context_id"),
-            "name": request.session.get("context_name"),
-        }
-        if (
-            session_context["type"] != current_context.type
-            or session_context["id"] != current_context.id
-            or session_context["name"] != current_context.name
-        ):
-            request.session["context_type"] = current_context.type
-            request.session["context_id"] = current_context.id
-            request.session["context_name"] = current_context.name
+        if not override:
+            session_context = {
+                "type": request.session.get("context_type"),
+                "id": request.session.get("context_id"),
+                "name": request.session.get("context_name"),
+            }
+            if (
+                session_context["type"] != current_context.type
+                or session_context["id"] != current_context.id
+                or session_context["name"] != current_context.name
+            ):
+                request.session["context_type"] = current_context.type
+                request.session["context_id"] = current_context.id
+                request.session["context_name"] = current_context.name
 
         organizations_enabled = flag_is_active(request, "organizations")
         organizations = []
@@ -69,7 +79,11 @@ class SwitchContextView(LoginRequiredMixin, View):
             data = json.loads(request.body)
             context_type = data.get('type')
             context_id = data.get('id')
-            context_name = data.get('name')
+            persist_raw = data.get('persist', data.get('persist_session', data.get('persistSession', True)))
+            if isinstance(persist_raw, str):
+                persist = persist_raw.strip().lower() not in ['0', 'false', 'no', 'off']
+            else:
+                persist = bool(persist_raw)
             
             # Validate context type
             if context_type not in ['personal', 'organization']:
@@ -79,11 +93,12 @@ class SwitchContextView(LoginRequiredMixin, View):
             if context_type == 'personal':
                 if str(request.user.id) != context_id:
                     return JsonResponse({'error': 'Invalid personal context'}, status=403)
-                
-                # Store in session
-                request.session['context_type'] = 'personal'
-                request.session['context_id'] = str(request.user.id)
-                request.session['context_name'] = request.user.get_full_name() or request.user.username
+                context_name = request.user.get_full_name() or request.user.username or request.user.email or "Personal"
+                if persist:
+                    # Store in session
+                    request.session['context_type'] = 'personal'
+                    request.session['context_id'] = str(request.user.id)
+                    request.session['context_name'] = context_name
                 
             # If organization context, validate membership
             elif context_type == 'organization':
@@ -93,11 +108,12 @@ class SwitchContextView(LoginRequiredMixin, View):
                         org_id=context_id,
                         status=OrganizationMembership.OrgStatus.ACTIVE
                     )
-                    
-                    # Store in session
-                    request.session['context_type'] = 'organization'
-                    request.session['context_id'] = str(membership.org.id)
-                    request.session['context_name'] = membership.org.name
+                    context_name = membership.org.name
+                    if persist:
+                        # Store in session
+                        request.session['context_type'] = 'organization'
+                        request.session['context_id'] = str(membership.org.id)
+                        request.session['context_name'] = context_name
                     
                 except OrganizationMembership.DoesNotExist:
                     return JsonResponse({'error': 'Invalid organization context'}, status=403)
@@ -105,9 +121,9 @@ class SwitchContextView(LoginRequiredMixin, View):
             return JsonResponse({
                 'success': True,
                 'context': {
-                    'type': request.session['context_type'],
-                    'id': request.session['context_id'],
-                    'name': request.session['context_name']
+                    'type': context_type,
+                    'id': str(context_id),
+                    'name': context_name
                 }
             })
             
