@@ -2135,27 +2135,32 @@ class ProxyServer(models.Model):
             True if the proxy was deactivated as a result of this check
         """
         from django.conf import settings
+        from django.db.models import F
 
-        self.last_health_check_at = timezone.now()
+        now = timezone.now()
+        self.last_health_check_at = now
 
         if passed:
             self.consecutive_health_failures = 0
             self.save(update_fields=['last_health_check_at', 'consecutive_health_failures'])
             return False
 
-        self.consecutive_health_failures += 1
+        # Atomically increment failure count to prevent race conditions
+        ProxyServer.objects.filter(pk=self.pk).update(
+            consecutive_health_failures=F('consecutive_health_failures') + 1
+        )
+        self.refresh_from_db(fields=['consecutive_health_failures'])
+
         deactivated = self.consecutive_health_failures >= settings.PROXY_CONSECUTIVE_FAILURE_THRESHOLD
 
         if deactivated:
             self.is_active = False
-            self.auto_deactivated_at = timezone.now()
+            self.auto_deactivated_at = now
             self.deactivation_reason = "repeated_health_check_failures"
+            self.save(update_fields=['last_health_check_at', 'is_active', 'auto_deactivated_at', 'deactivation_reason'])
+        else:
+            self.save(update_fields=['last_health_check_at'])
 
-        self.save(update_fields=[
-            'last_health_check_at',
-            'consecutive_health_failures',
-            *(['is_active', 'auto_deactivated_at', 'deactivation_reason'] if deactivated else [])
-        ])
         return deactivated
 
     def set_dedicated_state(self, *, dedicated: bool, save: bool = True) -> None:

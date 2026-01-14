@@ -250,24 +250,29 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
             if location:
                 proxy_name += f" ({location})"
 
-            # Create or update the proxy server record
+            # Check if proxy already exists to avoid overwriting is_active on update
+            existing_proxy = ProxyServer.objects.filter(decodo_ip=decodo_ip).first()
+
+            defaults_dict = {
+                "name": proxy_name,
+                "proxy_type": ProxyServer.ProxyType.HTTPS,
+                "host": ip_block.endpoint,
+                "port": port,
+                "username": ip_block.credential.username,
+                "password": ip_block.credential.password,
+                "static_ip": decodo_ip.ip_address,
+                "is_dedicated": True,
+                "notes": f"Auto-generated from Decodo IP block {ip_block.endpoint}:{ip_block.start_port}",
+                "updated_at": timezone.now()
+            }
+
+            # Only set is_active=True for new proxies, preserve existing status
+            if not existing_proxy:
+                defaults_dict["is_active"] = True
+
             proxy_server, created = ProxyServer.objects.update_or_create(
                 decodo_ip=decodo_ip,
-                defaults={
-                    "name": proxy_name,
-                    "proxy_type": ProxyServer.ProxyType.HTTPS,
-                    "host": ip_block.endpoint,
-                    "port": port,
-                    "username": ip_block.credential.username,
-                    "password": ip_block.credential.password,
-                    "static_ip": decodo_ip.ip_address,
-                    "is_dedicated": True,
-                    "notes": f"Auto-generated from Decodo IP block {ip_block.endpoint}:{ip_block.start_port}",
-                    "updated_at": timezone.now()
-                },
-                create_defaults={
-                    "is_active": True,
-                }
+                defaults=defaults_dict,
             )
 
             if created:
@@ -392,16 +397,17 @@ def proxy_health_check_nightly(self):
         for proxy in proxy_sample:
             try:
                 result = _perform_proxy_health_check(proxy)
-                if result:
-                    deactivated = proxy.record_health_check(result.passed)
-                    if result.passed:
-                        successful_checks += 1
-                    else:
-                        failed_checks += 1
-                        if deactivated:
-                            logger.warning(f"Proxy {proxy.host}:{proxy.port} auto-deactivated after {proxy.consecutive_health_failures} consecutive failures")
+                if not result:
+                    failed_checks += 1
+                    continue
+
+                deactivated = proxy.record_health_check(result.passed)
+                if result.passed:
+                    successful_checks += 1
                 else:
                     failed_checks += 1
+                    if deactivated:
+                        logger.warning(f"Proxy {proxy.host}:{proxy.port} auto-deactivated after {proxy.consecutive_health_failures} consecutive failures")
             except Exception as e:
                 failed_checks += 1
                 logger.error(f"Health check error for proxy {proxy.host}:{proxy.port}: {e}")
