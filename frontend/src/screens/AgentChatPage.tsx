@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
@@ -931,7 +931,7 @@ export function AgentChatPage({
     onToggle: setSelectionSidebarCollapsed,
     contextSwitcher: contextSwitcher ?? undefined,
   }
-  const renderSelectionLayout = (content: JSX.Element) => (
+  const renderSelectionLayout = (content: ReactNode) => (
     <div className="agent-chat-page min-h-screen">
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName}>{content}</main>
