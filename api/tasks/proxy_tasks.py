@@ -262,9 +262,11 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
                     "password": ip_block.credential.password,
                     "static_ip": decodo_ip.ip_address,
                     "is_dedicated": True,
-                    "is_active": True,
                     "notes": f"Auto-generated from Decodo IP block {ip_block.endpoint}:{ip_block.start_port}",
                     "updated_at": timezone.now()
+                },
+                create_defaults={
+                    "is_active": True,
                 }
             )
 
