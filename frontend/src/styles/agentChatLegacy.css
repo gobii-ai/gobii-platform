@@ -1232,7 +1232,7 @@
 
 .timeline-event {
   position: relative;
-  contain: layout style;
+  /* contain: layout style; */ /* Disabled: causes Safari/WebKit repaint bugs on mobile */
 }
 
 .timeline-event--incoming {
