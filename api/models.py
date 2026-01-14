@@ -2152,7 +2152,10 @@ class ProxyServer(models.Model):
         )
         self.refresh_from_db(fields=['consecutive_health_failures'])
 
-        deactivated = self.consecutive_health_failures >= settings.PROXY_CONSECUTIVE_FAILURE_THRESHOLD
+        deactivated = (
+            self.consecutive_health_failures >= settings.PROXY_CONSECUTIVE_FAILURE_THRESHOLD
+            and not self.is_dedicated_allocated
+        )
 
         if deactivated:
             self.is_active = False

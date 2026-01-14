@@ -13,7 +13,7 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.utils import timezone
 
-from api.models import DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
+from api.models import DedicatedProxyAllocation, DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
 from api.admin import DecodoIPBlockAdmin
 from api.tasks import (
     sync_ip_block,
@@ -222,6 +222,43 @@ class DecodoSyncTaskTests(TestCase):
         self.assertFalse(DecodoIP.objects.filter(id=decodo_ip.id).exists())
         proxy.refresh_from_db()
         self.assertIsNone(proxy.decodo_ip_id)
+
+    @override_settings(PROXY_CONSECUTIVE_FAILURE_THRESHOLD=1)
+    def test_auto_deactivation_skips_dedicated_allocation(self):
+        user = User.objects.create_user(
+            username="proxy-owner",
+            email="proxy-owner@example.com",
+            password="password",
+        )
+        decodo_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.55",
+            port=10002,
+        )
+        proxy = ProxyServer.objects.create(
+            name="Assigned Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=decodo_ip.port,
+            username=self.credential.username,
+            password=self.credential.password,
+            static_ip=decodo_ip.ip_address,
+            is_active=True,
+            is_dedicated=True,
+            decodo_ip=decodo_ip,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(proxy, user)
+
+        deactivated = proxy.record_health_check(False)
+
+        self.assertFalse(deactivated)
+        proxy.refresh_from_db()
+        self.assertTrue(proxy.is_active)
+        self.assertIsNone(proxy.auto_deactivated_at)
+        self.assertEqual(proxy.deactivation_reason, "")
+        self.assertEqual(proxy.decodo_ip_id, decodo_ip.id)
+        self.assertTrue(DecodoIP.objects.filter(id=decodo_ip.id).exists())
+        self.assertEqual(proxy.consecutive_health_failures, 1)
 
     def test_proxy_record_reuses_existing_proxy(self):
         decodo_ip = DecodoIP.objects.create(
