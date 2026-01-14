@@ -252,6 +252,11 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
 
             # Check if proxy already exists to avoid overwriting is_active on update
             existing_proxy = ProxyServer.objects.filter(decodo_ip=decodo_ip).first()
+            if not existing_proxy:
+                existing_proxy = ProxyServer.objects.filter(
+                    host=ip_block.endpoint,
+                    port=port,
+                ).first()
 
             defaults_dict = {
                 "name": proxy_name,
@@ -266,14 +271,20 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
                 "updated_at": timezone.now()
             }
 
-            # Only set is_active=True for new proxies, preserve existing status
-            if not existing_proxy:
+            if existing_proxy:
+                for field, value in defaults_dict.items():
+                    setattr(existing_proxy, field, value)
+                if existing_proxy.decodo_ip_id != decodo_ip.id:
+                    existing_proxy.decodo_ip = decodo_ip
+                existing_proxy.save()
+                created = False
+            else:
                 defaults_dict["is_active"] = True
-
-            proxy_server, created = ProxyServer.objects.update_or_create(
-                decodo_ip=decodo_ip,
-                defaults=defaults_dict,
-            )
+                proxy_server = ProxyServer.objects.create(
+                    decodo_ip=decodo_ip,
+                    **defaults_dict,
+                )
+                created = True
 
             if created:
                 logger.info("Created new proxy record for IP: %s at %s:%d",

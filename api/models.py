@@ -2158,7 +2158,14 @@ class ProxyServer(models.Model):
             self.is_active = False
             self.auto_deactivated_at = now
             self.deactivation_reason = "repeated_health_check_failures"
-            self.save(update_fields=['last_health_check_at', 'is_active', 'auto_deactivated_at', 'deactivation_reason'])
+            decodo_ip_id = self.decodo_ip_id
+            update_fields = ['last_health_check_at', 'is_active', 'auto_deactivated_at', 'deactivation_reason']
+            if decodo_ip_id:
+                self.decodo_ip = None
+                update_fields.append('decodo_ip')
+            self.save(update_fields=update_fields)
+            if decodo_ip_id:
+                DecodoIP.objects.filter(id=decodo_ip_id).delete()
         else:
             self.save(update_fields=['last_health_check_at'])
 

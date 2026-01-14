@@ -4,7 +4,7 @@ Tests for Decodo IP block sync functionality.
 import uuid
 from unittest.mock import patch, MagicMock
 
-from django.test import TestCase, RequestFactory, tag
+from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.contrib.admin.sites import AdminSite
 from django.contrib.messages import get_messages
@@ -14,7 +14,12 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 
 from api.models import DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
 from api.admin import DecodoIPBlockAdmin
-from api.tasks import sync_ip_block, _fetch_decodo_ip_data, _update_or_create_ip_record
+from api.tasks import (
+    sync_ip_block,
+    _fetch_decodo_ip_data,
+    _update_or_create_ip_record,
+    _update_or_create_proxy_record,
+)
 
 User = get_user_model()
 
@@ -166,6 +171,57 @@ class DecodoSyncTaskTests(TestCase):
         
         for i, expected_call in enumerate(expected_calls):
             self.assertEqual(actual_calls[i][1], expected_call[1])
+
+    @override_settings(PROXY_CONSECUTIVE_FAILURE_THRESHOLD=1)
+    def test_auto_deactivation_detaches_decodo_ip(self):
+        decodo_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.50",
+            port=10001,
+        )
+        proxy = ProxyServer.objects.create(
+            name="Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=decodo_ip.port,
+            username=self.credential.username,
+            password=self.credential.password,
+            static_ip=decodo_ip.ip_address,
+            is_active=True,
+            is_dedicated=True,
+            decodo_ip=decodo_ip,
+        )
+
+        deactivated = proxy.record_health_check(False)
+
+        self.assertTrue(deactivated)
+        self.assertFalse(DecodoIP.objects.filter(id=decodo_ip.id).exists())
+        proxy.refresh_from_db()
+        self.assertIsNone(proxy.decodo_ip_id)
+
+    def test_proxy_record_reuses_existing_proxy(self):
+        decodo_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.60",
+            port=10002,
+        )
+        proxy = ProxyServer.objects.create(
+            name="Existing Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=decodo_ip.port,
+            username="old_user",
+            password="old_pass",
+            is_active=False,
+            is_dedicated=False,
+        )
+
+        created = _update_or_create_proxy_record(decodo_ip, self.ip_block)
+
+        self.assertFalse(created)
+        proxy.refresh_from_db()
+        self.assertEqual(proxy.decodo_ip_id, decodo_ip.id)
+        self.assertTrue(proxy.is_dedicated)
 
 
 @tag("batch_api_decodo")
