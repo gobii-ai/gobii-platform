@@ -11,6 +11,7 @@ from django.contrib.messages import get_messages
 from django.urls import reverse
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.storage.fallback import FallbackStorage
+from django.utils import timezone
 
 from api.models import DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
 from api.admin import DecodoIPBlockAdmin
@@ -171,6 +172,29 @@ class DecodoSyncTaskTests(TestCase):
         
         for i, expected_call in enumerate(expected_calls):
             self.assertEqual(actual_calls[i][1], expected_call[1])
+
+    @patch('api.tasks.proxy_tasks._fetch_decodo_ip_data')
+    @patch('api.tasks.proxy_tasks._update_or_create_ip_record')
+    def test_sync_ip_block_skips_auto_deactivated_proxy(self, mock_update_record, mock_fetch_data):
+        self.ip_block.block_size = 1
+        self.ip_block.save(update_fields=["block_size"])
+        ProxyServer.objects.create(
+            name="Deactivated Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=self.ip_block.start_port,
+            username=self.credential.username,
+            password=self.credential.password,
+            is_active=False,
+            is_dedicated=True,
+            auto_deactivated_at=timezone.now(),
+            deactivation_reason="repeated_health_check_failures",
+        )
+
+        sync_ip_block(str(self.ip_block.id))
+
+        mock_fetch_data.assert_not_called()
+        mock_update_record.assert_not_called()
 
     @override_settings(PROXY_CONSECUTIVE_FAILURE_THRESHOLD=1)
     def test_auto_deactivation_detaches_decodo_ip(self):

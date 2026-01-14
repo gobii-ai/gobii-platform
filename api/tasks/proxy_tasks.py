@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 #  Decodo IP Block Sync Task
 # --------------------------------------------------------------------------- #
 
+def _should_skip_decodo_port(ip_block: DecodoIPBlock, port: int) -> bool:
+    return ProxyServer.objects.filter(
+        host=ip_block.endpoint,
+        port=port,
+        is_active=False,
+        auto_deactivated_at__isnull=False,
+        deactivation_reason="repeated_health_check_failures",
+    ).exists()
+
+
 @shared_task(bind=True, ignore_result=True)
 def sync_ip_block(self, block_id: str) -> None:
     """
@@ -43,6 +53,7 @@ def sync_ip_block(self, block_id: str) -> None:
             updated_count = 0
             created_count = 0
             error_count = 0
+            skipped_count = 0
 
             # Sync each IP in the block
             for port_offset in range(ip_block.block_size):
@@ -51,6 +62,14 @@ def sync_ip_block(self, block_id: str) -> None:
                         port = ip_block.start_port + port_offset
                         logger.info("Processing IP %d/%d for block %s (port %d)",
                                    port_offset + 1, ip_block.block_size, ip_block, port)
+                        if _should_skip_decodo_port(ip_block, port):
+                            skipped_count += 1
+                            logger.info(
+                                "Skipping Decodo sync for %s:%d due to auto-deactivated proxy",
+                                ip_block.endpoint,
+                                port,
+                            )
+                            continue
 
                         # Make request to Decodo API
                         ip_data = _fetch_decodo_ip_data(
@@ -76,8 +95,8 @@ def sync_ip_block(self, block_id: str) -> None:
                         error_count += 1
 
             logger.info(
-                "Sync completed for block %s: %d created, %d updated, %d errors",
-                block_id, created_count, updated_count, error_count
+                "Sync completed for block %s: %d created, %d updated, %d skipped, %d errors",
+                block_id, created_count, updated_count, skipped_count, error_count
             )
 
         except DecodoIPBlock.DoesNotExist:
@@ -156,6 +175,14 @@ def _update_or_create_ip_record(ip_block: DecodoIPBlock, ip_data: dict, port: in
     """
     with traced("PROXY Update or Create IP Record", ip_block_id=str(ip_block.id), port=port):
         try:
+            if _should_skip_decodo_port(ip_block, port):
+                logger.info(
+                    "Skipping Decodo IP record update for %s:%d due to auto-deactivated proxy",
+                    ip_block.endpoint,
+                    port,
+                )
+                return False
+
             # Extract IP address from the proxy data
             ip_address = ip_data.get("proxy", {}).get("ip")
             if not ip_address:
