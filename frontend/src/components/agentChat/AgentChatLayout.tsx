@@ -8,6 +8,7 @@ import { StreamingReplyCard } from './StreamingReplyCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
@@ -29,6 +30,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onCreateAgent?: () => void
+  contextSwitcher?: AgentChatContextSwitcherData
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
@@ -76,6 +78,7 @@ export function AgentChatLayout({
   rosterError,
   onSelectAgent,
   onCreateAgent,
+  contextSwitcher,
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
@@ -160,6 +163,7 @@ export function AgentChatLayout({
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
         onCreateAgent={onCreateAgent}
+        contextSwitcher={contextSwitcher}
       />
       {showBanner && (
         <AgentChatBanner

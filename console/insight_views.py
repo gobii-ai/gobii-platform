@@ -29,7 +29,7 @@ from api.models import (
 )
 from api.agent.core.prompt_context import get_agent_daily_credit_state
 from billing.services import BillingService
-from console.agent_chat.access import resolve_agent
+from console.agent_chat.access import resolve_agent_for_request
 from console.context_helpers import build_console_context
 from console.phone_utils import get_primary_phone, serialize_phone
 from config import settings
@@ -533,7 +533,7 @@ class AgentInsightsAPIView(LoginRequiredMixin, View):
 
         # Resolve agent with access check
         try:
-            agent = resolve_agent(request.user, request.session, agent_id)
+            agent = resolve_agent_for_request(request, agent_id)
         except Exception:
             return JsonResponse({"error": "Agent not found"}, status=404)
 

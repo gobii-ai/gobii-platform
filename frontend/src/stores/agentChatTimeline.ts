@@ -1,7 +1,5 @@
-import type { AgentMessage, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
-import { looksLikeHtml, sanitizeHtml } from '../util/sanitize'
-
-const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
+import type { TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
 
 type ParsedTimelineCursor = {
   value: number
@@ -9,30 +7,12 @@ type ParsedTimelineCursor = {
   identifier: string
 }
 
-function pickHtmlCandidate(message: AgentMessage): string | null {
-  const htmlValue = message.bodyHtml?.trim()
-  if (htmlValue) {
-    return htmlValue
-  }
-
-  const textValue = message.bodyText?.trim()
-  if (!textValue) {
-    return null
-  }
-
-  if (looksLikeHtml(textValue) || HTML_TAG_FALLBACK_PATTERN.test(textValue)) {
-    return textValue
-  }
-
-  return null
-}
-
 export function normalizeTimelineEvent(event: TimelineEvent): TimelineEvent {
   if (event.kind !== 'message') {
     return event
   }
 
-  const candidate = pickHtmlCandidate(event.message)
+  const candidate = pickHtmlCandidate(event.message.bodyHtml, event.message.bodyText)
   if (!candidate) {
     if (event.message.bodyHtml === undefined) {
       return {

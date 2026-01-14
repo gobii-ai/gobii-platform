@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { AuditEvent, AuditTimelineBucket } from '../types/agentAudit'
 import { fetchAuditEvents, fetchAuditTimeline } from '../api/agentAudit'
+import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
 
 type AuditState = {
   agentId: string | null
@@ -45,6 +46,31 @@ function mergeEvents(existing: AuditEvent[], incoming: AuditEvent[]): AuditEvent
   return merged
 }
 
+function normalizeAuditEvent(event: AuditEvent): AuditEvent {
+  if (event.kind !== 'message') {
+    return event
+  }
+
+  const candidate = pickHtmlCandidate(event.body_html, event.body_text)
+  if (!candidate) {
+    return event
+  }
+
+  const sanitized = sanitizeHtml(candidate)
+  if ((event.body_html ?? '') === sanitized) {
+    return event
+  }
+
+  return {
+    ...event,
+    body_html: sanitized,
+  }
+}
+
+function normalizeAuditEvents(events: AuditEvent[]): AuditEvent[] {
+  return events.map((event) => normalizeAuditEvent(event))
+}
+
 export const useAgentAuditStore = create<AuditState>((set, get) => ({
   agentId: null,
   events: [],
@@ -62,7 +88,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
     set({ loading: true, agentId, error: null, selectedTimestamp: null })
     try {
       const payload = await fetchAuditEvents(agentId, { limit: 40, tzOffsetMinutes: -new Date().getTimezoneOffset() })
-      const events = payload.events || []
+      const events = normalizeAuditEvents(payload.events || [])
       set({
         events,
         nextCursor: payload.next_cursor,
@@ -90,7 +116,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
         limit: 40,
         tzOffsetMinutes: -new Date().getTimezoneOffset(),
       })
-      const incoming = payload.events || []
+      const incoming = normalizeAuditEvents(payload.events || [])
       set((current) => ({
         events: mergeEvents(current.events, incoming),
         nextCursor: payload.next_cursor,
@@ -140,7 +166,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
         day: timestamp,
         tzOffsetMinutes: -new Date().getTimezoneOffset(),
       })
-      const events = payload.events || []
+      const events = normalizeAuditEvents(payload.events || [])
       set({
         events,
         nextCursor: payload.next_cursor,
@@ -182,7 +208,7 @@ export const useAgentAuditStore = create<AuditState>((set, get) => ({
       return
     }
 
-    const event = payload as AuditEvent
+    const event = normalizeAuditEvent(payload as AuditEvent)
     set((current) => ({
       events: mergeEvents(current.events, [event]),
     }))

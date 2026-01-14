@@ -1,14 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
+import type { ConsoleContext } from '../api/context'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
+import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
@@ -162,14 +164,48 @@ function AgentNotFoundState({ hasOtherAgents, onCreateAgent }: AgentNotFoundStat
   )
 }
 
+type AgentSelectStateProps = {
+  hasAgents: boolean
+  onCreateAgent?: () => void
+}
+
+function AgentSelectState({ hasAgents, onCreateAgent }: AgentSelectStateProps) {
+  return (
+    <div className="flex min-h-[60vh] flex-col items-center justify-center gap-3 px-6 text-center">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Agent workspace</p>
+      <h2 className="text-2xl font-semibold text-slate-900">
+        {hasAgents ? 'Select a conversation' : 'No agents yet'}
+      </h2>
+      <p className="max-w-lg text-sm text-slate-500">
+        {hasAgents
+          ? 'Pick an agent from the list to continue the conversation.'
+          : 'Create your first agent to start a new conversation.'}
+      </p>
+      {!hasAgents && onCreateAgent ? (
+        <button
+          type="button"
+          onClick={onCreateAgent}
+          className="group mt-2 inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+        >
+          <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+          Create Your First Agent
+        </button>
+      ) : null}
+    </div>
+  )
+}
+
 export type AgentChatPageProps = {
-  agentId: string | null
+  agentId?: string | null
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
+  showContextSwitcher?: boolean
+  persistContextSession?: boolean
+  onContextSwitch?: (context: ConsoleContext) => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -177,17 +213,57 @@ const STREAMING_REFRESH_INTERVAL_MS = 6000
 const SCROLL_END_TOLERANCE_PX = 4
 const BOTTOM_PANEL_GAP_PX = 20
 
-export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, onClose, onCreateAgent, onAgentCreated }: AgentChatPageProps) {
+export function AgentChatPage({
+  agentId,
+  agentName,
+  agentColor,
+  agentAvatarUrl,
+  onClose,
+  onCreateAgent,
+  onAgentCreated,
+  showContextSwitcher = false,
+  persistContextSession = true,
+  onContextSwitch,
+}: AgentChatPageProps) {
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
+  const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
 
-  const [activeAgentId, setActiveAgentId] = useState(agentId)
+  const handleContextSwitched = useCallback(
+    (context: ConsoleContext) => {
+      void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: true })
+      if (onContextSwitch) {
+        onContextSwitch(context)
+        return
+      }
+      if (typeof window !== 'undefined') {
+        window.location.reload()
+      }
+    },
+    [onContextSwitch, queryClient],
+  )
+
+  const {
+    data: contextData,
+    isSwitching: contextSwitching,
+    error: contextError,
+    switchContext,
+    refresh: refreshContext,
+  } = useConsoleContextSwitcher({
+    enabled: showContextSwitcher,
+    onSwitched: handleContextSwitched,
+    persistSession: persistContextSession,
+  })
+
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const liveAgentId = contextSwitching ? null : activeAgentId
 
   useEffect(() => {
-    setActiveAgentId(agentId)
+    setActiveAgentId(agentId ?? null)
   }, [agentId])
 
   const initialize = useAgentChatStore((state) => state.initialize)
@@ -237,8 +313,8 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
 
   const [isNearBottom, setIsNearBottom] = useState(true)
 
-  const socketSnapshot = useAgentChatSocket(activeAgentId)
-  const { status: sessionStatus, error: sessionError } = useAgentWebSession(activeAgentId)
+  const socketSnapshot = useAgentChatSocket(liveAgentId)
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterQuery = useAgentRoster()
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
@@ -270,14 +346,30 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     pendingAgentMetaRef.current = null
-    initialize(activeAgentId, {
-      agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
-      agentName: resolvedPendingMeta?.agentName ?? agentName,
-      agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
-    })
+    const run = async () => {
+      await initialize(activeAgentId, {
+        agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
+        agentName: resolvedPendingMeta?.agentName ?? agentName,
+        agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
+      })
+      if (showContextSwitcher) {
+        void refreshContext()
+      }
+    }
+    void run()
     // Fetch insights when agent initializes
     void fetchInsights()
-  }, [activeAgentId, agentAvatarUrl, agentColor, agentName, initialize, fetchInsights])
+  }, [
+    activeAgentId,
+    agentAvatarUrl,
+    agentColor,
+    agentName,
+    fetchInsights,
+    initialize,
+    persistContextSession,
+    refreshContext,
+    showContextSwitcher,
+  ])
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
   const getScrollDistanceToBottom = useCallback(() => {
@@ -576,6 +668,21 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
+  const hasSelectedAgent = Boolean(activeAgentId)
+  const allowAgentRefresh = hasSelectedAgent && !contextSwitching
+  const contextSwitcher = useMemo(() => {
+    if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
+      return null
+    }
+    return {
+      current: contextData.context,
+      personal: contextData.personal,
+      organizations: contextData.organizations,
+      onSwitch: switchContext,
+      isBusy: contextSwitching,
+      errorMessage: contextError,
+    }
+  }, [contextData, contextError, contextSwitching, switchContext])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
@@ -594,9 +701,13 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
 
   // Update document title when agent changes
   useEffect(() => {
-    const name = isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')
+    const name = isSelectionView
+      ? 'Select a conversation'
+      : isNewAgent
+        ? 'New Agent'
+        : (resolvedAgentName || 'Agent')
     document.title = `${name} · Gobii`
-  }, [isNewAgent, resolvedAgentName])
+  }, [isNewAgent, isSelectionView, resolvedAgentName])
 
   const rosterErrorMessage = rosterQuery.isError
     ? rosterQuery.error instanceof Error
@@ -691,6 +802,9 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }
 
   const handleSend = async (body: string, attachments: File[] = []) => {
+    if (!activeAgentId && !isNewAgent) {
+      return
+    }
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       try {
@@ -734,7 +848,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
 
   // Start/stop insight rotation based on processing state
-  const isProcessing = processingActive || awaitingResponse || (streaming && !streaming.done)
+  const isProcessing = allowAgentRefresh && (processingActive || awaitingResponse || (streaming && !streaming.done))
   useEffect(() => {
     if (isProcessing) {
       startInsightRotation()
@@ -751,17 +865,31 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
   }, [insights, dismissedInsightIds])
 
   useEffect(() => {
-    if (!streaming || streaming.done) {
+    if (!allowAgentRefresh || !streaming || streaming.done) {
       return () => undefined
     }
     const interval = window.setInterval(() => {
       void refreshProcessing()
     }, STREAMING_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(interval)
-  }, [refreshProcessing, streaming])
+  }, [allowAgentRefresh, refreshProcessing, streaming])
 
   useEffect(() => {
-    if (!streaming || streaming.done) {
+    if (contextSwitching || !showContextSwitcher || !activeAgentId || !rosterQuery.isSuccess) {
+      return
+    }
+    void refreshContext()
+  }, [
+    activeAgentId,
+    contextSwitching,
+    refreshContext,
+    rosterQuery.dataUpdatedAt,
+    rosterQuery.isSuccess,
+    showContextSwitcher,
+  ])
+
+  useEffect(() => {
+    if (!allowAgentRefresh || !streaming || streaming.done) {
       return () => undefined
     }
     if (processingActive) {
@@ -783,6 +911,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     const timeout = window.setTimeout(handleTimeout, timeoutMs)
     return () => window.clearTimeout(timeout)
   }, [
+    allowAgentRefresh,
     finalizeStreaming,
     processingActive,
     refreshLatest,
@@ -790,25 +919,41 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
     streamingLastUpdatedAt,
   ])
 
+  const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
+  const selectionSidebarProps = {
+    agents: rosterAgents,
+    activeAgentId: null,
+    loading: rosterQuery.isLoading,
+    errorMessage: rosterErrorMessage,
+    onSelectAgent: handleSelectAgent,
+    onCreateAgent: handleCreateAgent,
+    defaultCollapsed: selectionSidebarCollapsed,
+    onToggle: setSelectionSidebarCollapsed,
+    contextSwitcher: contextSwitcher ?? undefined,
+  }
+  const renderSelectionLayout = (content: ReactNode) => (
+    <div className="agent-chat-page min-h-screen">
+      <ChatSidebar {...selectionSidebarProps} />
+      <main className={selectionMainClassName}>{content}</main>
+    </div>
+  )
+
+  if (isSelectionView) {
+    return renderSelectionLayout(
+      <AgentSelectState
+        hasAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
+    )
+  }
+
   // Show a dedicated not-found state with sidebar still accessible
   if (agentNotFound) {
-    return (
-      <div className="agent-chat-page min-h-screen">
-        <ChatSidebar
-          agents={rosterAgents}
-          activeAgentId={null}
-          loading={rosterQuery.isLoading}
-          errorMessage={rosterErrorMessage}
-          onSelectAgent={handleSelectAgent}
-          onCreateAgent={handleCreateAgent}
-        />
-        <main className="has-sidebar has-sidebar--collapsed min-h-screen">
-          <AgentNotFoundState
-            hasOtherAgents={rosterAgents.length > 0}
-            onCreateAgent={handleCreateAgent}
-          />
-        </main>
-      </div>
+    return renderSelectionLayout(
+      <AgentNotFoundState
+        hasOtherAgents={rosterAgents.length > 0}
+        onCreateAgent={handleCreateAgent}
+      />,
     )
   }
 
@@ -834,6 +979,7 @@ export function AgentChatPage({ agentId, agentName, agentColor, agentAvatarUrl, 
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
+        contextSwitcher={contextSwitcher ?? undefined}
         onClose={onClose}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}

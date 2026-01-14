@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
+import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
@@ -10,6 +11,7 @@ const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 
 type AppRoute =
   | { kind: 'command-center' }
+  | { kind: 'agent-select' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
@@ -69,7 +71,7 @@ function parseRoute(pathname: string): AppRoute {
   }
 
   if (parts[0] === 'agents') {
-    return { kind: 'command-center' }
+    return { kind: 'agent-select' }
   }
 
   return { kind: 'not-found' }
@@ -262,6 +264,10 @@ export function ImmersiveApp() {
     navigateTo(`/app/agents/${agentId}`)
   }, [])
 
+  const handleContextSwitch = useCallback((_context: ConsoleContext) => {
+    navigateTo('/app/agents')
+  }, [])
+
   return (
     <div className="immersive-shell">
       <div className="immersive-shell__content">
@@ -271,6 +277,19 @@ export function ImmersiveApp() {
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+          />
+        ) : null}
+        {route.kind === 'agent-select' ? (
+          <AgentChatPage
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
           />
         ) : null}
         {route.kind === 'command-center' ? (

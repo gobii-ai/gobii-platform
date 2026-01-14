@@ -1,7 +1,9 @@
 import { memo, useState, useCallback, useEffect, useMemo } from 'react'
 import { PanelLeft, PanelLeftClose, Menu, X, Plus } from 'lucide-react'
 
+import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
 
 const SEARCH_THRESHOLD = 6
@@ -16,6 +18,7 @@ type ChatSidebarProps = {
   onToggle?: (collapsed: boolean) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
   onCreateAgent?: () => void
+  contextSwitcher?: AgentChatContextSwitcherData
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -28,6 +31,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   onToggle,
   onSelectAgent,
   onCreateAgent,
+  contextSwitcher,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const [isMobile, setIsMobile] = useState(false)
@@ -113,6 +117,16 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   // Mobile FAB and drawer
   if (isMobile) {
+    const mobileContextSwitcher = contextSwitcher
+      ? {
+          ...contextSwitcher,
+          onSwitch: (context: ConsoleContext) => {
+            void contextSwitcher.onSwitch(context)
+            setDrawerOpen(false)
+          },
+        }
+      : null
+
     return (
       <>
         {/* FAB button */}
@@ -141,7 +155,12 @@ export const ChatSidebar = memo(function ChatSidebar({
           aria-label="Switch agent"
         >
           <div className="agent-drawer-header">
-            <span className="agent-drawer-title">Switch Agent</span>
+            <div className="agent-drawer-heading">
+              <span className="agent-drawer-title">Switch Agent</span>
+              {mobileContextSwitcher ? (
+                <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
+              ) : null}
+            </div>
             <button
               type="button"
               className="agent-drawer-close"
@@ -209,19 +228,23 @@ export const ChatSidebar = memo(function ChatSidebar({
       data-collapsed={collapsed}
     >
       <div className="chat-sidebar-inner">
-        {/* Toggle button */}
-        <button
-          type="button"
-          className="chat-sidebar-toggle"
-          onClick={handleToggle}
-          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        >
-          {collapsed ? (
-            <PanelLeft className="h-4 w-4" />
-          ) : (
-            <PanelLeftClose className="h-4 w-4" />
-          )}
-        </button>
+        <div className="chat-sidebar-controls" data-collapsed={collapsed ? 'true' : 'false'}>
+          {contextSwitcher ? (
+            <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
+          ) : null}
+          <button
+            type="button"
+            className="chat-sidebar-toggle"
+            onClick={handleToggle}
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? (
+              <PanelLeft className="h-4 w-4" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4" />
+            )}
+          </button>
+        </div>
 
         <div className="chat-sidebar-section">
           <div className="chat-sidebar-section-header">

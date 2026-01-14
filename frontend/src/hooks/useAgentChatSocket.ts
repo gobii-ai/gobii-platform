@@ -4,6 +4,7 @@ import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
+import { readStoredConsoleContext } from '../util/consoleContextStorage'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 15000
@@ -210,6 +211,9 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return
     }
+    if (!agentIdRef.current) {
+      return
+    }
     const now = Date.now()
     if (now - lastSyncAtRef.current < RESYNC_THROTTLE_MS) {
       return
@@ -239,7 +243,12 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
       return
     }
 
-    if (!sendSocketMessage({ type: 'subscribe', agent_id: nextAgentId })) {
+    const contextOverride = readStoredConsoleContext()
+    const payload: Record<string, unknown> = { type: 'subscribe', agent_id: nextAgentId }
+    if (contextOverride?.type && contextOverride?.id) {
+      payload.context = { type: contextOverride.type, id: contextOverride.id }
+    }
+    if (!sendSocketMessage(payload)) {
       updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket send failed.' })
       socket.close()
       return

@@ -86,7 +86,7 @@ from api.services.web_sessions import (
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-from console.agent_chat.access import agent_queryset_for, resolve_agent
+from console.agent_chat.access import agent_queryset_for, resolve_agent_for_request
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
@@ -96,7 +96,8 @@ from console.agent_chat.timeline import (
     serialize_message_event,
     serialize_processing_snapshot,
 )
-from console.context_helpers import build_console_context
+from console.context_helpers import build_console_context, resolve_console_context
+from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_creation import enable_agent_sms_contact
@@ -1206,11 +1207,12 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        agents = (
-            agent_queryset_for(request.user, request.session)
-            .select_related("agent_color")
-            .order_by("name")
+        context_info = resolve_console_context(
+            request.user,
+            request.session,
+            override=get_context_override(request),
         )
+        agents = agent_queryset_for(request.user, context_info.current_context).select_related("agent_color").order_by("name")
         payload = [
             {
                 "id": str(agent.id),
@@ -1404,7 +1406,7 @@ class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         phone = get_primary_phone(request.user)
         if not phone or not phone.is_verified:
             return JsonResponse({"error": "Please verify a phone number before enabling SMS."}, status=400)
@@ -1426,7 +1428,7 @@ class AgentReassignAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -1456,13 +1458,12 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
-
         direction_raw = (request.GET.get("direction") or "initial").lower()
         direction: TimelineDirection
         if direction_raw not in {"initial", "older", "newer"}:
             return HttpResponseBadRequest("Invalid direction parameter")
         direction = direction_raw  # type: ignore[assignment]
+        agent = resolve_agent_for_request(request, agent_id)
 
         cursor = request.GET.get("cursor") or None
         try:
@@ -1496,7 +1497,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         attachments: list[Any] = []
         message_text = ""
         if request.content_type and request.content_type.startswith("multipart/form-data"):
@@ -1736,7 +1737,7 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         filespace = get_or_create_default_filespace(agent)
         nodes = (
             AgentFsNode.objects
@@ -1788,7 +1789,7 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         files = list(request.FILES.getlist("files")) or list(request.FILES.getlist("file"))
         if not files:
             Analytics.track_event(
@@ -1912,7 +1913,7 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -1961,7 +1962,7 @@ class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -2031,7 +2032,7 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -3965,7 +3966,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         snapshot = build_processing_snapshot(agent)
         return JsonResponse(
             {
@@ -4910,7 +4911,7 @@ class AgentWebSessionStartAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -4943,7 +4944,7 @@ class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -4969,7 +4970,7 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent(request.user, request.session, agent_id)
+        agent = resolve_agent_for_request(request, agent_id)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:

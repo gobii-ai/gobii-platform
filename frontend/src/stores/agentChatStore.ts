@@ -402,7 +402,10 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
     const currentAgentId = agentId
     try {
-      const snapshot = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_WINDOW_SIZE })
+      const snapshot = await fetchAgentTimeline(agentId, {
+        direction: 'initial',
+        limit: TIMELINE_WINDOW_SIZE,
+      })
       if (get().agentId !== currentAgentId) {
         return
       }

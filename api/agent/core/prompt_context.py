@@ -1915,8 +1915,6 @@ def build_prompt_context(
             non_shrinkable=True
         )
 
-    _build_kanban_sections(agent, important_group)
-
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
         cap_group = important_group.group("agent_capabilities", weight=2)
@@ -2101,6 +2099,8 @@ def build_prompt_context(
         daily_credit_state=daily_credit_state,
         agent=agent,
     )
+
+    _build_kanban_sections(agent, critical_group)
 
     reasoning_streak_text = _get_reasoning_streak_prompt(
         reasoning_only_streak,

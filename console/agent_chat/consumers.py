@@ -127,10 +127,13 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             return
         if message_type == "subscribe":
             agent_id = content.get("agent_id")
+            context_override = content.get("context")
+            if context_override is not None and not isinstance(context_override, dict):
+                context_override = None
             if not agent_id:
                 await self.send_json({"type": "subscription.error", "message": "agent_id is required"})
                 return
-            await self._subscribe(str(agent_id))
+            await self._subscribe(str(agent_id), context_override=context_override)
             return
         if message_type == "unsubscribe":
             agent_id = content.get("agent_id")
@@ -145,14 +148,14 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     async def stream_event(self, event):
         await self.send_json({"type": "stream.event", "payload": event.get("payload")})
 
-    async def _subscribe(self, agent_id: str) -> None:
+    async def _subscribe(self, agent_id: str, context_override=None) -> None:
         if self.agent_id == agent_id:
             return
 
         await self._clear_subscription()
 
         try:
-            await self._resolve_agent(self.user, self.session, agent_id)
+            await self._resolve_agent(self.user, self.session, agent_id, context_override=context_override)
         except PermissionDenied as exc:
             logger.warning(
                 "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
@@ -221,8 +224,8 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         self.user_group_name = None
 
     @database_sync_to_async
-    def _resolve_agent(self, user, session, agent_id):
-        return resolve_agent(user, session, agent_id)
+    def _resolve_agent(self, user, session, agent_id, context_override=None):
+        return resolve_agent(user, session, agent_id, context_override=context_override)
 
 
 class EchoConsumer(AsyncJsonWebsocketConsumer):

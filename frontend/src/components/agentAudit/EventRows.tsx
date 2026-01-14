@@ -7,7 +7,6 @@ import { MessageContent } from '../agentChat/MessageContent'
 import { normalizeStructuredValue } from '../agentChat/toolDetails'
 import { EventHeader } from './EventHeader'
 import { IconCircle, renderHtmlOrText } from './eventPrimitives'
-import { looksLikeHtml } from '../../util/sanitize'
 
 export function ToolCallRow({
   tool,
@@ -116,7 +115,7 @@ export function MessageRow({
   collapsed?: boolean
   onToggle?: () => void
 }) {
-  const htmlBody = message.body_html && looksLikeHtml(message.body_html) ? message.body_html : null
+  const htmlBody = message.body_html && message.body_html.trim().length > 0 ? message.body_html : null
   const textBody = message.body_text || (htmlBody ? null : message.body_html)
   const hasBody = Boolean(htmlBody || (textBody && textBody.trim().length > 0))
   const attachments = message.attachments || []

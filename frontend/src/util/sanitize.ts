@@ -13,6 +13,8 @@ export function sanitizeHtml(value: string): string {
   })
 }
 
+const HTML_TAG_FALLBACK_PATTERN = /<\/?[a-zA-Z][^>]*>/
+
 /**
  * Check if content appears to be HTML rather than markdown.
  *
@@ -25,6 +27,27 @@ export function looksLikeHtml(value: string | null | undefined): boolean {
   // Block-level tags that indicate actual HTML content
   const blockTagPattern = /<(p|div|table|thead|tbody|tr|td|th|ul|ol|li|blockquote|pre|h[1-6]|section|article|header|footer|nav|main|form|dl|dt|dd|figure|figcaption|hr|address)(?:\s[^>]*)?>/i
   return blockTagPattern.test(value.trim())
+}
+
+export function pickHtmlCandidate(
+  htmlValue: string | null | undefined,
+  textValue: string | null | undefined,
+): string | null {
+  const htmlCandidate = htmlValue?.trim()
+  if (htmlCandidate) {
+    return htmlCandidate
+  }
+
+  const textCandidate = textValue?.trim()
+  if (!textCandidate) {
+    return null
+  }
+
+  if (looksLikeHtml(textCandidate) || HTML_TAG_FALLBACK_PATTERN.test(textCandidate)) {
+    return textCandidate
+  }
+
+  return null
 }
 
 // Quote characters that might wrap blockquote content redundantly
