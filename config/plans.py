@@ -1,7 +1,13 @@
+import logging
+
+from django.apps import apps
 from django.core.exceptions import AppRegistryNotReady
+from django.db import OperationalError, ProgrammingError
 
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNames
+
+logger = logging.getLogger(__name__)
 
 
 # Python has no int min constant, so we define our own
@@ -80,8 +86,24 @@ PLAN_CONFIG = {
 }
 
 
+def _get_price_amount(price_id: str, default: int) -> int:
+    """Fetch price amount in dollars from dj-stripe Price model."""
+    if not price_id:
+        return default
+    try:
+        Price = apps.get_model("djstripe", "Price")
+        price_obj = Price.objects.filter(id=price_id).first()
+        if price_obj and price_obj.unit_amount is not None:
+            return price_obj.unit_amount // 100  # Convert cents to dollars
+    except (LookupError, OperationalError, ProgrammingError):
+        pass
+    except Exception as e:
+        logger.debug("Error fetching price %s: %s", price_id, e)
+    return default
+
+
 def _refresh_plan_products() -> None:
-    """Update plan product IDs from StripeConfig storage."""
+    """Update plan product IDs and prices from StripeConfig and dj-stripe."""
     try:
         stripe_settings = get_stripe_settings()
     except AppRegistryNotReady:
@@ -90,10 +112,16 @@ def _refresh_plan_products() -> None:
     PLAN_CONFIG[PlanNames.STARTUP]["product_id"] = stripe_settings.startup_product_id or ""
     PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_product_id"] = stripe_settings.startup_dedicated_ip_product_id or ""
     PLAN_CONFIG[PlanNames.STARTUP]["dedicated_ip_price_id"] = stripe_settings.startup_dedicated_ip_price_id or ""
+    PLAN_CONFIG[PlanNames.STARTUP]["price"] = _get_price_amount(
+        stripe_settings.startup_price_id, default=50
+    )
 
     PLAN_CONFIG[PlanNames.SCALE]["product_id"] = stripe_settings.scale_product_id or ""
     PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_product_id"] = stripe_settings.scale_dedicated_ip_product_id or ""
     PLAN_CONFIG[PlanNames.SCALE]["dedicated_ip_price_id"] = stripe_settings.scale_dedicated_ip_price_id or ""
+    PLAN_CONFIG[PlanNames.SCALE]["price"] = _get_price_amount(
+        stripe_settings.scale_price_id, default=250
+    )
 
     PLAN_CONFIG[PlanNames.ORG_TEAM]["product_id"] = stripe_settings.org_team_product_id or ""
     PLAN_CONFIG[PlanNames.ORG_TEAM]["seat_price_id"] = stripe_settings.org_team_price_id or ""
@@ -106,6 +134,9 @@ def _refresh_plan_products() -> None:
     PLAN_CONFIG[PlanNames.ORG_TEAM]["dedicated_ip_price_id"] = (
         stripe_settings.org_team_dedicated_ip_price_id or ""
     )
+    org_team_price = _get_price_amount(stripe_settings.org_team_price_id, default=50)
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["price"] = org_team_price
+    PLAN_CONFIG[PlanNames.ORG_TEAM]["price_per_seat"] = org_team_price
 
 
 def get_plan_product_id(plan_name: str) -> str | None:
@@ -130,3 +161,12 @@ def get_plan_by_product_id(product_id: str) -> dict[str, int | str] | None:
             return config
 
     return None
+
+
+def get_plan_config(plan_name: str) -> dict | None:
+    """
+    Returns the full plan configuration for the given plan name.
+    Refreshes prices and product IDs from StripeConfig before returning.
+    """
+    _refresh_plan_products()
+    return PLAN_CONFIG.get(plan_name.lower())
