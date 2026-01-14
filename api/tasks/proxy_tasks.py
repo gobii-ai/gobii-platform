@@ -175,14 +175,6 @@ def _update_or_create_ip_record(ip_block: DecodoIPBlock, ip_data: dict, port: in
     """
     with traced("PROXY Update or Create IP Record", ip_block_id=str(ip_block.id), port=port):
         try:
-            if _should_skip_decodo_port(ip_block, port):
-                logger.info(
-                    "Skipping Decodo IP record update for %s:%d due to auto-deactivated proxy",
-                    ip_block.endpoint,
-                    port,
-                )
-                return False
-
             # Extract IP address from the proxy data
             ip_address = ip_data.get("proxy", {}).get("ip")
             if not ip_address:
