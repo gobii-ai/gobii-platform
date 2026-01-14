@@ -79,7 +79,7 @@ class SwitchContextView(LoginRequiredMixin, View):
             data = json.loads(request.body)
             context_type = data.get('type')
             context_id = data.get('id')
-            persist_raw = data.get('persist', data.get('persist_session', data.get('persistSession', True)))
+            persist_raw = data.get('persist', True)
             if isinstance(persist_raw, str):
                 persist = persist_raw.strip().lower() not in ['0', 'false', 'no', 'off']
             else:

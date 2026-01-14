@@ -52,3 +52,13 @@ export function storeConsoleContext(context: StoredConsoleContext): void {
     storage.removeItem(STORAGE_KEYS.name)
   }
 }
+
+export function clearStoredConsoleContext(): void {
+  const storage = getSessionStorage()
+  if (!storage) {
+    return
+  }
+  storage.removeItem(STORAGE_KEYS.type)
+  storage.removeItem(STORAGE_KEYS.id)
+  storage.removeItem(STORAGE_KEYS.name)
+}

@@ -1,4 +1,4 @@
-import { readStoredConsoleContext } from '../util/consoleContextStorage'
+import { clearStoredConsoleContext, readStoredConsoleContext } from '../util/consoleContextStorage'
 
 export class HttpError extends Error {
   public readonly status: number
@@ -15,17 +15,35 @@ export class HttpError extends Error {
 
 let loginRedirectScheduled = false
 
-function applyConsoleContextHeaders(headers: Headers): void {
+function applyConsoleContextHeaders(headers: Headers): boolean {
   const context = readStoredConsoleContext()
   if (!context) {
-    return
+    return false
   }
+  let applied = false
   if (!headers.has('X-Gobii-Context-Type')) {
     headers.set('X-Gobii-Context-Type', context.type)
+    applied = true
   }
   if (!headers.has('X-Gobii-Context-Id')) {
     headers.set('X-Gobii-Context-Id', context.id)
+    applied = true
   }
+  return applied
+}
+
+function isInvalidContextOverrideError(payload: unknown): boolean {
+  if (!payload) {
+    return false
+  }
+  if (typeof payload === 'string') {
+    return payload.includes('Invalid context override')
+  }
+  if (typeof payload === 'object' && 'error' in payload) {
+    const errorValue = (payload as { error?: unknown }).error
+    return typeof errorValue === 'string' && errorValue.includes('Invalid context override')
+  }
+  return false
 }
 
 function buildLoginUrl(): string {
@@ -73,14 +91,18 @@ function maybeRedirectToLogin(response: Response): void {
   scheduleLoginRedirect()
 }
 
-export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+async function jsonFetchInternal<T>(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  allowRetry: boolean,
+): Promise<T> {
   const { headers: initHeaders, ...restInit } = init
   const headers = new Headers(initHeaders ?? undefined)
 
   if (!headers.has('Accept')) {
     headers.set('Accept', 'application/json')
   }
-  applyConsoleContextHeaders(headers)
+  const appliedContextHeaders = applyConsoleContextHeaders(headers)
 
   const response = await fetch(input, {
     credentials: 'same-origin',
@@ -106,10 +128,33 @@ export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit =
   }
 
   if (!response.ok) {
+    if (
+      allowRetry &&
+      appliedContextHeaders &&
+      response.status === 403 &&
+      isInvalidContextOverrideError(payload)
+    ) {
+      clearStoredConsoleContext()
+      const retryHeaders = new Headers(initHeaders ?? undefined)
+      retryHeaders.delete('X-Gobii-Context-Type')
+      retryHeaders.delete('X-Gobii-Context-Id')
+      return jsonFetchInternal<T>(
+        input,
+        {
+          ...restInit,
+          headers: retryHeaders,
+        },
+        false,
+      )
+    }
     throw new HttpError(response.status, response.statusText, payload)
   }
 
   return (payload === null ? undefined : (payload as T)) as T
+}
+
+export async function jsonFetch<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T> {
+  return jsonFetchInternal(input, init, true)
 }
 
 function getCsrfCookieName(): string {

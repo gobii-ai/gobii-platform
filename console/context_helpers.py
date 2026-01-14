@@ -125,8 +125,5 @@ def build_console_context(request) -> ConsoleContextInfo:
     user: AbstractBaseUser = request.user
     override = get_context_override(request)
     if override:
-        try:
-            return resolve_console_context(user, request.session, override=override)
-        except PermissionDenied:
-            pass
+        return resolve_console_context(user, request.session, override=override)
     return resolve_console_context(user, request.session)
