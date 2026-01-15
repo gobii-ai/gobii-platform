@@ -30,6 +30,7 @@ from api.tasks import (
     _fetch_decodo_ip_data,
     _update_or_create_ip_record,
     _update_or_create_proxy_record,
+    decodo_low_inventory_reminder,
 )
 
 User = get_user_model()
@@ -390,6 +391,17 @@ class DecodoSyncTaskTests(TestCase):
         proxy.refresh_from_db()
         self.assertEqual(proxy.decodo_ip_id, decodo_ip.id)
         self.assertTrue(proxy.is_dedicated)
+
+    @override_settings(GOBII_RELEASE_ENV="staging")
+    @patch("api.tasks.proxy_tasks.maybe_send_decodo_low_inventory_alert")
+    @patch("api.tasks.proxy_tasks.logger")
+    def test_inventory_reminder_skips_outside_prod(self, mock_logger, mock_alert):
+        decodo_low_inventory_reminder(None)
+        mock_alert.assert_not_called()
+        mock_logger.info.assert_called_once_with(
+            "Decodo inventory reminder skipped; task runs only in production (env=%s)",
+            "staging",
+        )
 
 
 @tag("batch_api_decodo")

@@ -474,6 +474,10 @@ def proxy_health_check_single(self, proxy_id: str):
 @shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.decodo_low_inventory_reminder")
 def decodo_low_inventory_reminder(self):
     """Send daily low-inventory reminders for Decodo proxy capacity."""
+    if settings.GOBII_RELEASE_ENV != "prod":
+        logger.info("Decodo inventory reminder skipped; task runs only in production (env=%s)", env)
+        return 0
+
     from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
 
     maybe_send_decodo_low_inventory_alert(reason="daily_reminder")
