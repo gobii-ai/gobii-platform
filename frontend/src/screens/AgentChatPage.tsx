@@ -328,6 +328,7 @@ export function AgentChatPage({
   const forceScrollOnNextUpdateRef = useRef(false)
   const didInitialScrollRef = useRef(false)
   const isNearBottomRef = useRef(isNearBottom)
+  const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
@@ -622,6 +623,12 @@ export function AgentChatPage({
     }
   }, [])
 
+  useEffect(() => () => {
+    if (composerFocusNudgeTimeoutRef.current !== null) {
+      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     if (isNewAgent) {
       didInitialScrollRef.current = true
@@ -800,6 +807,25 @@ export function AgentChatPage({
     setAutoScrollPinned(true)
     scrollToBottom()
   }
+
+  const handleComposerFocus = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (!isTouch) return
+
+    setAutoScrollPinned(true)
+    forceScrollOnNextUpdateRef.current = true
+    jumpToBottom()
+
+    if (composerFocusNudgeTimeoutRef.current !== null) {
+      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
+    }
+    composerFocusNudgeTimeoutRef.current = window.setTimeout(() => {
+      jumpToBottom()
+      scrollToBottom()
+      composerFocusNudgeTimeoutRef.current = null
+    }, 180)
+  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
   const handleSend = async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
@@ -982,6 +1008,7 @@ export function AgentChatPage({
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
         contextSwitcher={contextSwitcher ?? undefined}
+        onComposerFocus={handleComposerFocus}
         onClose={onClose}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}

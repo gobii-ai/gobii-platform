@@ -39,6 +39,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
+  onComposerFocus?: () => void
   isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
@@ -98,6 +99,7 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onSendMessage,
+  onComposerFocus,
   isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
@@ -270,6 +272,7 @@ export function AgentChatLayout({
 
             <AgentComposer
               onSubmit={onSendMessage}
+              onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}
               processingTasks={processingWebTasks}
