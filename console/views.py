@@ -2308,6 +2308,21 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         return self._handle(request)
 
     def _handle(self, request):
+        # Restore charter from OAuth cookie if missing from session
+        if 'agent_charter' not in request.session:
+            from django.core import signing
+            from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+            cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
+            if cookie_value:
+                try:
+                    stashed = signing.loads(cookie_value, max_age=3600)
+                    for key in ("agent_charter", "pretrained_worker_template", "agent_charter_source"):
+                        if key in stashed:
+                            request.session[key] = stashed[key]
+                    request.session.modified = True
+                except (signing.BadSignature, signing.SignatureExpired):
+                    pass
+
         if 'agent_charter' not in request.session:
             messages.error(request, "Please start by describing what your agent should do.")
             return redirect('agents')
@@ -2352,7 +2367,14 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             return_to=request.GET.get("return_to") or session_return_to,
             embed=embed,
         )
-        return redirect(app_url)
+        response = redirect(app_url)
+
+        # Clear the OAuth charter cookie if present (no longer needed)
+        from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+        if OAUTH_CHARTER_COOKIE in request.COOKIES:
+            response.delete_cookie(OAUTH_CHARTER_COOKIE)
+
+        return response
 
 
 class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):

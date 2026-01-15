@@ -24,7 +24,7 @@
     {% provider_app_exists 'google' as has_google_provider %}
     {% if has_google_provider %}
       {% providers_media_js %}
-      <a href="{% provider_login_url 'google' %}"
+      <a href="{% provider_login_url 'google' next=redirect_field_value %}"
          class="mt-6 w-full inline-flex justify-center items-center gap-x-2 rounded-lg
                 border border-gray-200 bg-white text-gray-800 text-sm font-medium py-3
                 shadow-2xs hover:bg-gray-50">

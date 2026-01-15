@@ -590,11 +590,31 @@ class PretrainedWorkerHireView(View):
         )
 
         from django.contrib.auth.views import redirect_to_login
+        from django.core import signing
+        from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 
-        return redirect_to_login(
+        response = redirect_to_login(
             next=next_url,
             login_url=_login_url_with_utms(request),
         )
+
+        # Also store charter in a signed cookie for OAuth flows where session
+        # data might be lost during the redirect chain
+        charter_data = {
+            "agent_charter": template.charter,
+            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
+            "agent_charter_source": "template",
+        }
+        response.set_cookie(
+            OAUTH_CHARTER_COOKIE,
+            signing.dumps(charter_data),
+            max_age=3600,  # 1 hour
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure(),
+        )
+
+        return response
 
 
 class EngineeringProSignupView(View):
