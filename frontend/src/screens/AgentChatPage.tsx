@@ -371,23 +371,7 @@ export function AgentChatPage({
     showContextSwitcher,
   ])
 
-  const getScrollContainer = useCallback(() => {
-    // Try to find a scrollable parent of the timeline
-    const timeline = timelineRef.current
-    if (timeline) {
-      let parent = timeline.parentElement
-      while (parent) {
-        // Check if this parent is scrollable
-        const style = window.getComputedStyle(parent)
-        const isScrollable = style.overflowY === 'auto' || style.overflowY === 'scroll'
-        if (isScrollable && parent.scrollHeight > parent.clientHeight) {
-          return parent
-        }
-        parent = parent.parentElement
-      }
-    }
-    return document.scrollingElement ?? document.documentElement ?? document.body
-  }, [])
+  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
   const getScrollDistanceToBottom = useCallback(() => {
     const target = getScrollContainer()
@@ -486,12 +470,7 @@ export function AgentChatPage({
     let lastScrollTop = scroller?.scrollTop ?? window.scrollY
     let scrollTicking = false
 
-    const handleScroll = (e?: Event) => {
-      // If we received an event, verify it's from our container or window
-      if (e && e.target !== scroller && e.target !== document) {
-        return
-      }
-
+    const handleScroll = () => {
       if (scrollTicking) return
       scrollTicking = true
       requestAnimationFrame(() => {
@@ -517,15 +496,14 @@ export function AgentChatPage({
     window.addEventListener('touchstart', handleTouchStart, { passive: true })
     window.addEventListener('touchmove', handleTouchMove, { passive: true })
     window.addEventListener('keydown', handleKeyDown)
-    // Use capture for scroll to ensure we get events from any container, then filter in handler
-    window.addEventListener('scroll', handleScroll, { passive: true, capture: true })
+    window.addEventListener('scroll', handleScroll, { passive: true })
 
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('scroll', handleScroll, { capture: true })
+      window.removeEventListener('scroll', handleScroll)
     }
   }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
 
