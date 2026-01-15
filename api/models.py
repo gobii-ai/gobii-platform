@@ -2053,6 +2053,28 @@ class ProxyServer(models.Model):
     )
     notes = models.TextField(blank=True, help_text="Additional notes about this proxy server")
 
+    # Health check failure tracking
+    consecutive_health_failures = models.PositiveIntegerField(
+        default=0,
+        help_text="Count of consecutive health check failures"
+    )
+    last_health_check_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp of the most recent health check"
+    )
+    auto_deactivated_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When this proxy was automatically deactivated due to failures"
+    )
+    deactivation_reason = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Reason for deactivation (e.g., 'repeated_health_check_failures')"
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2102,6 +2124,57 @@ class ProxyServer(models.Model):
         except AttributeError:
             return False
         return allocation is not None
+
+    def record_health_check(self, passed: bool) -> bool:
+        """
+        Record the result of a health check and potentially deactivate the proxy.
+
+        Args:
+            passed: Whether the health check passed
+
+        Returns:
+            True if the proxy was deactivated as a result of this check
+        """
+        from django.conf import settings
+        from django.db.models import F
+
+        now = timezone.now()
+        self.last_health_check_at = now
+
+        if passed:
+            self.consecutive_health_failures = 0
+            self.save(update_fields=['last_health_check_at', 'consecutive_health_failures'])
+            return False
+
+        # Atomically increment failure count to prevent race conditions
+        ProxyServer.objects.filter(pk=self.pk).update(
+            consecutive_health_failures=F('consecutive_health_failures') + 1
+        )
+        self.refresh_from_db(fields=['consecutive_health_failures'])
+
+        deactivated = (
+            self.consecutive_health_failures >= settings.PROXY_CONSECUTIVE_FAILURE_THRESHOLD
+            and not self.is_dedicated_allocated
+        )
+
+        if deactivated:
+            self.is_active = False
+            self.auto_deactivated_at = now
+            self.deactivation_reason = "repeated_health_check_failures"
+            decodo_ip_id = self.decodo_ip_id
+            update_fields = ['last_health_check_at', 'is_active', 'auto_deactivated_at', 'deactivation_reason']
+            if decodo_ip_id:
+                self.decodo_ip = None
+                update_fields.append('decodo_ip')
+            self.save(update_fields=update_fields)
+            if decodo_ip_id:
+                DecodoIP.objects.filter(id=decodo_ip_id).delete()
+                from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
+                maybe_send_decodo_low_inventory_alert(reason="auto_deactivation")
+        else:
+            self.save(update_fields=['last_health_check_at'])
+
+        return deactivated
 
     def set_dedicated_state(self, *, dedicated: bool, save: bool = True) -> None:
         """Toggle dedicated state with optional persistence hook."""
@@ -3116,6 +3189,33 @@ class DecodoIP(models.Model):
         if location:
             return f"DecodoIP: {self.ip_address} ({location})"
         return f"DecodoIP: {self.ip_address}"
+
+
+class DecodoLowInventoryAlert(models.Model):
+    """Record low-inventory alert sends for Decodo proxy capacity."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sent_on = models.DateField(help_text="Local date when the alert was sent.")
+    active_proxy_count = models.PositiveIntegerField(
+        help_text="Active Decodo proxies available (excluding dedicated allocations).",
+    )
+    threshold = models.PositiveIntegerField(
+        help_text="Inventory threshold that triggered the alert.",
+    )
+    recipient_email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-sent_on"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sent_on"],
+                name="unique_decodo_low_inventory_alert_day",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"DecodoLowInventoryAlert<{self.sent_on}: {self.active_proxy_count}>"
 
 # api/models.py
 class UserBilling(models.Model):

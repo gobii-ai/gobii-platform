@@ -18,6 +18,16 @@ logger = logging.getLogger(__name__)
 #  Decodo IP Block Sync Task
 # --------------------------------------------------------------------------- #
 
+def _should_skip_decodo_port(ip_block: DecodoIPBlock, port: int) -> bool:
+    return ProxyServer.objects.filter(
+        host=ip_block.endpoint,
+        port=port,
+        is_active=False,
+        auto_deactivated_at__isnull=False,
+        deactivation_reason="repeated_health_check_failures",
+    ).exists()
+
+
 @shared_task(bind=True, ignore_result=True)
 def sync_ip_block(self, block_id: str) -> None:
     """
@@ -43,6 +53,7 @@ def sync_ip_block(self, block_id: str) -> None:
             updated_count = 0
             created_count = 0
             error_count = 0
+            skipped_count = 0
 
             # Sync each IP in the block
             for port_offset in range(ip_block.block_size):
@@ -51,6 +62,14 @@ def sync_ip_block(self, block_id: str) -> None:
                         port = ip_block.start_port + port_offset
                         logger.info("Processing IP %d/%d for block %s (port %d)",
                                    port_offset + 1, ip_block.block_size, ip_block, port)
+                        if _should_skip_decodo_port(ip_block, port):
+                            skipped_count += 1
+                            logger.info(
+                                "Skipping Decodo sync for %s:%d due to auto-deactivated proxy",
+                                ip_block.endpoint,
+                                port,
+                            )
+                            continue
 
                         # Make request to Decodo API
                         ip_data = _fetch_decodo_ip_data(
@@ -76,8 +95,8 @@ def sync_ip_block(self, block_id: str) -> None:
                         error_count += 1
 
             logger.info(
-                "Sync completed for block %s: %d created, %d updated, %d errors",
-                block_id, created_count, updated_count, error_count
+                "Sync completed for block %s: %d created, %d updated, %d skipped, %d errors",
+                block_id, created_count, updated_count, skipped_count, error_count
             )
 
         except DecodoIPBlock.DoesNotExist:
@@ -250,23 +269,41 @@ def _update_or_create_proxy_record(decodo_ip: DecodoIP, ip_block: DecodoIPBlock)
             if location:
                 proxy_name += f" ({location})"
 
-            # Create or update the proxy server record
-            proxy_server, created = ProxyServer.objects.update_or_create(
-                decodo_ip=decodo_ip,
-                defaults={
-                    "name": proxy_name,
-                    "proxy_type": ProxyServer.ProxyType.HTTPS,
-                    "host": ip_block.endpoint,
-                    "port": port,
-                    "username": ip_block.credential.username,
-                    "password": ip_block.credential.password,
-                    "static_ip": decodo_ip.ip_address,
-                    "is_dedicated": True,
-                    "is_active": True,
-                    "notes": f"Auto-generated from Decodo IP block {ip_block.endpoint}:{ip_block.start_port}",
-                    "updated_at": timezone.now()
-                }
-            )
+            # Check if proxy already exists to avoid overwriting is_active on update
+            existing_proxy = ProxyServer.objects.filter(decodo_ip=decodo_ip).first()
+            if not existing_proxy:
+                existing_proxy = ProxyServer.objects.filter(
+                    host=ip_block.endpoint,
+                    port=port,
+                ).first()
+
+            defaults_dict = {
+                "name": proxy_name,
+                "proxy_type": ProxyServer.ProxyType.HTTPS,
+                "host": ip_block.endpoint,
+                "port": port,
+                "username": ip_block.credential.username,
+                "password": ip_block.credential.password,
+                "static_ip": decodo_ip.ip_address,
+                "is_dedicated": True,
+                "notes": f"Auto-generated from Decodo IP block {ip_block.endpoint}:{ip_block.start_port}",
+                "updated_at": timezone.now()
+            }
+
+            if existing_proxy:
+                for field, value in defaults_dict.items():
+                    setattr(existing_proxy, field, value)
+                if existing_proxy.decodo_ip_id != decodo_ip.id:
+                    existing_proxy.decodo_ip = decodo_ip
+                existing_proxy.save()
+                created = False
+            else:
+                defaults_dict["is_active"] = True
+                proxy_server = ProxyServer.objects.create(
+                    decodo_ip=decodo_ip,
+                    **defaults_dict,
+                )
+                created = True
 
             if created:
                 logger.info("Created new proxy record for IP: %s at %s:%d",
@@ -390,14 +427,17 @@ def proxy_health_check_nightly(self):
         for proxy in proxy_sample:
             try:
                 result = _perform_proxy_health_check(proxy)
-                if result and result.passed:
+                if not result:
+                    failed_checks += 1
+                    continue
+
+                deactivated = proxy.record_health_check(result.passed)
+                if result.passed:
                     successful_checks += 1
-                    logger.info(f"Health check passed for proxy {proxy.host}:{proxy.port}")
                 else:
                     failed_checks += 1
-                    status = result.status if result else "UNKNOWN"
-                    logger.warning(f"Health check failed for proxy {proxy.host}:{proxy.port} with status {status}")
-                    # TODO: Consider marking proxy as inactive after repeated failures
+                    if deactivated:
+                        logger.warning(f"Proxy {proxy.host}:{proxy.port} auto-deactivated after {proxy.consecutive_health_failures} consecutive failures")
             except Exception as e:
                 failed_checks += 1
                 logger.error(f"Health check error for proxy {proxy.host}:{proxy.port}: {e}")
@@ -420,16 +460,23 @@ def proxy_health_check_single(self, proxy_id: str):
 
             result = _perform_proxy_health_check(proxy_server)
 
-            if result and result.passed:
-                logger.info(f"On-demand health check passed for proxy {proxy_server.host}:{proxy_server.port}")
-            else:
-                status = result.status if result else "UNKNOWN"
-                logger.warning(f"On-demand health check failed for proxy {proxy_server.host}:{proxy_server.port} with status {status}")
+            if result:
+                deactivated = proxy_server.record_health_check(result.passed)
+                if deactivated:
+                    logger.warning(f"Proxy {proxy_server.host}:{proxy_server.port} auto-deactivated after {proxy_server.consecutive_health_failures} consecutive failures")
 
         except ProxyServer.DoesNotExist:
             logger.error(f"Proxy server {proxy_id} not found for health check")
         except Exception as e:
             logger.error(f"Error during on-demand health check for proxy {proxy_id}: {e}")
+
+
+@shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.decodo_low_inventory_reminder")
+def decodo_low_inventory_reminder(self):
+    """Send daily low-inventory reminders for Decodo proxy capacity."""
+    from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
+
+    maybe_send_decodo_low_inventory_alert(reason="daily_reminder")
 
 
 def _perform_proxy_health_check(proxy_server: 'ProxyServer') -> 'ProxyHealthCheckResult':

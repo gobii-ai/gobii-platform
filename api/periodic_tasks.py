@@ -33,6 +33,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Daily Decodo inventory reminder (only sends when under threshold)
+    beat_schedule["decodo-low-inventory-daily"] = {
+        "task": "gobii_platform.api.tasks.decodo_low_inventory_reminder",
+        "schedule": crontab(hour=4, minute=0),  # 04:00 UTC daily
+        "args": [],
+    }
+
     # Add a monthly prune of UsageThresholdSent records older than 18 months
     beat_schedule["prune-threshold-sent-monthly"] = {
         "task": "prune_usage_threshold_sent",

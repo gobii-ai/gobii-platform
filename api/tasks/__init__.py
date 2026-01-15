@@ -21,6 +21,7 @@ from .proxy_tasks import (
     backfill_missing_proxy_records,
     proxy_health_check_nightly,
     proxy_health_check_single,
+    decodo_low_inventory_reminder,
     _perform_proxy_health_check,
     _fetch_decodo_ip_data,
     _update_or_create_ip_record,
