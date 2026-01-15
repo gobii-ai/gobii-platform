@@ -730,6 +730,11 @@ AGENT_WEB_TASK_ACTIVE_MAX_AGE_SECONDS = env.int(
     "AGENT_WEB_TASK_ACTIVE_MAX_AGE_SECONDS",
     default=4 * 60 * 60,
 )
+# Max age for appending "X ago" suffixes to agent prompt message headers
+AGENT_RECENT_MINUTES_SUFFIX_MAX_AGE_SECONDS = env.int(
+    "AGENT_RECENT_MINUTES_SUFFIX_MAX_AGE_SECONDS",
+    default=1800,
+)
 
 # Backwards-compatible aliases for legacy settings names.
 AGENT_EVENT_PROCESSING_PENDING_TTL_SECONDS = AGENT_EVENT_PROCESSING_PENDING_SET_TTL_SECONDS

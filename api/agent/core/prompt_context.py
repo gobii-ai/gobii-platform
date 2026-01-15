@@ -4182,7 +4182,12 @@ def _format_recent_minutes_suffix(timestamp: datetime) -> str:
         return ""
 
     seconds = int(delta.total_seconds())
-    if seconds >= 12 * 3600:
+    max_age_seconds = getattr(
+        settings,
+        "AGENT_RECENT_MINUTES_SUFFIX_MAX_AGE_SECONDS",
+        1800,
+    )
+    if seconds >= max_age_seconds:
         return ""
     if seconds < 60:
         return f" {seconds}s ago,"
