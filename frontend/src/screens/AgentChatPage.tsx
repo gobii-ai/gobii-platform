@@ -373,13 +373,27 @@ export function AgentChatPage({
 
   const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
 
+  const getViewportMetrics = useCallback(() => {
+    const target = getScrollContainer()
+    const baseHeight = target?.clientHeight || (typeof window !== 'undefined' ? window.innerHeight : 0)
+    const viewport = typeof window !== 'undefined' ? window.visualViewport : null
+    if (!viewport) {
+      return { height: baseHeight, offsetTop: 0 }
+    }
+    // On mobile Safari the layout viewport doesn't shrink when the keyboard opens.
+    // Using the visual viewport height (plus any offset) keeps scroll math aligned to what's actually visible.
+    const height = Math.min(baseHeight, viewport.height)
+    const offsetTop = viewport.offsetTop || 0
+    return { height, offsetTop }
+  }, [getScrollContainer])
+
   const getScrollDistanceToBottom = useCallback(() => {
     const target = getScrollContainer()
     const documentHeight = target.scrollHeight
     const scrollTop = target.scrollTop
-    const clientHeight = target.clientHeight
-    return documentHeight - clientHeight - scrollTop
-  }, [getScrollContainer])
+    const { height: viewportHeight, offsetTop } = getViewportMetrics()
+    return documentHeight - viewportHeight - offsetTop - scrollTop
+  }, [getScrollContainer, getViewportMetrics])
 
   const getBottomGapOffset = useCallback(() => {
     const timeline = timelineRef.current
