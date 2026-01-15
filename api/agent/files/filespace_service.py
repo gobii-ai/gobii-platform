@@ -238,7 +238,7 @@ def write_bytes_to_dir(
     except SuspiciousFileOperation:
         return {
             "status": "error",
-            "message": "Invalid file path. Use a safe path like /exports/report.csv without $[...] wrappers.",
+            "message": "Invalid file path. The path may contain unsafe components or invalid characters.",
         }
     if not normalized_path:
         return {"status": "error", "message": "path must include a filename."}
