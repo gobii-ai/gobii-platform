@@ -38,7 +38,7 @@ def _format_vite_tags() -> str:
 def _format_segment_snippet() -> str:
     """Generate Segment analytics snippet if configured."""
     write_key = getattr(settings, "SEGMENT_WEB_WRITE_KEY", None)
-    if not write_key:
+    if settings.DEBUG or not write_key:
         # Provide a no-op stub in debug mode or when not configured
         return """<script>
     window.analytics = window.analytics || {
