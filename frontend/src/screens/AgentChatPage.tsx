@@ -920,6 +920,8 @@ export function AgentChatPage({
   ])
 
   const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
+  const selectionMainStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
+  const viewportPageStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
   const selectionSidebarProps = {
     agents: rosterAgents,
     activeAgentId: null,
@@ -932,9 +934,9 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
   }
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page min-h-screen">
+    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
       <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName}>{content}</main>
+      <main className={selectionMainClassName} style={selectionMainStyle}>{content}</main>
     </div>
   )
 
@@ -958,7 +960,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page min-h-screen">
+    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}

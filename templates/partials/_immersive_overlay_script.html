@@ -3,6 +3,7 @@
     const overlay = document.getElementById('immersive-overlay');
     const frame = document.getElementById('immersive-frame');
     const closeButton = document.getElementById('immersive-close');
+    const root = document.documentElement;
 
     if (!overlay || !frame || !closeButton) {
       return;
@@ -11,6 +12,21 @@
     let isOpen = false;
     let returnToPath = null;
     let lastHistoryPath = null;
+    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+    const isNarrowScreen = () => window.matchMedia('(max-width: 900px)').matches;
+    const shouldBypassOverlay = () => isTouchDevice && isNarrowScreen();
+
+    const applyViewportVars = () => {
+      const viewport = window.visualViewport;
+      const height = viewport?.height ?? window.innerHeight ?? overlay.clientHeight;
+      root.style.setProperty('--immersive-viewport-height', `${height}px`);
+    };
+
+    applyViewportVars();
+    window.addEventListener('resize', applyViewportVars);
+    window.visualViewport?.addEventListener('resize', applyViewportVars);
+    window.visualViewport?.addEventListener('scroll', applyViewportVars);
 
     const setState = (state) => {
       overlay.dataset.state = state;
@@ -54,6 +70,16 @@
 
     const openOverlay = ({ src, returnTo, historyPath } = {}) => {
       const resolvedReturnTo = returnTo || returnToPath || getCurrentPath();
+
+      const rawTarget = src || buildLaunchPath(resolvedReturnTo);
+
+      if (shouldBypassOverlay()) {
+        if (rawTarget) {
+          window.location.assign(rawTarget);
+        }
+        return;
+      }
+
       if (!returnToPath) {
         returnToPath = resolvedReturnTo;
       }
@@ -152,6 +178,9 @@
       if (!href) {
         return;
       }
+      if (shouldBypassOverlay()) {
+        return;
+      }
       event.preventDefault();
       openOverlay({ src: href, returnTo: getCurrentPath() });
     });
@@ -162,6 +191,10 @@
       }
       const form = event.target;
       if (!form.hasAttribute('data-immersive-form')) {
+        return;
+      }
+      if (shouldBypassOverlay()) {
+        form.removeAttribute('target');
         return;
       }
       const isAuthenticated = form.dataset.authenticated === 'true';

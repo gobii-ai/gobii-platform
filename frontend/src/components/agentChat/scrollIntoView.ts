@@ -33,16 +33,19 @@ function measureViewportMargins(options: ScrollIntoViewOptions): { top: number; 
   }
 
   const composer = document.getElementById('agent-composer-shell')
-  const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+  const viewportHeight = window.visualViewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight
 
   if (!composer) {
     return { top, bottom: DEFAULT_MARGIN }
   }
 
   const composerRect = composer.getBoundingClientRect()
+  const bottomInset = parseFloat(
+    getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-bottom-inset') || '0',
+  ) || 0
   const overlap = Math.max(0, viewportHeight - composerRect.top)
 
-  return { top, bottom: overlap + DEFAULT_MARGIN }
+  return { top, bottom: overlap + DEFAULT_MARGIN + bottomInset }
 }
 
 function scrollElement(element: HTMLElement, delta: number, behavior: ScrollBehavior) {
@@ -70,7 +73,7 @@ export function scrollIntoViewIfNeeded(element: HTMLElement | null, options: Scr
 
     if (scrollParent === document.scrollingElement || scrollParent === document.documentElement || scrollParent === document.body) {
       const rect = element.getBoundingClientRect()
-      const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight ?? document.documentElement.clientHeight
       const visibleTop = marginTop
       const visibleBottom = viewportHeight - marginBottom
 

@@ -1,5 +1,10 @@
+:root {
+  --immersive-viewport-height: 100vh;
+}
+
 body.immersive-open {
   overflow: hidden;
+  overscroll-behavior: contain;
 }
 
 .immersive-overlay {
@@ -9,9 +14,18 @@ body.immersive-open {
   display: grid;
   place-items: stretch;
   background: #fff;
+  height: var(--immersive-viewport-height, 100vh);
+  min-height: 100vh;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease;
+}
+
+@supports (height: 100dvh) {
+  .immersive-overlay {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
 }
 
 .immersive-overlay[data-state="loading"],
@@ -27,9 +41,12 @@ body.immersive-open {
 .immersive-frame {
   position: relative;
   z-index: 1;
+  display: block;
   width: 100%;
   height: 100%;
+  min-height: inherit;
   border: 0;
+  background: #fff;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
