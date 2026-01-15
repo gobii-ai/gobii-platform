@@ -371,17 +371,38 @@ export function AgentChatPage({
     showContextSwitcher,
   ])
 
-  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
+  const getScrollContainer = useCallback(() => {
+    // Try to find a scrollable parent of the timeline
+    const timeline = timelineRef.current
+    if (timeline) {
+      let parent = timeline.parentElement
+      while (parent) {
+        // Check if this parent is scrollable
+        const style = window.getComputedStyle(parent)
+        const isScrollable = style.overflowY === 'auto' || style.overflowY === 'scroll'
+        if (isScrollable && parent.scrollHeight > parent.clientHeight) {
+          return parent
+        }
+        parent = parent.parentElement
+      }
+    }
+    return document.scrollingElement ?? document.documentElement ?? document.body
+  }, [])
+
   const getScrollDistanceToBottom = useCallback(() => {
     const target = getScrollContainer()
+    const isWindowScroll = target === document.scrollingElement || target === document.documentElement || target === document.body
+
     // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
+    // ONLY if we are using window scroll. If we are internal scrolling in a fixed shell, use clientHeight.
+    const viewportHeight = isWindowScroll && window.visualViewport ? window.visualViewport.height : target.clientHeight
+
     const documentHeight = target.scrollHeight
     const scrollTop = target.scrollTop
-    // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
-    const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
-    return documentHeight - effectiveClientHeight - scrollTop
+
+    return documentHeight - viewportHeight - scrollTop
   }, [getScrollContainer])
+
   const getBottomGapOffset = useCallback(() => {
     const timeline = timelineRef.current
     if (!timeline) return 0
@@ -465,7 +486,12 @@ export function AgentChatPage({
     let lastScrollTop = scroller?.scrollTop ?? window.scrollY
     let scrollTicking = false
 
-    const handleScroll = () => {
+    const handleScroll = (e?: Event) => {
+      // If we received an event, verify it's from our container or window
+      if (e && e.target !== scroller && e.target !== document) {
+        return
+      }
+
       if (scrollTicking) return
       scrollTicking = true
       requestAnimationFrame(() => {
@@ -491,14 +517,15 @@ export function AgentChatPage({
     window.addEventListener('touchstart', handleTouchStart, { passive: true })
     window.addEventListener('touchmove', handleTouchMove, { passive: true })
     window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('scroll', handleScroll, { passive: true })
+    // Use capture for scroll to ensure we get events from any container, then filter in handler
+    window.addEventListener('scroll', handleScroll, { passive: true, capture: true })
 
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('scroll', handleScroll, { capture: true })
     }
   }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
 

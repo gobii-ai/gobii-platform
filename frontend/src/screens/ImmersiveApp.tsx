@@ -3,6 +3,7 @@ import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { useAgentRoster } from '../hooks/useAgentRoster'
+import { useVisualViewport } from '../hooks/useVisualViewport'
 import { AgentChatPage } from './AgentChatPage'
 import '../styles/immersiveApp.css'
 
@@ -207,6 +208,7 @@ function navigateTo(path: string) {
 
 export function ImmersiveApp() {
   const location = useAppLocation()
+  const viewportHeight = useVisualViewport()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
   const embed = useMemo(() => parseBooleanFlag(new URLSearchParams(location.search).get('embed')), [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
@@ -269,7 +271,14 @@ export function ImmersiveApp() {
   }, [])
 
   return (
-    <div className="immersive-shell">
+    <div
+      className="immersive-shell"
+      style={
+        {
+          '--app-height': viewportHeight ? `${viewportHeight}px` : '100dvh',
+        } as React.CSSProperties
+      }
+    >
       <div className="immersive-shell__content">
         {route.kind === 'agent-chat' ? (
           <AgentChatPage

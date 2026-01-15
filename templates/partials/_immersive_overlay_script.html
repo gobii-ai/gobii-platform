@@ -52,8 +52,28 @@
       }
     };
 
+    const isMobile = () => {
+      return window.matchMedia('(max-width: 768px)').matches;
+    };
+
     const openOverlay = ({ src, returnTo, historyPath } = {}) => {
       const resolvedReturnTo = returnTo || returnToPath || getCurrentPath();
+
+      // Mobile Breakout: Navigate to full URL instead of opening overlay
+      if (isMobile()) {
+        const urlToOpen = src || historyPath;
+        if (urlToOpen) {
+          const destination = buildHistoryPath(urlToOpen);
+          // Append return_to if not present
+          const urlObj = new URL(destination, window.location.origin);
+          if (!urlObj.searchParams.has('return_to')) {
+            urlObj.searchParams.set('return_to', resolvedReturnTo);
+          }
+          window.location.assign(urlObj.toString());
+          return;
+        }
+      }
+
       if (!returnToPath) {
         returnToPath = resolvedReturnTo;
       }
@@ -187,12 +207,21 @@
       if (returnToInput) {
         returnToInput.value = returnTo;
       }
-      if (embedInput) {
-        embedInput.value = '1';
+
+      // Mobile Breakout: Do not serve as embed
+      if (isMobile()) {
+        if (embedInput) {
+          embedInput.value = ''; // Ensure not marked as embed
+        }
+        form.removeAttribute('target'); // Submit normally
+      } else {
+        if (embedInput) {
+          embedInput.value = '1';
+        }
+        const frameName = frame.getAttribute('name') || 'immersive-frame';
+        form.setAttribute('target', frameName);
+        openOverlay({ returnTo });
       }
-      const frameName = frame.getAttribute('name') || 'immersive-frame';
-      form.setAttribute('target', frameName);
-      openOverlay({ returnTo });
     });
 
     window.GobiiImmersiveOverlay = {
