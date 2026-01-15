@@ -59,6 +59,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
+  onComposerFocus?: () => void
 }
 
 export function AgentChatLayout({
@@ -110,6 +111,7 @@ export function AgentChatLayout({
   onInsightIndexChange,
   onPauseChange,
   isInsightsPaused,
+  onComposerFocus,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
 
@@ -281,6 +283,7 @@ export function AgentChatLayout({
               onInsightIndexChange={onInsightIndexChange}
               onPauseChange={onPauseChange}
               isInsightsPaused={isInsightsPaused}
+              onFocus={onComposerFocus}
             />
           </div>
           {footer ? <div className="mt-6">{footer}</div> : null}

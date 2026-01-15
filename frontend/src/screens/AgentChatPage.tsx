@@ -375,16 +375,10 @@ export function AgentChatPage({
 
   const getScrollDistanceToBottom = useCallback(() => {
     const target = getScrollContainer()
-    const isWindowScroll = target === document.scrollingElement || target === document.documentElement || target === document.body
-
-    // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-    // ONLY if we are using window scroll. If we are internal scrolling in a fixed shell, use clientHeight.
-    const viewportHeight = isWindowScroll && window.visualViewport ? window.visualViewport.height : target.clientHeight
-
     const documentHeight = target.scrollHeight
     const scrollTop = target.scrollTop
-
-    return documentHeight - viewportHeight - scrollTop
+    const clientHeight = target.clientHeight
+    return documentHeight - clientHeight - scrollTop
   }, [getScrollContainer])
 
   const getBottomGapOffset = useCallback(() => {
@@ -1004,6 +998,7 @@ export function AgentChatPage({
         onLoadNewer={isNewAgent ? undefined : (hasMoreNewer ? loadNewer : undefined)}
         onSendMessage={handleSend}
         onJumpToLatest={handleJumpToLatest}
+        onComposerFocus={handleJumpToLatest}
         autoFocusComposer
         isNearBottom={isNearBottom}
         hasUnseenActivity={isNewAgent ? false : hasUnseenActivity}

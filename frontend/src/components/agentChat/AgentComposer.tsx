@@ -103,6 +103,7 @@ type AgentComposerProps = {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
+  onFocus?: () => void
 }
 
 export function AgentComposer({
@@ -120,6 +121,7 @@ export function AgentComposer({
   onInsightIndexChange,
   onPauseChange,
   isInsightsPaused = false,
+  onFocus,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -586,6 +588,7 @@ export function AgentComposer({
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 onKeyDown={handleKeyDown}
+                onFocus={onFocus}
                 disabled={disabled}
                 ref={textareaRef}
               />
