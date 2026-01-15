@@ -601,7 +601,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
               <span className="upsell-hero__price-period">/month</span>
             </div>
           )}
-          <motion.a className="upsell-hero__cta" href={checkoutUrl} variants={badgeVariants}>
+          <motion.a className="upsell-hero__cta" href={checkoutUrl} target="_top" variants={badgeVariants}>
             <span>{upsellItem.ctaLabel || 'Upgrade Now'}</span>
             <ArrowRight size={15} strokeWidth={2.5} />
           </motion.a>
