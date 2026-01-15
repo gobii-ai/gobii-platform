@@ -98,6 +98,27 @@ class FileExportToolTests(TestCase):
         second_node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/report (2).csv")
         self.assertNotEqual(first_node.id, second_node.id)
 
+    def test_create_csv_accepts_placeholder_wrapped_path(self):
+        result = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n1,2\n", "file_path": "$[/exports/wrapped.csv]"},
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["file"], "$[/exports/wrapped.csv]")
+        node = AgentFsNode.objects.get(created_by_agent=self.agent, path="/exports/wrapped.csv")
+        with node.content.open("rb") as handle:
+            self.assertEqual(handle.read(), b"col1,col2\n1,2\n")
+
+    def test_create_csv_rejects_invalid_path(self):
+        result = execute_create_csv(
+            self.agent,
+            {"csv_text": "col1,col2\n1,2\n", "file_path": "$["},
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("invalid", result["message"].lower())
+
     def test_create_file_writes_file(self):
         result = execute_create_file(
             self.agent,

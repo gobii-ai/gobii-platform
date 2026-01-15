@@ -15,6 +15,8 @@ def resolve_export_target(
     if not isinstance(file_path, str):
         return None, False, {"status": "error", "message": "file_path must be a string"}
     file_path = file_path.strip()
+    if file_path.startswith("$[") and file_path.endswith("]"):
+        file_path = file_path[2:-1].strip()
     if not file_path:
         return None, False, {"status": "error", "message": "file_path must be a non-empty string"}
 
