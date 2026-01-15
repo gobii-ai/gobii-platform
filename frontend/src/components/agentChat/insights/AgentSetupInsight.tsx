@@ -617,7 +617,9 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
             variants={badgeVariants}
             target="_top"
             onClick={() => {
-              track(AnalyticsEvent.AGENT_SETUP_UPGRADE_CLICKED, {
+              const planName = upsellItem?.plan?.replace(/\b\w/g, char => char.toUpperCase());
+
+              track(AnalyticsEvent.AGENT_SETUP_UPGRADE_CLICKED + " - " + planName, {
                 agentId: metadata.agentId,
                 plan: upsellItem.plan,
               })

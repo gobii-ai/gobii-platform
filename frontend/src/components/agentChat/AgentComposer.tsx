@@ -216,9 +216,10 @@ export function AgentComposer({
     // Track the tab click
     const clickedInsight = insights[index]
     if (clickedInsight) {
-      track(AnalyticsEvent.INSIGHT_TAB_CLICKED, {
+      track(AnalyticsEvent.INSIGHT_TAB_CLICKED + " - " + clickedInsight.title, {
         insightType: clickedInsight.insightType,
         insightId: clickedInsight.insightId,
+        title: clickedInsight.title,
         tabIndex: index,
         totalInsights: insights.length,
       })
@@ -244,7 +245,7 @@ export function AgentComposer({
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
     setIsWorkingExpanded(newExpanded)
-    track(AnalyticsEvent.INSIGHT_PANEL_TOGGLED, {
+    track(AnalyticsEvent.INSIGHT_PANEL_TOGGLED + " - " + (newExpanded ? "Open" : "Close"), {
       expanded: newExpanded,
       hasInsights,
       currentInsightType: currentInsight?.insightType ?? null,
