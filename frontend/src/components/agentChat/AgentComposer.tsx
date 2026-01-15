@@ -7,6 +7,7 @@ import type { ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
+import { track, AnalyticsEvent } from '../../util/analytics'
 
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
@@ -211,7 +212,19 @@ export function AgentComposer({
     onPauseChange?.(true) // Pause when user manually selects
     lastRotationTimeRef.current = Date.now()
     setCountdownProgress(0)
-  }, [onInsightIndexChange, onPauseChange, resolvedWorkingExpanded, setIsWorkingExpanded])
+
+    // Track the tab click
+    const clickedInsight = insights[index]
+    if (clickedInsight) {
+      track(AnalyticsEvent.INSIGHT_TAB_CLICKED + " - " + clickedInsight.title, {
+        insightType: clickedInsight.insightType,
+        insightId: clickedInsight.insightId,
+        title: clickedInsight.title,
+        tabIndex: index,
+        totalInsights: insights.length,
+      })
+    }
+  }, [onInsightIndexChange, onPauseChange, resolvedWorkingExpanded, setIsWorkingExpanded, insights])
 
   // Handle hover - pause auto-rotation
   const handleInsightMouseEnter = useCallback(() => {
@@ -227,6 +240,29 @@ export function AgentComposer({
       setCountdownProgress(0)
     }
   }, [hasMultipleInsights, onPauseChange])
+
+  // Handle panel expand/collapse toggle
+  const handlePanelToggle = useCallback(() => {
+    const newExpanded = !resolvedWorkingExpanded
+    setIsWorkingExpanded(newExpanded)
+    track(AnalyticsEvent.INSIGHT_PANEL_TOGGLED + " - " + (newExpanded ? "Open" : "Close"), {
+      expanded: newExpanded,
+      hasInsights,
+      currentInsightType: currentInsight?.insightType ?? null,
+    })
+  }, [resolvedWorkingExpanded, setIsWorkingExpanded, hasInsights, currentInsight?.insightType])
+
+  // Wrap dismiss handler to track dismissals
+  const handleDismissInsight = useCallback((insightId: string) => {
+    const dismissedInsight = insights.find((i) => i.insightId === insightId)
+    if (dismissedInsight) {
+      track(AnalyticsEvent.INSIGHT_DISMISSED, {
+        insightType: dismissedInsight.insightType,
+        insightId: dismissedInsight.insightId,
+      })
+    }
+    onDismissInsight?.(insightId)
+  }, [insights, onDismissInsight])
 
   // Update countdown progress for the timer indicator (only when processing)
   useEffect(() => {
@@ -487,14 +523,14 @@ export function AgentComposer({
             {/* Header row - clickable to toggle, with tabs and chevron */}
             <div
               className="composer-working-header-row"
-              onClick={() => setIsWorkingExpanded(!resolvedWorkingExpanded)}
+              onClick={handlePanelToggle}
               role="button"
               tabIndex={0}
               aria-expanded={resolvedWorkingExpanded}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  setIsWorkingExpanded(!resolvedWorkingExpanded)
+                  handlePanelToggle()
                 }
               }}
             >
@@ -576,7 +612,7 @@ export function AgentComposer({
               >
                 <div className="composer-working-insight" key={currentInsight?.insightId}>
                   {currentInsight ? (
-                    <InsightEventCard insight={currentInsight} onDismiss={onDismissInsight} />
+                    <InsightEventCard insight={currentInsight} onDismiss={handleDismissInsight} />
                   ) : null}
                 </div>
               </div>
