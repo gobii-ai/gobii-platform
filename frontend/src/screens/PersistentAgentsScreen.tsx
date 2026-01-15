@@ -3,14 +3,7 @@ import type { CSSProperties } from 'react'
 import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
 import { AgentAvatarBadge } from '../components/common/AgentAvatarBadge'
 import { normalizeHexColor } from '../util/color'
-
-declare global {
-  interface Window {
-    analytics?: {
-      track?: (event: string, properties?: Record<string, unknown>) => void
-    }
-  }
-}
+import { track } from '../util/analytics'
 
 type AgentSummary = {
   id: string
@@ -428,8 +421,8 @@ type AgentEmptyStateProps = {
 
 function AgentEmptyState({ spawnUrl, analyticsEvent }: AgentEmptyStateProps) {
   const handleClick = () => {
-    if (analyticsEvent && typeof window !== 'undefined') {
-      window.analytics?.track?.(analyticsEvent)
+    if (analyticsEvent) {
+      track(analyticsEvent)
     }
   }
 

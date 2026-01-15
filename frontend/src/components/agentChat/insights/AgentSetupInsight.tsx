@@ -12,6 +12,7 @@ import {
   verifyUserPhone,
 } from '../../../api/agentSetup'
 import { HttpError } from '../../../api/http'
+import { track, AnalyticsEvent } from '../../../util/analytics'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -228,10 +229,11 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       await navigator.clipboard.writeText(value)
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1600)
+      track(AnalyticsEvent.AGENT_SETUP_SMS_NUMBER_COPIED, { agentId: metadata.agentId })
     } catch {
       // Ignore clipboard failures.
     }
-  }, [])
+  }, [metadata.agentId])
 
   const handleAddPhone = useCallback(async () => {
     const trimmed = phoneInput.trim()
@@ -246,12 +248,13 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       const response = await addUserPhone(formatted)
       setPhone(response.phone ?? null)
       setPhoneInput('')
+      track(AnalyticsEvent.AGENT_SETUP_SMS_CODE_SENT, { agentId: metadata.agentId })
     } catch (error) {
       setSmsError(describeError(error))
     } finally {
       setSmsAction(null)
     }
-  }, [phoneInput, region])
+  }, [phoneInput, region, metadata.agentId])
 
   const handleVerify = useCallback(async () => {
     const trimmed = codeInput.trim()
@@ -265,12 +268,13 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       const response = await verifyUserPhone(trimmed)
       setPhone(response.phone ?? null)
       setCodeInput('')
+      track(AnalyticsEvent.AGENT_SETUP_SMS_VERIFIED, { agentId: metadata.agentId })
     } catch (error) {
       setSmsError(describeError(error))
     } finally {
       setSmsAction(null)
     }
-  }, [codeInput])
+  }, [codeInput, metadata.agentId])
 
   const handleResend = useCallback(async () => {
     setSmsError(null)
@@ -307,6 +311,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       setSmsEnabled(true)
       setAgentNumber(response.agentSms?.number ?? null)
       setPhone(response.userPhone ?? null)
+      track(AnalyticsEvent.AGENT_SETUP_SMS_ENABLED, { agentId: metadata.agentId })
     } catch (error) {
       setSmsError(describeError(error))
     } finally {
@@ -322,6 +327,11 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       const nextOrg = response.organization ?? null
       setOrgCurrent(nextOrg)
       setSelectedOrgId(nextOrg?.id ?? null)
+      track(AnalyticsEvent.AGENT_SETUP_ORG_MOVED, {
+        agentId: metadata.agentId,
+        toOrgId: nextOrg?.id ?? 'personal',
+        toOrgName: nextOrg?.name ?? 'Personal workspace',
+      })
     } catch (error) {
       setOrgError(describeError(error))
     } finally {
@@ -601,7 +611,20 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
               <span className="upsell-hero__price-period">/month</span>
             </div>
           )}
-          <motion.a className="upsell-hero__cta" href={checkoutUrl} target="_top" variants={badgeVariants}>
+          <motion.a
+            className="upsell-hero__cta"
+            href={checkoutUrl}
+            variants={badgeVariants}
+            target="_top"
+            onClick={() => {
+              const planName = upsellItem?.plan?.replace(/\b\w/g, char => char.toUpperCase());
+
+              track(AnalyticsEvent.AGENT_SETUP_UPGRADE_CLICKED + " - " + planName, {
+                agentId: metadata.agentId,
+                plan: upsellItem.plan,
+              })
+            }}
+          >
             <span>{upsellItem.ctaLabel || 'Upgrade Now'}</span>
             <ArrowRight size={15} strokeWidth={2.5} />
           </motion.a>
