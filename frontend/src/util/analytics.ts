@@ -25,7 +25,7 @@ type TrackProperties = Record<string, unknown>
  * Track an analytics event.
  * Safe to call even if analytics is not loaded (e.g., blocked by ad blocker).
  *
- * @param event - The event name (use snake_case by convention)
+ * @param event - The event name (use Title Case by convention)
  * @param properties - Optional event properties
  *
  * @example
