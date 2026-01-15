@@ -2,8 +2,10 @@
 Tests for Decodo IP block sync functionality.
 """
 import uuid
+from datetime import timedelta
 from unittest.mock import patch, MagicMock
 
+from django.core import mail
 from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.contrib.admin.sites import AdminSite
@@ -13,8 +15,16 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from django.contrib.messages.storage.fallback import FallbackStorage
 from django.utils import timezone
 
-from api.models import DedicatedProxyAllocation, DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer
+from api.models import (
+    DecodoLowInventoryAlert,
+    DedicatedProxyAllocation,
+    DecodoCredential,
+    DecodoIPBlock,
+    DecodoIP,
+    ProxyServer,
+)
 from api.admin import DecodoIPBlockAdmin
+from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
 from api.tasks import (
     sync_ip_block,
     _fetch_decodo_ip_data,
@@ -259,6 +269,103 @@ class DecodoSyncTaskTests(TestCase):
         self.assertEqual(proxy.decodo_ip_id, decodo_ip.id)
         self.assertTrue(DecodoIP.objects.filter(id=decodo_ip.id).exists())
         self.assertEqual(proxy.consecutive_health_failures, 1)
+
+    @override_settings(
+        DECODO_LOW_INVENTORY_THRESHOLD=2,
+        DECODO_LOW_INVENTORY_EMAIL="ops@example.com",
+    )
+    def test_low_inventory_alert_sends_once_per_day(self):
+        owner = User.objects.create_user(
+            username="dedicated-owner",
+            email="dedicated-owner@example.com",
+            password="password",
+        )
+        decodo_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.70",
+            port=10003,
+        )
+        ProxyServer.objects.create(
+            name="Active Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=decodo_ip.port,
+            username=self.credential.username,
+            password=self.credential.password,
+            static_ip=decodo_ip.ip_address,
+            is_active=True,
+            is_dedicated=True,
+            decodo_ip=decodo_ip,
+        )
+        dedicated_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.72",
+            port=10005,
+        )
+        dedicated_proxy = ProxyServer.objects.create(
+            name="Dedicated Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=dedicated_ip.port,
+            username=self.credential.username,
+            password=self.credential.password,
+            static_ip=dedicated_ip.ip_address,
+            is_active=True,
+            is_dedicated=True,
+            decodo_ip=dedicated_ip,
+        )
+        DedicatedProxyAllocation.objects.assign_to_owner(dedicated_proxy, owner)
+
+        sent = maybe_send_decodo_low_inventory_alert(reason="test")
+
+        self.assertTrue(sent)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn("Active shared proxies: 1", mail.outbox[0].body)
+        self.assertIn("Active dedicated allocations: 1", mail.outbox[0].body)
+        self.assertIn("Active Decodo proxies (total): 2", mail.outbox[0].body)
+        self.assertEqual(DecodoLowInventoryAlert.objects.count(), 1)
+
+        sent = maybe_send_decodo_low_inventory_alert(reason="test")
+
+        self.assertFalse(sent)
+        self.assertEqual(len(mail.outbox), 1)
+
+        next_day = timezone.localdate() + timedelta(days=1)
+        with patch("api.services.decodo_inventory.timezone.localdate", return_value=next_day):
+            sent = maybe_send_decodo_low_inventory_alert(reason="test")
+
+        self.assertTrue(sent)
+        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(DecodoLowInventoryAlert.objects.count(), 2)
+
+    @override_settings(
+        DECODO_LOW_INVENTORY_THRESHOLD=1,
+        DECODO_LOW_INVENTORY_EMAIL="ops@example.com",
+    )
+    def test_low_inventory_alert_skips_when_above_threshold(self):
+        decodo_ip = DecodoIP.objects.create(
+            ip_block=self.ip_block,
+            ip_address="192.168.1.71",
+            port=10004,
+        )
+        ProxyServer.objects.create(
+            name="Active Decodo Proxy",
+            proxy_type=ProxyServer.ProxyType.HTTPS,
+            host=self.ip_block.endpoint,
+            port=decodo_ip.port,
+            username=self.credential.username,
+            password=self.credential.password,
+            static_ip=decodo_ip.ip_address,
+            is_active=True,
+            is_dedicated=True,
+            decodo_ip=decodo_ip,
+        )
+
+        sent = maybe_send_decodo_low_inventory_alert(reason="test")
+
+        self.assertFalse(sent)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertEqual(DecodoLowInventoryAlert.objects.count(), 0)
 
     def test_proxy_record_reuses_existing_proxy(self):
         decodo_ip = DecodoIP.objects.create(

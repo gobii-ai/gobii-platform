@@ -89,6 +89,12 @@ LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)
 # Proxy health check: deactivate after N consecutive failures
 PROXY_CONSECUTIVE_FAILURE_THRESHOLD = env.int("PROXY_CONSECUTIVE_FAILURE_THRESHOLD", default=3)
+# Decodo inventory alerting
+DECODO_LOW_INVENTORY_THRESHOLD = env.int("DECODO_LOW_INVENTORY_THRESHOLD", default=30)
+DECODO_LOW_INVENTORY_EMAIL = env(
+    "DECODO_LOW_INVENTORY_EMAIL",
+    default="support@gobii.ai",
+)
 
 try:
     from proprietary import defaults as _proprietary_defaults_module

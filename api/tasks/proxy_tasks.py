@@ -471,6 +471,14 @@ def proxy_health_check_single(self, proxy_id: str):
             logger.error(f"Error during on-demand health check for proxy {proxy_id}: {e}")
 
 
+@shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.decodo_low_inventory_reminder")
+def decodo_low_inventory_reminder(self):
+    """Send daily low-inventory reminders for Decodo proxy capacity."""
+    from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
+
+    maybe_send_decodo_low_inventory_alert(reason="daily_reminder")
+
+
 def _perform_proxy_health_check(proxy_server: 'ProxyServer') -> 'ProxyHealthCheckResult':
     """
     Perform a health check on a single proxy server using browser automation.

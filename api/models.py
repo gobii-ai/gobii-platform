@@ -2169,6 +2169,8 @@ class ProxyServer(models.Model):
             self.save(update_fields=update_fields)
             if decodo_ip_id:
                 DecodoIP.objects.filter(id=decodo_ip_id).delete()
+                from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
+                maybe_send_decodo_low_inventory_alert(reason="auto_deactivation")
         else:
             self.save(update_fields=['last_health_check_at'])
 
@@ -3187,6 +3189,33 @@ class DecodoIP(models.Model):
         if location:
             return f"DecodoIP: {self.ip_address} ({location})"
         return f"DecodoIP: {self.ip_address}"
+
+
+class DecodoLowInventoryAlert(models.Model):
+    """Record low-inventory alert sends for Decodo proxy capacity."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    sent_on = models.DateField(help_text="Local date when the alert was sent.")
+    active_proxy_count = models.PositiveIntegerField(
+        help_text="Active Decodo proxies available (excluding dedicated allocations).",
+    )
+    threshold = models.PositiveIntegerField(
+        help_text="Inventory threshold that triggered the alert.",
+    )
+    recipient_email = models.EmailField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-sent_on"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["sent_on"],
+                name="unique_decodo_low_inventory_alert_day",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"DecodoLowInventoryAlert<{self.sent_on}: {self.active_proxy_count}>"
 
 # api/models.py
 class UserBilling(models.Model):
