@@ -5,6 +5,7 @@ import uuid
 from django.http.response import JsonResponse
 from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
+from django.core import signing
 from django.core.mail import send_mail
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
@@ -19,6 +20,7 @@ from api.models import PaidPlanIntent, PersistentAgent
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -590,8 +592,6 @@ class PretrainedWorkerHireView(View):
         )
 
         from django.contrib.auth.views import redirect_to_login
-        from django.core import signing
-        from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 
         response = redirect_to_login(
             next=next_url,
