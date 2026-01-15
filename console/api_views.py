@@ -1227,6 +1227,51 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         return JsonResponse({"agents": payload})
 
 
+class AgentContextResolveAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        try:
+            agent = (
+                PersistentAgent.objects.non_eval()
+                .select_related("organization", "user")
+                .get(pk=agent_id)
+            )
+        except PersistentAgent.DoesNotExist:
+            return JsonResponse({"error": "Agent not found"}, status=404)
+
+        if agent.organization_id:
+            membership = (
+                OrganizationMembership.objects.select_related("org")
+                .filter(
+                    user=request.user,
+                    org_id=agent.organization_id,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                .first()
+            )
+            if membership is None:
+                return JsonResponse({"error": "Not permitted"}, status=403)
+            context = {
+                "type": "organization",
+                "id": str(agent.organization_id),
+                "name": membership.org.name,
+            }
+        else:
+            if agent.user_id != request.user.id:
+                return JsonResponse({"error": "Not permitted"}, status=403)
+            context = {
+                "type": "personal",
+                "id": str(agent.user_id),
+                "name": request.user.get_full_name()
+                or request.user.username
+                or request.user.email
+                or "Personal",
+            }
+
+        return JsonResponse({"context": context})
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentQuickCreateAPIView(LoginRequiredMixin, View):
     """API endpoint to create an agent from an initial message and return the agent ID."""
