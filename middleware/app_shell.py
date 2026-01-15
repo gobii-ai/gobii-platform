@@ -45,7 +45,7 @@ def _build_shell_html() -> str:
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
   <title>Gobii App</title>
   <link rel="icon" type="image/png" href="{icon_url}" />
   <link rel="preload" as="image" href="{icon_url}" />
