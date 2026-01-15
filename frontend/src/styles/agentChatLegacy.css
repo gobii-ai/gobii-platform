@@ -9,7 +9,7 @@
 
 .agent-chat-page {
   position: relative;
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
   background: #fafbfc;
   isolation: isolate;
 }
@@ -569,7 +569,7 @@
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 1.25rem;
+  bottom: calc(var(--app-viewport-bottom-inset, 0px) + 1.25rem);
   display: flex;
   justify-content: center;
   padding: 0 1.5rem;
@@ -1040,7 +1040,7 @@
   z-index: 50;
   width: 2.5rem;
   height: 2.5rem;
-  bottom: calc(var(--composer-height, 6.5rem) + 1.75rem);
+  bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1.75rem);
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.7);
   background: rgba(255, 255, 255, 0.85);
@@ -1491,7 +1491,7 @@
 @media (max-width: 768px) {
   .composer-shell {
     padding: 0 0.75rem;
-    bottom: 0.75rem;
+    bottom: calc(var(--app-viewport-bottom-inset, 0px) + 0.75rem);
   }
 
   #timeline-events {
@@ -1506,7 +1506,7 @@
   .jump-to-latest {
     width: 2.25rem;
     height: 2.25rem;
-    bottom: calc(var(--composer-height, 6.5rem) + 1rem);
+    bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1rem);
     transform: translateX(-50%);
   }
 
@@ -3404,7 +3404,7 @@
 .agent-fab {
   position: fixed;
   right: calc(0.75rem + 1rem + 0.25rem);
-  bottom: calc(var(--composer-height, 6.5rem) + 1.25rem);
+  bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1.25rem);
   z-index: 50;
   display: none;
   align-items: center;

@@ -1,16 +1,16 @@
 .immersive-shell {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
   background: #ffffff;
   color: #0f172a;
   position: relative;
 }
 
 .immersive-shell__content {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
 }
 
 .immersive-command {
-  min-height: 100vh;
+  min-height: var(--app-viewport-height, 100vh);
   display: flex;
   flex-direction: column;
   justify-content: center;

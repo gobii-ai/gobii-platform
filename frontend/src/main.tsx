@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react'
 import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
 import './index.css'
 import './styles/consoleShell.css'
+import { installViewportCssVars } from './util/viewport'
 
 const AgentChatPage = lazy(async () => ({ default: (await import('./screens/AgentChatPage')).AgentChatPage }))
 const AgentDetailScreen = lazy(async () => ({ default: (await import('./screens/AgentDetailScreen')).AgentDetailScreen }))
@@ -32,6 +33,8 @@ const mountNode = document.getElementById('gobii-frontend-root')
 if (!mountNode) {
   throw new Error('Gobii frontend mount element not found')
 }
+
+installViewportCssVars()
 
 const appName = mountNode.dataset.app ?? 'agent-chat'
 const isStaff = mountNode.dataset.isStaff === 'true'

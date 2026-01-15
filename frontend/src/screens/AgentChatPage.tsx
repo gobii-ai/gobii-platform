@@ -328,6 +328,7 @@ export function AgentChatPage({
   const forceScrollOnNextUpdateRef = useRef(false)
   const didInitialScrollRef = useRef(false)
   const isNearBottomRef = useRef(isNearBottom)
+  const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
 
   // Track if we should scroll on next content update (captured before DOM changes)
   const shouldScrollOnNextUpdateRef = useRef(autoScrollPinned)
@@ -622,6 +623,12 @@ export function AgentChatPage({
     }
   }, [])
 
+  useEffect(() => () => {
+    if (composerFocusNudgeTimeoutRef.current !== null) {
+      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
+    }
+  }, [])
+
   useEffect(() => {
     if (isNewAgent) {
       didInitialScrollRef.current = true
@@ -801,6 +808,25 @@ export function AgentChatPage({
     scrollToBottom()
   }
 
+  const handleComposerFocus = useCallback(() => {
+    if (typeof window === 'undefined') return
+    const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    if (!isTouch) return
+
+    setAutoScrollPinned(true)
+    forceScrollOnNextUpdateRef.current = true
+    jumpToBottom()
+
+    if (composerFocusNudgeTimeoutRef.current !== null) {
+      window.clearTimeout(composerFocusNudgeTimeoutRef.current)
+    }
+    composerFocusNudgeTimeoutRef.current = window.setTimeout(() => {
+      jumpToBottom()
+      scrollToBottom()
+      composerFocusNudgeTimeoutRef.current = null
+    }, 180)
+  }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
+
   const handleSend = async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -920,6 +946,8 @@ export function AgentChatPage({
   ])
 
   const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
+  const selectionMainStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
+  const viewportPageStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
   const selectionSidebarProps = {
     agents: rosterAgents,
     activeAgentId: null,
@@ -932,9 +960,9 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
   }
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page min-h-screen">
+    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
       <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName}>{content}</main>
+      <main className={selectionMainClassName} style={selectionMainStyle}>{content}</main>
     </div>
   )
 
@@ -958,7 +986,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page min-h-screen">
+    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
@@ -980,6 +1008,7 @@ export function AgentChatPage({
         onSelectAgent={handleSelectAgent}
         onCreateAgent={handleCreateAgent}
         contextSwitcher={contextSwitcher ?? undefined}
+        onComposerFocus={handleComposerFocus}
         onClose={onClose}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}

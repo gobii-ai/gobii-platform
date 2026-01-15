@@ -92,6 +92,7 @@ type AgentComposerProps = {
   autoFocus?: boolean
   // Key that triggers re-focus when changed (e.g., agentId for switching agents)
   focusKey?: string | null
+  onFocus?: () => void
   insightsPanelStorageKey?: string | null
   // Working panel props
   agentFirstName?: string
@@ -110,6 +111,7 @@ export function AgentComposer({
   disabled = false,
   autoFocus = false,
   focusKey,
+  onFocus,
   insightsPanelStorageKey,
   agentFirstName = 'Agent',
   isProcessing = false,
@@ -128,6 +130,7 @@ export function AgentComposer({
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
+  const focusScrollTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const attachmentInputId = useId()
   const dragCounter = useRef(0)
@@ -183,6 +186,20 @@ export function AgentComposer({
   const hasMultipleInsights = totalInsights > 1
   const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
   const hasInsights = totalInsights > 0
+  const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
+
+  const scrollToBottom = useCallback(() => {
+    if (!isTouchDevice) return
+    const target =
+      document.getElementById('timeline-bottom-sentinel') ||
+      document.getElementById('timeline-events') ||
+      document.scrollingElement
+    if (target && 'scrollIntoView' in target) {
+      target.scrollIntoView({ block: 'end', behavior: 'smooth' })
+      return
+    }
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+  }, [isTouchDevice])
 
   // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
   const handleTabClick = useCallback((index: number) => {
@@ -245,6 +262,22 @@ export function AgentComposer({
     lastRotationTimeRef.current = Date.now()
     setCountdownProgress(0)
   }, [currentInsightIndex])
+
+  useEffect(() => {
+    return () => {
+      if (focusScrollTimeoutRef.current !== null) {
+        window.clearTimeout(focusScrollTimeoutRef.current)
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (focusScrollTimeoutRef.current !== null) {
+        window.clearTimeout(focusScrollTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const adjustTextareaHeight = useCallback(
     (reset = false) => {
@@ -586,6 +619,14 @@ export function AgentComposer({
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 onKeyDown={handleKeyDown}
+                onFocus={() => {
+                  onFocus?.()
+                  if (!isTouchDevice) return
+                  if (focusScrollTimeoutRef.current !== null) {
+                    window.clearTimeout(focusScrollTimeoutRef.current)
+                  }
+                  focusScrollTimeoutRef.current = window.setTimeout(scrollToBottom, 60)
+                }}
                 disabled={disabled}
                 ref={textareaRef}
               />

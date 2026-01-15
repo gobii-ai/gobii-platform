@@ -39,6 +39,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
+  onComposerFocus?: () => void
   isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
@@ -98,6 +99,7 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onSendMessage,
+  onComposerFocus,
   isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
@@ -150,6 +152,7 @@ export function AgentChatLayout({
   const composerPalette = buildAgentComposerPalette(agentColorHex)
 
   const mainClassName = `has-sidebar ${sidebarCollapsed ? 'has-sidebar--collapsed' : ''}`
+  const viewportMinHeightStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
 
   return (
     <>
@@ -179,7 +182,7 @@ export function AgentChatLayout({
           sidebarCollapsed={sidebarCollapsed}
         />
       )}
-      <main className={`min-h-screen ${mainClassName}`}>
+      <main className={`min-h-screen ${mainClassName}`} style={viewportMinHeightStyle}>
         <div className="mx-auto flex w-full flex-col px-4 pb-0 sm:px-6 lg:px-10" style={containerStyle}>
           <div
             id="agent-workspace-root"
@@ -269,6 +272,7 @@ export function AgentChatLayout({
 
             <AgentComposer
               onSubmit={onSendMessage}
+              onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}
               processingTasks={processingWebTasks}
