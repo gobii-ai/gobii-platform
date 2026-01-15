@@ -5,9 +5,10 @@ import time
 from datetime import timedelta
 
 from celery import shared_task
-from django.utils import timezone
 from django.conf import settings
+from django.utils import timezone
 
+from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
 from observability import traced
 from ..models import DecodoIPBlock, DecodoIP, ProxyServer
 
@@ -472,15 +473,14 @@ def proxy_health_check_single(self, proxy_id: str):
 
 
 @shared_task(bind=True, ignore_result=True, name="gobii_platform.api.tasks.decodo_low_inventory_reminder")
-def decodo_low_inventory_reminder(self):
+def decodo_low_inventory_reminder(self, *_args, **_kwargs):
     """Send daily low-inventory reminders for Decodo proxy capacity."""
-    if settings.GOBII_RELEASE_ENV != "prod":
+    env = settings.GOBII_RELEASE_ENV
+    if env != "prod":
         logger.info("Decodo inventory reminder skipped; task runs only in production (env=%s)", env)
         return 0
 
-    from api.services.decodo_inventory import maybe_send_decodo_low_inventory_alert
-
-    maybe_send_decodo_low_inventory_alert(reason="daily_reminder")
+    return maybe_send_decodo_low_inventory_alert(reason="daily_reminder")
 
 
 def _perform_proxy_health_check(proxy_server: 'ProxyServer') -> 'ProxyHealthCheckResult':
