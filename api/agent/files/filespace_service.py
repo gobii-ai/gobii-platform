@@ -8,6 +8,7 @@ from typing import Any, List
 
 from celery.utils.log import get_task_logger
 from django.conf import settings
+from django.core.exceptions import SuspiciousFileOperation
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
 from django.utils.text import get_valid_filename
@@ -232,7 +233,13 @@ def write_bytes_to_dir(
     if extension and not extension.startswith("."):
         extension = f".{extension}"
 
-    normalized_path = _normalize_write_path(path, extension)
+    try:
+        normalized_path = _normalize_write_path(path, extension)
+    except SuspiciousFileOperation:
+        return {
+            "status": "error",
+            "message": "Invalid file path. Use a safe path like /exports/report.csv without $[...] wrappers.",
+        }
     if not normalized_path:
         return {"status": "error", "message": "path must include a filename."}
 
