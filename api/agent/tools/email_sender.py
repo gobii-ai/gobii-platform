@@ -28,6 +28,7 @@ from ..files.attachment_helpers import (
     resolve_filespace_attachments,
 )
 from ..files.filespace_service import broadcast_message_attachment_update
+from api.services.email_verification import require_verified_email, EmailVerificationError
 
 logger = logging.getLogger(__name__)
 
@@ -82,8 +83,6 @@ def get_send_email_tool() -> Dict[str, Any]:
 
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
-    from api.services.email_verification import require_verified_email, EmailVerificationError
-
     try:
         require_verified_email(agent.user, action_description="send emails")
     except EmailVerificationError as e:
