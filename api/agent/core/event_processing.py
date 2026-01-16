@@ -228,14 +228,14 @@ def _normalize_tool_result_content(raw: str) -> str:
         return raw
     try:
         parsed = json.loads(raw)
-    except Exception:
+    except json.JSONDecodeError:
         return raw
     if not isinstance(parsed, (dict, list)):
         return raw
     normalized = decode_embedded_json_strings(parsed)
     try:
         return json.dumps(normalized, ensure_ascii=False)
-    except Exception:
+    except TypeError:
         return raw
 
 
