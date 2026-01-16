@@ -18,9 +18,15 @@
             </div>
           {% endif %}
         {% endif %}
+        {% if not email_verified %}
+          <div class="inline-flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
+            <i aria-hidden="true" data-lucide="mail-warning" class="w-4 h-4"></i>
+            <span>Please <a href="{% url 'account_email' %}" class="underline hover:text-amber-800">verify your email address</a> to create API keys.</span>
+          </div>
+        {% endif %}
       </div>
 
-      {% if can_manage_api_keys %}
+      {% if can_manage_api_keys and email_verified %}
         <button hx-get="{% url 'api_key_create_modal' %}" hx-target="#modal-container" hx-swap="innerHTML"
           class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium text-sm shadow-sm hover:shadow-md transition-all w-max">
           Create New Key
@@ -51,7 +57,7 @@
           {% empty %}
             <tr>
               <td colspan="{% if api_key_context.type == 'organization' %}7{% else %}6{% endif %}" class="px-3 md:px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-center">
-                No API keys found.{% if can_manage_api_keys %} Create one to get started.{% endif %}
+                No API keys found.{% if can_manage_api_keys and email_verified %} Create one to get started.{% endif %}
               </td>
             </tr>
           {% endfor %}

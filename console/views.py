@@ -920,10 +920,13 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     @tracer.start_as_current_span("CONSOLE API Key List - get_context_data")
     def get_context_data(self, **kwargs):
         """Add form to context."""
+        from api.services.email_verification import has_verified_email
+
         context = super().get_context_data(**kwargs)
         context['form'] = self.get_form() # Add form instance from FormMixin
         context['api_key_context'] = self.api_key_context
         context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
+        context['email_verified'] = has_verified_email(self.request.user)
         return context
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_form_kwargs")
