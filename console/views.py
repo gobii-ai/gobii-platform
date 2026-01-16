@@ -2367,10 +2367,13 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         if session_return_to is not None:
             request.session.modified = True
         embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
+        # Default return_to to agents list so closing the chat doesn't redirect back
+        # to this view (which would fail since agent_charter was consumed)
+        return_to = request.GET.get("return_to") or session_return_to or reverse("agents")
         app_url = build_immersive_chat_url(
             request,
             result.agent.id,
-            return_to=request.GET.get("return_to") or session_return_to,
+            return_to=return_to,
             embed=embed,
         )
         response = redirect(app_url)
