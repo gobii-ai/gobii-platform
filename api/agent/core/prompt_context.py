@@ -269,6 +269,11 @@ sqlite_batch(sql="
   FROM __tool_results WHERE result_id='{id}'")
 one_result_id = one_sqlite_batch   # never query same result_id in separate calls
 budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
+TEMP TABLE = gone next call   # TEMP tables vanish after each sqlite_batch; use CREATE TABLE (no TEMP)
+
+# Persist intermediate results with CREATE TABLE AS SELECT:
+CREATE TABLE my_data AS SELECT json_extract(...) FROM __tool_results WHERE result_id='abc';
+# → my_data persists; query it in future calls
 
 # Identifiers: copy, never construct
 result_id    → copy_verbatim(tool_result.result_id)
