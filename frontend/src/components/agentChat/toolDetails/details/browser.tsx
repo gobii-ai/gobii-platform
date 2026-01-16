@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { MarkdownViewer } from '../../../common/MarkdownViewer'
 import { looksLikeHtml, sanitizeHtml } from '../../../../util/sanitize'
 import type { ToolDetailProps } from '../../tooling/types'
+import { extractBrightDataResultCount, extractBrightDataSearchQuery } from '../../../tooling/brightdata'
 import { KeyValueList, Section } from '../shared'
 
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
@@ -114,6 +115,27 @@ export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
           <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
         </Section>
       ) : null}
+    </div>
+  )
+}
+
+export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
+  const parameters =
+    entry.parameters && typeof entry.parameters === 'object' && !Array.isArray(entry.parameters)
+      ? (entry.parameters as Record<string, unknown>)
+      : null
+  const query = extractBrightDataSearchQuery(parameters)
+  const resultCount = extractBrightDataResultCount(entry.result)
+  const infoItems = [
+    query ? { label: 'Query', value: <span className="tool-search-query-inline">“{query}”</span> } : null,
+    resultCount !== null ? { label: 'Results', value: String(resultCount) } : null,
+  ]
+  const hasDetails = infoItems.some(Boolean)
+
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <KeyValueList items={infoItems} />
+      {!hasDetails ? <p className="text-slate-500">No search details returned.</p> : null}
     </div>
   )
 }

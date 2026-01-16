@@ -5,7 +5,7 @@ import { SqliteBatchDetail, EnableDatabaseDetail } from './details/sqlite'
 import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
-import { BrowserTaskDetail, BrightDataSnapshotDetail } from './details/browser'
+import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -28,6 +28,7 @@ export {
   AnalysisToolDetail,
   UpdateScheduleDetail,
   BrightDataSnapshotDetail,
+  BrightDataSearchDetail,
   AgentConfigUpdateDetail,
 }
 
@@ -47,6 +48,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   analysis: AnalysisToolDetail,
   updateSchedule: UpdateScheduleDetail,
   brightDataSnapshot: BrightDataSnapshotDetail,
+  brightDataSearch: BrightDataSearchDetail,
   mcpTool: McpToolDetail,
 }
 

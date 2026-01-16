@@ -6,6 +6,7 @@ import {
   DatabaseZap,
   ClipboardList,
   BrainCircuit,
+  Linkedin,
   Search,
   Network,
   FileText,
@@ -31,6 +32,7 @@ import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooli
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
 import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
 import { parseAgentConfigUpdates } from './agentConfigSql'
+import { extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
 
 const COMMUNICATION_TOOL_NAMES = [
   'send_email',
@@ -50,6 +52,9 @@ export const CHAT_SKIP_TOOL_NAMES = new Set<string | null>([
 export const USAGE_SKIP_TOOL_NAMES = new Set<string | null>(BASE_SKIP_TOOL_NAMES)
 
 export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
+
+const LINKEDIN_ICON_BG_CLASS = 'bg-sky-100'
+const LINKEDIN_ICON_COLOR_CLASS = 'text-sky-700'
 
 export type ToolMetadataConfig = {
   name: string
@@ -73,6 +78,32 @@ export function coerceString(value: unknown): string | null {
     return value
   }
   return null
+}
+
+function pickFirstParameter(
+  parameters: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | null {
+  if (!parameters) return null
+  for (const key of keys) {
+    const value = coerceString(parameters[key])
+    if (value) {
+      return value
+    }
+  }
+  return null
+}
+
+function deriveLinkedInCaption(
+  parameters: Record<string, unknown> | null | undefined,
+  keys: string[],
+  fallback?: string | null,
+): string | null {
+  const value = pickFirstParameter(parameters, keys)
+  if (value) {
+    return truncate(value, 56)
+  }
+  return fallback ?? null
 }
 
 
@@ -733,6 +764,154 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       return {
         caption: caption ?? entry.caption ?? 'Credentials request',
         summary: summaryText,
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_search_engine',
+    aliases: ['mcp_brightdata_search_engine_batch', 'search_engine', 'search_engine_batch'],
+    label: 'Web search',
+    icon: Search,
+    iconBgClass: 'bg-blue-100',
+    iconColorClass: 'text-blue-600',
+    detailKind: 'brightDataSearch',
+    derive(entry, parameters) {
+      const query = extractBrightDataSearchQuery(parameters ?? null)
+      const resultCount = extractBrightDataResultCount(entry.result)
+      const captionParts: string[] = []
+
+      if (query) {
+        captionParts.push(`“${truncate(query, 52)}”`)
+      }
+      if (resultCount !== null) {
+        captionParts.push(`${resultCount} result${resultCount === 1 ? '' : 's'}`)
+      }
+
+      const caption = captionParts.length ? captionParts.join(' • ') : entry.caption ?? 'Web search'
+      const summary =
+        entry.summary ??
+        (resultCount !== null ? `${resultCount} result${resultCount === 1 ? '' : 's'}` : null)
+
+      return {
+        caption,
+        summary,
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_person_profile',
+    aliases: ['web_data_linkedin_person_profile'],
+    label: 'LinkedIn profile',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'mcpTool',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'profile_url',
+        'profile_id',
+        'public_id',
+        'person_url',
+        'url',
+        'username',
+        'vanity',
+        'name',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn profile',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_company_profile',
+    aliases: ['web_data_linkedin_company_profile'],
+    label: 'LinkedIn company',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'mcpTool',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'company_name',
+        'company',
+        'organization',
+        'company_url',
+        'url',
+        'profile_url',
+        'name',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn company',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_job_listings',
+    aliases: ['web_data_linkedin_job_listings'],
+    label: 'LinkedIn jobs',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'mcpTool',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'company_name',
+        'company',
+        'title',
+        'role',
+        'location',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn jobs',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_posts',
+    aliases: ['web_data_linkedin_posts'],
+    label: 'LinkedIn posts',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'mcpTool',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'profile_url',
+        'company_name',
+        'hashtag',
+        'url',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn posts',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_people_search',
+    aliases: ['web_data_linkedin_people_search'],
+    label: 'LinkedIn search',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'mcpTool',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'company',
+        'title',
+        'role',
+        'location',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn search',
       }
     },
   },
