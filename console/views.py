@@ -8578,18 +8578,22 @@ def _update_stripe_dedicated_ip_quantity(owner, owner_type: str, desired_qty: in
 
     if desired_qty > 0:
         if dedicated_item is None:
-            stripe.SubscriptionItem.create(
-                subscription=subscription.id,
-                price=dedicated_price_id,
-                quantity=desired_qty,
-            )
+            items_payload = [{"price": dedicated_price_id, "quantity": desired_qty}]
         else:
-            stripe.SubscriptionItem.modify(
-                dedicated_item.get("id"),
-                quantity=desired_qty,
-            )
+            items_payload = [{"id": dedicated_item.get("id"), "quantity": desired_qty}]
+        modify_kwargs = {
+            "items": items_payload,
+            "proration_behavior": "always_invoice",
+            "expand": ["items.data.price"],
+            "payment_behavior": "pending_if_incomplete",
+        }
+        stripe.Subscription.modify(subscription.id, **modify_kwargs)
     elif dedicated_item is not None:
-        stripe.SubscriptionItem.delete(dedicated_item.get("id"))
+        stripe.Subscription.modify(
+            subscription.id,
+            items=[{"id": dedicated_item.get("id"), "deleted": True}],
+            proration_behavior="always_invoice",
+        )
 
 
 @login_required

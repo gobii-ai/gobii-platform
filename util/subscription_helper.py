@@ -317,6 +317,8 @@ def ensure_single_individual_subscription(
         metadata=merged_metadata,
         idempotency_key=idempotency_token,
         expand=["items.data.price"],
+        proration_behavior="always_invoice",
+        payment_behavior="pending_if_incomplete",
     )
 
     return updated_sub, "updated"
