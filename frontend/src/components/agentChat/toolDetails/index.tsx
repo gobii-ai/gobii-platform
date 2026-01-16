@@ -6,6 +6,7 @@ import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
+import { LinkedInPersonProfileDetail } from './details/linkedin'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -30,6 +31,7 @@ export {
   BrightDataSnapshotDetail,
   BrightDataSearchDetail,
   AgentConfigUpdateDetail,
+  LinkedInPersonProfileDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
@@ -49,6 +51,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   updateSchedule: UpdateScheduleDetail,
   brightDataSnapshot: BrightDataSnapshotDetail,
   brightDataSearch: BrightDataSearchDetail,
+  linkedinPerson: LinkedInPersonProfileDetail,
   mcpTool: McpToolDetail,
 }
 
