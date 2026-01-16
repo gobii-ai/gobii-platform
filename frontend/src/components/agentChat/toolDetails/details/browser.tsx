@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import { MarkdownViewer } from '../../../common/MarkdownViewer'
 import { looksLikeHtml, sanitizeHtml } from '../../../../util/sanitize'
 import type { ToolDetailProps } from '../../tooling/types'
-import { extractBrightDataResultCount, extractBrightDataSearchQuery } from '../../../tooling/brightdata'
+import { extractBrightDataResultCount, extractBrightDataSearchQuery, extractBrightDataSerpItems } from '../../../tooling/brightdata'
 import { KeyValueList, Section } from '../shared'
 
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
@@ -125,7 +125,10 @@ export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
       ? (entry.parameters as Record<string, unknown>)
       : null
   const query = extractBrightDataSearchQuery(parameters)
-  const resultCount = extractBrightDataResultCount(entry.result)
+  const serpItems = extractBrightDataSerpItems(entry.result)
+  const resultCount = extractBrightDataResultCount(entry.result) ?? (serpItems.length ? serpItems.length : null)
+  const displayItems = serpItems.slice(0, 10)
+  const hasMore = serpItems.length > displayItems.length
   const infoItems = [
     query ? { label: 'Query', value: <span className="tool-search-query-inline">“{query}”</span> } : null,
     resultCount !== null ? { label: 'Results', value: String(resultCount) } : null,
@@ -135,7 +138,29 @@ export function BrightDataSearchDetail({ entry }: ToolDetailProps) {
   return (
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList items={infoItems} />
-      {!hasDetails ? <p className="text-slate-500">No search details returned.</p> : null}
+      {displayItems.length ? (
+        <Section title="Results">
+          <ol className="space-y-2">
+            {displayItems.map((item, idx) => (
+              <li key={`${item.url}-${idx}`} className="flex gap-2">
+                <span className="mt-1 min-w-[1.5rem] text-right text-xs font-medium text-slate-400">
+                  {item.position ?? idx + 1}.
+                </span>
+                <div className="space-y-0.5">
+                  <div className="font-semibold text-slate-800">
+                    <a href={item.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                      {item.title}
+                    </a>
+                  </div>
+                  <p className="text-xs text-slate-500 break-all">{item.url}</p>
+                </div>
+              </li>
+            ))}
+          </ol>
+          {hasMore ? <p className="text-xs text-slate-500">Showing first {displayItems.length} results.</p> : null}
+        </Section>
+      ) : null}
+      {!hasDetails && !displayItems.length ? <p className="text-slate-500">No search details returned.</p> : null}
     </div>
   )
 }
