@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.db import connection
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
@@ -31,6 +32,13 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
     def setUp(self):
         self.user = User.objects.create_user(
             username="u@example.com", email="u@example.com", password="pw"
+        )
+        # Email verification is required for outbound email sending
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
         )
         self.browser = create_browser_agent_without_proxy(self.user, "BA")
         self.agent = PersistentAgent.objects.create(

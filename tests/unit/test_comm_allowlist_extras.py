@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
@@ -28,6 +29,13 @@ class ManualEmailDisplayNameAndCaseTests(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="ownerx", email="ownerx@example.com", password="pw"
+        )
+        # Email verification is required for inbound email processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.browser_agent = BrowserUseAgent.objects.create(user=self.owner, name="BAx")
         self.agent = PersistentAgent.objects.create(

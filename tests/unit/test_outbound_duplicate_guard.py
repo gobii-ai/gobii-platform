@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TransactionTestCase, tag
 
@@ -42,6 +43,13 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
             username="dup-user@example.com",
             email="dup-user@example.com",
             password="password123",
+        )
+        # Email verification is required for outbound email/SMS sending
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
         )
         self.browser_agent = create_browser_agent_without_proxy(self.user, "NoProxy Browser")
         self.agent = PersistentAgent.objects.create(
