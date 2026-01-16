@@ -4024,7 +4024,9 @@ def _get_system_instruction(
 
         if not already_contacted:
             contact_endpoint = agent.preferred_contact_endpoint
-            if contact_endpoint:
+            # Only instruct agent to send welcome message if owner has verified email
+            # (outbound email/SMS is gated by email verification)
+            if contact_endpoint and has_verified_email(agent.user):
                 channel = contact_endpoint.channel
                 address = contact_endpoint.address
                 welcome_instruction = (
