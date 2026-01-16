@@ -967,6 +967,26 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'mcp_brightdata_web_data_reuter_news',
+    aliases: ['web_data_reuter_news'],
+    label: 'Reuters news',
+    icon: Globe,
+    iconBgClass: 'bg-blue-100',
+    iconColorClass: 'text-blue-700',
+    detailKind: 'reutersNews',
+    derive(entry, parameters) {
+      const articles = extractBrightDataArray(entry.result)
+      const first = articles[0]
+      const headline = coerceString(first?.['headline']) || coerceString(first?.['title'])
+      const keyword = coerceString(first?.['keyword']) || coerceString(parameters?.['keyword'])
+      const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
+      const caption = headline || keyword || url
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reuters news',
+      }
+    },
+  },
+  {
     name: 'mcp_brightdata_web_data_crunchbase_company',
     aliases: ['web_data_crunchbase_company'],
     label: 'Crunchbase company',
