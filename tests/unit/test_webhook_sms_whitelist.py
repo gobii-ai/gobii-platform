@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
@@ -28,6 +29,13 @@ class SmsWebhookWhitelistTests(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="own", email="own@example.com", password="pw"
+        )
+        # Email verification is required for inbound SMS processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.browser = BrowserUseAgent.objects.create(user=self.owner, name="BA")
         self.agent = PersistentAgent.objects.create(
