@@ -327,28 +327,37 @@ export function AgentChatPage({
   })
 
   useEffect(() => {
-    if (!contextData?.context) {
+    const rosterContext = rosterQuery.data?.context
+    if (rosterQuery.isSuccess && rosterContext) {
+      const changed =
+        resolvedContext?.id !== rosterContext.id || resolvedContext?.type !== rosterContext.type
+      if (changed) {
+        setResolvedContext(rosterContext)
+      }
+      storeConsoleContext(rosterContext)
       return
     }
-    const next = contextData.context
-    if (
-      (!agentId || contextSwitching) &&
-      (resolvedContext?.id !== next.id || resolvedContext?.type !== next.type)
-    ) {
-      setResolvedContext(next)
-    }
-  }, [agentId, contextData?.context, contextSwitching, resolvedContext])
 
-  useEffect(() => {
-    if (rosterQuery.isSuccess && rosterQuery.data?.context) {
-      setResolvedContext(rosterQuery.data.context)
-      storeConsoleContext(rosterQuery.data.context)
+    const switcherContext = contextData?.context
+    if (!switcherContext) {
       return
     }
-    if (rosterQuery.isError) {
-      // Keep contextReady derived; no state update needed
+    const shouldUseSwitcherContext =
+      !agentId || contextSwitching || !rosterQuery.isSuccess || rosterQuery.isError
+    const contextChanged =
+      resolvedContext?.id !== switcherContext.id || resolvedContext?.type !== switcherContext.type
+    if (shouldUseSwitcherContext && contextChanged) {
+      setResolvedContext(switcherContext)
     }
-  }, [rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
+  }, [
+    agentId,
+    contextData?.context,
+    contextSwitching,
+    resolvedContext,
+    rosterQuery.data?.context,
+    rosterQuery.isError,
+    rosterQuery.isSuccess,
+  ])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
