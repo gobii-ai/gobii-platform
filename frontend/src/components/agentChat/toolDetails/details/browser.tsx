@@ -1,10 +1,48 @@
-import type { ReactNode } from 'react'
+import { ArrowLeft, ArrowRight, RotateCcw, Globe } from 'lucide-react'
 
 import { MarkdownViewer } from '../../../common/MarkdownViewer'
-import { looksLikeHtml, sanitizeHtml } from '../../../../util/sanitize'
+import { looksLikeHtml, pickHtmlCandidate, sanitizeHtml } from '../../../../util/sanitize'
 import type { ToolDetailProps } from '../../tooling/types'
 import { extractBrightDataResultCount, extractBrightDataSearchQuery, extractBrightDataSerpItems } from '../../../tooling/brightdata'
+import { isPlainObject, parseResultObject } from '../../../../util/objectUtils'
 import { KeyValueList, Section } from '../shared'
+
+function pickString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length ? value.trim() : null
+}
+
+type LinkItem = { title: string; url: string; position: number }
+type SectionItem = { heading: string; snippet: string | null }
+
+function normalizeLinkItem(value: unknown, index: number): LinkItem | null {
+  if (!isPlainObject(value)) return null
+  const url =
+    pickString(value['u']) || pickString(value['url']) || pickString(value['link']) || pickString(value['href'])
+  if (!url) return null
+  const title =
+    pickString(value['t']) ||
+    pickString(value['title']) ||
+    pickString(value['name']) ||
+    pickString(value['label']) ||
+    url
+  const posRaw = value['p'] ?? value['position']
+  const pos =
+    typeof posRaw === 'number' && Number.isFinite(posRaw)
+      ? posRaw
+      : typeof posRaw === 'string'
+        ? Number.parseInt(posRaw, 10)
+        : index + 1
+  return { title, url, position: Number.isFinite(pos) ? pos : index + 1 }
+}
+
+function normalizeSectionItem(value: unknown): SectionItem | null {
+  if (!isPlainObject(value)) return null
+  const heading =
+    pickString(value['h']) || pickString(value['heading']) || pickString(value['title']) || pickString(value['name'])
+  const snippet = pickString(value['c']) || pickString(value['content']) || pickString(value['excerpt'])
+  if (!heading && !snippet) return null
+  return { heading: heading ?? 'Section', snippet }
+}
 
 export function BrowserTaskDetail({ entry }: ToolDetailProps) {
   const params = entry.parameters || {}
@@ -65,56 +103,141 @@ export function BrowserTaskDetail({ entry }: ToolDetailProps) {
 
 export function BrightDataSnapshotDetail({ entry }: ToolDetailProps) {
   const params = (entry.parameters as Record<string, unknown>) || {}
-  const urlValue = params['url'] || params['start_url']
-  const targetUrl = typeof urlValue === 'string' ? urlValue : null
-  const titleValue = params['title'] || params['page_title']
-  const pageTitle = typeof titleValue === 'string' ? titleValue : entry.summary || null
-  const markdownValue = params['markdown']
-  const markdown = typeof markdownValue === 'string' && markdownValue.trim().length > 0 ? markdownValue : null
-  const htmlValue = params['html']
-  const htmlSnapshot = typeof htmlValue === 'string' && htmlValue.trim().length > 0 ? htmlValue : null
-  const screenshotValue = params['screenshot_url'] || params['screenshot']
-  const screenshotUrl = typeof screenshotValue === 'string' ? screenshotValue : null
-  const contentFromResult = !markdown && !htmlSnapshot && typeof entry.result === 'string' ? entry.result : null
-  const contentMarkdown = markdown || (contentFromResult && !looksLikeHtml(contentFromResult) ? contentFromResult : null)
-  const contentHtml = htmlSnapshot || (contentFromResult && looksLikeHtml(contentFromResult) ? contentFromResult : null)
-  const sanitizedHtml = contentHtml ? sanitizeHtml(contentHtml) : null
+  const parsedResult = parseResultObject(entry.result)
+  const nestedResultString = parsedResult && typeof parsedResult['result'] === 'string' ? parsedResult['result'] : null
+  const rawResultString = typeof entry.result === 'string' ? entry.result : null
 
-  const infoItems: Array<{ label: string; value: ReactNode }> = []
-  if (pageTitle) {
-    infoItems.push({ label: 'Page title', value: pageTitle })
-  }
-  if (targetUrl) {
-    infoItems.push({
-      label: 'URL',
-      value: (
-        <a href={targetUrl} target="_blank" rel="noopener noreferrer" className="text-indigo-600 underline">
-          {targetUrl}
-        </a>
-      ),
-    })
-  }
+  const htmlCandidate = pickHtmlCandidate(pickString(params['html']), nestedResultString ?? rawResultString)
+  const sanitizedHtml = htmlCandidate ? sanitizeHtml(htmlCandidate) : null
+
+  const markdownCandidate =
+    pickString(params['markdown']) ||
+    (nestedResultString && !looksLikeHtml(nestedResultString) ? nestedResultString : null) ||
+    (!parsedResult && rawResultString && !looksLikeHtml(rawResultString) ? rawResultString : null)
+  const readerText = markdownCandidate || pickString(parsedResult?.excerpt) || null
+
+  const screenshotUrl =
+    pickString(params['screenshot_url']) || pickString(params['screenshot']) || pickString(parsedResult?.screenshot_url)
+
+  const targetUrl =
+    pickString(params['url']) ||
+    pickString(params['start_url']) ||
+    pickString(params['target_url']) ||
+    pickString(parsedResult?.url)
+
+  const pageTitle =
+    pickString(params['title']) ||
+    pickString(params['page_title']) ||
+    pickString(parsedResult?.title) ||
+    pickString(entry.summary) ||
+    null
+
+  const itemsRaw = Array.isArray(parsedResult?.items) ? (parsedResult?.items as unknown[]) : []
+  const linkItems = itemsRaw.map(normalizeLinkItem).filter((item): item is LinkItem => Boolean(item))
+  const sectionItems = itemsRaw.map(normalizeSectionItem).filter((item): item is SectionItem => Boolean(item))
+  const meta = isPlainObject(parsedResult?._meta) ? (parsedResult?._meta as Record<string, unknown>) : null
+  const compressionLabel = pickString(meta?.ratio)
+
+  const urlLabel = targetUrl || pickString(parsedResult?.url) || 'Web snapshot'
+  const hasOutline = sectionItems.length > 0 || linkItems.length > 0
 
   return (
     <div className="space-y-3 text-sm text-slate-600">
-      {infoItems.length ? <KeyValueList items={infoItems} /> : null}
-      {screenshotUrl ? (
-        <Section title="Screenshot">
-          <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-sm">
-            <img src={screenshotUrl} alt={pageTitle ? `Snapshot of ${pageTitle}` : 'Page snapshot'} className="w-full" />
+      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-sm">
+        <div className="flex items-center gap-2 bg-slate-900/95 px-4 py-2 text-slate-100">
+          <div className="flex items-center gap-1 rounded-lg bg-slate-800/80 px-2 py-1 shadow-inner shadow-slate-900/60">
+            <button
+              type="button"
+              disabled
+              className="rounded-md px-2 py-1 text-slate-500/80 ring-1 ring-slate-700/60"
+              aria-label="Back"
+            >
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              disabled
+              className="rounded-md px-2 py-1 text-slate-500/80 ring-1 ring-slate-700/60"
+              aria-label="Forward"
+            >
+              <ArrowRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              disabled
+              className="rounded-md px-2 py-1 text-slate-500/80 ring-1 ring-slate-700/60"
+              aria-label="Refresh"
+            >
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />
+            </button>
           </div>
-        </Section>
-      ) : null}
-      {contentMarkdown ? (
-        <Section title="Snapshot">
-          <MarkdownViewer content={contentMarkdown} className="prose prose-sm max-w-none" />
-        </Section>
-      ) : null}
-      {sanitizedHtml ? (
-        <Section title={contentMarkdown ? 'Raw HTML' : 'Snapshot'}>
-          <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
-        </Section>
-      ) : null}
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-lg bg-slate-800/80 px-3 py-1.5 text-xs font-semibold leading-tight shadow-inner shadow-slate-900/60">
+            <Globe className="h-4 w-4 text-slate-200" aria-hidden="true" />
+            <span className="truncate">{urlLabel}</span>
+          </div>
+          {compressionLabel ? (
+            <span className="rounded-full bg-indigo-500/20 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-indigo-50 ring-1 ring-indigo-400/50">
+              {compressionLabel} trimmed
+            </span>
+          ) : null}
+        </div>
+        <div className="space-y-3 px-4 py-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 space-y-1">
+              {pageTitle ? <p className="text-base font-semibold leading-snug text-slate-900">{pageTitle}</p> : null}
+            </div>
+          </div>
+          {screenshotUrl ? (
+            <div className="overflow-hidden rounded-xl border border-slate-200/70">
+              <img
+                src={screenshotUrl}
+                alt={pageTitle ? `Snapshot of ${pageTitle}` : 'Page snapshot'}
+                className="w-full"
+              />
+            </div>
+          ) : null}
+          {sanitizedHtml ? <div className="prose prose-sm max-w-none" dangerouslySetInnerHTML={{ __html: sanitizedHtml }} /> : null}
+          {!sanitizedHtml && readerText ? (
+            <MarkdownViewer content={readerText} className="prose prose-sm max-w-none" />
+          ) : null}
+          {hasOutline ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Page outline</p>
+              {sectionItems.length
+                ? sectionItems.map((item, idx) => (
+                    <div key={`${item.heading}-${idx}`} className="rounded-xl border border-slate-200/80 px-3 py-2.5">
+                      <p className="text-sm font-semibold text-slate-800">{item.heading}</p>
+                      {item.snippet ? <p className="text-xs leading-relaxed text-slate-500">{item.snippet}</p> : null}
+                    </div>
+                  ))
+                : null}
+              {!sectionItems.length && linkItems.length ? (
+                <ol className="space-y-2">
+                  {linkItems.map((item) => (
+                    <li key={`${item.url}-${item.position}`} className="rounded-xl border border-slate-200/80 px-3 py-2.5">
+                      <div className="flex items-start gap-2">
+                        <span className="mt-0.5 text-[11px] font-semibold text-slate-400">{item.position}.</span>
+                        <div className="min-w-0 space-y-1">
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="line-clamp-2 text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+                          >
+                            {item.title}
+                          </a>
+                          <p className="text-[11px] text-slate-500 break-all">{item.url}</p>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              ) : null}
+            </div>
+          ) : null}
+          {!sanitizedHtml && !readerText && !hasOutline ? <p className="text-slate-500">No page content returned.</p> : null}
+        </div>
+      </div>
     </div>
   )
 }

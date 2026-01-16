@@ -1123,6 +1123,27 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
   },
   {
     name: 'mcp_brightdata_scrape_as_markdown',
+    aliases: ['scrape_as_markdown'],
+    label: 'Web snapshot',
+    icon: ScanText,
+    iconBgClass: 'bg-fuchsia-100',
+    iconColorClass: 'text-fuchsia-600',
+    detailKind: 'brightDataSnapshot',
+    derive(entry, parameters) {
+      const url =
+        coerceString(parameters?.['url']) ||
+        coerceString(parameters?.['start_url']) ||
+        coerceString(parameters?.['target_url']) ||
+        null
+      const caption = url ? truncate(url, 64) : null
+      return {
+        caption: caption ?? entry.caption ?? 'Web snapshot',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_scrape_as_html',
+    aliases: ['scrape_as_html'],
     label: 'Web snapshot',
     icon: ScanText,
     iconBgClass: 'bg-fuchsia-100',
