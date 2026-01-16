@@ -110,9 +110,8 @@ def seed_sqlite_kanban(agent) -> Optional[KanbanSnapshot]:
             """
         )
 
-        card_filter = _kanban_scope_filter(agent)
         cards = list(
-            PersistentAgentKanbanCard.objects.filter(**card_filter).order_by(
+            PersistentAgentKanbanCard.objects.filter(assigned_agent=agent).order_by(
                 "-priority",
                 "created_at",
             )
@@ -525,15 +524,6 @@ def _drop_kanban_table() -> None:
                 conn.close()
             except Exception:
                 pass
-
-
-def _kanban_scope_filter(agent) -> dict:
-    if getattr(agent, "organization_id", None):
-        return {"assigned_agent__organization_id": agent.organization_id}
-    return {
-        "assigned_agent__organization__isnull": True,
-        "assigned_agent__user_id": agent.user_id,
-    }
 
 
 def _determine_action(old_status: str, new_status: str) -> str:
