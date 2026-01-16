@@ -7,8 +7,8 @@ import {
   Header,
   ListBox,
   ListBoxItem,
+  ListBoxSection,
   Popover,
-  Section,
   type Key,
   type Selection,
 } from 'react-aria-components'
@@ -124,7 +124,7 @@ export function AgentChatContextSwitcher({
               onSelectionChange={(keys) => handleSelect(keys as Selection)}
               className="chat-context-switcher__list"
             >
-              <Section className="chat-context-switcher__section">
+              <ListBoxSection className="chat-context-switcher__section">
                 <Header className="chat-context-switcher__heading">Personal</Header>
                 <ListBoxItem
                   id={personalKey}
@@ -141,9 +141,9 @@ export function AgentChatContextSwitcher({
                     </>
                   )}
                 </ListBoxItem>
-              </Section>
+              </ListBoxSection>
               {organizationOptions.length ? (
-                <Section className="chat-context-switcher__section">
+                <ListBoxSection className="chat-context-switcher__section">
                   <Header className="chat-context-switcher__heading">Organizations</Header>
                   {organizationOptions.map((option) => (
                     <ListBoxItem
@@ -168,7 +168,7 @@ export function AgentChatContextSwitcher({
                       )}
                     </ListBoxItem>
                   ))}
-                </Section>
+                </ListBoxSection>
               ) : null}
             </ListBox>
             {errorMessage ? <div className="chat-context-switcher__error">{errorMessage}</div> : null}
