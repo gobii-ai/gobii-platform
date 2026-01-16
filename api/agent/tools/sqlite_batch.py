@@ -385,12 +385,15 @@ def _fix_unbalanced_parens(sql: str) -> tuple[str, str | None]:
     close_count = 0
     in_string = False
     string_char = None
+    i = 0
 
-    for i, char in enumerate(sql):
+    while i < len(sql):
+        char = sql[i]
         if in_string:
             if char == string_char:
-                # Check for escaped quote
+                # Check for escaped quote (doubled)
                 if i + 1 < len(sql) and sql[i + 1] == string_char:
+                    i += 2  # Skip both quotes
                     continue
                 in_string = False
         else:
@@ -401,6 +404,7 @@ def _fix_unbalanced_parens(sql: str) -> tuple[str, str | None]:
                 open_count += 1
             elif char == ')':
                 close_count += 1
+        i += 1
 
     diff = open_count - close_count
 
@@ -606,10 +610,6 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_dialect_syntax(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_unbalanced_parens(sql)
     if fix:
         corrections.append(fix)
 
