@@ -315,6 +315,12 @@ _LLM_TRAILING_ARTIFACTS_RE = re.compile(
     r"</think>.*$|<arg_\w+>.*$|<function_call>.*$|<tool_call>.*$",
     re.IGNORECASE | re.DOTALL,
 )
+# Match XML-style function/tool call patterns that LLMs mistakenly output instead of using the API
+# Includes: <function_calls>, <invoke>, <function_calls>, <invoke>, <parameter>
+_LLM_XML_TOOL_CALL_RE = re.compile(
+    r"</?(?:antml:)?(?:function_calls?|invoke|parameter)[^>]*>",
+    re.IGNORECASE,
+)
 
 
 def strip_llm_artifacts(value: str | None) -> str:
@@ -326,6 +332,7 @@ def strip_llm_artifacts(value: str | None) -> str:
     - <think>...</think> or </think> tags
     - <arg_key>...</arg_key> and <arg_value>...</arg_value> patterns
     - Trailing incomplete tool call fragments
+    - XML-style tool call syntax (<function_calls>, <invoke>, <parameter>)
 
     Args:
         value: Text potentially containing LLM artifacts
@@ -346,6 +353,9 @@ def strip_llm_artifacts(value: str | None) -> str:
 
     # Remove arg key/value tags
     text = _LLM_ARG_TAGS_RE.sub("", text)
+
+    # Remove XML-style tool call patterns (LLMs sometimes output these instead of using API)
+    text = _LLM_XML_TOOL_CALL_RE.sub("", text)
 
     return text.strip()
 

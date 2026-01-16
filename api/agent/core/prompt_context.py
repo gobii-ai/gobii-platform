@@ -3271,7 +3271,7 @@ def _get_system_instruction(
             "Empty response\n"
             "  → auto-sleep until next trigger\n"
         )
-        tool_calls_note = "Tool calls use OpenAI-compatible JSON in the tool_calls array—never XML or text. You can combine text + tools in one response. "
+        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** You can combine text + tools in one response. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3297,7 +3297,7 @@ def _get_system_instruction(
             "  Example: send_chat_message(body='Here are the results: ...') + sqlite_batch(...)\n\n"
             "Note: Text-only output is never delivered. Always use send tools for communication."
         )
-        tool_calls_note = "Tool calls use OpenAI-compatible JSON in the tool_calls array—never XML or text. "
+        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** "
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates
@@ -3365,13 +3365,30 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
-        "## CRITICAL: Tool Call Format\n\n"
-        "You MUST use OpenAI-compatible JSON function calling. Your tool calls go in the `tool_calls` array of your response, NOT in your message text.\n\n"
-        "WRONG (these do nothing):\n"
-        "- XML: `<function_calls><invoke name=\"...\">` or `<function_calls>`\n"
-        "- Text: `sqlite_batch(sql=\"...\")` written in your message\n\n"
-        "RIGHT: Use the API's tool_calls mechanism with JSON arguments like `{\"sql\": \"SELECT ...\"}`\n\n"
-        "If you output XML or text tool syntax, it will NOT execute and your task will fail.\n\n"
+        "## CRITICAL: Tool Call Format — READ THIS FIRST\n\n"
+        "**You MUST use the API's native tool_calls mechanism.** Tool calls are a SEPARATE FIELD in the API response structure, NOT text in your message content.\n\n"
+        "**NEVER output tool calls as text.** The following formats DO NOT WORK and will cause your task to FAIL:\n\n"
+        "❌ WRONG — XML syntax (completely ignored):\n"
+        "```xml\n"
+        "<function_calls>\n"
+        "  <invoke name=\"sqlite_batch\">\n"
+        "    <parameter name=\"sql\">SELECT * FROM table</parameter>\n"
+        "  </invoke>\n"
+        "</function_calls>\n"
+        "```\n\n"
+        "❌ WRONG — Function call syntax in text (completely ignored):\n"
+        "```\n"
+        "sqlite_batch(sql=\"SELECT * FROM table\")\n"
+        "http_request(url=\"https://example.com\")\n"
+        "```\n\n"
+        "❌ WRONG — Any tool invocation written in your message content\n\n"
+        "✅ RIGHT — Use the tool_calls field in the API response:\n"
+        "Your response has two parts: `content` (text) and `tool_calls` (array of tool invocations).\n"
+        "Tool calls go in `tool_calls`, NOT in `content`. The API handles this automatically when you invoke a tool.\n"
+        "Arguments are JSON objects like `{\"sql\": \"SELECT * FROM table\"}`\n\n"
+        "**If you write XML tags like `<function_calls>`, `<invoke>`, or `<parameter>` in your message, NOTHING HAPPENS.**\n"
+        "**If you write function call syntax like `tool_name(arg=\"value\")` in your message, NOTHING HAPPENS.**\n"
+        "**Your task will fail. The user will not get results. DO NOT DO THIS.**\n\n"
         "Language policy:\n"
         "- Default to English.\n"
         "- Switch to another language only if the user requests it or starts speaking in that language.\n"
@@ -3806,9 +3823,9 @@ def _get_system_instruction(
 
         "## Tool Rules\n\n"
 
-        "**FORMAT: OpenAI-compatible JSON in tool_calls array.** "
-        "XML like `<invoke>` or `<function_calls>` in your text does NOTHING. "
-        "Examples below show *what* to call; use the API's tool_calls mechanism with JSON arguments.\n\n"
+        "**⚠️ REMINDER: Tool calls use the API's tool_calls field, NOT your message text.**\n"
+        "Writing `<function_calls>`, `<invoke>`, or `tool_name(...)` in your response does NOTHING.\n"
+        "The pseudo-code examples below show *what* to call conceptually. To actually invoke tools, use the API's native tool calling mechanism with JSON arguments.\n\n"
 
         "```\n"
         "# Primitives\n"
