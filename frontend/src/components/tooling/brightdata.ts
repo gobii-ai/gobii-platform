@@ -16,7 +16,16 @@ function normalizeResultPayload(result: unknown): unknown | null {
   return result
 }
 
-function extractArrayCandidate(value: unknown): unknown[] | null {
+export function extractArrayCandidate(value: unknown): unknown[] | null {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return extractArrayCandidate(parsed)
+    } catch {
+      return null
+    }
+  }
+
   if (Array.isArray(value)) {
     return value
   }
@@ -31,6 +40,22 @@ function extractArrayCandidate(value: unknown): unknown[] | null {
     const candidate = obj[key]
     if (Array.isArray(candidate)) {
       return candidate
+    }
+    if (typeof candidate === 'string') {
+      try {
+        const parsed = JSON.parse(candidate)
+        if (Array.isArray(parsed)) {
+          return parsed
+        }
+        if (isPlainObject(parsed)) {
+          const nested = extractArrayCandidate(parsed)
+          if (nested) {
+            return nested
+          }
+        }
+      } catch {
+        // fall through
+      }
     }
   }
 
@@ -166,24 +191,34 @@ export function extractBrightDataSerpItems(result: unknown): SerpItem[] {
 }
 
 export function extractBrightDataFirstRecord(result: unknown): Record<string, unknown> | null {
-  const parsed = parseResultObject(result)
+  const payload = normalizeResultPayload(result)
+  const parsed = parseResultObject(payload ?? result)
   const candidates: unknown[] = []
 
-  if (Array.isArray(parsed)) {
-    candidates.push(...parsed)
-  } else if (isPlainObject(parsed)) {
-    const obj = parsed as Record<string, unknown>
-    if (Array.isArray(obj.result)) {
-      candidates.push(...obj.result)
-    } else if (obj.result && Array.isArray((obj.result as { items?: unknown[] }).items)) {
-      candidates.push(...(((obj.result as { items?: unknown[] }).items as unknown[]) ?? []))
-    } else {
-      candidates.push(parsed)
-    }
-  } else if (Array.isArray(result)) {
-    candidates.push(...result)
+  const base = parsed ?? payload ?? result
+  const arrayCandidate = extractArrayCandidate(base)
+
+  if (arrayCandidate) {
+    candidates.push(...arrayCandidate)
+  } else if (isPlainObject(base)) {
+    candidates.push(base as Record<string, unknown>)
   }
 
   const first = candidates.find((item) => isPlainObject(item)) as Record<string, unknown> | undefined
   return first ?? null
+}
+
+export function extractBrightDataArray(result: unknown): Record<string, unknown>[] {
+  const payload = normalizeResultPayload(result)
+  const parsed = parseResultObject(payload ?? result)
+  const candidates: unknown[] = []
+
+  const base = parsed ?? payload ?? result
+  const arrayCandidate = extractArrayCandidate(base)
+
+  if (arrayCandidate) {
+    candidates.push(...arrayCandidate)
+  }
+
+  return candidates.filter((item): item is Record<string, unknown> => isPlainObject(item))
 }

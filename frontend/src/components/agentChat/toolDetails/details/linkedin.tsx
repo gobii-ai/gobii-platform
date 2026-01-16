@@ -1,5 +1,5 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList } from '../shared'
+import { KeyValueList, Section } from '../shared'
 import { isNonEmptyString } from '../utils'
 import { parseResultObject, isPlainObject } from '../../../../util/objectUtils'
 
@@ -173,6 +173,71 @@ export function LinkedInCompanyProfileDetail({ entry }: ToolDetailProps) {
     <div className="space-y-3 text-sm text-slate-600">
       <KeyValueList items={infoItems} />
       {!hasDetails ? <p className="text-slate-500">No company details returned.</p> : null}
+    </div>
+  )
+}
+
+type PeopleResult = {
+  name: string | null
+  url: string | null
+  location: string | null
+  experience: string | null
+  education: string | null
+}
+
+function normalizePeopleSearch(result: unknown): PeopleResult[] {
+  const parsed = parseResultObject(result)
+  const items = Array.isArray(parsed) ? parsed : isPlainObject(parsed) && Array.isArray((parsed as Record<string, unknown>).result)
+    ? ((parsed as Record<string, unknown>).result as unknown[])
+    : []
+
+  return items
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const record = item as Record<string, unknown>
+      return {
+        name: toText(record.name),
+        url: toText(record.url),
+        location: toText(record.location),
+        experience: toText(record.experience),
+        education: toText(record.education),
+      }
+    })
+    .filter((item): item is PeopleResult => Boolean(item && (item.name || item.url || item.location || item.experience || item.education)))
+}
+
+export function LinkedInPeopleSearchDetail({ entry }: ToolDetailProps) {
+  const results = normalizePeopleSearch(entry.result).slice(0, 12)
+  const hasResults = results.length > 0
+
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      {hasResults ? (
+        <Section title="People">
+          <ul className="space-y-2">
+            {results.map((item, idx) => (
+              <li key={`${item.url ?? item.name ?? idx}`} className="rounded-lg border border-slate-200/80 px-3 py-2">
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-slate-800">
+                    {item.url ? (
+                      <a href={item.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                        {item.name ?? item.url}
+                      </a>
+                    ) : (
+                      item.name ?? 'Unknown person'
+                    )}
+                  </span>
+                  {item.location ? <span className="text-xs text-slate-500">{item.location}</span> : null}
+                  {item.experience ? <span className="text-xs text-slate-600">{item.experience}</span> : null}
+                  {item.education ? <span className="text-xs text-slate-600">{item.education}</span> : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </Section>
+      ) : (
+        <p className="text-slate-500">No people found.</p>
+      )}
     </div>
   )
 }

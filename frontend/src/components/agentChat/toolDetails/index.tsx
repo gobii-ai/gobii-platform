@@ -6,10 +6,10 @@ import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
-import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail } from './details/linkedin'
+import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail, LinkedInPeopleSearchDetail } from './details/linkedin'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
-import { AmazonProductDetail } from './details/commerce'
+import { AmazonProductDetail, AmazonProductReviewsDetail } from './details/commerce'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -39,6 +39,8 @@ export {
   YahooFinanceBusinessDetail,
   CrunchbaseCompanyDetail,
   AmazonProductDetail,
+  LinkedInPeopleSearchDetail,
+  AmazonProductReviewsDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
@@ -63,6 +65,8 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   yahooFinanceBusiness: YahooFinanceBusinessDetail,
   crunchbaseCompany: CrunchbaseCompanyDetail,
   amazonProduct: AmazonProductDetail,
+  amazonProductReviews: AmazonProductReviewsDetail,
+  linkedinPeopleSearch: LinkedInPeopleSearchDetail,
   mcpTool: McpToolDetail,
 }
 

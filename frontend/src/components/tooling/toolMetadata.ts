@@ -33,7 +33,7 @@ import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooli
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
 import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
 import { parseAgentConfigUpdates } from './agentConfigSql'
-import { extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
+import { extractBrightDataArray, extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
 
 const COMMUNICATION_TOOL_NAMES = [
   'send_email',
@@ -79,6 +79,22 @@ export function coerceString(value: unknown): string | null {
     return value
   }
   return null
+}
+
+function coerceNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/[, ]+/g, ''))
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function formatCount(value: number | null): string | null {
+  if (value === null) return null
+  return value.toLocaleString()
 }
 
 function pickFirstParameter(
@@ -900,9 +916,12 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
-    detailKind: 'mcpTool',
+    detailKind: 'linkedinPeopleSearch',
     derive(entry, parameters) {
-      const caption = deriveLinkedInCaption(parameters, [
+      const firstName = coerceString(parameters?.['first_name'])
+      const lastName = coerceString(parameters?.['last_name'])
+      const nameCaption = [firstName, lastName].filter(Boolean).join(' ')
+      const caption = nameCaption || deriveLinkedInCaption(parameters, [
         'query',
         'keywords',
         'keyword',
@@ -960,6 +979,34 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const caption = pickFirstParameter(parameters, ['title', 'asin', 'url', 'product', 'name'])
       return {
         caption: caption ? truncate(caption, 56) : entry.caption ?? 'Amazon product',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_amazon_product_reviews',
+    aliases: ['web_data_amazon_product_reviews'],
+    label: 'Amazon reviews',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProductReviews',
+    derive(entry, parameters) {
+      const urlCaption = pickFirstParameter(parameters, ['url', 'product_url'])
+      const firstRecord = extractBrightDataArray(entry.result)[0]
+      const productName = coerceString(firstRecord?.['product_name'])
+      const ratingValue = coerceNumber(firstRecord?.['product_rating'])
+      const ratingLabel =
+        ratingValue !== null ? `${Number.isInteger(ratingValue) ? ratingValue : ratingValue.toFixed(1)}/5` : null
+      const ratingCount = formatCount(coerceNumber(firstRecord?.['product_rating_count']))
+      const ratingSummary = ratingLabel
+        ? `${ratingLabel}${ratingCount ? ` (${ratingCount})` : ''}`
+        : ratingCount
+          ? `${ratingCount} ratings`
+          : null
+      const caption = productName || urlCaption
+      const combined = caption && ratingSummary ? `${caption} • ${ratingSummary}` : caption ?? ratingSummary
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon reviews',
       }
     },
   },
