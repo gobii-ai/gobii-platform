@@ -607,7 +607,7 @@ class PretrainedWorkerHireView(View):
         }
         response.set_cookie(
             OAUTH_CHARTER_COOKIE,
-            signing.dumps(charter_data),
+            signing.dumps(charter_data, compress=True),
             max_age=3600,  # 1 hour
             httponly=True,
             samesite="Lax",
