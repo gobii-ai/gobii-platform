@@ -2015,6 +2015,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'agentsUnlimited': capacity['agents_unlimited'],
             'llmIntelligence': llm_intelligence,
             'isStaff': is_staff,
+            'emailVerified': has_verified_email(self.request.user),
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")

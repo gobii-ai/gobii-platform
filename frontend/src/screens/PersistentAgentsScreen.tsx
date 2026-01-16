@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, X, Zap } from 'lucide-react'
 import { AgentAvatarBadge } from '../components/common/AgentAvatarBadge'
 import { normalizeHexColor } from '../util/color'
 import { track } from '../util/analytics'
@@ -47,6 +47,7 @@ type AgentListPayload = {
   agentsAvailable: number
   agentsUnlimited: boolean
   isStaff: boolean
+  emailVerified: boolean
 }
 
 export type PersistentAgentsScreenProps = {
@@ -68,6 +69,7 @@ function formatCreditBurn(value: number | null): string {
 
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
   const [query, setQuery] = useState('')
+  const [showVerificationDialog, setShowVerificationDialog] = useState(false)
 
   const normalizedAgents = useMemo<NormalizedAgent[]>(() => {
     return initialData.agents.map((agent) => ({
@@ -89,8 +91,21 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
 
   const showEmptyState = !hasAgents
 
+  const handleContactClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      if (!initialData.emailVerified) {
+        e.preventDefault()
+        setShowVerificationDialog(true)
+      }
+    },
+    [initialData.emailVerified],
+  )
+
   return (
     <div className="space-y-6 pb-6">
+      {showVerificationDialog && (
+        <EmailVerificationDialog onClose={() => setShowVerificationDialog(false)} />
+      )}
       {showEmptyState ? (
         <AgentEmptyState spawnUrl={initialData.spawnAgentUrl} analyticsEvent={initialData.createFirstAgentEvent} />
       ) : (
@@ -109,6 +124,7 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
               <AgentCard
                 key={agent.id}
                 agent={agent}
+                onContactClick={handleContactClick}
               />
             ))}
           </div>
@@ -203,9 +219,10 @@ function AgentListHeader({ query, onSearchChange, canSpawnAgents, spawnUrl, show
 
 type AgentCardProps = {
   agent: NormalizedAgent
+  onContactClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void
 }
 
-function AgentCard({ agent }: AgentCardProps) {
+function AgentCard({ agent, onContactClick }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
   const smsValue = agent.primarySms
@@ -352,6 +369,7 @@ function AgentCard({ agent }: AgentCardProps) {
                 <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-emerald-600/80">
                   <a
                     href={`sms:${smsValue}`}
+                    onClick={onContactClick}
                     className="inline-flex flex-1 items-center justify-center gap-x-2 bg-emerald-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
                   >
                     <Phone className="h-4 w-4" aria-hidden="true" />
@@ -376,6 +394,7 @@ function AgentCard({ agent }: AgentCardProps) {
                 <div className="inline-flex min-w-[7.5rem] flex-1 items-stretch overflow-hidden rounded-lg border border-sky-600/80">
                   <a
                     href={`mailto:${emailValue}`}
+                    onClick={onContactClick}
                     className="inline-flex flex-1 items-center justify-center gap-x-2 bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700"
                   >
                     <Mail className="h-4 w-4" aria-hidden="true" />
@@ -444,6 +463,53 @@ function AgentEmptyState({ spawnUrl, analyticsEvent }: AgentEmptyStateProps) {
           >
             <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
             Create Your First Agent
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+type EmailVerificationDialogProps = {
+  onClose: () => void
+}
+
+function EmailVerificationDialog({ onClose }: EmailVerificationDialogProps) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative z-10 w-full max-w-md rounded-xl bg-white p-6 shadow-2xl mx-4">
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute right-4 top-4 rounded-full p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          aria-label="Close"
+        >
+          <X className="h-5 w-5" />
+        </button>
+
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-amber-100">
+          <Mail className="h-6 w-6 text-amber-600" />
+        </div>
+
+        <h2 className="text-lg font-semibold text-gray-900">Verify your email</h2>
+        <p className="mt-2 text-sm text-gray-600">
+          To send emails or SMS messages through your agent, please verify your email address first.
+        </p>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cancel
+          </button>
+          <a
+            href="/accounts/email/"
+            className="inline-flex items-center justify-center rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700"
+          >
+            Verify Email
           </a>
         </div>
       </div>
