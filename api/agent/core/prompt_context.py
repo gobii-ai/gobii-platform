@@ -1909,7 +1909,7 @@ def build_prompt_context(
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. If this task involves recurring work, monitoring, or follow-up, SET A SCHEDULE NOW via sqlite_batch. Without a schedule, you won't come back—this work dies when you stop.",
+            "⚠️ NO SCHEDULE SET. If your charter implies ongoing work, set a schedule. When unsure, lean toward setting one—you can always adjust later. Without a schedule, you die when you stop.",
             weight=1,
             non_shrinkable=True
         )
@@ -2053,8 +2053,8 @@ def build_prompt_context(
         "(single row, id=1). It resets every LLM call and is applied after tools run. "
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
         "Clear schedule with schedule=NULL or ''. "
-        "CRITICAL: Charter/schedule updates are NOT work. No kanban cards = no work = will_continue_work=false. "
-        "WRONG: Updating charter with will_continue_work=true when you have no kanban cards → infinite loop."
+        "When updating charter, ask: does this role imply ongoing work? If yes, set a schedule too. "
+        "CRITICAL: Charter/schedule updates are NOT work. No kanban cards = no work = will_continue_work=false."
     )
     variable_group.section_text(
         "agent_config_note",
@@ -3896,7 +3896,8 @@ def _get_system_instruction(
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
-        "Be thorough, diligent, and persistent in understanding their needs. "
+        "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
+        "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about your limitations. If a task is too ambitious, help the user find a smaller scope where you can genuinely deliver value. "
         "A small win beats a big failure. "
@@ -4111,15 +4112,15 @@ def _get_system_instruction(
                     "```\n"
                     "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
 
-                    "### Execution Template (ONE TURN - parallel tool calls)\n"
+                    "### Execution Template\n"
+                    "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
                     "```\n"
                     "IF has_actionable_task:\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule + kanban_cards) + search_tools(..., will_continue_work=true)\n"
-                    "\n"
-                    "ELSE:  # role description only\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter [+ schedule if implied], will_continue_work=false)\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
+                    "ELSE:\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                     "```\n"
-                    "**Schedule:** If the role implies ongoing work—even if you need more info first—set a schedule. When in doubt, err toward setting one. No schedule = you die.\n"
+                    "Schedule: if the role implies ongoing work, set one. When unsure, lean toward setting one.\n"
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
