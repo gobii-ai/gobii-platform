@@ -100,7 +100,7 @@ from .tool_results import (
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
 )
-
+from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -2255,8 +2255,6 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
 
     Returns the rendered recent contacts text so it can be placed in a critical section.
     """
-    from api.services.email_verification import has_verified_email
-
     limit_msg_history = message_history_limit(agent)
     owner_email_verified = has_verified_email(agent.user) if agent.user else False
     span.set_attribute("persistent_agent.owner_email_verified", owner_email_verified)
