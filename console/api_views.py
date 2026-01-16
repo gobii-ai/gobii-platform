@@ -1207,12 +1207,58 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        override = get_context_override(request)
+        for_agent_id = request.GET.get("for_agent")
+        if for_agent_id:
+            try:
+                agent = (
+                    PersistentAgent.objects.non_eval()
+                    .select_related("organization")
+                    .get(pk=for_agent_id)
+                )
+            except PersistentAgent.DoesNotExist:
+                return JsonResponse({"error": "Agent not found"}, status=404)
+
+            if agent.organization_id:
+                membership = (
+                    OrganizationMembership.objects.select_related("org")
+                    .filter(
+                        user=request.user,
+                        org_id=agent.organization_id,
+                        status=OrganizationMembership.OrgStatus.ACTIVE,
+                    )
+                    .first()
+                )
+                if membership is None:
+                    return JsonResponse({"error": "Not permitted"}, status=403)
+                override = {
+                    "type": "organization",
+                    "id": str(agent.organization_id),
+                    "name": membership.org.name,
+                }
+            else:
+                if agent.user_id != request.user.id:
+                    return JsonResponse({"error": "Not permitted"}, status=403)
+                override = {
+                    "type": "personal",
+                    "id": str(agent.user_id),
+                    "name": request.user.get_full_name()
+                    or request.user.username
+                    or request.user.email
+                    or "Personal",
+                }
+
         context_info = resolve_console_context(
             request.user,
             request.session,
-            override=get_context_override(request),
+            override=override,
         )
-        agents = agent_queryset_for(request.user, context_info.current_context).select_related("agent_color").order_by("name")
+
+        agents = (
+            agent_queryset_for(request.user, context_info.current_context)
+            .select_related("agent_color")
+            .order_by("name")
+        )
         payload = [
             {
                 "id": str(agent.id),
@@ -1224,52 +1270,16 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             }
             for agent in agents
         ]
-        return JsonResponse({"agents": payload})
-
-
-class AgentContextResolveAPIView(LoginRequiredMixin, View):
-    http_method_names = ["get"]
-
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        try:
-            agent = (
-                PersistentAgent.objects.non_eval()
-                .select_related("organization", "user")
-                .get(pk=agent_id)
-            )
-        except PersistentAgent.DoesNotExist:
-            return JsonResponse({"error": "Agent not found"}, status=404)
-
-        if agent.organization_id:
-            membership = (
-                OrganizationMembership.objects.select_related("org")
-                .filter(
-                    user=request.user,
-                    org_id=agent.organization_id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-                .first()
-            )
-            if membership is None:
-                return JsonResponse({"error": "Not permitted"}, status=403)
-            context = {
-                "type": "organization",
-                "id": str(agent.organization_id),
-                "name": membership.org.name,
+        return JsonResponse(
+            {
+                "context": {
+                    "type": context_info.current_context.type,
+                    "id": context_info.current_context.id,
+                    "name": context_info.current_context.name,
+                },
+                "agents": payload,
             }
-        else:
-            if agent.user_id != request.user.id:
-                return JsonResponse({"error": "Not permitted"}, status=403)
-            context = {
-                "type": "personal",
-                "id": str(agent.user_id),
-                "name": request.user.get_full_name()
-                or request.user.username
-                or request.user.email
-                or "Personal",
-            }
-
-        return JsonResponse({"context": context})
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

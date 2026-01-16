@@ -3,7 +3,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
-import { fetchAgentContext } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
@@ -231,9 +230,7 @@ export function AgentChatPage({
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
-  const [contextReady, setContextReady] = useState<boolean>(() => !agentId)
   const [resolvedContext, setResolvedContext] = useState<ConsoleContext | null>(null)
-  const [contextBootstrapError, setContextBootstrapError] = useState<string | null>(null)
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
@@ -256,7 +253,7 @@ export function AgentChatPage({
     switchContext,
     refresh: refreshContext,
   } = useConsoleContextSwitcher({
-    enabled: showContextSwitcher && contextReady,
+    enabled: showContextSwitcher,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
   })
@@ -265,42 +262,12 @@ export function AgentChatPage({
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const effectiveContext = resolvedContext ?? contextData?.context ?? null
+  const contextReady = Boolean(effectiveContext)
   const liveAgentId = contextSwitching || !contextReady ? null : activeAgentId
 
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
-  }, [agentId])
-
-  useEffect(() => {
-    if (!agentId) {
-      setContextReady(true)
-      setResolvedContext(null)
-      setContextBootstrapError(null)
-      return
-    }
-    let cancelled = false
-    setContextReady(false)
-    setResolvedContext(null)
-    setContextBootstrapError(null)
-    const run = async () => {
-      try {
-        const nextContext = await fetchAgentContext(agentId)
-        if (cancelled) return
-        storeConsoleContext(nextContext)
-        setResolvedContext(nextContext)
-        setContextReady(true)
-      } catch (err) {
-        console.error('Failed to resolve agent context', err)
-        if (cancelled) return
-        setContextReady(false)
-        setResolvedContext(null)
-        setContextBootstrapError('Unable to resolve agent workspace.')
-      }
-    }
-    void run()
-    return () => {
-      cancelled = true
-    }
   }, [agentId])
 
   const initialize = useAgentChatStore((state) => state.initialize)
@@ -352,12 +319,36 @@ export function AgentChatPage({
 
   const socketSnapshot = useAgentChatSocket(liveAgentId)
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
-  const activeContextForRoster = resolvedContext ?? contextData?.context ?? null
-  const rosterContextKey = activeContextForRoster ? `${activeContextForRoster.type}:${activeContextForRoster.id}` : 'unknown'
+  const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
   const rosterQuery = useAgentRoster({
-    enabled: contextReady && (!agentId || !!resolvedContext || !!contextData?.context),
+    enabled: true,
     contextKey: rosterContextKey,
+    forAgentId: agentId ?? undefined,
   })
+
+  useEffect(() => {
+    if (!contextData?.context) {
+      return
+    }
+    const next = contextData.context
+    if (
+      (!agentId || contextSwitching) &&
+      (resolvedContext?.id !== next.id || resolvedContext?.type !== next.type)
+    ) {
+      setResolvedContext(next)
+    }
+  }, [agentId, contextData?.context, contextSwitching, resolvedContext])
+
+  useEffect(() => {
+    if (rosterQuery.isSuccess && rosterQuery.data?.context) {
+      setResolvedContext(rosterQuery.data.context)
+      storeConsoleContext(rosterQuery.data.context)
+      return
+    }
+    if (rosterQuery.isError) {
+      // Keep contextReady derived; no state update needed
+    }
+  }, [rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   useEffect(() => {
@@ -708,8 +699,8 @@ export function AgentChatPage({
   ])
 
   const rosterAgents = useMemo(
-    () => (contextReady && activeContextForRoster ? rosterQuery.data ?? [] : []),
-    [activeContextForRoster, contextReady, rosterQuery.data],
+    () => (contextReady ? rosterQuery.data?.agents ?? [] : []),
+    [contextReady, rosterQuery.data?.agents],
   )
   const activeRosterMeta = useMemo(
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
@@ -724,8 +715,7 @@ export function AgentChatPage({
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && contextReady
-  const rosterLoading =
-    rosterQuery.isLoading || !contextReady || (hasSelectedAgent && !resolvedContext) || !activeContextForRoster
+  const rosterLoading = rosterQuery.isLoading || !contextReady || (hasSelectedAgent && !resolvedContext)
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
@@ -736,9 +726,9 @@ export function AgentChatPage({
       organizations: contextData.organizations,
       onSwitch: switchContext,
       isBusy: contextSwitching,
-      errorMessage: contextBootstrapError || contextError,
+      errorMessage: contextError,
     }
-  }, [contextBootstrapError, contextData, contextError, contextSwitching, switchContext])
+  }, [contextData, contextError, contextSwitching, switchContext])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
