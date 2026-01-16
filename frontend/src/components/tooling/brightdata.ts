@@ -164,3 +164,26 @@ export function extractBrightDataSerpItems(result: unknown): SerpItem[] {
     .map((item, idx) => normalizeSerpItem(item, idx))
     .filter((item): item is SerpItem => Boolean(item))
 }
+
+export function extractBrightDataFirstRecord(result: unknown): Record<string, unknown> | null {
+  const parsed = parseResultObject(result)
+  const candidates: unknown[] = []
+
+  if (Array.isArray(parsed)) {
+    candidates.push(...parsed)
+  } else if (isPlainObject(parsed)) {
+    const obj = parsed as Record<string, unknown>
+    if (Array.isArray(obj.result)) {
+      candidates.push(...obj.result)
+    } else if (obj.result && Array.isArray((obj.result as { items?: unknown[] }).items)) {
+      candidates.push(...(((obj.result as { items?: unknown[] }).items as unknown[]) ?? []))
+    } else {
+      candidates.push(parsed)
+    }
+  } else if (Array.isArray(result)) {
+    candidates.push(...result)
+  }
+
+  const first = candidates.find((item) => isPlainObject(item)) as Record<string, unknown> | undefined
+  return first ?? null
+}

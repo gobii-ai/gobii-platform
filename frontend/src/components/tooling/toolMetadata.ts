@@ -916,6 +916,23 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'mcp_brightdata_web_data_yahoo_finance_business',
+    aliases: ['web_data_yahoo_finance_business'],
+    label: 'Yahoo Finance',
+    icon: BarChart3,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    detailKind: 'yahooFinanceBusiness',
+    derive(entry, parameters) {
+      const ticker = coerceString(parameters?.['stock_ticker']) || coerceString(parameters?.['symbol'])
+      const name = coerceString(parameters?.['name'])
+      const captionPieces = [ticker ? ticker.toUpperCase() : null, name ? truncate(name, 44) : null].filter(Boolean)
+      return {
+        caption: captionPieces.length ? captionPieces.join(' • ') : entry.caption ?? 'Yahoo Finance',
+      }
+    },
+  },
+  {
     name: 'mcp_brightdata_scrape_as_markdown',
     label: 'Web snapshot',
     icon: ScanText,

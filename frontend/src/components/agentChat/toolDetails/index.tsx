@@ -7,6 +7,7 @@ import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
 import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail } from './details/linkedin'
+import { YahooFinanceBusinessDetail } from './details/finance'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -33,6 +34,7 @@ export {
   AgentConfigUpdateDetail,
   LinkedInPersonProfileDetail,
   LinkedInCompanyProfileDetail,
+  YahooFinanceBusinessDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
@@ -54,6 +56,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   brightDataSearch: BrightDataSearchDetail,
   linkedinPerson: LinkedInPersonProfileDetail,
   linkedinCompany: LinkedInCompanyProfileDetail,
+  yahooFinanceBusiness: YahooFinanceBusinessDetail,
   mcpTool: McpToolDetail,
 }
 
