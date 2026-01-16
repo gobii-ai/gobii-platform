@@ -113,6 +113,7 @@ from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
 from waffle import flag_is_active
+from api.services.email_verification import has_verified_email
 
 
 def _clamp_color(value: int) -> int:
@@ -920,8 +921,6 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     @tracer.start_as_current_span("CONSOLE API Key List - get_context_data")
     def get_context_data(self, **kwargs):
         """Add form to context."""
-        from api.services.email_verification import has_verified_email
-
         context = super().get_context_data(**kwargs)
         context['form'] = self.get_form() # Add form instance from FormMixin
         context['api_key_context'] = self.api_key_context
@@ -1001,8 +1000,6 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     @transaction.atomic
     def form_valid(self, form):
         """Process a valid form to create an API key."""
-        from api.services.email_verification import has_verified_email
-
         if not has_verified_email(self.request.user):
             form.add_error(None, "Email verification required to create API keys. Please verify your email address in your account settings.")
             return self.form_invalid(form)

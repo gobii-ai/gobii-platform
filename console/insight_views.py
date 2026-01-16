@@ -37,6 +37,7 @@ from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
 from util.subscription_helper import get_organization_plan, get_user_plan
+from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +131,6 @@ def _build_agent_setup_metadata(
     agent: PersistentAgent,
     organization: Optional[Any],
 ) -> dict:
-    from api.services.email_verification import has_verified_email
-
     phone = get_primary_phone(request.user)
     email_verified = has_verified_email(request.user)
     phone_payload = serialize_phone(phone)
