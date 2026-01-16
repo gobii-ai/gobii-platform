@@ -36,12 +36,15 @@ function isInvalidContextOverrideError(payload: unknown): boolean {
   if (!payload) {
     return false
   }
+  // Match all context override errors: "Invalid context override.",
+  // "Invalid personal context override.", "Invalid organization context override."
+  const pattern = /Invalid\s+(\w+\s+)?context override/i
   if (typeof payload === 'string') {
-    return payload.includes('Invalid context override')
+    return pattern.test(payload)
   }
   if (typeof payload === 'object' && 'error' in payload) {
     const errorValue = (payload as { error?: unknown }).error
-    return typeof errorValue === 'string' && errorValue.includes('Invalid context override')
+    return typeof errorValue === 'string' && pattern.test(errorValue)
   }
   return false
 }
