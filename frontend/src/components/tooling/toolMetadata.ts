@@ -8,6 +8,7 @@ import {
   ClipboardList,
   BrainCircuit,
   Linkedin,
+  Home,
   Search,
   Network,
   FileText,
@@ -983,6 +984,35 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const caption = headline || keyword || url
       return {
         caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reuters news',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_zillow_properties_listing',
+    aliases: ['web_data_zillow_properties_listing'],
+    label: 'Zillow listing',
+    icon: Home,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'zillowListing',
+    derive(entry, parameters) {
+      const properties = extractBrightDataArray(entry.result)
+      const first = properties[0]
+      const addressRecord =
+        first && typeof first === 'object' && 'address' in first && first.address && typeof first.address === 'object'
+          ? (first.address as Record<string, unknown>)
+          : null
+      const street = coerceString(first?.['streetAddress']) || coerceString(addressRecord?.['streetAddress'])
+      const city = coerceString(first?.['city']) || coerceString(addressRecord?.['city'])
+      const state = coerceString(first?.['state']) || coerceString(addressRecord?.['state'])
+      const location = [street, city, state].filter(Boolean).join(', ')
+      const price = coerceNumber(first?.['price'])
+      const priceCaption = price !== null ? `$${price.toLocaleString()}` : null
+      const url = coerceString(parameters?.['url'])
+      const baseCaption = location || url
+      const combined = baseCaption && priceCaption ? `${baseCaption} • ${priceCaption}` : baseCaption ?? priceCaption
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Zillow listing',
       }
     },
   },

@@ -8,6 +8,7 @@ import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/fil
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
 import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail, LinkedInPeopleSearchDetail, LinkedInJobListingsDetail, LinkedInPostsDetail } from './details/linkedin'
 import { ReutersNewsDetail } from './details/news'
+import { ZillowListingDetail } from './details/realestate'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
 import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDetail } from './details/commerce'
@@ -44,6 +45,7 @@ export {
   LinkedInJobListingsDetail,
   LinkedInPostsDetail,
   ReutersNewsDetail,
+  ZillowListingDetail,
   AmazonProductReviewsDetail,
   AmazonProductSearchDetail,
 }
@@ -76,6 +78,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   linkedinJobListings: LinkedInJobListingsDetail,
   linkedinPosts: LinkedInPostsDetail,
   reutersNews: ReutersNewsDetail,
+  zillowListing: ZillowListingDetail,
   mcpTool: McpToolDetail,
 }
 
