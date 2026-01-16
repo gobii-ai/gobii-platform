@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -9,6 +9,7 @@ import {
   enableAgentSms,
   reassignAgentOrg,
   resendUserPhone,
+  resendEmailVerification,
   verifyUserPhone,
 } from '../../../api/agentSetup'
 import { HttpError } from '../../../api/http'
@@ -140,6 +141,8 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   const [smsError, setSmsError] = useState<string | null>(null)
   const [cooldown, setCooldown] = useState(phone?.cooldownRemaining ?? 0)
   const [copied, setCopied] = useState(false)
+  const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
+  const [emailResendError, setEmailResendError] = useState<string | null>(null)
 
   const [orgCurrent, setOrgCurrent] = useState(metadata.organization.currentOrg ?? null)
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
@@ -289,6 +292,18 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     }
   }, [])
 
+  const handleResendEmailVerification = useCallback(async () => {
+    setEmailResendState('sending')
+    setEmailResendError(null)
+    try {
+      await resendEmailVerification()
+      setEmailResendState('sent')
+    } catch (error) {
+      setEmailResendState('error')
+      setEmailResendError(describeError(error))
+    }
+  }, [])
+
   const handleDeletePhone = useCallback(async () => {
     setSmsError(null)
     setSmsAction('delete')
@@ -371,9 +386,11 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   )
 
   const renderSms = () => {
+    const emailVerified = metadata.sms.emailVerified !== false
     const isComplete = smsEnabled && agentNumber
 
     const getTitle = () => {
+      if (!emailVerified) return 'Email Verification Required'
       if (isComplete) return 'SMS Connected'
       if (phoneVerified) return 'Enable SMS'
       if (phone) return 'Verify Your Phone'
@@ -382,6 +399,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
 
     const getSubtitle = () => {
       if (smsError) return smsError
+      if (!emailVerified) return 'Please verify your email address to enable SMS messaging.'
       if (isComplete) return 'Text this number anytime to chat with your agent.'
       if (phoneVerified) return 'Your phone is verified. Enable SMS to start chatting.'
       if (phone) return 'Enter the verification code we sent to your phone.'
@@ -409,7 +427,32 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
           <h3 className="sms-hero__title">{getTitle()}</h3>
           <p className={`sms-hero__body${smsError ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
 
-          {!phone ? (
+          {!emailVerified ? (
+            <div className="sms-hero__form">
+              <div className="sms-hero__verified" style={{ color: '#b45309' }}>
+                <Mail size={16} strokeWidth={2.2} />
+                <span>Email not verified</span>
+              </div>
+              {emailResendState === 'sent' ? (
+                <div className="sms-hero__verified" style={{ color: '#15803d' }}>
+                  <Check size={16} strokeWidth={2.2} />
+                  <span>Verification email sent!</span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="sms-hero__button"
+                  onClick={handleResendEmailVerification}
+                  disabled={emailResendState === 'sending'}
+                >
+                  {emailResendState === 'sending' ? 'Sending...' : 'Resend Verification Email'}
+                </button>
+              )}
+              {emailResendState === 'error' && emailResendError && (
+                <span style={{ color: '#dc2626', fontSize: '12px' }}>{emailResendError}</span>
+              )}
+            </div>
+          ) : !phone ? (
             <div className="sms-hero__form">
               <input
                 className="sms-hero__input"

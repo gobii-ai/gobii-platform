@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from allauth.account.models import EmailAddress
 from django.test import TransactionTestCase, tag
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
@@ -34,6 +35,13 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             username="sender@example.com",
             email="sender@example.com",
             password="secret",
+        )
+        # Email verification is required for outbound email sending
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
         )
         self.browser_agent = create_browser_agent_without_proxy(self.user, "BA")
         self.agent = PersistentAgent.objects.create(

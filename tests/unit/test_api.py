@@ -1034,23 +1034,24 @@ class BrowserUseAgentTaskViewSetTests(APITestCase):
 @tag("batch_api_agents")
 class AutoCreateApiKeyTest(APITestCase):
     def test_auto_create_api_key_for_new_user(self):
-        """Test that a new user automatically gets an API key created."""
+        """Test that a new user does NOT automatically get an API key created.
+
+        API keys are not auto-created because users must verify their email
+        before they can use API features. Users create API keys manually
+        after email verification.
+        """
         # Create a new user
         new_user = User.objects.create_user(
-            username='newuser@example.com', 
-            email='newuser@example.com', 
+            username='newuser@example.com',
+            email='newuser@example.com',
             password='password123'
         )
-        
-        # Check if an API key was automatically created
-        api_keys = ApiKey.objects.filter(user=new_user)
-        self.assertEqual(api_keys.count(), 1)
-        self.assertEqual(api_keys.first().name, "default")
-        
-        # Check if the API key is active
-        self.assertTrue(api_keys.first().is_active)
 
-        # Verify UserQuota was also created
+        # Verify no API key was automatically created (requires email verification first)
+        api_keys = ApiKey.objects.filter(user=new_user)
+        self.assertEqual(api_keys.count(), 0)
+
+        # Verify UserQuota was still created
         user_quota = UserQuota.objects.filter(user=new_user)
         self.assertEqual(user_quota.count(), 1)
 

@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch, MagicMock
 
+from allauth.account.models import EmailAddress
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 from django.http import HttpResponse
@@ -26,6 +27,13 @@ class PostmarkEmailWebhookTest(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="testowner", email="owner@example.com", password="password"
+        )
+        # Email verification is required for inbound email processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.non_owner = User.objects.create_user(
             username="nonowner", email="nonowner@example.com", password="password"
@@ -133,6 +141,13 @@ class MailgunEmailWebhookTest(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="mgowner", email="owner@example.com", password="password"
+        )
+        # Email verification is required for inbound email processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.non_owner = User.objects.create_user(
             username="mgnonowner", email="nonowner@example.com", password="password"

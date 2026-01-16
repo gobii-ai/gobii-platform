@@ -27,6 +27,7 @@ import re
 from config import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -79,6 +80,16 @@ def sms_webhook(request):
             if not agent or not agent.user:
                 logger.warning(f"Endpoint {to_number} is not associated with a usable agent/user. Discarding.")
                 whitelist_span.add_event('SMS - No Agent/User', {'to_number': to_number})
+                return HttpResponse(status=200)
+
+            from api.services.email_verification import has_verified_email
+            if not has_verified_email(agent.user):
+                logger.info(f"Discarding inbound SMS to agent '{agent.name}' - owner email not verified.")
+                whitelist_span.add_event('SMS - Owner Email Not Verified', {
+                    'agent_id': str(agent.id),
+                    'agent_name': agent.name,
+                    'to_number': to_number,
+                })
                 return HttpResponse(status=200)
 
             if not agent.is_sender_whitelisted(CommsChannel.SMS, from_number):
@@ -298,6 +309,17 @@ def _handle_inbound_email(
             span.set_attribute("agent_id", str(agent.id))
             span.set_attribute("agent_name", agent.name)
             span.set_attribute("endpoint_address", endpoint.address)
+
+            if not has_verified_email(agent.user):
+                logger.info(
+                    f"Discarding inbound email to endpoint {endpoint.address} - owner email not verified."
+                )
+                span.add_event('Email - Owner Email Not Verified', {
+                    'agent_id': str(agent.id),
+                    'agent_name': agent.name,
+                    'endpoint_address': endpoint.address,
+                })
+                continue
 
             if not agent.is_sender_whitelisted(CommsChannel.EMAIL, from_email):
                 logger.info(

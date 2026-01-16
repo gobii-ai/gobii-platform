@@ -113,6 +113,7 @@ from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
 from waffle import flag_is_active
+from api.services.email_verification import has_verified_email
 
 
 def _clamp_color(value: int) -> int:
@@ -924,6 +925,7 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
         context['form'] = self.get_form() # Add form instance from FormMixin
         context['api_key_context'] = self.api_key_context
         context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
+        context['email_verified'] = has_verified_email(self.request.user)
         return context
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_form_kwargs")
@@ -998,6 +1000,10 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     @transaction.atomic
     def form_valid(self, form):
         """Process a valid form to create an API key."""
+        if not has_verified_email(self.request.user):
+            form.add_error(None, "Email verification required to create API keys. Please verify your email address in your account settings.")
+            return self.form_invalid(form)
+
         name = form.cleaned_data['name']
         ctx = self.api_key_context
 
@@ -2009,6 +2015,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'agentsUnlimited': capacity['agents_unlimited'],
             'llmIntelligence': llm_intelligence,
             'isStaff': is_staff,
+            'emailVerified': has_verified_email(self.request.user),
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
@@ -2361,10 +2368,13 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         if session_return_to is not None:
             request.session.modified = True
         embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
+        # Default return_to to agents list so closing the chat doesn't redirect back
+        # to this view (which would fail since agent_charter was consumed)
+        return_to = request.GET.get("return_to") or session_return_to or reverse("agents")
         app_url = build_immersive_chat_url(
             request,
             result.agent.id,
-            return_to=request.GET.get("return_to") or session_return_to,
+            return_to=return_to,
             embed=embed,
         )
         response = redirect(app_url)
@@ -2788,8 +2798,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         pending_count: int | None = None,
         max_contacts: int | None = None,
         pending_contact_requests: int | None = None,
+        email_verified: bool | None = None,
     ) -> dict[str, object]:
         from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+        from api.services.email_verification import has_verified_email
 
         entries_qs = entries
         if entries_qs is None:
@@ -2818,6 +2830,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 agent=agent,
                 status=AgentAllowlistInvite.InviteStatus.PENDING,
             ).count()
+        if email_verified is None:
+            email_verified = has_verified_email(agent.user)
 
         return {
             'show': True,
@@ -2846,6 +2860,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'activeCount': (active_count or 0) + (pending_count or 0),
             'maxContacts': max_contacts,
             'pendingContactRequests': pending_contact_requests,
+            'emailVerified': email_verified,
         }
 
     def _build_mcp_servers_payload(

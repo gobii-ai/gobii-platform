@@ -37,6 +37,7 @@ from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
 from util.subscription_helper import get_organization_plan, get_user_plan
+from api.services.email_verification import has_verified_email
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +132,9 @@ def _build_agent_setup_metadata(
     organization: Optional[Any],
 ) -> dict:
     phone = get_primary_phone(request.user)
+    # Check agent owner's verification status (not viewer's) since outbound
+    # communications are gated by require_verified_email(agent.user)
+    email_verified = has_verified_email(agent.user)
     phone_payload = serialize_phone(phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
 
@@ -220,6 +224,7 @@ def _build_agent_setup_metadata(
             "enabled": bool(agent_sms),
             "agentNumber": agent_sms.address if agent_sms else None,
             "userPhone": phone_payload,
+            "emailVerified": email_verified,
         },
         "organization": {
             "currentOrg": current_org,

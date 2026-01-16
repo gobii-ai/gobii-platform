@@ -1,6 +1,7 @@
 import json
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.test import TestCase, RequestFactory, tag
 from django.contrib.auth import get_user_model
 
@@ -27,6 +28,13 @@ class ManualAllowlistEmailTests(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="owner1", email="owner1@example.com", password="pw"
+        )
+        # Email verification is required for inbound email processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.browser_agent = BrowserUseAgent.objects.create(user=self.owner, name="BA1")
         self.agent = PersistentAgent.objects.create(
@@ -89,6 +97,13 @@ class OrgDefaultAllowlistEmailTests(TestCase):
         self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="owner2", email="owner2@example.com", password="pw"
+        )
+        # Email verification is required for inbound email processing
+        EmailAddress.objects.create(
+            user=self.owner,
+            email=self.owner.email,
+            verified=True,
+            primary=True,
         )
         self.member = User.objects.create_user(
             username="member1", email="member1@example.com", password="pw"
