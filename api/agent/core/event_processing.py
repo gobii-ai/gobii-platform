@@ -335,6 +335,25 @@ def _strip_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     return cleaned, found
 
 
+def _normalize_tool_result_content(raw: str) -> str:
+    """Decode stringified JSON payloads so nested arrays/objects stay structured."""
+    from api.agent.tools.json_utils import decode_embedded_json_strings
+
+    if not raw or not isinstance(raw, str):
+        return raw
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if not isinstance(parsed, (dict, list)):
+        return raw
+    normalized = decode_embedded_json_strings(parsed)
+    try:
+        return json.dumps(normalized, ensure_ascii=False)
+    except TypeError:
+        return raw
+
+
 def _should_imply_continue(
     *,
     has_canonical_continuation: bool,
@@ -800,6 +819,7 @@ def _persist_tool_call_step(
     Returns the created step, or None if persistence failed.
     """
     from api.models import PersistentAgentStep, PersistentAgentToolCall
+    normalized_result = _normalize_tool_result_content(result_content)
 
     # Truncate tool_name as a safety measure (should already be sanitized, but be defensive)
     safe_tool_name = (tool_name or "")[:256]
@@ -807,7 +827,7 @@ def _persist_tool_call_step(
     # Build a safe description (truncate if needed)
     try:
         params_preview = str(tool_params)[:100] if tool_params else ""
-        result_preview = (result_content or "")[:100]
+        result_preview = (normalized_result or "")[:100]
         description = f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
     except Exception:
         description = f"Tool call: {safe_tool_name}"
@@ -828,7 +848,7 @@ def _persist_tool_call_step(
             step=step,
             tool_name=safe_tool_name,
             tool_params=tool_params,
-            result=result_content,
+            result=normalized_result,
         )
         try:
             from console.agent_chat.signals import emit_tool_call_realtime
