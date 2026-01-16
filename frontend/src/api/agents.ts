@@ -1,4 +1,5 @@
 import { jsonFetch, jsonRequest } from './http'
+import type { ConsoleContext } from './context'
 import type { AgentRosterEntry } from '../types/agentRoster'
 
 export type UpdateAgentPayload = {
@@ -11,6 +12,7 @@ export type CreateAgentResponse = {
 }
 
 type AgentRosterPayload = {
+  context: ConsoleContext
   agents: {
     id: string
     name: string
@@ -21,9 +23,10 @@ type AgentRosterPayload = {
   }[]
 }
 
-export async function fetchAgentRoster(): Promise<AgentRosterEntry[]> {
-  const payload = await jsonFetch<AgentRosterPayload>('/console/api/agents/roster/')
-  return payload.agents.map((agent) => ({
+export async function fetchAgentRoster(options: { forAgentId?: string } = {}): Promise<{ context: ConsoleContext; agents: AgentRosterEntry[] }> {
+  const query = options.forAgentId ? `?for_agent=${encodeURIComponent(options.forAgentId)}` : ''
+  const payload = await jsonFetch<AgentRosterPayload>(`/console/api/agents/roster/${query}`)
+  const agents = payload.agents.map((agent) => ({
     id: agent.id,
     name: agent.name,
     avatarUrl: agent.avatar_url,
@@ -31,6 +34,7 @@ export async function fetchAgentRoster(): Promise<AgentRosterEntry[]> {
     isActive: agent.is_active,
     shortDescription: agent.short_description,
   }))
+  return { context: payload.context, agents }
 }
 
 export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promise<void> {

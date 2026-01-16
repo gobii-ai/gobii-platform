@@ -1206,13 +1206,72 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
+    def _resolve_override_for_agent(self, request: HttpRequest, agent_id: str) -> tuple[dict[str, str] | None, JsonResponse | None]:
+        try:
+            agent = (
+                PersistentAgent.objects.non_eval()
+                .select_related("organization")
+                .get(pk=agent_id)
+            )
+        except PersistentAgent.DoesNotExist:
+            return None, JsonResponse({"error": "Agent not found"}, status=404)
+
+        if agent.organization_id:
+            membership = (
+                OrganizationMembership.objects.select_related("org")
+                .filter(
+                    user=request.user,
+                    org_id=agent.organization_id,
+                    status=OrganizationMembership.OrgStatus.ACTIVE,
+                )
+                .first()
+            )
+            if membership is None:
+                return None, JsonResponse({"error": "Not permitted"}, status=403)
+            return (
+                {
+                    "type": "organization",
+                    "id": str(agent.organization_id),
+                    "name": membership.org.name,
+                },
+                None,
+            )
+
+        if agent.user_id != request.user.id:
+            return None, JsonResponse({"error": "Not permitted"}, status=403)
+
+        return (
+            {
+                "type": "personal",
+                "id": str(agent.user_id),
+                "name": request.user.get_full_name()
+                or request.user.username
+                or request.user.email
+                or "Personal",
+            },
+            None,
+        )
+
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        override = get_context_override(request)
+        for_agent_id = request.GET.get("for_agent")
+        if for_agent_id:
+            override_for_agent, error_response = self._resolve_override_for_agent(request, for_agent_id)
+            if error_response:
+                return error_response
+            override = override_for_agent
+
         context_info = resolve_console_context(
             request.user,
             request.session,
-            override=get_context_override(request),
+            override=override,
         )
-        agents = agent_queryset_for(request.user, context_info.current_context).select_related("agent_color").order_by("name")
+
+        agents = (
+            agent_queryset_for(request.user, context_info.current_context)
+            .select_related("agent_color")
+            .order_by("name")
+        )
         payload = [
             {
                 "id": str(agent.id),
@@ -1224,7 +1283,16 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             }
             for agent in agents
         ]
-        return JsonResponse({"agents": payload})
+        return JsonResponse(
+            {
+                "context": {
+                    "type": context_info.current_context.type,
+                    "id": context_info.current_context.id,
+                    "name": context_info.current_context.name,
+                },
+                "agents": payload,
+            }
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")

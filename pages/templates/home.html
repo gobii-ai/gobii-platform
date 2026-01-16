@@ -276,7 +276,7 @@
             <div class="grid gap-5 sm:grid-cols-3">
               {% if recent_agents %}
                 {% for agent in recent_agents %}
-                <a href="{% url 'agent_detail' agent.id %}" class="group relative bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-300 hover:-translate-y-0.5 block text-left">
+                <a href="{{ agent.chat_url }}" data-immersive-link class="group relative bg-white border border-slate-200/60 rounded-2xl p-5 shadow-sm hover:shadow-md hover:border-indigo-300 transition-all duration-300 hover:-translate-y-0.5 block text-left">
                   <div class="flex items-center justify-between mb-3">
                     <p class="text-base font-semibold text-slate-900 truncate pr-2">{{ agent.name }}</p>
                     <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider {{ agent.status_class }} ring-1 ring-inset ring-current/10">{{ agent.status_label }}</span>

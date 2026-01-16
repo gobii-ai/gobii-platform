@@ -35,7 +35,7 @@ from util.subscription_helper import (
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
-from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, normalize_return_to
+from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url, normalize_return_to
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -408,6 +408,11 @@ class HomePage(TemplateView):
                 else:
                     agent.status_label = "Active"
                     agent.status_class = "text-emerald-600 bg-emerald-50"
+                agent.chat_url = build_immersive_chat_url(
+                    self.request,
+                    agent.id,
+                    return_to=self.request.get_full_path(),
+                )
 
             context['recent_agents'] = recent_agents
 
