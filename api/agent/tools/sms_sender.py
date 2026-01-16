@@ -35,6 +35,7 @@ from ...models import (
 )
 from opentelemetry import trace
 from urlextract import URLExtract
+from api.services.email_verification import require_verified_email, EmailVerificationError
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -86,8 +87,6 @@ def get_send_sms_tool() -> Dict[str, Any]:
 @tracer.start_as_current_span("SMS Sender - execute_send_sms")
 def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute SMS sending for a persistent agent."""
-    from api.services.email_verification import require_verified_email, EmailVerificationError
-
     try:
         require_verified_email(agent.user, action_description="send SMS messages")
     except EmailVerificationError as e:
