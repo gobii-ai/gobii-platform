@@ -130,13 +130,10 @@ export function AgentChatLayout({
   const showStreamingSlot = showStreamingReasoning || (hasStreamingContent && isStreaming)
 
   // Show progress bar whenever processing is active (agent is working)
-  // Hide it only while actively streaming message content (the streaming text is the feedback)
+  // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
   const isActivelyStreamingContent = hasStreamingContent && isStreaming
-  const showResponseSkeleton = Boolean(
-    (awaitingResponse || processingActive || isStreaming) &&
-    !isActivelyStreamingContent &&
-    !hasMoreNewer
-  )
+  const shouldRenderResponseSkeleton = Boolean(awaitingResponse || processingActive || isStreaming)
+  const hideResponseSkeleton = isActivelyStreamingContent || hasMoreNewer
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
@@ -241,8 +238,8 @@ export function AgentChatLayout({
                   </div>
                 ) : null}
 
-                {showResponseSkeleton ? (
-                  <ResponseSkeleton startTime={processingStartedAt} />
+                {shouldRenderResponseSkeleton ? (
+                  <ResponseSkeleton startTime={processingStartedAt} hidden={hideResponseSkeleton} />
                 ) : null}
 
                 {showBottomSentinel ? (
