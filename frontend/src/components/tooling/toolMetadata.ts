@@ -988,6 +988,27 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'mcp_brightdata_web_data_reddit_posts',
+    aliases: ['web_data_reddit_posts'],
+    label: 'Reddit posts',
+    icon: MessageSquareText,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'redditPosts',
+    derive(entry, parameters) {
+      const posts = extractBrightDataArray(entry.result)
+      const first = posts[0]
+      const title = coerceString(first?.['title'])
+      const author = coerceString(first?.['author']) || coerceString(first?.['user_posted'])
+      const community = coerceString(first?.['community_name']) || coerceString(first?.['subreddit'])
+      const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
+      const caption = title || community || author || url
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reddit posts',
+      }
+    },
+  },
+  {
     name: 'mcp_brightdata_web_data_zillow_properties_listing',
     aliases: ['web_data_zillow_properties_listing'],
     label: 'Zillow listing',
