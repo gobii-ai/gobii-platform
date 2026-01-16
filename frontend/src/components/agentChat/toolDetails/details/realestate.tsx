@@ -2,19 +2,7 @@ import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
 import { extractBrightDataArray } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
-
-function toText(value: unknown): string | null {
-  return isNonEmptyString(value) ? (value as string) : null
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[, $]+/g, ''))
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
+import { shorten, toNumber, toText } from '../brightDataUtils'
 
 function formatMoney(value: number | null, currency = 'USD'): string | null {
   if (value === null) return null
@@ -28,11 +16,6 @@ function formatMoney(value: number | null, currency = 'USD'): string | null {
 function formatArea(value: number | null): string | null {
   if (value === null) return null
   return `${value.toLocaleString()} sqft`
-}
-
-function shorten(value: string | null, max = 360): string | null {
-  if (!value) return null
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value
 }
 
 type PropertyRecord = {

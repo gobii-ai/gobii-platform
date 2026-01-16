@@ -16,6 +16,7 @@ import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDet
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
+import { ChartDetail } from './details/chart'
 
 export { normalizeStructuredValue } from './normalize'
 export {
@@ -50,9 +51,10 @@ export {
   RedditPostsDetail,
   AmazonProductReviewsDetail,
   AmazonProductSearchDetail,
+  ChartDetail,
 }
 
-export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
+export const TOOL_DETAIL_COMPONENTS = {
   default: GenericToolDetail,
   updateCharter: UpdateCharterDetail,
   sqliteBatch: SqliteBatchDetail,
@@ -82,10 +84,13 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   reutersNews: ReutersNewsDetail,
   zillowListing: ZillowListingDetail,
   redditPosts: RedditPostsDetail,
+  chart: ChartDetail,
   mcpTool: McpToolDetail,
-}
+} satisfies Record<string, ToolDetailComponent>
 
-export function resolveDetailComponent(kind: string | null | undefined): ToolDetailComponent {
+export type DetailKind = keyof typeof TOOL_DETAIL_COMPONENTS
+
+export function resolveDetailComponent(kind: DetailKind | null | undefined): ToolDetailComponent {
   if (!kind) return GenericToolDetail
   return TOOL_DETAIL_COMPONENTS[kind] ?? GenericToolDetail
 }

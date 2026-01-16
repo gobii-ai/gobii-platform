@@ -1,16 +1,8 @@
 import type { ToolDetailProps } from '../../tooling/types'
-import { KeyValueList, Section } from '../shared'
+import { Section } from '../shared'
 import { extractBrightDataArray } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
-
-function toText(value: unknown): string | null {
-  return isNonEmptyString(value) ? (value as string) : null
-}
-
-function shorten(value: string | null, max = 520): string | null {
-  if (!value) return null
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value
-}
+import { shorten, toText } from '../brightDataUtils'
 
 function formatDate(value: string | null): string | null {
   if (!value) return null
@@ -80,7 +72,7 @@ export function ReutersNewsDetail({ entry }: ToolDetailProps) {
             const updated = formatDate(article.updated)
             const metaParts = [article.author, published].filter(Boolean)
             const statsParts = [updated ? `Updated ${updated}` : null].filter(Boolean)
-            const summary = shorten(article.description || article.content)
+            const summary = shorten(article.description || article.content, 520)
 
             return (
               <div key={`${article.url ?? article.headline ?? idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">

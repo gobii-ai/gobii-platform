@@ -2,19 +2,7 @@ import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
 import { extractBrightDataFirstRecord } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
-
-function toText(value: unknown): string | null {
-  return isNonEmptyString(value) ? (value as string) : null
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[, ]+/g, ''))
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
+import { toNumber, toText } from '../brightDataUtils'
 
 function formatCompact(value: number | null): string | null {
   if (value === null) return null

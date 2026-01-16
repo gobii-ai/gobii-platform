@@ -2,19 +2,7 @@ import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
 import { extractBrightDataArray, extractBrightDataFirstRecord, extractBrightDataResultCount } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
-
-function toText(value: unknown): string | null {
-  return isNonEmptyString(value) ? (value as string) : null
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[, ]+/g, ''))
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
-}
+import { shorten, toNumber, toText } from '../brightDataUtils'
 
 function formatCount(value: number | null): string | null {
   if (value === null) return null
@@ -31,11 +19,6 @@ function formatPrice(value: number | null, currency: string | null): string | nu
     }
   }
   return value.toFixed(2)
-}
-
-function shorten(value: string | null, max = 320): string | null {
-  if (!value) return null
-  return value.length > max ? `${value.slice(0, max - 1)}…` : value
 }
 
 function formatRatingValue(value: number | null): string | null {
@@ -101,9 +84,9 @@ export function AmazonProductDetail({ entry }: ToolDetailProps) {
   const sellerId = toText(record.seller_id)
   const sellerUrl = toText(record.seller_url)
   const seller = sellerUrl ? 'View seller' : sellerId
-  const description = shorten(toText(record.description))
-  const topReview = shorten(toText(record.top_review))
-  const customerSays = shorten(toText(record.customer_says))
+  const description = shorten(toText(record.description), 320)
+  const topReview = shorten(toText(record.top_review), 320)
+  const customerSays = shorten(toText(record.customer_says), 320)
   const features = Array.isArray(record.features)
     ? (record.features as string[]).filter(isNonEmptyString).slice(0, 8)
     : []

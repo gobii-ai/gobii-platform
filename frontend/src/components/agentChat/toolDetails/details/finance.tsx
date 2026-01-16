@@ -2,15 +2,7 @@ import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
 import { extractBrightDataFirstRecord } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const num = Number(value.replace(/[, ]+/g, ''))
-    return Number.isFinite(num) ? num : null
-  }
-  return null
-}
+import { toNumber } from '../brightDataUtils'
 
 function formatNumber(value: number | null, fractionDigits = 2): string | null {
   if (value === null) return null

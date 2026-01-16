@@ -32,6 +32,7 @@ import { parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
+import type { DetailKind } from '../agentChat/toolDetails'
 import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
 import { parseAgentConfigUpdates } from './agentConfigSql'
 import { extractBrightDataArray, extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
@@ -65,7 +66,7 @@ export type ToolMetadataConfig = {
   icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
-  detailKind: string
+  detailKind: DetailKind
   skip?: boolean
   derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null): ToolDescriptorTransform | void
 }
@@ -1205,7 +1206,7 @@ export function getSharedToolMetadata(toolName: string | null | undefined): Tool
 }
 
 export function buildToolDescriptorMap(
-  resolveDetailComponent: (detailKind: string) => ToolDescriptor['detailComponent'],
+  resolveDetailComponent: (detailKind: DetailKind) => ToolDescriptor['detailComponent'],
 ): Map<string, ToolDescriptor> {
   const map: Map<string, ToolDescriptor> = new Map()
   const register = (config: ToolMetadataConfig) => {
