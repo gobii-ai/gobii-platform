@@ -82,6 +82,13 @@ def get_send_email_tool() -> Dict[str, Any]:
 
 def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_email tool for a persistent agent."""
+    from api.services.email_verification import require_verified_email, EmailVerificationError
+
+    try:
+        require_verified_email(agent.user, action_description="send emails")
+    except EmailVerificationError as e:
+        return e.to_tool_response()
+
     to_address = params.get("to_address")
     subject = params.get("subject")
     # Decode escape sequences and strip control chars from HTML body

@@ -998,6 +998,12 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     @transaction.atomic
     def form_valid(self, form):
         """Process a valid form to create an API key."""
+        from api.services.email_verification import has_verified_email
+
+        if not has_verified_email(self.request.user):
+            form.add_error(None, "Email verification required to create API keys. Please verify your email address in your account settings.")
+            return self.form_invalid(form)
+
         name = form.cleaned_data['name']
         ctx = self.api_key_context
 

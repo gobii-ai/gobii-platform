@@ -167,6 +167,13 @@ def _build_webhook_response(
 
 def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
     """Execute the send_webhook_event tool."""
+    from api.services.email_verification import require_verified_email, EmailVerificationError
+
+    try:
+        require_verified_email(agent.user, action_description="trigger webhooks")
+    except EmailVerificationError as e:
+        return e.to_tool_response()
+
     webhook_id = params.get("webhook_id")
     payload = params.get("payload")
     headers = _coerce_headers(params.get("headers"))
