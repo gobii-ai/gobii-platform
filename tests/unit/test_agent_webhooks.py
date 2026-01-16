@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
@@ -17,6 +18,13 @@ class AgentWebhookToolTests(TestCase):
             username="webhook-owner",
             email="owner@example.com",
             password="password123",
+        )
+        # Email verification is required for webhook sending
+        EmailAddress.objects.create(
+            user=cls.user,
+            email=cls.user.email,
+            verified=True,
+            primary=True,
         )
         cls.proxy = ProxyServer.objects.create(
             name="Webhook Proxy",
