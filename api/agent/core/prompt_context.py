@@ -2255,7 +2255,29 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
 
     Returns the rendered recent contacts text so it can be placed in a critical section.
     """
+    from api.services.email_verification import has_verified_email
+
     limit_msg_history = message_history_limit(agent)
+    owner_email_verified = has_verified_email(agent.user) if agent.user else False
+    span.set_attribute("persistent_agent.owner_email_verified", owner_email_verified)
+
+    # If owner email is not verified, add a prominent note about restricted external communication
+    if not owner_email_verified:
+        contacts_group.section_text(
+            "email_verification_required",
+            (
+                "IMPORTANT: External communication is currently unavailable because your owner "
+                "has not verified their email address.\n"
+                "- You cannot send emails or SMS\n"
+                "- You cannot add or contact external people\n"
+                "- Web chat remains available\n\n"
+                "If the user asks you to email, SMS, or loop in someone external, explain that "
+                "external communication requires email verification and ask them to verify their "
+                "email in account settings."
+            ),
+            weight=10,  # High weight to ensure it's prominent
+            non_shrinkable=True,
+        )
 
     # Agent endpoints (all, highlight primary)
     agent_eps = (
@@ -2393,7 +2415,9 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
 
     # Add the creator of the agent as a contact explicitly
     allowed_lines = []
-    if agent.user and agent.user.email:
+
+    # Only show owner email/phone as contacts if email is verified
+    if owner_email_verified and agent.user and agent.user.email:
         allowed_lines.append("As the creator of this agent, you can always contact the user at and receive messages from:")
         allowed_lines.append(f"- email: {agent.user.email} (owner - can configure)")
 
@@ -2407,26 +2431,31 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         if owner_phone and owner_phone.phone_number:
             allowed_lines.append(f"- sms: {owner_phone.phone_number} (owner - can configure)")
 
-    # Add explicitly allowed contacts from CommsAllowlistEntry
+    # Add explicitly allowed contacts from CommsAllowlistEntry (only if verified)
     from api.models import CommsAllowlistEntry
-    allowed_contacts = (
-        CommsAllowlistEntry.objects.filter(
-            agent=agent,
-            is_active=True,
+    if owner_email_verified:
+        allowed_contacts = (
+            CommsAllowlistEntry.objects.filter(
+                agent=agent,
+                is_active=True,
+            )
+            .order_by("channel", "address")
         )
-        .order_by("channel", "address")
-    )
-    if allowed_contacts:
-        allowed_lines.append("Additional allowed contacts (inbound = can receive from them; outbound = can send to them):")
-        for entry in allowed_contacts:
-            name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
-            config_marker = " [can configure]" if entry.can_configure else ""
-            perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
-            allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})")
+        if allowed_contacts:
+            allowed_lines.append("Additional allowed contacts (inbound = can receive from them; outbound = can send to them):")
+            for entry in allowed_contacts:
+                name_str = f" ({entry.name})" if hasattr(entry, "name") and entry.name else ""
+                config_marker = " [can configure]" if entry.can_configure else ""
+                perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
+                allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})")
 
-    allowed_lines.append("Only contact people listed here or in recent conversations.")
-    allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
-    allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
+    if owner_email_verified:
+        allowed_lines.append("Only contact people listed here or in recent conversations.")
+        allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
+        allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
+    else:
+        allowed_lines.append("External contacts are unavailable until your owner verifies their email address.")
+        allowed_lines.append("You can communicate with users via web chat only.")
 
     contacts_group.section_text(
         "allowed_contacts",
