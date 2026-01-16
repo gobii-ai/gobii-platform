@@ -71,10 +71,10 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "CRITICAL: Set true unless this is your FINAL report with all kanban cards done. Intro/greeting, progress updates, questions = always true. Only omit/false after delivering final results.",
+                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = FINAL report, all work done AND marked done.",
                     },
                 },
-                "required": ["to_address", "subject", "mobile_first_html"],
+                "required": ["to_address", "subject", "mobile_first_html", "will_continue_work"],
             },
         },
     }

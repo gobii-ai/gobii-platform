@@ -47,10 +47,10 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "CRITICAL: Set true unless this is your FINAL message with all kanban cards done. Intro, coordination requests, questions = always true. Only omit/false after all work complete.",
+                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = FINAL message, all work done AND marked done.",
                     },
                 },
-                "required": ["peer_agent_id", "message"],
+                "required": ["peer_agent_id", "message", "will_continue_work"],
             },
         },
     }

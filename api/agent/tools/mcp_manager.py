@@ -91,9 +91,15 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     updated_properties = dict(properties)
     updated_properties["will_continue_work"] = {
         "type": "boolean",
-        "description": "Set false to STOP when: all kanban cards are done AND you've sent your final report. Omitting defaults to continue. Always set false on your final tool call.",
+        "description": "REQUIRED. true = work remains (cards in todo/doing). false = all work done AND marked done, report sent.",
     }
     updated_parameters["properties"] = updated_properties
+    # Add to required list
+    existing_required = parameters.get("required", [])
+    if isinstance(existing_required, list):
+        updated_parameters["required"] = list(existing_required) + ["will_continue_work"]
+    else:
+        updated_parameters["required"] = ["will_continue_work"]
     return updated_parameters
 
 
