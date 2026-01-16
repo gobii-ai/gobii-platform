@@ -1319,20 +1319,47 @@ class MarketingContactRequestView(View):
 
 
 class ClearSignupTrackingView(View):
-    """Clear the signup tracking cookie."""
+    """Return signup tracking data (if any) and clear the session flag.
+
+    Used by static app shells that can't access Django template context.
+    Returns tracking data needed to fire conversion pixels client-side.
+    """
 
     def get(self, request, *args, **kwargs):
-        # Clear the signup tracking cookie
-        response = JsonResponse({})
+        # Check if there's pending signup tracking
+        show_tracking = request.session.get('show_signup_tracking', False)
 
-        if 'show_signup_tracking' in request.session:
-            del request.session['show_signup_tracking']
+        if not show_tracking:
+            return JsonResponse({'tracking': False})
 
+        # Gather tracking data before clearing
+        from pages.context_processors import analytics
+        analytics_data = analytics(request).get('analytics', {}).get('data', {})
+
+        data = {
+            'tracking': True,
+            'eventId': request.session.get('signup_event_id', ''),
+            'userId': str(request.user.id) if request.user.is_authenticated else '',
+            'emailHash': analytics_data.get('email_hash', ''),
+            'idHash': analytics_data.get('id_hash', ''),
+            'registrationValue': float(getattr(settings, 'CAPI_REGISTRATION_VALUE', 0) or 0),
+            # Include pixel IDs so client knows which to fire
+            'pixels': {
+                'ga': getattr(settings, 'GA_MEASUREMENT_ID', ''),
+                'reddit': getattr(settings, 'REDDIT_PIXEL_ID', ''),
+                'tiktok': getattr(settings, 'TIKTOK_PIXEL_ID', ''),
+                'meta': getattr(settings, 'META_PIXEL_ID', ''),
+                'linkedin': getattr(settings, 'LINKEDIN_SIGNUP_CONVERSION_ID', ''),
+            },
+        }
+
+        # Clear the session flag and related data
+        del request.session['show_signup_tracking']
         for key in ('signup_event_id', 'signup_user_id', 'signup_email_hash'):
             if key in request.session:
                 del request.session[key]
 
-        return response
+        return JsonResponse(data)
 
 
 class SolutionView(TemplateView):

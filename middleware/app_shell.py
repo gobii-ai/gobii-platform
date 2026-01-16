@@ -62,9 +62,154 @@ def _format_segment_snippet() -> str:
   </script>"""
 
 
+def _format_signup_tracking_snippet() -> str:
+    """Generate signup tracking snippet that fetches data from API.
+
+    Since the app shell is statically cached, we can't include user-specific
+    tracking data directly. Instead, this script fetches tracking data from
+    the clear_signup_tracking endpoint which has session access.
+    """
+    if settings.DEBUG:
+        return "<!-- Signup tracking disabled in debug mode -->"
+
+    proprietary = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+    if not proprietary:
+        return "<!-- Signup tracking disabled (non-proprietary mode) -->"
+
+    return """<script>
+  (function() {
+    // Fetch signup tracking data from session-aware endpoint
+    fetch('/clear_signup_tracking', { credentials: 'same-origin' })
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (!data.tracking) return;
+
+        var p = data.pixels || {};
+        var val = data.registrationValue || 0;
+        var cur = 'USD';
+
+        // Google Analytics
+        if (p.ga && typeof window.gtag === 'function') {
+          gtag('event', 'sign_up', { method: 'email', value: val, currency: cur });
+        }
+
+        // Reddit
+        if (p.reddit && typeof window.rdt === 'function') {
+          rdt('track', 'SignUp', {
+            email: data.emailHash,
+            externalId: data.userId,
+            conversionId: data.eventId || ('reg-' + data.userId),
+            value: val,
+            currency: cur
+          });
+        }
+
+        // TikTok
+        if (p.tiktok && window.ttq && typeof window.ttq.track === 'function') {
+          ttq.track('CompleteRegistration', {
+            event_id: data.eventId,
+            external_id: data.idHash,
+            email: data.emailHash,
+            value: val,
+            currency: cur
+          });
+        }
+
+        // Meta/Facebook
+        if (p.meta && typeof window.fbq === 'function') {
+          fbq('track', 'CompleteRegistration', {}, {
+            external_id: data.userId,
+            em: data.emailHash,
+            eventID: data.eventId
+          });
+        }
+
+        // LinkedIn
+        if (p.linkedin && typeof window.lintrk === 'function') {
+          window.lintrk('track', { conversion_id: p.linkedin });
+        }
+      })
+      .catch(function() { /* ignore errors */ });
+  })();
+  </script>"""
+
+
+def _format_pixel_loaders() -> str:
+    """Generate pixel loader scripts for tracking platforms."""
+    if settings.DEBUG:
+        return "<!-- Pixel loaders disabled in debug mode -->"
+
+    proprietary = getattr(settings, "GOBII_PROPRIETARY_MODE", False)
+    snippets = []
+
+    # Google Analytics
+    ga_id = getattr(settings, "GA_MEASUREMENT_ID", None)
+    if ga_id:
+        snippets.append(f"""<script async src="https://www.googletagmanager.com/gtag/js?id={ga_id}"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){{dataLayer.push(arguments);}}
+    gtag('js', new Date());
+    gtag('config', '{ga_id}', {{ anonymize_ip: true }});
+  </script>""")
+
+    if not proprietary:
+        return "\n  ".join(snippets) if snippets else ""
+
+    # Reddit Pixel
+    reddit_id = getattr(settings, "REDDIT_PIXEL_ID", None)
+    if reddit_id:
+        snippets.append(f"""<script>
+  !function(w,d){{if(!w.rdt){{var p=w.rdt=function(){{p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)}};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}}}(window,document);
+  rdt('init','{reddit_id}');
+  rdt('track', 'PageVisit');
+  </script>""")
+
+    # TikTok Pixel
+    tiktok_id = getattr(settings, "TIKTOK_PIXEL_ID", None)
+    if tiktok_id:
+        snippets.append(f"""<script>
+  !function (w, d, t) {{
+    w.TiktokAnalyticsObject=t;var ttq=w[t]=w[t]||[];ttq.methods=["page","track","identify","instances","debug","on","off","once","ready","alias","group","enableCookie","disableCookie","holdConsent","revokeConsent","grantConsent"],ttq.setAndDefer=function(t,e){{t[e]=function(){{t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}}};for(var i=0;i<ttq.methods.length;i++)ttq.setAndDefer(ttq,ttq.methods[i]);ttq.instance=function(t){{for(var e=ttq._i[t]||[],n=0;n<ttq.methods.length;n++)ttq.setAndDefer(e,ttq.methods[n]);return e}},ttq.load=function(e,n){{var r="https://analytics.tiktok.com/i18n/pixel/events.js",o=n&&n.partner;ttq._i=ttq._i||{{}},ttq._i[e]=[],ttq._i[e]._u=r,ttq._t=ttq._t||{{}},ttq._t[e]=+new Date,ttq._o=ttq._o||{{}},ttq._o[e]=n||{{}};n=document.createElement("script");n.type="text/javascript";n.async=!0;n.src=r+"?sdkid="+e+"&lib="+t;var a=document.getElementsByTagName("script")[0];a.parentNode.insertBefore(n,a)}};
+    ttq.load('{tiktok_id}');
+    ttq.page();
+  }}(window, document, 'ttq');
+  </script>""")
+
+    # Meta Pixel
+    meta_id = getattr(settings, "META_PIXEL_ID", None)
+    if meta_id:
+        snippets.append(f"""<script>
+  !function(f,b,e,v,n,t,s)
+  {{if(f.fbq)return;n=f.fbq=function(){{n.callMethod?
+  n.callMethod.apply(n,arguments):n.queue.push(arguments)}};
+  if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+  n.queue=[];t=b.createElement(e);t.async=!0;
+  t.src=v;s=b.getElementsByTagName(e)[0];
+  s.parentNode.insertBefore(t,s)}}(window, document,'script',
+  'https://connect.facebook.net/en_US/fbevents.js');
+  fbq('init', '{meta_id}');
+  fbq('track', 'PageView');
+  </script>""")
+
+    # LinkedIn Pixel
+    linkedin_id = getattr(settings, "LINKEDIN_PARTNER_ID", None)
+    if linkedin_id:
+        snippets.append(f"""<script>
+  _linkedin_partner_id = "{linkedin_id}";
+  window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
+  window._linkedin_data_partner_ids.push(_linkedin_partner_id);
+  (function(l){{if(!l){{window.lintrk=function(a,b){{window.lintrk.q.push([a,b])}};window.lintrk.q=[]}}var s=document.getElementsByTagName("script")[0];var b=document.createElement("script");b.type="text/javascript";b.async=true;b.src="https://snap.licdn.com/li.lms-analytics/insight.min.js";s.parentNode.insertBefore(b,s);}})(window.lintrk);
+  </script>""")
+
+    return "\n  ".join(snippets) if snippets else ""
+
+
 def _build_shell_html() -> str:
     vite_tags = _format_vite_tags()
     segment_snippet = _format_segment_snippet()
+    pixel_loaders = _format_pixel_loaders()
+    signup_tracking = _format_signup_tracking_snippet()
     icon_url = static("images/noBgBlue.png")
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
@@ -81,7 +226,9 @@ def _build_shell_html() -> str:
   <link rel="stylesheet" href="{fonts_css}">
   <link rel="stylesheet" href="{pygments_css}">
   <link rel="stylesheet" href="{globals_css}">
+  {pixel_loaders}
   {segment_snippet}
+  {signup_tracking}
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
