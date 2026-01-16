@@ -284,6 +284,52 @@ function shorten(value: string | null, max = 360): string | null {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value
 }
 
+type PostRecord = {
+  title: string | null
+  headline: string | null
+  text: string | null
+  url: string | null
+  author: string | null
+  posted: string | null
+  likes: number | null
+  comments: number | null
+  hashtags: string[]
+}
+
+function normalizePosts(result: unknown): PostRecord[] {
+  const parsed = parseResultObject(result)
+  const items = Array.isArray(parsed)
+    ? parsed
+    : isPlainObject(parsed) && Array.isArray((parsed as Record<string, unknown>).result)
+      ? ((parsed as Record<string, unknown>).result as unknown[])
+      : []
+
+  return items
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const record = item as Record<string, unknown>
+      const hashtags = Array.isArray(record.hashtags)
+        ? (record.hashtags as unknown[]).map((tag) => toText(tag)).filter(isNonEmptyString) as string[]
+        : []
+      const rawText =
+        toText(record.post_text) ||
+        toText(record.original_post_text) ||
+        stripHtml(toText(record.post_text_html))
+      return {
+        title: toText(record.title),
+        headline: toText(record.headline),
+        text: rawText,
+        url: toText(record.url) || toText(record.post_url),
+        author: toText(record.user_id) || toText(record.user_name),
+        posted: toText(record.date_posted) || toText(record.timestamp),
+        likes: toNumber(record.num_likes),
+        comments: toNumber(record.num_comments),
+        hashtags,
+      }
+    })
+    .filter((item): item is PostRecord => Boolean(item && (item.title || item.text || item.url)))
+}
+
 export function LinkedInJobListingsDetail({ entry }: ToolDetailProps) {
   const jobs = normalizeJobListings(entry.result).slice(0, 10)
 
@@ -329,6 +375,60 @@ export function LinkedInJobListingsDetail({ entry }: ToolDetailProps) {
                   <p className="text-xs text-slate-500">{statParts.join(' • ')}</p>
                 ) : null}
                 {summary ? <p className="mt-2 leading-relaxed text-slate-700">{summary}</p> : null}
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+export function LinkedInPostsDetail({ entry }: ToolDetailProps) {
+  const posts = normalizePosts(entry.result).slice(0, 6)
+
+  if (!posts.length) {
+    return <p className="text-sm text-slate-500">No posts returned.</p>
+  }
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <Section title="Posts">
+        <div className="space-y-3">
+          {posts.map((post, idx) => {
+            const metaParts = [
+              post.author,
+              post.posted,
+            ].filter(Boolean)
+            const statsParts = [
+              post.likes !== null ? `${post.likes.toLocaleString()} like${post.likes === 1 ? '' : 's'}` : null,
+              post.comments !== null ? `${post.comments.toLocaleString()} comment${post.comments === 1 ? '' : 's'}` : null,
+            ].filter(Boolean)
+            const summary = shorten(post.text, 420)
+
+            return (
+              <div key={`${post.url ?? post.title ?? idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-slate-900">
+                    {post.url ? (
+                      <a href={post.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                        {post.title || post.headline || post.url}
+                      </a>
+                    ) : (
+                      post.title || post.headline || 'LinkedIn post'
+                    )}
+                  </span>
+                </div>
+                {metaParts.length ? (
+                  <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
+                ) : null}
+                {statsParts.length ? (
+                  <p className="text-xs text-slate-500">{statsParts.join(' • ')}</p>
+                ) : null}
+                {summary ? <p className="mt-2 leading-relaxed text-slate-700 whitespace-pre-wrap">{summary}</p> : null}
+                {post.hashtags.length ? (
+                  <p className="mt-1 text-xs text-slate-500">{post.hashtags.join(' ')}</p>
+                ) : null}
               </div>
             )
           })}

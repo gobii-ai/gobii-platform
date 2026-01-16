@@ -901,8 +901,14 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
-    detailKind: 'mcpTool',
+    detailKind: 'linkedinPosts',
     derive(entry, parameters) {
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const title = coerceString(first?.['title']) || coerceString(first?.['headline'])
+      const author = coerceString(first?.['user_name']) || coerceString(first?.['user_id'])
+      const url = coerceString(first?.['url']) || coerceString(first?.['post_url'])
+
       const caption = deriveLinkedInCaption(parameters, [
         'query',
         'keywords',
@@ -911,7 +917,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'company_name',
         'hashtag',
         'url',
-      ])
+      ]) || title || author || url
       return {
         caption: caption ?? entry.caption ?? 'LinkedIn posts',
       }
