@@ -1947,9 +1947,8 @@ def initialize_new_user_resources(sender, instance, created, **kwargs):
                         voided=False,
                     )
 
-            # Automatically create a default API key for new users
-            with traced("CREATE User API Key"):
-                ApiKey.create_for_user(user=instance, name="default", created_by=instance)
+            # Note: API keys are not auto-created on signup. Users must verify their
+            # email before creating API keys (enforced in console/views.py ApiKeyListView).
 
             # Create an initial billing record for the user
             with traced("CREATE User Billing Record", user_id=instance.id):
