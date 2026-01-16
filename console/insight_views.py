@@ -132,7 +132,9 @@ def _build_agent_setup_metadata(
     organization: Optional[Any],
 ) -> dict:
     phone = get_primary_phone(request.user)
-    email_verified = has_verified_email(request.user)
+    # Check agent owner's verification status (not viewer's) since outbound
+    # communications are gated by require_verified_email(agent.user)
+    email_verified = has_verified_email(agent.user)
     phone_payload = serialize_phone(phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
 
