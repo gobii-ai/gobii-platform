@@ -829,7 +829,7 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
-    detailKind: 'mcpTool',
+    detailKind: 'linkedinCompany',
     derive(entry, parameters) {
       const caption = deriveLinkedInCaption(parameters, [
         'company_name',
