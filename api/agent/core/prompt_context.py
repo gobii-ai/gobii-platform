@@ -244,6 +244,8 @@ have(small_result) → read it directly → insight                         # RI
 have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
 ```
 
+**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
+
 ---
 
 ## Query Rules
