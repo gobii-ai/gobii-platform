@@ -1916,7 +1916,7 @@ def build_prompt_context(
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. If your charter implies ongoing work, set a schedule. When unsure, lean toward setting one—you can always adjust later. Without a schedule, you die when you stop.",
+            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
             weight=1,
             non_shrinkable=True
         )
@@ -2060,7 +2060,7 @@ def build_prompt_context(
         "(single row, id=1). It resets every LLM call and is applied after tools run. "
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
         "Clear schedule with schedule=NULL or ''. "
-        "When updating charter, ask: does this role imply ongoing work? If yes, set a schedule too. "
+        "When in doubt, set a schedule (default '0 9 * * *'). "
         "CRITICAL: Charter/schedule updates are NOT work. No kanban cards = no work = will_continue_work=false."
     )
     variable_group.section_text(
@@ -4127,7 +4127,7 @@ def _get_system_instruction(
                     "ELSE:\n"
                     "  send_{channel}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                     "```\n"
-                    "Schedule: if the role implies ongoing work, set one. When unsure, lean toward setting one.\n"
+                    "Schedule: When in doubt, set one (default '0 9 * * *'). Without a schedule, you die when you stop.\n"
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
