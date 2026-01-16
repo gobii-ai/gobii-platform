@@ -211,7 +211,7 @@ export function ImmersiveApp() {
   const embed = useMemo(() => parseBooleanFlag(new URLSearchParams(location.search).get('embed')), [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const rosterQuery = useAgentRoster()
-  const hasAgents = (rosterQuery.data?.length ?? 0) > 0
+  const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
   useEffect(() => {
     const fromQuery = readReturnToFromSearch(location.search)
