@@ -375,51 +375,6 @@ def _fix_dialect_syntax(sql: str) -> tuple[str, str | None]:
     return sql, None
 
 
-def _fix_unbalanced_parens(sql: str) -> tuple[str, str | None]:
-    """Attempt to fix unbalanced parentheses.
-
-    Only fixes simple cases: 1 extra open or 1 extra close paren.
-    """
-    # Count parens outside of strings
-    open_count = 0
-    close_count = 0
-    in_string = False
-    string_char = None
-
-    for i, char in enumerate(sql):
-        if in_string:
-            if char == string_char:
-                # Check for escaped quote
-                if i + 1 < len(sql) and sql[i + 1] == string_char:
-                    continue
-                in_string = False
-        else:
-            if char in ("'", '"'):
-                in_string = True
-                string_char = char
-            elif char == '(':
-                open_count += 1
-            elif char == ')':
-                close_count += 1
-
-    diff = open_count - close_count
-
-    if diff == 1:
-        # One extra open paren - add close paren at end
-        sql = sql.rstrip().rstrip(';') + ')'
-        return sql, "added missing ')'"
-    elif diff == -1:
-        # One extra close paren - try to remove trailing )
-        if sql.rstrip().endswith(')'):
-            sql = sql.rstrip()[:-1]
-            return sql, "removed extra ')'"
-    elif diff == 0:
-        return sql, None
-
-    # More complex imbalance - don't try to fix
-    return sql, None
-
-
 def _fix_trailing_commas(sql: str) -> tuple[str, str | None]:
     """Fix trailing commas before closing parentheses.
 
@@ -606,10 +561,6 @@ def _apply_all_sql_fixes(sql: str, error_msg: str = "") -> tuple[str, list[str]]
         corrections.append(fix)
 
     sql, fix = _fix_dialect_syntax(sql)
-    if fix:
-        corrections.append(fix)
-
-    sql, fix = _fix_unbalanced_parens(sql)
     if fix:
         corrections.append(fix)
 
@@ -1782,7 +1733,7 @@ def _execute_sqlite_batch_inner(
             "message": msg,
         }
 
-        if not had_error and will_continue_work is False and has_user_facing_message:
+        if not had_error and will_continue_work is False:
             response["auto_sleep_ok"] = True
 
         return response

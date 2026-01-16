@@ -23,7 +23,6 @@ from api.agent.tools.sqlite_batch import (
     _fix_python_operators,
     _fix_singular_plural_columns,
     _fix_singular_plural_tables,
-    _fix_unbalanced_parens,
     _is_typo,
     _strip_markdown_fences,
     _strip_trailing_tool_params,
@@ -1079,38 +1078,6 @@ class SqliteBatchToolTests(TestCase):
         self.assertNotIn("::", fixed)
 
     # -------------------------------------------------------------------------
-    # Unbalanced parentheses fix tests
-    # -------------------------------------------------------------------------
-
-    def test_fix_unbalanced_parens_missing_close(self):
-        """Adds missing closing paren."""
-        sql = "SELECT * FROM t WHERE (x = 1 AND y = 2"
-        fixed, fix = _fix_unbalanced_parens(sql)
-        self.assertTrue(fixed.endswith(")"))
-        self.assertIn("added", fix)
-
-    def test_fix_unbalanced_parens_extra_close(self):
-        """Removes extra closing paren at end."""
-        sql = "SELECT * FROM t WHERE x = 1)"
-        fixed, fix = _fix_unbalanced_parens(sql)
-        self.assertFalse(fixed.rstrip().endswith(")"))
-        self.assertIn("removed", fix)
-
-    def test_fix_unbalanced_parens_balanced(self):
-        """Doesn't modify balanced parentheses."""
-        sql = "SELECT * FROM t WHERE (x = 1) AND (y = 2)"
-        fixed, fix = _fix_unbalanced_parens(sql)
-        self.assertEqual(fixed, sql)
-        self.assertIsNone(fix)
-
-    def test_fix_unbalanced_parens_ignores_strings(self):
-        """Doesn't count parens inside string literals."""
-        sql = "SELECT * FROM t WHERE name = '(test)'"
-        fixed, fix = _fix_unbalanced_parens(sql)
-        self.assertEqual(fixed, sql)
-        self.assertIsNone(fix)
-
-    # -------------------------------------------------------------------------
     # Singular/plural fix tests
     # -------------------------------------------------------------------------
 
@@ -1237,20 +1204,3 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             results = out["results"][0]["result"]
             self.assertEqual(len(results), 3)
-
-    def test_integration_unbalanced_parens(self):
-        """Full integration: missing paren is added and query runs."""
-        with self._with_temp_db():
-            setup = "CREATE TABLE t (x INT, y INT); INSERT INTO t VALUES (1, 2), (3, 4);"
-            execute_sqlite_batch(self.agent, {"sql": setup})
-
-            # Query with missing closing paren
-            sql = "SELECT * FROM t WHERE (x = 1 AND y = 2"
-            out = execute_sqlite_batch(self.agent, {"sql": sql})
-
-            self.assertEqual(out.get("status"), "ok", out.get("message"))
-            self.assertIn("AUTO-CORRECTED", out.get("message", ""))
-            auto_fix = out["results"][0].get("auto_correction")
-            self.assertIsNotNone(auto_fix)
-            self.assertIn("WHERE (x = 1 AND y = 2", auto_fix["before"])
-            self.assertIn("WHERE (x = 1 AND y = 2)", auto_fix["after"])

@@ -244,6 +244,8 @@ have(small_result) → read it directly → insight                         # RI
 have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
 ```
 
+**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
+
 ---
 
 ## Query Rules
@@ -267,6 +269,11 @@ sqlite_batch(sql="
   FROM __tool_results WHERE result_id='{id}'")
 one_result_id = one_sqlite_batch   # never query same result_id in separate calls
 budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
+TEMP TABLE = gone next call   # TEMP tables vanish after each sqlite_batch; use CREATE TABLE (no TEMP)
+
+# Persist intermediate results with CREATE TABLE AS SELECT:
+CREATE TABLE my_data AS SELECT json_extract(...) FROM __tool_results WHERE result_id='abc';
+# → my_data persists; query it in future calls
 
 # Identifiers: copy, never construct
 result_id    → copy_verbatim(tool_result.result_id)
@@ -688,7 +695,7 @@ sqlite_batch(sql="
 2. See the result - verify success
 3. Only then mark that specific card done
 4. Repeat for each task
-5. Final turn: send report FIRST, then mark last card done
+5. **Final turn: send report, then sqlite_batch(mark last card done, will_continue_work=false) → END**
 
 **WRONG patterns:**
 ```sql
@@ -1263,9 +1270,8 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
         kanban_group.section_text(
             "kanban_completion_hint",
             (
-                "⚡ Work cycle: Do the task → verify success → UPDATE status='done' → next card. "
-                "Don't leave cards in 'doing' — finish and mark done immediately. "
-                "Batch the done-UPDATE with your next action when possible."
+                "⚡ Work cycle: Do task → verify success → UPDATE status='done' → next card. "
+                "On your LAST card: report findings first, then sqlite_batch(mark done, will_continue_work=false) to terminate."
             ),
             weight=1,
             non_shrinkable=True,
@@ -1910,7 +1916,7 @@ def build_prompt_context(
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. If this task involves recurring work, monitoring, or follow-up, SET A SCHEDULE NOW via sqlite_batch. Without a schedule, you won't come back—this work dies when you stop.",
+            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
             weight=1,
             non_shrinkable=True
         )
@@ -2053,7 +2059,9 @@ def build_prompt_context(
         f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
         "(single row, id=1). It resets every LLM call and is applied after tools run. "
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
-        "Clear schedule with schedule=NULL or ''."
+        "Clear schedule with schedule=NULL or ''. "
+        "When in doubt, set a schedule (default '0 9 * * *'). "
+        "CRITICAL: Charter/schedule updates are NOT work. No kanban cards = no work = will_continue_work=false."
     )
     variable_group.section_text(
         "agent_config_note",
@@ -2577,9 +2585,8 @@ def _get_work_completion_prompt(
             return (
                 "work_complete",
                 (
-                    f"✅ All work complete: {done_count} card(s) done, nothing remaining.\n"
-                    "Already sent your results? Just `sleep_until_next_trigger` to finish.\n"
-                    "Still need to share findings? Include them now (one message is enough), then sleep."
+                    f"🛑 STOP: All {done_count} card(s) done. You should have used will_continue_work=false when marking the last card done. "
+                    "Do not output text. Do not announce completion. Just stop."
                 ),
                 9,  # Highest weight - must stop
             )
@@ -2590,11 +2597,11 @@ def _get_work_completion_prompt(
                 return (
                     "schedule_triggered_empty",
                     (
-                        "📅 Schedule triggered with empty kanban board.\n"
-                        "First step: evaluate your charter and add cards for any work needed.\n"
-                        "If nothing to do, respond with an empty message or `sleep_until_next_trigger`."
+                        "🛑 Schedule triggered but NO kanban cards exist.\n"
+                        "You have no work. Use will_continue_work=false on your next action and stop.\n"
+                        "Do NOT loop updating charter. Do NOT send messages with will_continue_work=true."
                     ),
-                    5,
+                    9,  # High weight to override other guidance
                 )
             return None
 
@@ -3307,29 +3314,27 @@ def _get_system_instruction(
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**Defaults:** Message tools (send_chat, send_email, send_sms) stop when omitted. Data tools (http_request, sqlite_batch) continue when omitted.\n\n"
-        "**STOP (will_continue_work=false)** — all kanban cards done AND report sent:\n"
+        "**HARD RULE:** No kanban cards = no work. ALL tool calls (greetings, charter updates, everything) must use will_continue_work=false.\n\n"
+        "**STOP (will_continue_work=false)** — no kanban cards OR all cards done:\n"
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')} → STOP (message tools stop by default).\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')} → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
         f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
         "- Research complete, report sent, all cards done → will_continue_work=false on final tool → STOP.\n\n"
-        "**CONTINUE (will_continue_work=true)** — still have work or report not sent:\n"
-        f"- 'what's bitcoin?' → http_request → process result → {reply_short} → STOP.\n"
-        "- 'what's on HN?' → http_request → process → send report → STOP.\n"
-        "- 'research competitors' → search_tools → keep working until all kanban cards done.\n"
-        f"- Fetched data but {fetched_note} → keep going.\n"
+        "**CONTINUE (will_continue_work=true)** — ONLY when you have kanban cards in todo/doing:\n"
         "- Kanban cards still in todo/doing → keep going.\n"
+        f"- Fetched data but {fetched_note} → keep going.\n"
+        "- 'research competitors' → search_tools → keep working until all kanban cards done.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
         f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
-        "**CRITICAL: Before your last tool call, verify:**\n"
-        "1. All kanban cards are 'done' (no todo/doing remain)\n"
-        "2. You've sent your final report to the user\n"
-        "3. If BOTH are true → will_continue_work=false on your final tool call → STOP\n"
-        "4. If EITHER is false → keep working\n\n"
+        "**CRITICAL termination sequence:**\n"
+        "1. Send your final report to the user\n"
+        "2. Mark your last kanban card done with `will_continue_work=false` on that sqlite_batch\n"
+        "3. You're done—no extra turn, no announcement\n\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
@@ -3341,7 +3346,7 @@ def _get_system_instruction(
         )
     else:
         will_continue_guidance = (
-            "**Stopping:** When all kanban cards are done AND you've sent your final report, use will_continue_work=false on your last tool call to STOP. Do not take extra turns.\n"
+            "**Stopping:** After sending your final report, mark your last card done with will_continue_work=false. That's your final action—no extra turn.\n"
         )
 
     delivery_instructions = (
@@ -3443,17 +3448,10 @@ def _get_system_instruction(
         "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
 
         "### When to use kanban cards:\n"
-        "**USE CARDS** for multi-step work: research tasks, investigations with multiple sources, anything requiring 3+ tool calls, work that spans multiple turns, or tasks where you might lose your place.\n"
-        "**SKIP CARDS** for simple tasks: quick lookups (weather, price, single fact), one-shot questions, simple greetings, direct answers that need just 1-2 tool calls. Just do the work and respond—no planning overhead.\n\n"
-        "Examples of NO cards needed:\n"
-        "- 'What's Bitcoin at?' → fetch price → respond. Done.\n"
-        "- 'What time is it in Tokyo?' → calculate → respond. Done.\n"
-        "- 'Summarize this article' → scrape → summarize → respond. Done.\n"
-        "- 'Hi!' → greet back. Done.\n\n"
-        "Examples of YES cards needed:\n"
-        "- 'Research competitors' → multiple searches, multiple scrapes, analysis, report\n"
-        "- 'Monitor this daily' → ongoing work across sessions\n"
-        "- 'Build me a comparison of X, Y, Z' → structured multi-source research\n\n"
+        "**USE CARDS** for your multi-step work: research, investigations, anything 3+ tool calls or spanning multiple turns.\n"
+        "**SKIP CARDS** for: simple tasks (lookups, greetings, 1-2 tool calls), awaiting instructions, and user-requested tracking (if user wants 'a todo list' or 'track X for me', that's their data in a custom table—not your kanban).\n\n"
+        "NO cards: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' → just do it.\n"
+        "YES cards: 'Research competitors' / 'Monitor daily' / 'Compare X, Y, Z' → multi-step work.\n\n"
 
         "### Charter + Kanban work together (for multi-step work):\n"
         "- Charter = what you're doing (your purpose)\n"
@@ -3470,7 +3468,7 @@ def _get_system_instruction(
         "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
         "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done.\n"
-        "- **All cards 'done' + report sent = STOP.** Use will_continue_work=false on your final tool call to stop immediately. Do not take extra turns.\n\n"
+        "- **Terminate on final card:** When marking your last card done, use `will_continue_work=false` on that sqlite_batch. This ends your turn immediately—no extra cycle.\n\n"
 
         "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
@@ -3890,36 +3888,23 @@ def _get_system_instruction(
         "Text output is for RESULTS, not narration. Tools execute silently—no commentary.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
         "## Kanban Tracking (for multi-step work)\n\n"
-        "Use kanban for complex tasks needing 3+ tool calls or spanning multiple turns. Skip it for simple lookups and one-shot questions—just do the work directly.\n\n"
-        "When you DO use kanban, the sequence is: DO THE WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
-        "**Card quality:** Each card must be ultra-specific, info-dense, and fully self-contained. Include the high-level goal so context survives across long sessions.\n"
-        "- BAD: 'Do research' / 'Step 1' / 'Analyze data' (vague, useless without context)\n"
-        "- BAD: 'Get pricing info' (which products? for what purpose?)\n"
-        "- GOOD: 'Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tiers for CRM comparison report'\n"
-        "- GOOD: 'Build comparison table: CRM × tier × price × key limits — user evaluating which CRM to buy'\n"
-        "- GOOD: 'Email CRM pricing report to user with rec for 10-person sales team under $500/mo'\n\n"
-        "**Pattern:** `<action> — <context about why / high-level goal>`\n"
-        "The dash-context reminds future-you what this is all for when you've lost the thread.\n\n"
-        "**Every plan MUST end with a reporting step.** The final card delivers results to the user:\n"
-        "- 'Email competitor analysis with top 3 ranked picks to user'\n"
-        "- 'Send weekly startup digest to user — include funding, team size, and why each matters'\n"
-        "- 'Message user with final recommendations + supporting evidence from research'\n\n"
-        "Steps:\n"
-        "1. Create cards for each task AND a final reporting/delivery card when work begins\n"
-        "2. Set status='doing' on the card you're actively working on\n"
-        "3. DO THE ACTUAL WORK (tool calls, analysis, etc.)\n"
-        "4. VERIFY the work succeeded (check tool results)\n"
-        "5. THEN mark status='done'—never before the work is complete\n"
-        "6. **When ALL cards are 'done' AND you've sent your final report → will_continue_work=false → STOP IMMEDIATELY**\n\n"
-        "WRONG: Mark card done → then do the work (or skip it entirely)\n"
-        "WRONG: All cards done but keep taking turns without will_continue_work=false\n"
-        "WRONG: No reporting card—work done but user never gets results\n"
-        "RIGHT: Do the work → verify success → mark done → send report → STOP\n\n"
-        "No cards = no memory. Unmarked work = invisible progress. Premature 'done' = lying. Forgetting to stop = wasting credits.\n\n"
+        "Use kanban for your own multi-step work (3+ tool calls, multiple turns). Skip for simple tasks.\n\n"
+        "**The sequence:** DO WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
+        "**Card quality:** Ultra-specific and self-contained. Pattern: `<action> — <context/goal>`\n"
+        "- BAD: 'Do research' / 'Step 1' (vague)\n"
+        "- GOOD: 'Scrape Salesforce, HubSpot pricing — for CRM comparison report'\n"
+        "- GOOD: 'Email pricing report with rec to user — completing CRM research'\n\n"
+        "**Rules:**\n"
+        "1. Every plan ends with a reporting step that delivers results to user\n"
+        "2. Mark cards done AFTER verifying work succeeded, not before\n"
+        "3. When marking your LAST card done, use `will_continue_work=false` on that sqlite_batch—this terminates immediately\n\n"
+        "WRONG: Mark last card done with will_continue_work=true → get extra turn → announce 'I completed everything'\n"
+        "RIGHT: Report → sqlite_batch(mark last card done, will_continue_work=false) → END\n\n"
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
-        "Be thorough, diligent, and persistent in understanding their needs. "
+        "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
+        "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about your limitations. If a task is too ambitious, help the user find a smaller scope where you can genuinely deliver value. "
         "A small win beats a big failure. "
@@ -4016,7 +4001,7 @@ def _get_system_instruction(
                     "One sqlite_batch with 5 statements beats 5 separate calls. Always batch.\n"
                     "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
                     "Don't provide IDs—they auto-generate. Just title + status.\n"
-                    "Charter without cards leaves you with no memory of what to do. Always include both.\n\n"
+                    "No concrete task yet? No cards needed—just greet and set charter to 'Awaiting instructions'.\n\n"
                     "**Card quality:** Cards must be ultra-specific and embed the high-level goal. Pattern: `<action> — <context/why>`\n"
                     "The dash-context ensures future-you knows what this is all for even if you lose the thread.\n"
                     "- BAD: 'Research competitors' (vague, no targets, useless alone)\n"
@@ -4128,24 +4113,21 @@ def _get_system_instruction(
 
                     "### R5: Continuation Logic\n"
                     "```\n"
-                    "WHEN task_exists AND known_api => http_request(api_url), will_continue_work=true\n"
-                    "WHEN task_exists              => search_tools('{domain}'), will_continue_work=true\n"
-                    "WHEN no_task                  => will_continue_work=false, stop\n"
-                    "```\n\n"
+                    "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
+                    "WHEN actionable_task              => search_tools('{domain}'), will_continue_work=true\n"
+                    "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
+                    "```\n"
+                    "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
 
                     "### Execution Template\n"
+                    "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
                     "```\n"
-                    "IF has_task:\n"
-                    "  send_{channel}(greeting)\n"
-                    "  sqlite_batch(sql=\"UPDATE ...\", will_continue_work=true)\n"
-                    "  # Public API available? → http_request directly\n"
-                    "  # Otherwise → search_tools('{domain}')\n"
-                    "\n"
+                    "IF has_actionable_task:\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
                     "ELSE:\n"
-                    "  send_{channel}('Hey! I'm {name} 👋 What can I help with?')\n"
-                    "  sqlite_batch(sql=\"UPDATE __agent_config SET charter='Awaiting instructions' WHERE id=1;\", will_continue_work=false)\n"
-                    "  # Stop here\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                     "```\n"
+                    "Schedule: When in doubt, set one (default '0 9 * * *'). Without a schedule, you die when you stop.\n"
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
