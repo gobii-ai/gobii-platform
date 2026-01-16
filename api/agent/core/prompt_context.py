@@ -4113,15 +4113,13 @@ def _get_system_instruction(
 
                     "### Execution Template (ONE TURN - parallel tool calls)\n"
                     "```\n"
-                    "IF has_actionable_task:  # specific thing to search/scrape/fetch NOW\n"
-                    "  # All in ONE response:\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter + kanban_cards) + search_tools(..., will_continue_work=true)\n"
+                    "IF has_actionable_task:\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule + kanban_cards) + search_tools(..., will_continue_work=true)\n"
                     "\n"
-                    "ELSE:  # role description only, or no task at all\n"
-                    "  # All in ONE response:\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter, will_continue_work=false)  # STOP\n"
+                    "ELSE:  # role description only\n"
+                    "  send_{channel}(greeting) + sqlite_batch(charter [+ schedule if implied], will_continue_work=false)\n"
                     "```\n"
-                    "**Key:** No actionable task = will_continue_work=false. Do greeting + charter in ONE turn, not separate turns.\n"
+                    "**Schedule:** If the role implies ongoing work—even if you need more info first—set a schedule. When in doubt, err toward setting one. No schedule = you die.\n"
                 )
                 return welcome_instruction + "\n\n" + base_prompt
 
