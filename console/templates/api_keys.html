@@ -19,9 +19,33 @@
           {% endif %}
         {% endif %}
         {% if not email_verified %}
-          <div class="inline-flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
+          <div x-data="{ sending: false, sent: false, error: '' }" class="inline-flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-1">
             <i aria-hidden="true" data-lucide="mail-warning" class="w-4 h-4"></i>
-            <span>Please <a href="{% url 'account_email' %}" class="underline hover:text-amber-800">verify your email address</a> to create API keys.</span>
+            <span>Please verify your email address to create API keys.</span>
+            <button
+              type="button"
+              x-show="!sent"
+              x-bind:disabled="sending"
+              @click="
+                sending = true;
+                error = '';
+                fetch('{% url 'console_user_email_resend_verification' %}', {
+                  method: 'POST',
+                  headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+                })
+                .then(r => r.json())
+                .then(data => {
+                  sending = false;
+                  if (data.error) { error = data.error; }
+                  else { sent = true; }
+                })
+                .catch(() => { sending = false; error = 'Failed to send.'; });
+              "
+              class="underline hover:text-amber-800 disabled:opacity-50"
+              x-text="sending ? 'Sending...' : 'Resend email'"
+            ></button>
+            <span x-show="sent" class="text-green-700">Sent!</span>
+            <span x-show="error" class="text-red-700" x-text="error"></span>
           </div>
         {% endif %}
       </div>

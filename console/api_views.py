@@ -1470,6 +1470,31 @@ class UserPhoneResendAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse({"phone": serialize_phone(phone)})
 
 
+class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
+    """Resend email verification for the current user's primary email."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        from allauth.account.models import EmailAddress
+        from allauth.account.utils import send_email_confirmation
+
+        email_address = EmailAddress.objects.filter(user=request.user, primary=True).first()
+        if not email_address:
+            return JsonResponse({"error": "No email address found."}, status=400)
+
+        if email_address.verified:
+            return JsonResponse({"verified": True, "message": "Email already verified."})
+
+        try:
+            send_email_confirmation(request, request.user, email=email_address.email)
+        except Exception as exc:
+            logger.exception("Failed to send email verification for user %s", request.user.id)
+            return JsonResponse({"error": f"Failed to send verification email: {exc}"}, status=500)
+
+        return JsonResponse({"verified": False, "message": "Verification email sent."})
+
+
 class AgentSmsEnableAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
