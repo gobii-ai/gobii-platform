@@ -512,7 +512,7 @@ MAILGUN_ENABLED = env.bool(
 # Community Edition disables email verification by default to avoid external email providers
 ACCOUNT_EMAIL_VERIFICATION = env(
     "ACCOUNT_EMAIL_VERIFICATION",
-    default="mandatory" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
+    default="optional" if GOBII_PROPRIETARY_MODE and MAILGUN_API_KEY else "none",
 )
 ACCOUNT_LOGOUT_ON_GET = True
 ACCOUNT_ADAPTER = "config.account_adapter.GobiiAccountAdapter"
