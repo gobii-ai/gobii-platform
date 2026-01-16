@@ -2797,8 +2797,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         pending_count: int | None = None,
         max_contacts: int | None = None,
         pending_contact_requests: int | None = None,
+        email_verified: bool | None = None,
     ) -> dict[str, object]:
         from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+        from api.services.email_verification import has_verified_email
 
         entries_qs = entries
         if entries_qs is None:
@@ -2827,6 +2829,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 agent=agent,
                 status=AgentAllowlistInvite.InviteStatus.PENDING,
             ).count()
+        if email_verified is None:
+            email_verified = has_verified_email(agent.user)
 
         return {
             'show': True,
@@ -2855,6 +2859,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'activeCount': (active_count or 0) + (pending_count or 0),
             'maxContacts': max_contacts,
             'pendingContactRequests': pending_contact_requests,
+            'emailVerified': email_verified,
         }
 
     def _build_mcp_servers_payload(

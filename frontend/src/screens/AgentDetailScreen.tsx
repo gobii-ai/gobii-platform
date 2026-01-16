@@ -158,6 +158,7 @@ type AllowlistState = {
   activeCount: number
   maxContacts: number | null
   pendingContactRequests: number
+  emailVerified: boolean
 }
 
 type McpServer = {
@@ -1895,6 +1896,17 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
       <p className="text-xs text-gray-500">
         By default, the agent owner and organization members can communicate with this agent. You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
       </p>
+
+      {!state.emailVerified && (
+        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
+          <Mail className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
+          <div className="text-sm text-amber-800">
+            <span className="font-medium">Email verification required.</span>{' '}
+            External contacts won't be able to reach your agent until you{' '}
+            <a href="/accounts/email/" className="underline hover:text-amber-900">verify your email address</a>.
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
