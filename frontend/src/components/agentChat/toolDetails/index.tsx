@@ -9,7 +9,7 @@ import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } f
 import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail, LinkedInPeopleSearchDetail } from './details/linkedin'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
-import { AmazonProductDetail, AmazonProductReviewsDetail } from './details/commerce'
+import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDetail } from './details/commerce'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -41,6 +41,7 @@ export {
   AmazonProductDetail,
   LinkedInPeopleSearchDetail,
   AmazonProductReviewsDetail,
+  AmazonProductSearchDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
@@ -66,6 +67,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   crunchbaseCompany: CrunchbaseCompanyDetail,
   amazonProduct: AmazonProductDetail,
   amazonProductReviews: AmazonProductReviewsDetail,
+  amazonProductSearch: AmazonProductSearchDetail,
   linkedinPeopleSearch: LinkedInPeopleSearchDetail,
   mcpTool: McpToolDetail,
 }

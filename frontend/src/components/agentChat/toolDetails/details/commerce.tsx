@@ -1,6 +1,6 @@
 import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
-import { extractBrightDataArray, extractBrightDataFirstRecord } from '../../../tooling/brightdata'
+import { extractBrightDataArray, extractBrightDataFirstRecord, extractBrightDataResultCount } from '../../../tooling/brightdata'
 import { isNonEmptyString } from '../utils'
 
 function toText(value: unknown): string | null {
@@ -19,6 +19,18 @@ function toNumber(value: unknown): number | null {
 function formatCount(value: number | null): string | null {
   if (value === null) return null
   return value.toLocaleString()
+}
+
+function formatPrice(value: number | null, currency: string | null): string | null {
+  if (value === null) return null
+  if (currency) {
+    try {
+      return new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
+    } catch {
+      // fall through to plain formatting
+    }
+  }
+  return value.toFixed(2)
 }
 
 function shorten(value: string | null, max = 320): string | null {
@@ -296,6 +308,138 @@ export function AmazonProductReviewsDetail({ entry }: ToolDetailProps) {
       ) : (
         <p className="text-slate-500">No reviews returned.</p>
       )}
+    </div>
+  )
+}
+
+export function AmazonProductSearchDetail({ entry }: ToolDetailProps) {
+  const records = extractBrightDataArray(entry.result)
+  const items = records.slice(0, 12)
+  const totalCount = extractBrightDataResultCount(entry.result) ?? items.length
+
+  const parameters = entry.parameters ?? null
+  const keyword =
+    (parameters && isNonEmptyString((parameters as Record<string, unknown>).keyword)
+      ? ((parameters as Record<string, unknown>).keyword as string)
+      : null) ||
+    toText(items[0]?.keyword) ||
+    (items[0] && typeof items[0] === 'object' && 'input' in (items[0] as Record<string, unknown>) && (items[0] as Record<string, unknown>).input && typeof (items[0] as Record<string, unknown>).input === 'object'
+      ? toText(((items[0] as Record<string, unknown>).input as Record<string, unknown>).keyword)
+      : null)
+  const domain = toText(items[0]?.domain)
+
+  if (!items.length) {
+    return <p className="text-sm text-slate-500">No products returned.</p>
+  }
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <KeyValueList
+        items={[
+          keyword ? { label: 'Query', value: keyword } : null,
+          domain ? { label: 'Site', value: domain } : null,
+          { label: 'Results', value: totalCount === items.length ? items.length.toString() : `${items.length} shown of ${totalCount}` },
+        ]}
+      />
+
+      <Section title="Results">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          {items.map((product, idx) => {
+            const name = toText(product.name) || toText(product.title) || toText(product.asin) || 'Product'
+            const url = toText(product.url)
+            const asin = toText(product.asin)
+            const rating = toNumber(product.rating)
+            const ratingLabel = rating !== null ? (Number.isInteger(rating) ? rating.toString() : rating.toFixed(1)) : null
+            const ratingCount = formatCount(toNumber(product.num_ratings))
+            const sold = formatCount(toNumber(product.sold ?? product.bought_past_month))
+            const initialPrice = toNumber(product.initial_price)
+            const finalPrice = toNumber(product.final_price)
+            const currency = toText(product.currency) || 'USD'
+            const price = formatPrice(finalPrice ?? initialPrice, currency)
+            const showStrike = initialPrice !== null && finalPrice !== null && finalPrice < initialPrice
+            const delivery =
+              Array.isArray(product.delivery) && product.delivery.length
+                ? (product.delivery as string[]).filter(isNonEmptyString).slice(0, 2)
+                : null
+            const variations =
+              Array.isArray(product.variations) && product.variations.length
+                ? (product.variations as Array<Record<string, unknown>>)
+                    .map((item) => toText(item.name))
+                    .filter(isNonEmptyString)
+                    .slice(0, 3)
+                : null
+            const brand = toText(product.brand)
+            const badge = toText(product.badge)
+            const isSponsored = String(product.sponsored ?? '').toLowerCase() === 'true'
+            const isPrime = String(product.is_prime ?? '').toLowerCase() === 'true'
+            const isCoupon = String(product.is_coupon ?? '').toLowerCase() === 'true'
+            const chips = [
+              isSponsored ? 'Sponsored' : null,
+              badge,
+              isPrime ? 'Prime' : null,
+              isCoupon ? 'Coupon' : null,
+            ].filter(isNonEmptyString)
+
+            return (
+              <div
+                key={`${name}-${url ?? asin ?? idx}`}
+                className="flex gap-3 rounded-lg border border-slate-200/80 bg-white p-3 shadow-sm"
+              >
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {chips.map((chip) => (
+                      <span key={chip} className="rounded-full bg-orange-50 px-2 py-0.5 text-[11px] font-semibold text-orange-700">
+                        {chip}
+                      </span>
+                    ))}
+                  </div>
+                  <a
+                    href={url ?? undefined}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="line-clamp-2 font-semibold text-slate-900 hover:text-indigo-600"
+                  >
+                    {name}
+                  </a>
+                  <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                    {brand ? <span className="font-semibold text-slate-700">{brand}</span> : null}
+                    {asin ? <span className="text-slate-500">ASIN {asin}</span> : null}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    {price ? (
+                      <span className="font-semibold text-slate-900">
+                        {price}
+                        {showStrike && initialPrice !== null ? (
+                          <span className="ml-1 text-xs font-normal text-slate-500 line-through">
+                            {formatPrice(initialPrice, currency)}
+                          </span>
+                        ) : null}
+                      </span>
+                    ) : null}
+                    {ratingLabel ? (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                        {ratingLabel}
+                        {ratingCount ? <span className="ml-1 text-amber-600/90">({ratingCount})</span> : null}
+                      </span>
+                    ) : null}
+                    {sold ? <span className="text-xs text-slate-500">{sold} sold</span> : null}
+                  </div>
+                  {variations?.length ? (
+                    <p className="text-xs text-slate-600">Variants: {variations.join(', ')}</p>
+                  ) : null}
+                  {delivery?.length ? (
+                    <ul className="text-xs text-slate-600">
+                      {delivery.map((line) => (
+                        <li key={line}>{line}</li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </Section>
     </div>
   )
 }

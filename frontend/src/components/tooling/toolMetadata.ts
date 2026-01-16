@@ -983,6 +983,32 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'mcp_brightdata_web_data_amazon_product_search',
+    aliases: ['web_data_amazon_product_search'],
+    label: 'Amazon search',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProductSearch',
+    derive(entry, parameters) {
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const queryFromItem = coerceString(first?.['keyword']) ||
+        (first && typeof first === 'object' && 'input' in first && first.input && typeof first.input === 'object'
+          ? coerceString((first.input as Record<string, unknown>)['keyword'])
+          : null)
+      const query = extractBrightDataSearchQuery(parameters) || coerceString(parameters?.['keyword']) || queryFromItem
+      const name = coerceString(first?.['name']) || coerceString(first?.['title']) || coerceString(first?.['asin'])
+      const count = extractBrightDataResultCount(entry.result) ?? (items.length ? items.length : null)
+      const countLabel = count ? `${count} result${count === 1 ? '' : 's'}` : null
+      const caption = query || name
+      const combined = caption && countLabel ? `${caption} • ${countLabel}` : caption ?? countLabel
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon search',
+      }
+    },
+  },
+  {
     name: 'mcp_brightdata_web_data_amazon_product_reviews',
     aliases: ['web_data_amazon_product_reviews'],
     label: 'Amazon reviews',
