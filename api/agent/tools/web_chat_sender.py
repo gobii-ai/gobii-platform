@@ -56,7 +56,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                 "properties": {
                     "body": {
                         "type": "string",
-                        "description": "Plaintext message content to deliver in chat.",
+                        "description": "Plaintext message content to deliver in chat. Must be actual message text, NOT tool call syntax. XML like <function_calls> or <invoke> in this field does NOT execute tools—it will be sent as literal text to the user.",
                     },
                     "to_address": {
                         "type": "string",
