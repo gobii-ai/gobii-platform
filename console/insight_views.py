@@ -130,7 +130,10 @@ def _build_agent_setup_metadata(
     agent: PersistentAgent,
     organization: Optional[Any],
 ) -> dict:
+    from api.services.email_verification import has_verified_email
+
     phone = get_primary_phone(request.user)
+    email_verified = has_verified_email(request.user)
     phone_payload = serialize_phone(phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
 
@@ -220,6 +223,7 @@ def _build_agent_setup_metadata(
             "enabled": bool(agent_sms),
             "agentNumber": agent_sms.address if agent_sms else None,
             "userPhone": phone_payload,
+            "emailVerified": email_verified,
         },
         "organization": {
             "currentOrg": current_org,

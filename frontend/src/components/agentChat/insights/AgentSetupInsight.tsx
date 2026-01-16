@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -371,9 +371,11 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   )
 
   const renderSms = () => {
+    const emailVerified = metadata.sms.emailVerified !== false
     const isComplete = smsEnabled && agentNumber
 
     const getTitle = () => {
+      if (!emailVerified) return 'Email Verification Required'
       if (isComplete) return 'SMS Connected'
       if (phoneVerified) return 'Enable SMS'
       if (phone) return 'Verify Your Phone'
@@ -382,6 +384,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
 
     const getSubtitle = () => {
       if (smsError) return smsError
+      if (!emailVerified) return 'Please verify your email address to enable SMS messaging.'
       if (isComplete) return 'Text this number anytime to chat with your agent.'
       if (phoneVerified) return 'Your phone is verified. Enable SMS to start chatting.'
       if (phone) return 'Enter the verification code we sent to your phone.'
@@ -409,7 +412,21 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
           <h3 className="sms-hero__title">{getTitle()}</h3>
           <p className={`sms-hero__body${smsError ? ' sms-hero__body--error' : ''}`}>{getSubtitle()}</p>
 
-          {!phone ? (
+          {!emailVerified ? (
+            <div className="sms-hero__form">
+              <div className="sms-hero__verified" style={{ color: '#b45309' }}>
+                <Mail size={16} strokeWidth={2.2} />
+                <span>Email not verified</span>
+              </div>
+              <a
+                href="/accounts/email/"
+                className="sms-hero__button"
+                style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+              >
+                Verify Email
+              </a>
+            </div>
+          ) : !phone ? (
             <div className="sms-hero__form">
               <input
                 className="sms-hero__input"
