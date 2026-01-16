@@ -40,10 +40,10 @@ def get_update_charter_tool() -> Dict[str, Any]:
                     "new_charter": {"type": "string", "description": "New charter text."},
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "Set true if you still have work or kanban cards to complete. Omit or set false to STOP when: all kanban cards are done AND report sent.",
+                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = all work done AND marked done, report sent.",
                     },
                 },
-                "required": ["new_charter"],
+                "required": ["new_charter", "will_continue_work"],
             },
         },
     }
