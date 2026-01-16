@@ -1,0 +1,121 @@
+{% extends "allauth/layouts/manage.html" %}
+{% load i18n %}
+
+{% block head_title %}{% trans "Email Addresses" %}{% endblock %}
+
+{% block body_inner %}
+<div class="bg-white max-w-lg w-full sm:border sm:border-gray-200 sm:rounded-xl sm:shadow-2xs">
+  <div class="p-8">
+    <h1 class="text-center text-2xl font-bold text-gray-900 mb-2">
+      {% trans "Email Addresses" %}
+    </h1>
+    <p class="text-center text-sm text-gray-500 mb-6">
+      {% trans "Manage email addresses associated with your account." %}
+    </p>
+
+    {% if emailaddresses %}
+      {# Check if any email is unverified #}
+      {% for emailaddress in emailaddresses %}
+        {% if not emailaddress.verified %}
+          {# Prominent verification banner #}
+          <div class="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+            <div class="flex items-start gap-3">
+              <svg class="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+              <div class="flex-1">
+                <h3 class="text-sm font-semibold text-amber-800">{% trans "Email verification required" %}</h3>
+                <p class="text-sm text-amber-700 mt-1">
+                  {% trans "Please verify your email to unlock all features including external communications." %}
+                </p>
+                <form method="post" action="{% url 'account_email' %}" class="mt-3">
+                  {% csrf_token %}
+                  <input type="hidden" name="email" value="{{ emailaddress.email }}">
+                  <button type="submit" name="action_send" class="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                    </svg>
+                    {% trans "Send Verification Email" %}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+          {% comment %}Only show one banner{% endcomment %}
+          {% if forloop.first %}{% endif %}
+        {% endif %}
+      {% endfor %}
+
+      {# Email list #}
+      <div class="space-y-3 mb-6">
+        {% for emailaddress in emailaddresses %}
+          <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg border border-gray-200">
+            <div class="flex items-center gap-3">
+              <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+              </svg>
+              <div>
+                <span class="text-sm font-medium text-gray-900">{{ emailaddress.email }}</span>
+                <div class="flex gap-2 mt-0.5">
+                  {% if emailaddress.verified %}
+                    <span class="inline-flex items-center gap-1 text-xs text-green-700 bg-green-100 px-2 py-0.5 rounded-full">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                      </svg>
+                      {% trans "Verified" %}
+                    </span>
+                  {% else %}
+                    <span class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                      </svg>
+                      {% trans "Unverified" %}
+                    </span>
+                  {% endif %}
+                  {% if emailaddress.primary %}
+                    <span class="inline-flex items-center text-xs text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                      {% trans "Primary" %}
+                    </span>
+                  {% endif %}
+                </div>
+              </div>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+
+      {# Actions form #}
+      <form method="post" action="{% url 'account_email' %}" class="space-y-4">
+        {% csrf_token %}
+        <div class="flex flex-wrap gap-2">
+          <select name="email" class="flex-1 min-w-0 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+            {% for emailaddress in emailaddresses %}
+              <option value="{{ emailaddress.email }}" {% if emailaddress.primary %}selected{% endif %}>
+                {{ emailaddress.email }}
+              </option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button type="submit" name="action_send" class="px-3 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+            {% trans "Re-send Verification" %}
+          </button>
+        </div>
+      </form>
+    {% else %}
+      <div class="text-center py-6">
+        <svg class="w-12 h-12 text-gray-300 mx-auto mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+        </svg>
+        <p class="text-gray-500">{% trans "No email addresses on file." %}</p>
+      </div>
+    {% endif %}
+
+    <div class="mt-6 pt-4 border-t border-gray-200 text-center">
+      <a href="/" class="text-sm text-blue-600 hover:text-blue-800">
+        {% trans "Back to Dashboard" %}
+      </a>
+    </div>
+  </div>
+</div>
+{% endblock body_inner %}
