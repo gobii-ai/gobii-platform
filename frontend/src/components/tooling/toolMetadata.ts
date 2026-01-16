@@ -869,9 +869,9 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     icon: Linkedin,
     iconBgClass: LINKEDIN_ICON_BG_CLASS,
     iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
-    detailKind: 'mcpTool',
+    detailKind: 'linkedinJobListings',
     derive(entry, parameters) {
-      const caption = deriveLinkedInCaption(parameters, [
+      const query = deriveLinkedInCaption(parameters, [
         'query',
         'keywords',
         'keyword',
@@ -881,8 +881,16 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         'role',
         'location',
       ])
+
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const title = coerceString(first?.['job_title']) || coerceString(first?.['title'])
+      const company = coerceString(first?.['company_name']) || coerceString(first?.['company'])
+      const fallback = [title, company].filter(Boolean).join(' • ') || coerceString(parameters?.['url'])
+      const caption = query || fallback
+
       return {
-        caption: caption ?? entry.caption ?? 'LinkedIn jobs',
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'LinkedIn jobs',
       }
     },
   },

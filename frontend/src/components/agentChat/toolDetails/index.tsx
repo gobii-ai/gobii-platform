@@ -6,7 +6,7 @@ import { SearchToolDetail } from './details/search'
 import { ApiRequestDetail } from './details/api'
 import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/files'
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
-import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail, LinkedInPeopleSearchDetail } from './details/linkedin'
+import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail, LinkedInPeopleSearchDetail, LinkedInJobListingsDetail } from './details/linkedin'
 import { YahooFinanceBusinessDetail } from './details/finance'
 import { CrunchbaseCompanyDetail } from './details/crunchbase'
 import { AmazonProductDetail, AmazonProductReviewsDetail, AmazonProductSearchDetail } from './details/commerce'
@@ -40,6 +40,7 @@ export {
   CrunchbaseCompanyDetail,
   AmazonProductDetail,
   LinkedInPeopleSearchDetail,
+  LinkedInJobListingsDetail,
   AmazonProductReviewsDetail,
   AmazonProductSearchDetail,
 }
@@ -69,6 +70,7 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   amazonProductReviews: AmazonProductReviewsDetail,
   amazonProductSearch: AmazonProductSearchDetail,
   linkedinPeopleSearch: LinkedInPeopleSearchDetail,
+  linkedinJobListings: LinkedInJobListingsDetail,
   mcpTool: McpToolDetail,
 }
 

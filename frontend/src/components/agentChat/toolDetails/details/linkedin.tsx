@@ -33,6 +33,11 @@ function formatCount(value: unknown): string | null {
 
 const toText = (value: unknown): string | null => (isNonEmptyString(value) ? (value as string) : null)
 
+function stripHtml(value: string | null): string | null {
+  if (!value) return null
+  return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
 export function LinkedInPersonProfileDetail({ entry }: ToolDetailProps) {
   const profile = pickProfile(entry.result)
 
@@ -204,6 +209,133 @@ function normalizePeopleSearch(result: unknown): PeopleResult[] {
       }
     })
     .filter((item): item is PeopleResult => Boolean(item && (item.name || item.url || item.location || item.experience || item.education)))
+}
+
+type JobResult = {
+  title: string | null
+  company: string | null
+  location: string | null
+  url: string | null
+  summary: string | null
+  applicants: number | null
+  employmentType: string | null
+  seniority: string | null
+  salary: string | null
+  posted: string | null
+}
+
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/[, ]+/g, ''))
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function normalizeJobListings(result: unknown): JobResult[] {
+  const parsed = parseResultObject(result)
+  const items = Array.isArray(parsed)
+    ? parsed
+    : isPlainObject(parsed) && Array.isArray((parsed as Record<string, unknown>).result)
+      ? ((parsed as Record<string, unknown>).result as unknown[])
+      : []
+
+  return items
+    .map((item) => {
+      if (!isPlainObject(item)) return null
+      const record = item as Record<string, unknown>
+      const baseSalary =
+        isPlainObject(record.base_salary) && record.base_salary !== null
+          ? (record.base_salary as Record<string, unknown>)
+          : null
+      const salaryMin = toNumber(baseSalary?.min_amount)
+      const salaryMax = toNumber(baseSalary?.max_amount)
+      const salaryCurrency = toText(baseSalary?.currency)
+      const salaryPeriod = toText(baseSalary?.payment_period)
+      const salary =
+        toText(record.job_base_pay_range) ||
+        (salaryMin !== null && salaryMax !== null
+          ? `${salaryMin.toLocaleString()} - ${salaryMax.toLocaleString()}${salaryCurrency ?? ''}${salaryPeriod ? `/${salaryPeriod}` : ''}`
+          : null)
+      const rawSummary =
+        toText(record.job_summary) ||
+        toText(record.description) ||
+        toText(record.job_description) ||
+        stripHtml(toText(record.job_description_formatted))
+      return {
+        title: toText(record.job_title) || toText(record.title),
+        company: toText(record.company_name) || toText(record.company),
+        location: toText(record.job_location) || toText(record.location),
+        url: toText(record.apply_link) || toText(record.url),
+        summary: rawSummary,
+        applicants: toNumber(record.job_num_applicants ?? record.applicants),
+        employmentType: toText(record.job_employment_type) || toText(record.employment_type),
+        seniority: toText(record.job_seniority_level) || toText(record.seniority_level),
+        salary,
+        posted: toText(record.job_posted_time) || toText(record.job_posted_date),
+      }
+    })
+    .filter((item): item is JobResult => Boolean(item && (item.title || item.company || item.url)))
+}
+
+function shorten(value: string | null, max = 360): string | null {
+  if (!value) return null
+  return value.length > max ? `${value.slice(0, max - 1)}…` : value
+}
+
+export function LinkedInJobListingsDetail({ entry }: ToolDetailProps) {
+  const jobs = normalizeJobListings(entry.result).slice(0, 10)
+
+  if (!jobs.length) {
+    return <p className="text-sm text-slate-500">No job listings returned.</p>
+  }
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <Section title="Jobs">
+        <div className="space-y-3">
+          {jobs.map((job, idx) => {
+            const metaParts = [
+              job.company,
+              job.location,
+              job.employmentType,
+              job.seniority,
+            ].filter(Boolean)
+            const statParts = [
+              job.applicants !== null ? `${job.applicants.toLocaleString()} applicant${job.applicants === 1 ? '' : 's'}` : null,
+              job.salary,
+              job.posted,
+            ].filter(Boolean)
+            const summary = shorten(job.summary)
+
+            return (
+              <div key={`${job.title ?? job.company ?? 'job'}-${idx}`} className="rounded-lg border border-slate-200/80 bg-white px-3 py-2 shadow-sm">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-slate-900">
+                    {job.url ? (
+                      <a href={job.url} target="_blank" rel="noreferrer" className="text-indigo-600 underline">
+                        {job.title ?? 'Job listing'}
+                      </a>
+                    ) : (
+                      job.title ?? 'Job listing'
+                    )}
+                  </span>
+                </div>
+                {metaParts.length ? (
+                  <p className="text-xs text-slate-500">{metaParts.join(' • ')}</p>
+                ) : null}
+                {statParts.length ? (
+                  <p className="text-xs text-slate-500">{statParts.join(' • ')}</p>
+                ) : null}
+                {summary ? <p className="mt-2 leading-relaxed text-slate-700">{summary}</p> : null}
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+    </div>
+  )
 }
 
 export function LinkedInPeopleSearchDetail({ entry }: ToolDetailProps) {
