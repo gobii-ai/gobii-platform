@@ -1782,7 +1782,7 @@ def _execute_sqlite_batch_inner(
             "message": msg,
         }
 
-        if not had_error and will_continue_work is False and has_user_facing_message:
+        if not had_error and will_continue_work is False:
             response["auto_sleep_ok"] = True
 
         return response
