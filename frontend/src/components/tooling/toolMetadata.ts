@@ -4,6 +4,7 @@ import {
   CalendarClock,
   Database,
   DatabaseZap,
+  ShoppingBag,
   ClipboardList,
   BrainCircuit,
   Linkedin,
@@ -929,6 +930,36 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const captionPieces = [ticker ? ticker.toUpperCase() : null, name ? truncate(name, 44) : null].filter(Boolean)
       return {
         caption: captionPieces.length ? captionPieces.join(' • ') : entry.caption ?? 'Yahoo Finance',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_crunchbase_company',
+    aliases: ['web_data_crunchbase_company'],
+    label: 'Crunchbase company',
+    icon: Database,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'crunchbaseCompany',
+    derive(entry, parameters) {
+      const caption = pickFirstParameter(parameters, ['company', 'company_id', 'name', 'organization', 'slug', 'url'])
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Crunchbase company',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_amazon_product',
+    aliases: ['web_data_amazon_product'],
+    label: 'Amazon product',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProduct',
+    derive(entry, parameters) {
+      const caption = pickFirstParameter(parameters, ['title', 'asin', 'url', 'product', 'name'])
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Amazon product',
       }
     },
   },

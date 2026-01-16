@@ -8,6 +8,8 @@ import { FileReadDetail, FileWriteDetail, FileExportDetail } from './details/fil
 import { BrowserTaskDetail, BrightDataSnapshotDetail, BrightDataSearchDetail } from './details/browser'
 import { LinkedInPersonProfileDetail, LinkedInCompanyProfileDetail } from './details/linkedin'
 import { YahooFinanceBusinessDetail } from './details/finance'
+import { CrunchbaseCompanyDetail } from './details/crunchbase'
+import { AmazonProductDetail } from './details/commerce'
 import { RequestContactPermissionDetail, SecureCredentialsDetail } from './details/permissions'
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
@@ -35,6 +37,8 @@ export {
   LinkedInPersonProfileDetail,
   LinkedInCompanyProfileDetail,
   YahooFinanceBusinessDetail,
+  CrunchbaseCompanyDetail,
+  AmazonProductDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
@@ -57,6 +61,8 @@ export const TOOL_DETAIL_COMPONENTS: Record<string, ToolDetailComponent> = {
   linkedinPerson: LinkedInPersonProfileDetail,
   linkedinCompany: LinkedInCompanyProfileDetail,
   yahooFinanceBusiness: YahooFinanceBusinessDetail,
+  crunchbaseCompany: CrunchbaseCompanyDetail,
+  amazonProduct: AmazonProductDetail,
   mcpTool: McpToolDetail,
 }
 
