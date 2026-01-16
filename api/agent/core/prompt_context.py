@@ -2632,8 +2632,10 @@ def _get_work_completion_prompt(
             "work_completion_required",
             (
                 f"🚨 Unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Time to wrap up. Your next message must contain THE ACTUAL FINDINGS—not 'let me compile...' or 'let me send...'\n"
-                "Those phrases terminate you before delivery. Write the report itself, right now, in this response."
+                "Time to wrap up.\n"
+                "- If you haven't sent findings yet: write the actual report NOW (not 'let me compile...').\n"
+                "- If you already sent findings: just mark cards done with will_continue_work=false.\n"
+                "Do NOT send duplicate/redundant messages."
             ),
             8,  # High weight
         )

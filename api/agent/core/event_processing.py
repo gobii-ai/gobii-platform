@@ -148,6 +148,9 @@ MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation sig
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
+TOOL_ERROR_MESSAGE_MAX_BYTES = 800
+TOOL_ERROR_DETAIL_MAX_BYTES = 1500
+TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 MESSAGE_TOOL_NAMES = {
     "send_email",
@@ -181,6 +184,118 @@ CONTINUATION_PHRASES = (
     "proceeding to ",
     "moving on to ",
 )
+
+
+def _truncate_text_bytes(text: str, max_bytes: int) -> str:
+    if not text:
+        return ""
+    encoded = text.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return text
+    return encoded[:max_bytes].decode("utf-8", errors="ignore")
+
+
+def _coerce_error_text(value: Any, max_bytes: int) -> str:
+    if value is None:
+        return ""
+    try:
+        text = str(value)
+    except Exception:
+        text = "<unprintable>"
+    return _truncate_text_bytes(text, max_bytes)
+
+
+def _is_error_status(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    status = result.get("status")
+    return isinstance(status, str) and status.lower() == "error"
+
+
+def _infer_retryable_from_text(message: str) -> bool:
+    if not message:
+        return False
+    lower = message.lower()
+    return any(
+        token in lower
+        for token in (
+            "timeout",
+            "timed out",
+            "temporary",
+            "temporarily",
+            "rate limit",
+            "too many requests",
+            "connection reset",
+            "connection aborted",
+            "connection refused",
+            "service unavailable",
+            "gateway timeout",
+        )
+    )
+
+
+def _build_safe_error_payload(
+    message: Any,
+    *,
+    error_type: Any = None,
+    retryable: Optional[bool] = None,
+    detail: Any = None,
+    status_code: Any = None,
+) -> dict:
+    safe_message = _coerce_error_text(message or "Tool execution failed.", TOOL_ERROR_MESSAGE_MAX_BYTES)
+    payload = {"status": "error", "message": safe_message}
+    if error_type:
+        payload["error_type"] = _coerce_error_text(error_type, TOOL_ERROR_TYPE_MAX_BYTES)
+    if retryable is not None:
+        payload["retryable"] = bool(retryable)
+    if status_code is not None:
+        if isinstance(status_code, int):
+            payload["status_code"] = status_code
+        elif isinstance(status_code, str):
+            payload["status_code"] = _coerce_error_text(status_code, 40)
+        else:
+            payload["status_code"] = _coerce_error_text(status_code, 40)
+    if detail:
+        payload["detail"] = _coerce_error_text(detail, TOOL_ERROR_DETAIL_MAX_BYTES)
+    return payload
+
+
+def _normalize_error_result(result: dict) -> dict:
+    message = result.get("message") or result.get("error") or result.get("detail") or "Tool returned an error."
+    error_type = result.get("error_type") or result.get("type")
+    retryable = result.get("retryable") if isinstance(result.get("retryable"), bool) else None
+    status_code = result.get("status_code")
+    if status_code is None:
+        status_code = result.get("code")
+    if status_code is None:
+        status_code = result.get("error_code")
+
+    detail = None
+    for key in ("detail", "error_detail", "traceback", "stacktrace", "exception", "exception.stacktrace"):
+        if key in result:
+            detail = result.get(key)
+            break
+    if detail is None:
+        exception_block = result.get("exception")
+        if isinstance(exception_block, dict):
+            detail = (
+                exception_block.get("stacktrace")
+                or exception_block.get("traceback")
+                or exception_block.get("message")
+            )
+
+    safe_message = _coerce_error_text(message, TOOL_ERROR_MESSAGE_MAX_BYTES)
+    if retryable is None:
+        retryable = _infer_retryable_from_text(safe_message)
+
+    return _build_safe_error_payload(
+        safe_message,
+        error_type=error_type,
+        retryable=retryable,
+        detail=detail,
+        status_code=status_code,
+    )
+
 
 
 def _has_continuation_signal(text: str) -> bool:
@@ -3216,66 +3331,109 @@ def _run_agent_loop(
 
                     logger.info("Agent %s: executing %s now", agent.id, tool_name)
 
-                    # Check for eval mock before real execution (mock_config passed via BudgetContext)
-                    mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
-                    mock_result = mock_config.get(tool_name) if mock_config else None
-                    if mock_result is not None:
-                        logger.info("Agent %s: using mock for %s (eval_run_id=%s)", agent.id, tool_name, eval_run_id)
-                        result = mock_result
-                    elif tool_name == "spawn_web_task":
-                        # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
-                        result = execute_spawn_web_task(agent, exec_params)
-                    elif tool_name == "send_email":
-                        result = execute_send_email(agent, exec_params)
-                    elif tool_name == "send_sms":
-                        result = execute_send_sms(agent, exec_params)
-                    elif tool_name == "send_chat_message":
-                        result = execute_send_chat_message(agent, exec_params)
-                    elif tool_name == "send_agent_message":
-                        result = execute_send_agent_message(agent, exec_params)
-                    elif tool_name == "send_webhook_event":
-                        result = execute_send_webhook_event(agent, exec_params)
-                    elif tool_name == "update_schedule":
-                        result = execute_update_schedule(agent, exec_params)
-                    elif tool_name == "update_charter":
-                        result = execute_update_charter(agent, exec_params)
-                    elif tool_name == "secure_credentials_request":
-                        result = execute_secure_credentials_request(agent, exec_params)
-                    elif tool_name == "enable_database":
-                        result = execute_enable_database(agent, exec_params)
-                        before_count = len(tools)
-                        tools = get_agent_tools(agent)
-                        after_count = len(tools)
-                        logger.info(
-                            "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
+                    try:
+                        # Check for eval mock before real execution (mock_config passed via BudgetContext)
+                        mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
+                        mock_result = mock_config.get(tool_name) if mock_config else None
+                        if mock_result is not None:
+                            logger.info(
+                                "Agent %s: using mock for %s (eval_run_id=%s)",
+                                agent.id,
+                                tool_name,
+                                eval_run_id,
+                            )
+                            result = mock_result
+                        elif tool_name == "spawn_web_task":
+                            # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
+                            result = execute_spawn_web_task(agent, exec_params)
+                        elif tool_name == "send_email":
+                            result = execute_send_email(agent, exec_params)
+                        elif tool_name == "send_sms":
+                            result = execute_send_sms(agent, exec_params)
+                        elif tool_name == "send_chat_message":
+                            result = execute_send_chat_message(agent, exec_params)
+                        elif tool_name == "send_agent_message":
+                            result = execute_send_agent_message(agent, exec_params)
+                        elif tool_name == "send_webhook_event":
+                            result = execute_send_webhook_event(agent, exec_params)
+                        elif tool_name == "update_schedule":
+                            result = execute_update_schedule(agent, exec_params)
+                        elif tool_name == "update_charter":
+                            result = execute_update_charter(agent, exec_params)
+                        elif tool_name == "secure_credentials_request":
+                            result = execute_secure_credentials_request(agent, exec_params)
+                        elif tool_name == "enable_database":
+                            result = execute_enable_database(agent, exec_params)
+                            before_count = len(tools)
+                            tools = get_agent_tools(agent)
+                            after_count = len(tools)
+                            logger.info(
+                                "Agent %s: refreshed tools after enable_database (before=%d after=%d)",
+                                agent.id,
+                                before_count,
+                                after_count,
+                            )
+                        elif tool_name == "request_contact_permission":
+                            result = execute_request_contact_permission(agent, exec_params)
+                        elif tool_name == "search_tools":
+                            result = execute_search_tools(agent, exec_params)
+                            # After search_tools auto-enables relevant tools, refresh tool definitions
+                            before_count = len(tools)
+                            tools = get_agent_tools(agent)
+                            after_count = len(tools)
+                            logger.info(
+                                "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
+                                agent.id,
+                                before_count,
+                                after_count,
+                            )
+                        else:
+                            # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
+                            result = execute_enabled_tool(agent, tool_name, exec_params)
+                    except Exception as exc:
+                        mark_span_failed_with_exception(tool_span, exc, f"Tool {tool_name} failed")
+                        logger.exception(
+                            "Agent %s: tool %s failed (call_id=%s)",
                             agent.id,
-                            before_count,
-                            after_count,
+                            tool_name,
+                            call_id or "<none>",
                         )
-                    elif tool_name == "request_contact_permission":
-                        result = execute_request_contact_permission(agent, exec_params)
-                    elif tool_name == "search_tools":
-                        result = execute_search_tools(agent, exec_params)
-                        # After search_tools auto-enables relevant tools, refresh tool definitions
-                        before_count = len(tools)
-                        tools = get_agent_tools(agent)
-                        after_count = len(tools)
-                        logger.info(
-                            "Agent %s: refreshed tools after search_tools (before=%d after=%d)",
-                            agent.id,
-                            before_count,
-                            after_count,
+                        result = _build_safe_error_payload(
+                            f"Tool execution failed: {exc}",
+                            error_type=type(exc).__name__,
+                            retryable=_infer_retryable_from_text(str(exc)),
                         )
-                    else:
-                        # 'enable_tool' is no longer exposed to the main agent; enabling is handled internally by search_tools
-                        result = execute_enabled_tool(agent, tool_name, exec_params)
 
-                    result_content = json.dumps(result)
+                    if _is_error_status(result):
+                        result = _normalize_error_result(result)
+
+                    try:
+                        result_content = json.dumps(result)
+                    except (TypeError, ValueError):
+                        try:
+                            result_content = json.dumps(result, default=str)
+                        except Exception as exc:
+                            logger.exception(
+                                "Agent %s: failed to serialize tool result for %s (call_id=%s)",
+                                agent.id,
+                                tool_name,
+                                call_id or "<none>",
+                            )
+                            result = _build_safe_error_payload(
+                                "Tool result serialization failed.",
+                                error_type=type(exc).__name__,
+                                retryable=False,
+                            )
+                            result_content = json.dumps(result)
                     # Log result summary
                     try:
                         status = result.get("status") if isinstance(result, dict) else None
                     except Exception:
                         status = None
+                    try:
+                        tool_span.set_attribute("tool.status", str(status or ""))
+                    except Exception:
+                        pass
                     result_preview = result_content[:RESULT_LOG_MAX_CHARS]
                     logger.info(
                         "Agent %s: %s completed status=%s result=%s%s",
