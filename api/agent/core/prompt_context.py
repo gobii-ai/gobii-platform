@@ -614,13 +614,14 @@ will_continue_work=false → "I'm DONE, STOP NOW" — all work done AND marked d
 2. You've already sent your final report to the user
 3. There's nothing more to fetch, analyze, or compute
 
-**The decision:**
+**The decision — model your future state:**
 ```
-if all_work_done AND all_cards_marked_done AND final_report_sent:
-    will_continue_work = false  # STOP NOW
-else:
-    will_continue_work = true   # Keep working
+after_this_action = predict_state(current_state, my_tool_calls)
+will_continue_work = (after_this_action has more work for me)
 ```
+
+- Marking cards done? → You KNOW the outcome. Model it: "After this, 0 cards remain → false"
+- Fetching/scraping data? → You DON'T know the result yet. Assume you'll process it → true
 
 **Keep working (will_continue_work=true) when:**
 - You just fetched data and haven't reported it yet
@@ -638,13 +639,13 @@ Mark each card done only after verifying the work is actually complete. If the t
 
 **Critical: Send report BEFORE marking complete.** When wrapping up, always send your findings first, then mark the last card done. This ensures your report is delivered before you stop.
 
-Example wrap-up (single response with tools):
+Example wrap-up (model your future state):
 ```
 send_chat_message(body="Here's what I found: [full detailed report]",
-                  will_continue_work=true)  # true because still need to mark done
+                  will_continue_work=true)  # After this: still need to mark done → true
 
 sqlite_batch(sql="UPDATE __kanban_cards SET status='done' WHERE friendly_id='final-task';",
-             will_continue_work=false)  # false: report sent, now done
+             will_continue_work=false)  # After this: 0 cards remain → false
 ```
 
 **When to mark a card done:**

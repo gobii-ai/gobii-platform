@@ -211,8 +211,8 @@ export type AgentChatPageProps = {
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
-const SCROLL_END_TOLERANCE_PX = 4
-const BOTTOM_PANEL_GAP_PX = 20
+// Threshold for detecting intentional scroll-up gesture on touch devices
+const TOUCH_SCROLL_UNPIN_THRESHOLD = 40
 
 export function AgentChatPage({
   agentId,
@@ -407,70 +407,51 @@ export function AgentChatPage({
     showContextSwitcher,
   ])
 
-  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
-  const getScrollDistanceToBottom = useCallback(() => {
-    const target = getScrollContainer()
-    // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-    const documentHeight = target.scrollHeight
-    const scrollTop = target.scrollTop
-    // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
-    const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
-    return documentHeight - effectiveClientHeight - scrollTop
-  }, [getScrollContainer])
-  const getBottomGapOffset = useCallback(() => {
-    const timeline = timelineRef.current
-    if (!timeline) return 0
-    const timelineStyle = window.getComputedStyle(timeline)
-    const paddingBottom = parseFloat(timelineStyle.paddingBottom) || 0
-
-    const rootStyle = window.getComputedStyle(document.documentElement)
-    const composerHeightRaw = rootStyle.getPropertyValue('--composer-height')
-    let composerHeight = composerHeightRaw ? parseFloat(composerHeightRaw) : 0
-
-    if (!composerHeight) {
-      const composer = document.getElementById('agent-composer-shell')
-      composerHeight = composer?.getBoundingClientRect().height ?? 0
-    }
-
-    return Math.max(0, paddingBottom - composerHeight)
-  }, [])
-  const getAdjustedDistanceToBottom = useCallback(() => {
-    const scrollDistance = getScrollDistanceToBottom()
-    const bottomGapOffset = getBottomGapOffset()
-    const visualGap = bottomGapOffset > 0 ? BOTTOM_PANEL_GAP_PX : 0
-    return scrollDistance - bottomGapOffset + visualGap
-  }, [getBottomGapOffset, getScrollDistanceToBottom])
-  const updateIsNearBottom = useCallback(() => {
-    const adjustedDistance = getAdjustedDistanceToBottom()
-    const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
-    isNearBottomRef.current = nextIsNearBottom
-    setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
-    return adjustedDistance
-  }, [getAdjustedDistanceToBottom])
-
+  // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
+  const bottomSentinelRef = useRef<HTMLElement | null>(null)
   useEffect(() => {
-    const scroller = getScrollContainer()
+    // Find the bottom sentinel element
+    const sentinel = document.getElementById('timeline-bottom-sentinel')
+    bottomSentinelRef.current = sentinel
+    if (!sentinel) return
 
-    // Mobile detection for adaptive thresholds
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-
-    // Use larger thresholds on mobile to account for browser chrome changes (address bar, keyboard)
-    const restickThreshold = isTouchDevice ? 80 : 20
-    const touchScrollThreshold = 40 // More intentional gesture required to unpin
     const isAutoPinSuppressed = () => {
       const suppressedUntil = autoScrollPinSuppressedUntilRef.current
       return typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
     }
 
-    // Detect user scrolling UP via wheel - immediately unstick
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const isVisible = entry.isIntersecting
+        isNearBottomRef.current = isVisible
+        setIsNearBottom(isVisible)
+
+        // Auto-restick when user scrolls to bottom (sentinel becomes visible)
+        if (isVisible && !autoScrollPinnedRef.current && !isAutoPinSuppressed()) {
+          setAutoScrollPinned(true)
+        }
+      },
+      {
+        // 100px buffer so we detect "near bottom" before hitting the exact bottom
+        rootMargin: '0px 0px 100px 0px',
+        threshold: 0,
+      },
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [setAutoScrollPinned])
+
+  // Detect user scrolling UP to immediately unpin (wheel, touch, keyboard)
+  useEffect(() => {
+    // Detect scroll-up via wheel
     const handleWheel = (e: WheelEvent) => {
       if (e.deltaY < 0 && autoScrollPinnedRef.current) {
         setAutoScrollPinned(false)
       }
     }
 
-    // Detect user scrolling UP via touch
+    // Detect scroll-up via touch gesture
     let touchStartY = 0
     let touchStartTime = 0
     const handleTouchStart = (e: TouchEvent) => {
@@ -482,13 +463,13 @@ export function AgentChatPage({
       const touchY = e.touches[0]?.clientY ?? 0
       const deltaY = touchY - touchStartY
       const elapsed = Date.now() - touchStartTime
-      // Require more intentional gesture: larger movement AND not too fast (avoid accidental taps)
-      if (deltaY > touchScrollThreshold && elapsed > 50) {
+      // Require intentional gesture: larger movement AND not too fast (avoid accidental taps)
+      if (deltaY > TOUCH_SCROLL_UNPIN_THRESHOLD && elapsed > 50) {
         setAutoScrollPinned(false)
       }
     }
 
-    // Detect user scrolling UP via keyboard
+    // Detect scroll-up via keyboard
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!autoScrollPinnedRef.current) return
       const scrollUpKeys = ['ArrowUp', 'PageUp', 'Home']
@@ -497,63 +478,18 @@ export function AgentChatPage({
       }
     }
 
-    // Track scroll direction - only restick when user scrolls DOWN to bottom
-    let lastScrollTop = scroller?.scrollTop ?? window.scrollY
-    let scrollTicking = false
-
-    const handleScroll = () => {
-      if (scrollTicking) return
-      scrollTicking = true
-      requestAnimationFrame(() => {
-        scrollTicking = false
-        const target = scroller || document.documentElement || document.body
-        const currentScrollTop = target.scrollTop
-        const scrolledDown = currentScrollTop > lastScrollTop
-        lastScrollTop = currentScrollTop
-        const adjustedDistance = getAdjustedDistanceToBottom()
-        const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
-        const nearBottomForRestick = adjustedDistance <= restickThreshold
-        isNearBottomRef.current = nextIsNearBottom
-        setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
-
-        // Only restick if user actively scrolled down to the bottom
-        if (!autoScrollPinnedRef.current && scrolledDown && nearBottomForRestick && !isAutoPinSuppressed()) {
-          setAutoScrollPinned(true)
-        }
-      })
-    }
-
     window.addEventListener('wheel', handleWheel, { passive: true })
     window.addEventListener('touchstart', handleTouchStart, { passive: true })
     window.addEventListener('touchmove', handleTouchMove, { passive: true })
     window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('scroll', handleScroll, { passive: true })
 
     return () => {
       window.removeEventListener('wheel', handleWheel)
       window.removeEventListener('touchstart', handleTouchStart)
       window.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('scroll', handleScroll)
     }
-  }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
-
-  useEffect(() => {
-    updateIsNearBottom()
-    const handleResize = () => {
-      updateIsNearBottom()
-    }
-
-    window.addEventListener('resize', handleResize)
-    window.visualViewport?.addEventListener('resize', handleResize)
-    window.visualViewport?.addEventListener('scroll', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      window.visualViewport?.removeEventListener('resize', handleResize)
-      window.visualViewport?.removeEventListener('scroll', handleResize)
-    }
-  }, [updateIsNearBottom])
+  }, [setAutoScrollPinned])
 
   // Unpin auto-scroll when processing ends so user's reading position is preserved
   const prevProcessingRef = useRef(processingActive)
@@ -577,29 +513,25 @@ export function AgentChatPage({
 
   const pendingScrollFrameRef = useRef<number | null>(null)
 
+  const jumpToBottom = useCallback(() => {
+    const target = document.scrollingElement ?? document.documentElement ?? document.body
+    // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
+    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
+    // IntersectionObserver will automatically detect we're at bottom
+  }, [])
+
   const scrollToBottom = useCallback(() => {
     if (pendingScrollFrameRef.current !== null) {
       return
     }
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      const adjustedDistance = getAdjustedDistanceToBottom()
-      if (adjustedDistance > 0) {
-        window.scrollBy({ top: adjustedDistance })
-      }
-      updateIsNearBottom()
+      jumpToBottom()
     })
-  }, [getAdjustedDistanceToBottom, updateIsNearBottom])
+  }, [jumpToBottom])
 
   // Keep track of composer height to adjust scroll when it changes
   const prevComposerHeight = useRef<number | null>(null)
-
-  const jumpToBottom = useCallback(() => {
-    const target = document.scrollingElement ?? document.documentElement ?? document.body
-    // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
-    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
-    updateIsNearBottom()
-  }, [updateIsNearBottom])
 
   useEffect(() => {
     const composer = document.getElementById('agent-composer-shell')
@@ -618,17 +550,16 @@ export function AgentChatPage({
 
       prevComposerHeight.current = height
 
+      // If pinned, ensure we stay at the bottom
       if (autoScrollPinnedRef.current) {
-        // Ensure we stay pinned if we were pinned
         jumpToBottom()
-      } else {
-        updateIsNearBottom()
       }
+      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(composer)
     return () => observer.disconnect()
-  }, [jumpToBottom, updateIsNearBottom])
+  }, [jumpToBottom])
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -641,16 +572,16 @@ export function AgentChatPage({
     if (!timelineNode) return
 
     const observer = new ResizeObserver(() => {
+      // If pinned, ensure we stay at the bottom when content changes
       if (autoScrollPinnedRef.current) {
         jumpToBottom()
-      } else {
-        updateIsNearBottom()
       }
+      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(timelineNode)
     return () => observer.disconnect()
-  }, [timelineNode, jumpToBottom, updateIsNearBottom])
+  }, [timelineNode, jumpToBottom])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -666,7 +597,9 @@ export function AgentChatPage({
 
   useEffect(() => {
     if (isNewAgent) {
+      // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
       didInitialScrollRef.current = true
+      setAutoScrollPinned(true)
       return
     }
     if (!initialLoading && events.length && !didInitialScrollRef.current) {
@@ -681,12 +614,10 @@ export function AgentChatPage({
     if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
       forceScrollOnNextUpdateRef.current = false
       scrollToBottom()
-      return
     }
-    updateIsNearBottom()
+    // IntersectionObserver handles isNearBottom updates automatically
   }, [
     scrollToBottom,
-    updateIsNearBottom,
     events,
     streaming,
     loadingOlder,

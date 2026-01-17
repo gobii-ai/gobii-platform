@@ -1784,7 +1784,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = all work done AND marked done, report sent.",
+                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],
