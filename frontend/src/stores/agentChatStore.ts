@@ -220,7 +220,6 @@ export type AgentChatState = {
   streamingLastUpdatedAt: number | null
   streamingClearOnDone: boolean
   streamingThinkingCollapsed: boolean
-  thinkingCollapsedByCursor: Record<string, boolean>
   oldestCursor: string | null
   newestCursor: string | null
   hasMoreOlder: boolean
@@ -269,7 +268,6 @@ export type AgentChatState = {
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
-  toggleThinkingCollapsed: (cursor: string) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
   // Insight actions
   fetchInsights: () => Promise<void>
@@ -289,7 +287,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   streamingLastUpdatedAt: null,
   streamingClearOnDone: false,
   streamingThinkingCollapsed: false,
-  thinkingCollapsedByCursor: {},
   oldestCursor: null,
   newestCursor: null,
   hasMoreOlder: false,
@@ -393,7 +390,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       streamingLastUpdatedAt: null,
       streamingClearOnDone: false,
       streamingThinkingCollapsed: cachedState?.streamingThinkingCollapsed ?? false,
-      thinkingCollapsedByCursor: {},
       agentColorHex: providedColor ?? cachedState?.agentColorHex ?? fallbackColor ?? DEFAULT_CHAT_COLOR_HEX,
       agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? cachedState?.agentAvatarUrl ?? fallbackAvatarUrl ?? null,
@@ -1033,19 +1029,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         return state
       }
       return { autoScrollPinSuppressedUntil: until }
-    })
-  },
-
-  toggleThinkingCollapsed(cursor) {
-    set((state) => {
-      const current = state.thinkingCollapsedByCursor[cursor]
-      const nextCollapsed = !(current ?? true)
-      return {
-        thinkingCollapsedByCursor: {
-          ...state.thinkingCollapsedByCursor,
-          [cursor]: nextCollapsed,
-        },
-      }
     })
   },
 

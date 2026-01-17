@@ -317,11 +317,13 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
     const thinkingBefore: ThinkingEvent[] = []
     const thinkingBetween: ThinkingEvent[] = []
     const thinkingAfter: ThinkingEvent[] = []
+    const segmentThinking = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
+    const combinedThinking = mergeThinkingEntries(
+      mergeThinkingEntries(mergedCluster.thinkingEntries, pendingStepThinking),
+      segmentThinking,
+    ) ?? []
 
-    for (const event of segment) {
-      if (event.kind !== 'thinking') {
-        continue
-      }
+    for (const event of combinedThinking) {
       if (compareTimelineCursors(event.cursor, earliestCursor) <= 0) {
         thinkingBefore.push(event)
         continue
@@ -333,13 +335,10 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
       thinkingBetween.push(event)
     }
 
-    const mergedThinking = mergeThinkingEntries(
-      mergeThinkingEntries(mergedCluster.thinkingEntries, pendingStepThinking),
-      thinkingBetween,
-    )
-    const mergedWithThinking = mergedThinking?.length
-      ? { ...mergedCluster, thinkingEntries: mergedThinking }
-      : mergedCluster
+    const mergedWithThinking = {
+      ...mergedCluster,
+      thinkingEntries: thinkingBetween.length ? thinkingBetween : undefined,
+    }
 
     deduped.push(...thinkingBefore, mergedWithThinking, ...thinkingAfter)
     segment = []

@@ -1,18 +1,15 @@
-import { memo, useCallback } from 'react'
+import { memo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
 import { ToolDetailProvider } from './tooling/ToolDetailContext'
-import { ThinkingBubble } from './ThinkingBubble'
 import { KanbanEventCard } from './KanbanEventCard'
-import type { TimelineEvent } from './types'
+import type { TimelineEvent, ToolClusterEvent } from './types'
 
 type TimelineEventListProps = {
   agentFirstName: string
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
-  thinkingCollapsedByCursor?: Record<string, boolean>
-  onToggleThinking?: (cursor: string) => void
 }
 
 export const TimelineEventList = memo(function TimelineEventList({
@@ -20,18 +17,7 @@ export const TimelineEventList = memo(function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
-  thinkingCollapsedByCursor,
-  onToggleThinking,
 }: TimelineEventListProps) {
-  const handleToggleThinking = useCallback(
-    (cursor: string) => {
-      if (onToggleThinking) {
-        onToggleThinking(cursor)
-      }
-    },
-    [onToggleThinking],
-  )
-
   if (initialLoading) {
     return (
       <div className="timeline-loading-state flex items-center justify-center gap-3.5 rounded-[1.25rem] border border-indigo-100/80 bg-gradient-to-br from-white via-indigo-50/60 to-purple-50/40 px-7 py-9 shadow-sm">
@@ -60,14 +46,21 @@ export const TimelineEventList = memo(function TimelineEventList({
           )
         }
         if (event.kind === 'thinking') {
-          const collapsed = thinkingCollapsedByCursor?.[event.cursor] ?? true
+          const cluster: ToolClusterEvent = {
+            kind: 'steps',
+            cursor: event.cursor,
+            entries: [],
+            entryCount: 1,
+            collapsible: false,
+            collapseThreshold: 3,
+            earliestTimestamp: event.timestamp ?? null,
+            latestTimestamp: event.timestamp ?? null,
+            thinkingEntries: [event],
+          }
           return (
-            <ThinkingBubble
+            <ToolClusterCard
               key={event.cursor}
-              reasoning={event.reasoning || ''}
-              isStreaming={false}
-              collapsed={collapsed}
-              onToggle={() => handleToggleThinking(event.cursor)}
+              cluster={cluster}
             />
           )
         }
