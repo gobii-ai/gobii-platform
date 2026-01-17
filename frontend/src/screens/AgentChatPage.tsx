@@ -409,11 +409,19 @@ export function AgentChatPage({
 
   // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
   const bottomSentinelRef = useRef<HTMLElement | null>(null)
+  // Track whether sentinel exists to re-run effect when it appears
+  const hasSentinel = !initialLoading && !hasMoreNewer
   useEffect(() => {
     // Find the bottom sentinel element
     const sentinel = document.getElementById('timeline-bottom-sentinel')
     bottomSentinelRef.current = sentinel
-    if (!sentinel) return
+
+    // If no sentinel yet, mark as at-bottom by default (will be corrected when it appears)
+    if (!sentinel) {
+      isNearBottomRef.current = true
+      setIsNearBottom(true)
+      return
+    }
 
     const isAutoPinSuppressed = () => {
       const suppressedUntil = autoScrollPinSuppressedUntilRef.current
@@ -440,7 +448,7 @@ export function AgentChatPage({
 
     observer.observe(sentinel)
     return () => observer.disconnect()
-  }, [setAutoScrollPinned])
+  }, [setAutoScrollPinned, hasSentinel])
 
   // Detect user scrolling UP to immediately unpin (wheel, touch, keyboard)
   useEffect(() => {
@@ -517,7 +525,9 @@ export function AgentChatPage({
     const target = document.scrollingElement ?? document.documentElement ?? document.body
     // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
     window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
-    // IntersectionObserver will automatically detect we're at bottom
+    // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
+    isNearBottomRef.current = true
+    setIsNearBottom(true)
   }, [])
 
   const scrollToBottom = useCallback(() => {
