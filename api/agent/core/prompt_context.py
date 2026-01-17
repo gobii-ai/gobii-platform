@@ -2698,7 +2698,7 @@ def _get_work_completion_prompt(
                 f"📋 {open_cards} card(s) in progress ({cards_desc}).\n"
                 "Continue working. When ready to finish: write the actual report + mark done in one response.\n"
                 "Never 'let me compile...'—that terminates you before delivery. The report goes in your message.\n"
-                "Still working? End with \"CONTINUE_WORK_SIGNAL\" on its own line (stripped from output)."
+                "Remember: will_continue_work declares your intent. Omit it and you stop forever—no second chances."
             ),
             4,
         )

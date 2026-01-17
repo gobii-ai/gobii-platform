@@ -72,7 +72,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = FINAL report, all work done AND marked done.",
+                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html", "will_continue_work"],

@@ -47,7 +47,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = work remains (cards in todo/doing). false = FINAL message, all work done AND marked done.",
+                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     },
                 },
                 "required": ["peer_agent_id", "message", "will_continue_work"],

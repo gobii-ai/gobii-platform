@@ -998,8 +998,8 @@ export function AgentChatPage({
   ])
 
   const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-  const selectionMainStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
-  const viewportPageStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
+  const selectionMainStyle = { minHeight: '100dvh' }
+  const viewportPageStyle = { minHeight: '100dvh' }
   const selectionSidebarProps = {
     agents: rosterAgents,
     activeAgentId: null,

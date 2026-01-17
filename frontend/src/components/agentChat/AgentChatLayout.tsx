@@ -149,7 +149,7 @@ export function AgentChatLayout({
   const composerPalette = buildAgentComposerPalette(agentColorHex)
 
   const mainClassName = `has-sidebar ${sidebarCollapsed ? 'has-sidebar--collapsed' : ''}`
-  const viewportMinHeightStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
+  const viewportMinHeightStyle = { minHeight: '100dvh' }
 
   return (
     <>

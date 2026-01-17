@@ -40,12 +40,9 @@ function measureViewportMargins(options: ScrollIntoViewOptions): { top: number; 
   }
 
   const composerRect = composer.getBoundingClientRect()
-  const bottomInset = parseFloat(
-    getComputedStyle(document.documentElement).getPropertyValue('--app-viewport-bottom-inset') || '0',
-  ) || 0
   const overlap = Math.max(0, viewportHeight - composerRect.top)
 
-  return { top, bottom: overlap + DEFAULT_MARGIN + bottomInset }
+  return { top, bottom: overlap + DEFAULT_MARGIN }
 }
 
 function scrollElement(element: HTMLElement, delta: number, behavior: ScrollBehavior) {
