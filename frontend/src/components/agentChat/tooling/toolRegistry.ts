@@ -242,14 +242,13 @@ function buildThinkingEntry(clusterCursor: string, entry: ThinkingEvent): ToolEn
   if (!reasoning) {
     return null
   }
-  const caption = truncate(reasoning.replace(/\s+/g, ' '), 60)
   return {
     id: `thinking:${entry.cursor}`,
     clusterCursor,
     cursor: entry.cursor,
     toolName: 'thinking',
     label: 'Thinking',
-    caption: caption || 'Thinking',
+    caption: null,
     timestamp: entry.timestamp ?? null,
     icon: Brain,
     iconBgClass: 'bg-indigo-100',
