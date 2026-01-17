@@ -225,7 +225,7 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
                 </svg>
               </span>
               <span className="tool-cluster-batch-label">
-                <span data-role="cluster-count">{transformed.entryCount}</span> tools called
+                <span data-role="cluster-count">{transformed.entryCount}</span> events
               </span>
             </button>
           </div>

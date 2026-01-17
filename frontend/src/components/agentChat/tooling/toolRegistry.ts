@@ -1,7 +1,7 @@
-import { Waypoints } from 'lucide-react'
+import { Brain, Waypoints } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
-import type { ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import type { ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
   ToolDescriptor,
@@ -13,8 +13,81 @@ import {
   coerceString,
   truncate,
 } from '../../tooling/toolMetadata'
+import { ThinkingDetail } from '../toolDetails/details/common'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
+
+type ParsedTimelineCursor = {
+  value: number
+  kind: string
+  identifier: string
+}
+
+function parseTimelineCursor(raw: string | null | undefined): ParsedTimelineCursor | null {
+  if (!raw) {
+    return null
+  }
+  const parts = raw.split(':')
+  if (parts.length < 3) {
+    return null
+  }
+  const [valuePart, kind, ...identifierParts] = parts
+  const value = Number(valuePart)
+  if (!Number.isFinite(value)) {
+    return null
+  }
+  return {
+    value,
+    kind,
+    identifier: identifierParts.join(':'),
+  }
+}
+
+function compareTimelineCursors(left: string, right: string): number {
+  if (left === right) {
+    return 0
+  }
+  const leftParsed = parseTimelineCursor(left)
+  const rightParsed = parseTimelineCursor(right)
+  if (leftParsed && rightParsed) {
+    if (leftParsed.value !== rightParsed.value) {
+      return leftParsed.value - rightParsed.value
+    }
+    if (leftParsed.kind !== rightParsed.kind) {
+      return leftParsed.kind.localeCompare(rightParsed.kind)
+    }
+    if (leftParsed.kind === 'message') {
+      const leftSeq = Number(leftParsed.identifier)
+      const rightSeq = Number(rightParsed.identifier)
+      if (Number.isFinite(leftSeq) && Number.isFinite(rightSeq) && leftSeq !== rightSeq) {
+        return leftSeq - rightSeq
+      }
+    }
+    return leftParsed.identifier.localeCompare(rightParsed.identifier)
+  }
+  const leftValue = Number(left.split(':', 1)[0])
+  const rightValue = Number(right.split(':', 1)[0])
+  if (Number.isFinite(leftValue) && Number.isFinite(rightValue) && leftValue !== rightValue) {
+    return leftValue - rightValue
+  }
+  return left.localeCompare(right)
+}
+
+function compareEntryOrder(left: ToolEntryDisplay, right: ToolEntryDisplay): number {
+  if (left.cursor && right.cursor) {
+    return compareTimelineCursors(left.cursor, right.cursor)
+  }
+  if (left.timestamp && right.timestamp) {
+    return left.timestamp.localeCompare(right.timestamp)
+  }
+  if (left.timestamp) {
+    return -1
+  }
+  if (right.timestamp) {
+    return 1
+  }
+  return left.id.localeCompare(right.id)
+}
 
 function toTitleCase(value: string): string {
   return value
@@ -164,9 +237,39 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
   }
 }
 
+function buildThinkingEntry(clusterCursor: string, entry: ThinkingEvent): ToolEntryDisplay | null {
+  const reasoning = entry.reasoning?.trim() || ''
+  if (!reasoning) {
+    return null
+  }
+  const caption = truncate(reasoning.replace(/\s+/g, ' '), 60)
+  return {
+    id: `thinking:${entry.cursor}`,
+    clusterCursor,
+    cursor: entry.cursor,
+    toolName: 'thinking',
+    label: 'Thinking',
+    caption: caption || 'Thinking',
+    timestamp: entry.timestamp ?? null,
+    icon: Brain,
+    iconBgClass: 'bg-indigo-100',
+    iconColorClass: 'text-indigo-600',
+    parameters: null,
+    rawParameters: null,
+    result: reasoning,
+    summary: null,
+    charterText: null,
+    sqlStatements: undefined,
+    detailComponent: ThinkingDetail,
+    meta: undefined,
+    sourceEntry: undefined,
+  }
+}
+
 export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTransform {
   const entries: ToolEntryDisplay[] = []
   let skippedCount = 0
+  const thinkingEntries = cluster.thinkingEntries ?? []
 
   for (const entry of cluster.entries) {
     const transformed = buildToolEntry(cluster.cursor, entry)
@@ -176,6 +279,15 @@ export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTran
     }
     entries.push(transformed)
   }
+
+  for (const entry of thinkingEntries) {
+    const transformed = buildThinkingEntry(cluster.cursor, entry)
+    if (transformed) {
+      entries.push(transformed)
+    }
+  }
+
+  entries.sort(compareEntryOrder)
 
   const entryCount = entries.length
   const collapsible = entryCount >= cluster.collapseThreshold

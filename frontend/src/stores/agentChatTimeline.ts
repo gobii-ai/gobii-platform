@@ -1,4 +1,4 @@
-import type { TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import type { ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
 import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
 
 type ParsedTimelineCursor = {
@@ -108,6 +108,35 @@ function pickNonEmptyArray<T>(value: T[] | null | undefined, fallback: T[] | nul
   return fallback ?? undefined
 }
 
+function sortThinkingEntries(entries: ThinkingEvent[]): ThinkingEvent[] {
+  return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
+}
+
+function mergeThinkingEntries(
+  base: ThinkingEvent[] | undefined,
+  incoming: ThinkingEvent[] | undefined,
+): ThinkingEvent[] | undefined {
+  if (!base?.length && !incoming?.length) {
+    return undefined
+  }
+
+  const entryMap = new Map<string, ThinkingEvent>()
+  for (const entry of base ?? []) {
+    if (!entry?.cursor) {
+      continue
+    }
+    entryMap.set(entry.cursor, entry)
+  }
+  for (const entry of incoming ?? []) {
+    if (!entry?.cursor) {
+      continue
+    }
+    entryMap.set(entry.cursor, entry)
+  }
+
+  return sortThinkingEntries(Array.from(entryMap.values()))
+}
+
 function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallEntry {
   return {
     ...base,
@@ -189,6 +218,7 @@ function buildCluster(
   entries: ToolCallEntry[],
   threshold: number,
   secondaryCursor: string,
+  thinkingEntries?: ThinkingEvent[] | undefined,
 ): ToolClusterEvent {
   const sortedEntries = sortToolEntries(dedupeToolEntries(entries))
   const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor)
@@ -201,44 +231,131 @@ function buildCluster(
     collapsible: sortedEntries.length >= threshold,
     earliestTimestamp: pickTimestamp(sortedEntries, 'earliest'),
     latestTimestamp: pickTimestamp(sortedEntries, 'latest'),
+    thinkingEntries: thinkingEntries?.length ? thinkingEntries : undefined,
   }
 }
 
 export function mergeToolClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): ToolClusterEvent {
   const threshold = Math.max(base.collapseThreshold, incoming.collapseThreshold)
-  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor)
+  const thinkingEntries = mergeThinkingEntries(base.thinkingEntries, incoming.thinkingEntries)
+  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries)
 }
 
 function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   const deduped: TimelineEvent[] = []
   const seenToolEntryIds = new Set<string>()
+  let segment: TimelineEvent[] = []
+
+  const flushSegment = () => {
+    if (!segment.length) {
+      return
+    }
+
+    const stepEvents = segment.filter((event): event is ToolClusterEvent => event.kind === 'steps')
+    if (!stepEvents.length) {
+      deduped.push(...segment)
+      segment = []
+      return
+    }
+
+    let mergedCluster: ToolClusterEvent | null = null
+    let pendingStepThinking: ThinkingEvent[] = []
+    for (const event of stepEvents) {
+      const uniqueEntries = dedupeToolEntries(event.entries).filter((entry) => {
+        if (seenToolEntryIds.has(entry.id)) {
+          return false
+        }
+        seenToolEntryIds.add(entry.id)
+        return true
+      })
+
+      if (!uniqueEntries.length) {
+        if (event.thinkingEntries?.length) {
+          pendingStepThinking = mergeThinkingEntries(pendingStepThinking, event.thinkingEntries) ?? pendingStepThinking
+        }
+        continue
+      }
+
+      const normalizedCluster = buildCluster(
+        event,
+        uniqueEntries,
+        event.collapseThreshold,
+        event.cursor,
+        mergeThinkingEntries(event.thinkingEntries, pendingStepThinking),
+      )
+      pendingStepThinking = []
+      mergedCluster = mergedCluster ? mergeToolClusters(mergedCluster, normalizedCluster) : normalizedCluster
+    }
+
+    if (!mergedCluster) {
+      const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
+      const mergedThinking = mergeThinkingEntries(thinkingEvents, pendingStepThinking)
+      deduped.push(...(mergedThinking ?? thinkingEvents))
+      segment = []
+      return
+    }
+
+    const toolEntryCursors = mergedCluster.entries
+      .map((entry) => entry.cursor)
+      .filter((cursor): cursor is string => Boolean(cursor))
+
+    if (!toolEntryCursors.length) {
+      const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
+      const mergedThinking = mergeThinkingEntries(thinkingEvents, pendingStepThinking)
+      deduped.push(...(mergedThinking ?? thinkingEvents))
+      segment = []
+      return
+    }
+
+    const earliestCursor = toolEntryCursors.reduce((earliest, cursor) =>
+      compareTimelineCursors(cursor, earliest) < 0 ? cursor : earliest,
+    )
+    const latestCursor = toolEntryCursors.reduce((latest, cursor) =>
+      compareTimelineCursors(cursor, latest) > 0 ? cursor : latest,
+    )
+
+    const thinkingBefore: ThinkingEvent[] = []
+    const thinkingBetween: ThinkingEvent[] = []
+    const thinkingAfter: ThinkingEvent[] = []
+
+    for (const event of segment) {
+      if (event.kind !== 'thinking') {
+        continue
+      }
+      if (compareTimelineCursors(event.cursor, earliestCursor) <= 0) {
+        thinkingBefore.push(event)
+        continue
+      }
+      if (compareTimelineCursors(event.cursor, latestCursor) >= 0) {
+        thinkingAfter.push(event)
+        continue
+      }
+      thinkingBetween.push(event)
+    }
+
+    const mergedThinking = mergeThinkingEntries(
+      mergeThinkingEntries(mergedCluster.thinkingEntries, pendingStepThinking),
+      thinkingBetween,
+    )
+    const mergedWithThinking = mergedThinking?.length
+      ? { ...mergedCluster, thinkingEntries: mergedThinking }
+      : mergedCluster
+
+    deduped.push(...thinkingBefore, mergedWithThinking, ...thinkingAfter)
+    segment = []
+  }
 
   for (const event of events) {
-    if (event.kind !== 'steps') {
-      deduped.push(event)
+    if (event.kind === 'steps' || event.kind === 'thinking') {
+      segment.push(event)
       continue
     }
 
-    const uniqueEntries = dedupeToolEntries(event.entries).filter((entry) => {
-      if (seenToolEntryIds.has(entry.id)) {
-        return false
-      }
-      seenToolEntryIds.add(entry.id)
-      return true
-    })
-
-    if (!uniqueEntries.length) {
-      continue
-    }
-
-    const normalizedCluster = buildCluster(event, uniqueEntries, event.collapseThreshold, event.cursor)
-    const last = deduped[deduped.length - 1]
-    if (last && last.kind === 'steps') {
-      deduped[deduped.length - 1] = mergeToolClusters(last, normalizedCluster)
-    } else {
-      deduped.push(normalizedCluster)
-    }
+    flushSegment()
+    deduped.push(event)
   }
+
+  flushSegment()
 
   return deduped
 }

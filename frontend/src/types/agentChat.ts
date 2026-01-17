@@ -63,6 +63,7 @@ export type ToolClusterEvent = {
   latestTimestamp?: string | null
   earliestTimestamp?: string | null
   entries: ToolCallEntry[]
+  thinkingEntries?: ThinkingEvent[]
 }
 
 export type ProcessingWebTask = {
