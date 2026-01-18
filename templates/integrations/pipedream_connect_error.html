@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title|default:"Connection Error" }} – Gobii</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root {
+      font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: linear-gradient(135deg, #f6f9ff 0%, #e9f2ff 100%);
+      color: #0f172a;
+    }
+    .panel {
+      width: min(540px, 100%);
+      padding: 48px 42px;
+      border-radius: 28px;
+      background: rgba(255, 255, 255, 0.97);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      box-shadow: 0 28px 60px -26px rgba(79, 70, 229, 0.28);
+      text-align: center;
+    }
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.1);
+    }
+    .icon svg {
+      width: 32px;
+      height: 32px;
+      color: #dc2626;
+    }
+    .icon.icon-info {
+      background: rgba(59, 130, 246, 0.1);
+    }
+    .icon.icon-info svg {
+      color: #2563eb;
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: clamp(1.8rem, 1.7rem + 0.6vw, 2.15rem);
+      font-weight: 500;
+      letter-spacing: -0.015em;
+      color: #111827;
+    }
+    p {
+      margin: 0;
+      color: rgba(15, 23, 42, 0.65);
+      line-height: 1.55;
+      font-size: 0.98rem;
+    }
+    p + p {
+      margin-top: 14px;
+    }
+    .buttons {
+      margin-top: 28px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .cta {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 12px 26px;
+      border-radius: 999px;
+      border: none;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      background: linear-gradient(120deg, #5f5bff, #7a68ff);
+      box-shadow: 0 22px 44px -20px rgba(88, 83, 239, 0.5);
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .cta:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 26px 52px -20px rgba(76, 83, 238, 0.45);
+    }
+    .cta-secondary {
+      background: #fff;
+      color: #4f46e5;
+      border: 1.5px solid rgba(79, 70, 229, 0.3);
+      box-shadow: none;
+    }
+    .cta-secondary:hover {
+      background: rgba(79, 70, 229, 0.05);
+      box-shadow: none;
+      transform: none;
+    }
+    .support-text {
+      margin-top: 24px;
+      font-size: 0.85rem;
+      color: rgba(15, 23, 42, 0.5);
+    }
+    .support-text a {
+      color: #4f46e5;
+      text-decoration: none;
+    }
+    .support-text a:hover {
+      text-decoration: underline;
+    }
+    @media (max-width: 480px) {
+      .panel {
+        padding: 40px 26px;
+      }
+      .buttons {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <div class="icon {% if icon_type == 'info' %}icon-info{% endif %}">
+      {% if icon_type == "info" %}
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="m11.25 11.25.041-.02a.75.75 0 0 1 1.063.852l-.708 2.836a.75.75 0 0 0 1.063.853l.041-.021M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9-3.75h.008v.008H12V8.25Z" />
+      </svg>
+      {% else %}
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+      </svg>
+      {% endif %}
+    </div>
+    <h1>{{ heading|default:"Unable to connect" }}</h1>
+    <p>{{ message|default:"We couldn't generate a connection link for this integration right now. This is usually a temporary issue." }}</p>
+    {% if message_secondary %}
+    <p>{{ message_secondary }}</p>
+    {% else %}
+    <p>Please try again in a moment. If the problem persists, the integration service may be experiencing issues.</p>
+    {% endif %}
+    <div class="buttons">
+      {% if show_retry|default:True %}
+      <button class="cta" onclick="window.location.reload()">Try again</button>
+      {% endif %}
+      <a href="/console/" class="cta {% if show_retry|default:True %}cta-secondary{% endif %}">Back to console</a>
+    </div>
+    {% if show_support|default:True %}
+    <div class="support-text">
+      Still having trouble? <a href="mailto:support@gobii.ai">Contact support</a>
+    </div>
+    {% endif %}
+  </div>
+</body>
+</html>
