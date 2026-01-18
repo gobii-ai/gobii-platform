@@ -192,7 +192,7 @@ from console.views import (
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
-from api.views import LinkShortenerRedirectView, PersistentAgentViewSet
+from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
 
 urlpatterns = [
     # Pages app includes homepage, health check, and documentation
@@ -201,6 +201,9 @@ urlpatterns = [
 
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
     path("d/<str:token>/", SignedAgentFsNodeDownloadAPIView.as_view(), name="signed_agent_fs_download"),
+
+    # Pipedream JIT connect redirect - generates fresh auth links on-demand
+    path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),

@@ -34,7 +34,9 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
+from django.contrib.sites.models import Site
 from django.db.models import Max
+from django.urls import reverse
 from django.utils import timezone
 
 from .mcp_param_guards import MCPParamGuardRegistry
@@ -101,6 +103,17 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     else:
         updated_parameters["required"] = ["will_continue_work"]
     return updated_parameters
+
+
+def _build_jit_connect_url(agent_id: str, app_slug: str) -> str:
+    """
+    Build the just-in-time Pipedream connect URL that generates fresh auth links on demand.
+    This avoids the 4-hour expiration issue with direct Pipedream links.
+    """
+    current_site = Site.objects.get_current()
+    domain = current_site.domain.strip().rstrip('/')
+    path = reverse('pipedream_jit_connect', kwargs={'agent_id': agent_id, 'app_slug': app_slug})
+    return f"https://{domain}{path}"
 
 
 @dataclass
@@ -1360,10 +1373,11 @@ class MCPToolManager:
                                 )
 
                         if reused_url:
+                            jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
                             return {
                                 "status": "action_required",
-                                "result": f"Authorization required. Please connect your account via: {reused_url}",
-                                "connect_url": reused_url,
+                                "result": f"Authorization required. Please connect your account via: {jit_url}",
+                                "connect_url": jit_url,
                             }
 
                         session, first_party_url = create_connect_session(agent, normalized_app)
@@ -1388,23 +1402,24 @@ class MCPToolManager:
                                     ),
                                 }
 
-                        # Fall back to server‑provided URL if helper could not produce one
-                        final_url = first_party_url or connect_url
+                        # Use JIT URL that generates fresh auth links on demand
+                        jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
                         logger.info(
-                            "PD Connect: surfacing connect link agent=%s app=%s using_first_party=%s",
-                            str(agent.id), app_slug or "", bool(first_party_url)
+                            "PD Connect: surfacing JIT connect link agent=%s app=%s",
+                            str(agent.id), app_slug or ""
                         )
                         return {
                             "status": "action_required",
-                            "result": f"Authorization required. Please connect your account via: {final_url}",
-                            "connect_url": final_url,
+                            "result": f"Authorization required. Please connect your account via: {jit_url}",
+                            "connect_url": jit_url,
                         }
                     except Exception:
-                        logger.exception("PD Connect: failed to generate first-party link; falling back to server URL")
+                        logger.exception("PD Connect: failed to generate first-party link; falling back to JIT URL")
+                        jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
                         return {
                             "status": "action_required",
-                            "result": f"Authorization required. Please connect your account via: {connect_url}",
-                            "connect_url": connect_url,
+                            "result": f"Authorization required. Please connect your account via: {jit_url}",
+                            "connect_url": jit_url,
                         }
 
             response = {"status": "success", "result": content or "Tool executed successfully"}

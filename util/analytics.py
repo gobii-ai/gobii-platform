@@ -190,6 +190,9 @@ class AnalyticsEvent(StrEnum):
     CONSOLE_HOME_VIEWED = 'Console Home Viewed'
     CONSOLE_USAGE_VIEWED = 'Console Usage Viewed'
 
+    # Pipedream Events
+    PIPEDREAM_JIT_CONNECT_REDIRECT = 'Pipedream JIT Connect Redirect'
+
     # Email Events
     EMAIL_OPENED = 'Email Opened'
     EMAIL_LINK_CLICKED = 'Email Link Clicked'
@@ -264,6 +267,7 @@ class AnalyticsSource(StrEnum):
     AGENT = 'Agent'
     EMAIL = 'Email'
     SMS = 'SMS'
+    CONSOLE = 'Console'
 
 class Analytics:
     @staticmethod
