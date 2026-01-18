@@ -1415,7 +1415,7 @@ class MCPToolManager:
                         }
                     except Exception:
                         logger.exception("PD Connect: failed to generate first-party link; falling back to JIT URL")
-                        jit_url = _build_jit_connect_url(str(agent.id), normalized_app or "")
+                        jit_url = _build_jit_connect_url(str(agent.id), (app_slug or "").strip())
                         return {
                             "status": "action_required",
                             "result": f"Authorization required. Please connect your account via: {jit_url}",
