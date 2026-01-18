@@ -1039,14 +1039,12 @@ class PipedreamConnectRedirectView(View):
             return HttpResponseRedirect('/console/')
 
         # Check user has access to this agent (owns it or is in the org)
-        has_access = False
-        if agent.user_id == request.user.id:
-            has_access = True
-        elif agent.organization_id:
-            has_access = OrganizationMembership.objects.filter(
+        has_access = (agent.user_id == request.user.id) or (
+                agent.organization_id and OrganizationMembership.objects.filter(
                 org_id=agent.organization_id,
                 user_id=request.user.id,
             ).exists()
+        )
 
         if not has_access:
             logger.warning(
