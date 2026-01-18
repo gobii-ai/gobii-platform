@@ -8169,7 +8169,8 @@ class PipedreamConnectSession(models.Model):
     app_slug = models.CharField(max_length=64)
 
     # Short‑lived token and link returned by Connect API
-    connect_token = models.CharField(max_length=128, unique=True, blank=True)
+    # null=True so multiple pending sessions can exist (NULLs don't violate unique constraint)
+    connect_token = models.CharField(max_length=128, unique=True, null=True, blank=True, default=None)
     connect_link_url = models.TextField(blank=True)
     expires_at = models.DateTimeField(null=True, blank=True)
 
