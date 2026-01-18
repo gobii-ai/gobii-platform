@@ -1043,6 +1043,7 @@ class PipedreamConnectRedirectView(View):
                 agent.organization_id and OrganizationMembership.objects.filter(
                 org_id=agent.organization_id,
                 user_id=request.user.id,
+                status=OrganizationMembership.OrgStatus.ACTIVE
             ).exists()
         )
 
