@@ -17,21 +17,12 @@
   display: flex;
   flex-direction: column;
   overflow: hidden; /* Prevent body scroll - timeline scrolls internally */
-  background: #fafbfc;
-  isolation: isolate;
-}
-
-/* Subtle atmospheric gradients */
-.agent-chat-page::before {
-  content: "";
-  position: fixed;
-  inset: 0;
+  /* Gradient background */
   background:
-    radial-gradient(ellipse 80% 50% at 20% 20%, rgba(99, 102, 241, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 80% 30%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 50% at 50% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 50%);
-  pointer-events: none;
-  z-index: 0;
+    radial-gradient(ellipse 120% 80% at 20% 10%, rgba(99, 102, 241, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 100% 70% at 85% 20%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
+    radial-gradient(ellipse 140% 100% at 50% 100%, rgba(59, 130, 246, 0.04) 0%, rgba(99, 102, 241, 0.02) 40%, transparent 70%),
+    linear-gradient(to bottom, #fafbfc 0%, #f8fafc 100%);
 }
 
 /* ==========================================================================
@@ -545,6 +536,7 @@
   flex-direction: column;
   position: relative;
   z-index: 1;
+  background: transparent;
 }
 
 /* Scrollable timeline container - this is what scrolls, not the body */
@@ -561,6 +553,7 @@
   flex-direction: column;
   /* Scroll snap helps with initial positioning */
   scroll-snap-type: y proximity;
+  background: transparent;
 }
 
 /* Disable scroll-snap when user has scrolled up (not pinned to bottom) */
@@ -573,6 +566,7 @@
 #timeline-spacer {
   flex: 1 1 auto;
   min-height: calc(var(--agent-chat-banner-height, 0px) + 0.75rem);
+  background: transparent;
 }
 
 /* Inner container for max-width constraint - doesn't grow */
@@ -582,7 +576,8 @@
   max-width: min(56rem, 100%);
   margin: 0 auto;
   padding: 0 1rem;
-  padding-bottom: 0.25rem;
+  padding-bottom: 0;
+  background: transparent;
 }
 
 @media (min-width: 640px) {
@@ -608,11 +603,17 @@
 #timeline-events {
   --timeline-row-gap: 1rem;
   padding: 0;
+  background: transparent;
 }
 
 /* Extra padding when jump button is visible */
 #timeline-events[data-has-jump-button="true"] {
   padding-bottom: 3rem;
+}
+
+/* Ensure content above progress bar isn't cut off */
+#timeline-events[data-has-working-panel="true"] {
+  scroll-padding-bottom: 1rem;
 }
 
 #timeline-events.timeline-align-end {
@@ -649,11 +650,11 @@
   display: flex;
   justify-content: center;
   padding: 0 1.5rem;
-  padding-top: 0.5rem;
+  padding-top: 0;
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
   z-index: 40;
   pointer-events: none;
-  background: #fafbfc;
+  background: transparent;
 }
 
 .composer-surface {
@@ -753,10 +754,12 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-radius: 1rem 1rem 0 0;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  border-bottom: none;
+  border: none;
+  box-shadow: 0 -4px 20px -8px rgba(99, 102, 241, 0.08);
   overflow: hidden;
   transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -1047,11 +1050,6 @@
 .composer-shell[data-panel-visible="true"] .composer-input-surface {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
-  border-top: 1px solid rgba(226, 232, 240, 0.5);
-}
-
-.composer-shell[data-panel-visible="true"][data-expanded="true"] .composer-input-surface {
-  margin-top: -1px;
 }
 
 /* ==========================================================================
@@ -1299,6 +1297,7 @@
 .timeline-event {
   position: relative;
   contain: layout style;
+  scroll-margin-bottom: 1rem;
 }
 
 .timeline-event--incoming {
@@ -1557,11 +1556,13 @@
 @media (max-width: 768px) {
   .composer-shell {
     padding: 0 0.75rem;
+    padding-top: 0;
     padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
   }
 
   #timeline-inner {
     padding: 0 0.5rem;
+    padding-bottom: 0;
   }
 
   #timeline-events[data-has-jump-button="true"] {
@@ -2559,7 +2560,7 @@
    ========================================================================== */
 
 .response-progress-container {
-  padding: 0.75rem 0 0;
+  padding: 0.75rem 0 0.75rem;
   animation: progressFadeIn 0.4s ease-out;
 }
 
