@@ -412,12 +412,13 @@ export function AgentChatPage({
   // Track whether sentinel exists to re-run effect when it appears
   const hasSentinel = !initialLoading && !hasMoreNewer
   useEffect(() => {
-    // Find the bottom sentinel element
+    // Find the bottom sentinel element and scroll container
     const sentinel = document.getElementById('timeline-bottom-sentinel')
+    const container = document.getElementById('timeline-shell')
     bottomSentinelRef.current = sentinel
 
     // If no sentinel yet, mark as at-bottom by default (will be corrected when it appears)
-    if (!sentinel) {
+    if (!sentinel || !container) {
       isNearBottomRef.current = true
       setIsNearBottom(true)
       return
@@ -440,6 +441,8 @@ export function AgentChatPage({
         }
       },
       {
+        // Use container as root for container scrolling
+        root: container,
         // 100px buffer so we detect "near bottom" before hitting the exact bottom
         rootMargin: '0px 0px 100px 0px',
         threshold: 0,
@@ -452,6 +455,9 @@ export function AgentChatPage({
 
   // Detect user scrolling UP to immediately unpin (wheel, touch, keyboard)
   useEffect(() => {
+    const container = document.getElementById('timeline-shell')
+    if (!container) return
+
     // Detect scroll-up via wheel
     const handleWheel = (e: WheelEvent) => {
       if (e.deltaY < 0 && autoScrollPinnedRef.current) {
@@ -486,15 +492,16 @@ export function AgentChatPage({
       }
     }
 
-    window.addEventListener('wheel', handleWheel, { passive: true })
-    window.addEventListener('touchstart', handleTouchStart, { passive: true })
-    window.addEventListener('touchmove', handleTouchMove, { passive: true })
-    window.addEventListener('keydown', handleKeyDown)
+    // Listen on the container, not window
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    container.addEventListener('touchstart', handleTouchStart, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    window.addEventListener('keydown', handleKeyDown) // Keyboard stays on window
 
     return () => {
-      window.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('touchstart', handleTouchStart)
-      window.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
     }
   }, [setAutoScrollPinned])
@@ -522,9 +529,11 @@ export function AgentChatPage({
   const pendingScrollFrameRef = useRef<number | null>(null)
 
   const jumpToBottom = useCallback(() => {
-    const target = document.scrollingElement ?? document.documentElement ?? document.body
-    // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
-    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
+    // Container scrolling: scroll the timeline-shell, not the window
+    const container = document.getElementById('timeline-shell')
+    if (container) {
+      container.scrollTop = container.scrollHeight + 10000
+    }
     // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
     isNearBottomRef.current = true
     setIsNearBottom(true)
@@ -545,7 +554,8 @@ export function AgentChatPage({
 
   useEffect(() => {
     const composer = document.getElementById('agent-composer-shell')
-    if (!composer) return
+    const container = document.getElementById('timeline-shell')
+    if (!composer || !container) return
 
     const observer = new ResizeObserver((entries) => {
       const height = entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height
@@ -554,7 +564,7 @@ export function AgentChatPage({
         const delta = height - prevComposerHeight.current
         // If composer grew and we're at the bottom, scroll down to keep content visible
         if (delta > 0 && (autoScrollPinnedRef.current || isNearBottomRef.current)) {
-          window.scrollBy({ top: delta })
+          container.scrollTop += delta
         }
       }
 
@@ -605,7 +615,7 @@ export function AgentChatPage({
     }
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isNewAgent) {
       // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
       didInitialScrollRef.current = true
@@ -615,19 +625,20 @@ export function AgentChatPage({
     if (!initialLoading && events.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
-      // Use a small timeout to allow layout to settle before jumping
-      requestAnimationFrame(() => jumpToBottom())
+      // Scroll synchronously to avoid flash
+      jumpToBottom()
     }
   }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
     if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
       forceScrollOnNextUpdateRef.current = false
-      scrollToBottom()
+      // Scroll synchronously in layout effect to avoid visual flash
+      jumpToBottom()
     }
     // IntersectionObserver handles isNearBottom updates automatically
   }, [
-    scrollToBottom,
+    jumpToBottom,
     events,
     streaming,
     loadingOlder,
@@ -938,9 +949,7 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
-  const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-  const selectionMainStyle = { minHeight: '100dvh' }
-  const viewportPageStyle = { minHeight: '100dvh' }
+  const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
   const selectionSidebarProps = {
     agents: rosterAgents,
     activeAgentId: null,
@@ -953,9 +962,9 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
   }
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
+    <div className="agent-chat-page">
       <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName} style={selectionMainStyle}>{content}</main>
+      <main className={selectionMainClassName}>{content}</main>
     </div>
   )
 
@@ -986,7 +995,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
+    <div className="agent-chat-page">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}

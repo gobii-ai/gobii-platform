@@ -112,7 +112,9 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
   )
 
   const handleCloseDetail = useCallback(() => {
-    closeScrollRef.current = window.scrollY
+    // Container scrolling: store container scroll position
+    const container = document.getElementById('timeline-shell')
+    closeScrollRef.current = container?.scrollTop ?? 0
     setOpenKey(null)
     pendingScrollKeyRef.current = null
   }, [setOpenKey])
@@ -122,7 +124,11 @@ export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
 
     if (collapsed || !openKey || !activeEntry) {
       if (!openKey && closeScrollRef.current !== null) {
-        window.scrollTo({ top: closeScrollRef.current })
+        // Container scrolling: scroll the timeline-shell, not window
+        const container = document.getElementById('timeline-shell')
+        if (container) {
+          container.scrollTop = closeScrollRef.current
+        }
         closeScrollRef.current = null
       }
       if (!openKey) {

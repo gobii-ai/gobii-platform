@@ -7,6 +7,12 @@ type ScrollIntoViewOptions = {
 const DEFAULT_MARGIN = 16
 
 function findScrollParent(element: HTMLElement): HTMLElement | null {
+  // Container scrolling: prefer timeline-shell as scroll container
+  const timelineShell = document.getElementById('timeline-shell')
+  if (timelineShell && timelineShell.contains(element)) {
+    return timelineShell
+  }
+
   let parent: HTMLElement | null = element.parentElement
 
   while (parent && parent !== document.body) {
@@ -22,7 +28,8 @@ function findScrollParent(element: HTMLElement): HTMLElement | null {
     parent = parent.parentElement
   }
 
-  return document.scrollingElement as HTMLElement | null
+  // Fallback to timeline-shell if available
+  return timelineShell ?? (document.scrollingElement as HTMLElement | null)
 }
 
 function measureViewportMargins(options: ScrollIntoViewOptions): { top: number; bottom: number } {

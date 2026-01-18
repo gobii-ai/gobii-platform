@@ -143,13 +143,9 @@ export function AgentChatLayout({
   const showJumpButton = hasMoreNewer || hasUnseenActivity || !isNearBottom
 
   const showBanner = Boolean(agentName)
-  const containerStyle = showBanner
-    ? { paddingTop: 'calc(var(--agent-chat-banner-height, 0px) + 0.75rem)' }
-    : undefined
   const composerPalette = buildAgentComposerPalette(agentColorHex)
 
-  const mainClassName = `has-sidebar ${sidebarCollapsed ? 'has-sidebar--collapsed' : ''}`
-  const viewportMinHeightStyle = { minHeight: '100dvh' }
+  const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
   return (
     <>
@@ -179,15 +175,17 @@ export function AgentChatLayout({
           sidebarCollapsed={sidebarCollapsed}
         />
       )}
-      <main className={`min-h-screen ${mainClassName}`} style={viewportMinHeightStyle}>
-        <div className="mx-auto flex w-full flex-col px-4 pb-0 sm:px-6 lg:px-10" style={containerStyle}>
-          <div
-            id="agent-workspace-root"
-            className="relative flex flex-1 flex-col gap-2"
-            style={composerPalette.cssVars}
-          >
-            <div id="timeline-shell" className="relative">
-              <div ref={timelineRef} id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
+      <main className={mainClassName}>
+        <div
+          id="agent-workspace-root"
+          style={composerPalette.cssVars}
+        >
+          {/* Scrollable timeline container */}
+          <div ref={timelineRef} id="timeline-shell">
+            {/* Spacer pushes content to bottom when there's extra space */}
+            <div id="timeline-spacer" aria-hidden="true" />
+            <div id="timeline-inner">
+              <div id="timeline-events" className="flex flex-col gap-3" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 <div
                   id="timeline-load-older"
                   className="timeline-load-control"
@@ -267,42 +265,43 @@ export function AgentChatLayout({
               </div>
             </div>
 
-            <AgentComposer
-              onSubmit={onSendMessage}
-              onFocus={onComposerFocus}
-              agentFirstName={agentFirstName}
-              isProcessing={showProcessingIndicator}
-              processingTasks={processingWebTasks}
-              autoFocus={autoFocusComposer}
-              focusKey={activeAgentId}
-              insightsPanelStorageKey={insightsPanelStorageKey}
-              insights={insights}
-              currentInsightIndex={currentInsightIndex}
-              onDismissInsight={onDismissInsight}
-              onInsightIndexChange={onInsightIndexChange}
-              onPauseChange={onPauseChange}
-              isInsightsPaused={isInsightsPaused}
-            />
+            {/* Jump button positioned within scroll container */}
+            <button
+              id="jump-to-latest"
+              className="jump-to-latest"
+              type="button"
+              aria-label="Jump to latest"
+              aria-hidden={showJumpButton ? 'false' : 'true'}
+              onClick={onJumpToLatest}
+              data-has-activity={hasUnseenActivity ? 'true' : 'false'}
+              data-visible={showJumpButton ? 'true' : 'false'}
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
+              </svg>
+              <span className="sr-only">Jump to latest</span>
+            </button>
           </div>
-          {footer ? <div className="mt-6">{footer}</div> : null}
+
+          {/* Composer at bottom of flex layout */}
+          <AgentComposer
+            onSubmit={onSendMessage}
+            onFocus={onComposerFocus}
+            agentFirstName={agentFirstName}
+            isProcessing={showProcessingIndicator}
+            processingTasks={processingWebTasks}
+            autoFocus={autoFocusComposer}
+            focusKey={activeAgentId}
+            insightsPanelStorageKey={insightsPanelStorageKey}
+            insights={insights}
+            currentInsightIndex={currentInsightIndex}
+            onDismissInsight={onDismissInsight}
+            onInsightIndexChange={onInsightIndexChange}
+            onPauseChange={onPauseChange}
+            isInsightsPaused={isInsightsPaused}
+          />
         </div>
-
-        <button
-          id="jump-to-latest"
-          className="jump-to-latest"
-          type="button"
-          aria-label="Jump to latest"
-          aria-hidden={showJumpButton ? 'false' : 'true'}
-          onClick={onJumpToLatest}
-          data-has-activity={hasUnseenActivity ? 'true' : 'false'}
-          data-visible={showJumpButton ? 'true' : 'false'}
-        >
-          <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m0 0-5-5m5 5 5-5" />
-          </svg>
-          <span className="sr-only">Jump to latest</span>
-        </button>
-
+        {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
     </>
   )
