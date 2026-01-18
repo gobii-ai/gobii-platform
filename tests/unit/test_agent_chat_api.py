@@ -124,6 +124,14 @@ class AgentChatAPITests(TestCase):
         self.assertIsInstance(snapshot.get("webTasks"), list)
 
     @tag("batch_agent_chat")
+    def test_timeline_has_no_older_when_under_limit(self):
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        self.assertFalse(payload.get("has_more_older"))
+
+    @tag("batch_agent_chat")
     @patch("console.agent_chat.timeline.get_processing_heartbeat")
     def test_processing_snapshot_uses_heartbeat(self, mock_get_heartbeat):
         mock_get_heartbeat.return_value = {"last_seen": 123.0}

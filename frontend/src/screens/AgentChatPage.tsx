@@ -351,9 +351,8 @@ export function AgentChatPage({
   }, [rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
-  useEffect(() => {
-    autoScrollPinnedRef.current = autoScrollPinned
-  }, [autoScrollPinned])
+  // Sync ref during render (not in useEffect) so ResizeObservers see updated value immediately
+  autoScrollPinnedRef.current = autoScrollPinned
   const autoScrollPinSuppressedUntilRef = useRef(autoScrollPinSuppressedUntil)
   useEffect(() => {
     autoScrollPinSuppressedUntilRef.current = autoScrollPinSuppressedUntil
@@ -361,6 +360,8 @@ export function AgentChatPage({
   const forceScrollOnNextUpdateRef = useRef(false)
   const didInitialScrollRef = useRef(false)
   const isNearBottomRef = useRef(isNearBottom)
+  // Sync ref during render so ResizeObservers see updated value immediately
+  isNearBottomRef.current = isNearBottom
   const composerFocusNudgeTimeoutRef = useRef<number | null>(null)
 
   // Track if we should scroll on next content update (captured before DOM changes)
@@ -369,10 +370,6 @@ export function AgentChatPage({
   useEffect(() => {
     didInitialScrollRef.current = false
   }, [activeAgentId])
-
-  useEffect(() => {
-    isNearBottomRef.current = isNearBottom
-  }, [isNearBottom])
 
   useEffect(() => {
     // Skip initialization for new agent (null agentId)
@@ -639,6 +636,7 @@ export function AgentChatPage({
 
   useLayoutEffect(() => {
     if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
+      shouldScrollOnNextUpdateRef.current = false
       forceScrollOnNextUpdateRef.current = false
       // Scroll synchronously in layout effect to avoid visual flash
       jumpToBottom()
