@@ -559,8 +559,13 @@
   position: relative;
   display: flex;
   flex-direction: column;
-  /* Scroll snap to keep bottom visible when near it */
+  /* Scroll snap helps with initial positioning */
   scroll-snap-type: y proximity;
+}
+
+/* Disable scroll-snap when user has scrolled up (not pinned to bottom) */
+#timeline-shell[data-scroll-pinned="false"] {
+  scroll-snap-type: none;
 }
 
 /* Spacer that grows to push content to bottom when there's extra space */
@@ -1088,13 +1093,13 @@
 }
 
 /* ==========================================================================
-   Jump to Latest Button - Positioned within timeline shell
+   Jump to Latest Button - Fixed at bottom of viewport
    ========================================================================== */
 
 .jump-to-latest {
-  position: absolute;
+  position: fixed;
   left: 50%;
-  bottom: 1rem;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1rem);
   z-index: 50;
   width: 2.5rem;
   height: 2.5rem;
@@ -1111,6 +1116,24 @@
   transform: translateX(-50%);
   cursor: pointer;
   transition: all 0.2s ease;
+}
+
+/* Offset for sidebar */
+.has-sidebar .jump-to-latest {
+  left: calc(50% + 7.5rem);
+}
+
+.has-sidebar--collapsed .jump-to-latest,
+.agent-chat-main--sidebar-collapsed .jump-to-latest {
+  left: calc(50% + 2.5rem);
+}
+
+@media (max-width: 767px) {
+  .has-sidebar .jump-to-latest,
+  .has-sidebar--collapsed .jump-to-latest,
+  .agent-chat-main--sidebar-collapsed .jump-to-latest {
+    left: 50%;
+  }
 }
 
 .jump-to-latest[data-visible='false'] {
@@ -1183,7 +1206,6 @@
 .timeline-bottom-sentinel {
   width: 100%;
   height: 1px;
-  /* Snap to keep this visible when user is near bottom */
   scroll-snap-align: end;
 }
 

@@ -181,7 +181,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell">
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={isNearBottom ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">

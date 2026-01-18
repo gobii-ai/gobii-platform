@@ -531,7 +531,11 @@ export function AgentChatPage({
   const jumpToBottom = useCallback(() => {
     // Container scrolling: scroll the timeline-shell, not the window
     const container = document.getElementById('timeline-shell')
-    if (container) {
+    const sentinel = document.getElementById('timeline-bottom-sentinel')
+    if (sentinel) {
+      // scrollIntoView is more reliable across browsers
+      sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
+    } else if (container) {
       container.scrollTop = container.scrollHeight + 10000
     }
     // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
@@ -615,7 +619,7 @@ export function AgentChatPage({
     }
   }, [])
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (isNewAgent) {
       // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
       didInitialScrollRef.current = true
@@ -625,8 +629,11 @@ export function AgentChatPage({
     if (!initialLoading && events.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
-      // Scroll synchronously to avoid flash
+      // Immediate scroll attempt
       jumpToBottom()
+      // Plus delayed scroll to catch any async layout (images, fonts, etc)
+      const timeout = setTimeout(() => jumpToBottom(), 50)
+      return () => clearTimeout(timeout)
     }
   }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
