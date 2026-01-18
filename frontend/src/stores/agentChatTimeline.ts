@@ -1,4 +1,4 @@
-import type { ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import type { KanbanEvent, ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
 import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
 
 type ParsedTimelineCursor = {
@@ -112,6 +112,10 @@ function sortThinkingEntries(entries: ThinkingEvent[]): ThinkingEvent[] {
   return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
 }
 
+function sortKanbanEntries(entries: KanbanEvent[]): KanbanEvent[] {
+  return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
+}
+
 function mergeThinkingEntries(
   base: ThinkingEvent[] | undefined,
   incoming: ThinkingEvent[] | undefined,
@@ -135,6 +139,31 @@ function mergeThinkingEntries(
   }
 
   return sortThinkingEntries(Array.from(entryMap.values()))
+}
+
+function mergeKanbanEntries(
+  base: KanbanEvent[] | undefined,
+  incoming: KanbanEvent[] | undefined,
+): KanbanEvent[] | undefined {
+  if (!base?.length && !incoming?.length) {
+    return undefined
+  }
+
+  const entryMap = new Map<string, KanbanEvent>()
+  for (const entry of base ?? []) {
+    if (!entry?.cursor) {
+      continue
+    }
+    entryMap.set(entry.cursor, entry)
+  }
+  for (const entry of incoming ?? []) {
+    if (!entry?.cursor) {
+      continue
+    }
+    entryMap.set(entry.cursor, entry)
+  }
+
+  return sortKanbanEntries(Array.from(entryMap.values()))
 }
 
 function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallEntry {
@@ -213,15 +242,48 @@ function pickTimestamp(entries: ToolCallEntry[], direction: 'earliest' | 'latest
   return null
 }
 
+function pickNonToolTimestamp(
+  thinkingEntries: ThinkingEvent[] | undefined,
+  kanbanEntries: KanbanEvent[] | undefined,
+  direction: 'earliest' | 'latest',
+): string | null {
+  const combined = [...(thinkingEntries ?? []), ...(kanbanEntries ?? [])]
+  if (!combined.length) {
+    return null
+  }
+  const ordered = combined.sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
+  const slice = direction === 'earliest' ? ordered : [...ordered].reverse()
+  for (const entry of slice) {
+    if (entry.timestamp) {
+      return entry.timestamp ?? null
+    }
+  }
+  return null
+}
+
+function resolveSegmentCursor(segment: TimelineEvent[]): string {
+  if (!segment.length) {
+    return '0:steps:segment'
+  }
+  return segment.reduce((earliest, event) => {
+    return compareTimelineCursors(event.cursor, earliest) < 0 ? event.cursor : earliest
+  }, segment[0].cursor)
+}
+
 function buildCluster(
   base: ToolClusterEvent,
   entries: ToolCallEntry[],
   threshold: number,
   secondaryCursor: string,
   thinkingEntries?: ThinkingEvent[] | undefined,
+  kanbanEntries?: KanbanEvent[] | undefined,
 ): ToolClusterEvent {
   const sortedEntries = sortToolEntries(dedupeToolEntries(entries))
   const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor)
+  const earliestTimestamp =
+    pickTimestamp(sortedEntries, 'earliest') ?? pickNonToolTimestamp(thinkingEntries, kanbanEntries, 'earliest')
+  const latestTimestamp =
+    pickTimestamp(sortedEntries, 'latest') ?? pickNonToolTimestamp(thinkingEntries, kanbanEntries, 'latest')
   return {
     kind: 'steps',
     cursor,
@@ -229,19 +291,21 @@ function buildCluster(
     entryCount: sortedEntries.length,
     collapseThreshold: threshold,
     collapsible: sortedEntries.length >= threshold,
-    earliestTimestamp: pickTimestamp(sortedEntries, 'earliest'),
-    latestTimestamp: pickTimestamp(sortedEntries, 'latest'),
+    earliestTimestamp,
+    latestTimestamp,
     thinkingEntries: thinkingEntries?.length ? thinkingEntries : undefined,
+    kanbanEntries: kanbanEntries?.length ? kanbanEntries : undefined,
   }
 }
 
 export function mergeToolClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): ToolClusterEvent {
   const threshold = Math.max(base.collapseThreshold, incoming.collapseThreshold)
   const thinkingEntries = mergeThinkingEntries(base.thinkingEntries, incoming.thinkingEntries)
-  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries)
+  const kanbanEntries = mergeKanbanEntries(base.kanbanEntries, incoming.kanbanEntries)
+  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries, kanbanEntries)
 }
 
-function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
+function coalesceTimelineEvents(events: TimelineEvent[], latestKanbanCursor: string | null): TimelineEvent[] {
   const deduped: TimelineEvent[] = []
   const seenToolEntryIds = new Set<string>()
   let segment: TimelineEvent[] = []
@@ -252,77 +316,91 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
     }
 
     const stepEvents = segment.filter((event): event is ToolClusterEvent => event.kind === 'steps')
-    if (!stepEvents.length) {
+    const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
+    const kanbanEvents = segment.filter((event): event is KanbanEvent => event.kind === 'kanban')
+
+    if (!stepEvents.length && !kanbanEvents.length) {
       deduped.push(...segment)
       segment = []
       return
     }
 
-    let mergedCluster: ToolClusterEvent | null = null
-    let pendingStepThinking: ThinkingEvent[] = []
+    let stepThinking: ThinkingEvent[] | undefined
+    let stepKanban: KanbanEvent[] | undefined
+    const toolEntryMap = new Map<string, ToolCallEntry>()
+    let collapseThreshold = 0
+
     for (const event of stepEvents) {
-      const uniqueEntries = dedupeToolEntries(event.entries).filter((entry) => {
-        if (seenToolEntryIds.has(entry.id)) {
-          return false
-        }
-        seenToolEntryIds.add(entry.id)
-        return true
-      })
-
-      if (!uniqueEntries.length) {
-        if (event.thinkingEntries?.length) {
-          pendingStepThinking = mergeThinkingEntries(pendingStepThinking, event.thinkingEntries) ?? pendingStepThinking
-        }
-        continue
+      collapseThreshold = Math.max(collapseThreshold, event.collapseThreshold)
+      if (event.thinkingEntries?.length) {
+        stepThinking = mergeThinkingEntries(stepThinking, event.thinkingEntries) ?? stepThinking
       }
+      if (event.kanbanEntries?.length) {
+        stepKanban = mergeKanbanEntries(stepKanban, event.kanbanEntries) ?? stepKanban
+      }
+      for (const entry of event.entries) {
+        if (!entry?.id || seenToolEntryIds.has(entry.id)) {
+          continue
+        }
+        const existing = toolEntryMap.get(entry.id)
+        toolEntryMap.set(entry.id, existing ? mergeToolEntry(existing, entry) : entry)
+      }
+    }
 
-      const normalizedCluster = buildCluster(
-        event,
-        uniqueEntries,
-        event.collapseThreshold,
-        event.cursor,
-        mergeThinkingEntries(event.thinkingEntries, pendingStepThinking),
+    for (const entryId of toolEntryMap.keys()) {
+      seenToolEntryIds.add(entryId)
+    }
+
+    const toolEntries = Array.from(toolEntryMap.values())
+    const mergedThinking = mergeThinkingEntries(stepThinking, thinkingEvents)
+    const mergedKanban = mergeKanbanEntries(stepKanban, kanbanEvents)
+
+    if (toolEntries.length) {
+      const threshold = collapseThreshold || 3
+      const base = stepEvents[0]
+      const secondaryCursor = stepEvents[stepEvents.length - 1].cursor
+      const mergedCluster = buildCluster(
+        base,
+        toolEntries,
+        threshold,
+        secondaryCursor,
+        mergedThinking,
+        mergedKanban,
       )
-      pendingStepThinking = []
-      mergedCluster = mergedCluster ? mergeToolClusters(mergedCluster, normalizedCluster) : normalizedCluster
-    }
-
-    if (!mergedCluster) {
-      const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
-      const mergedThinking = mergeThinkingEntries(thinkingEvents, pendingStepThinking)
-      deduped.push(...(mergedThinking ?? thinkingEvents))
+      deduped.push(mergedCluster)
       segment = []
       return
     }
 
-    const toolEntryCursors = mergedCluster.entries
-      .map((entry) => entry.cursor)
-      .filter((cursor): cursor is string => Boolean(cursor))
-
-    if (!toolEntryCursors.length) {
-      const thinkingEvents = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
-      const mergedThinking = mergeThinkingEntries(thinkingEvents, pendingStepThinking)
-      deduped.push(...(mergedThinking ?? thinkingEvents))
+    if (mergedKanban?.length) {
+      const cursor = resolveSegmentCursor(segment)
+      const earliestTimestamp = pickNonToolTimestamp(mergedThinking, mergedKanban, 'earliest')
+      const latestTimestamp = pickNonToolTimestamp(mergedThinking, mergedKanban, 'latest')
+      deduped.push({
+        kind: 'steps',
+        cursor,
+        entries: [],
+        entryCount: 0,
+        collapseThreshold: Math.max(collapseThreshold, 3),
+        collapsible: false,
+        earliestTimestamp,
+        latestTimestamp,
+        thinkingEntries: mergedThinking?.length ? mergedThinking : undefined,
+        kanbanEntries: mergedKanban,
+      })
       segment = []
       return
     }
 
-    const segmentThinking = segment.filter((event): event is ThinkingEvent => event.kind === 'thinking')
-    const mergedThinking = mergeThinkingEntries(
-      mergeThinkingEntries(mergedCluster.thinkingEntries, pendingStepThinking),
-      segmentThinking,
-    )
-
-    const mergedWithThinking = mergedThinking?.length
-      ? { ...mergedCluster, thinkingEntries: mergedThinking }
-      : mergedCluster
-
-    deduped.push(mergedWithThinking)
+    if (mergedThinking?.length) {
+      deduped.push(...mergedThinking)
+    }
     segment = []
   }
 
   for (const event of events) {
-    if (event.kind === 'steps' || event.kind === 'thinking') {
+    const isCollapsibleKanban = event.kind === 'kanban' && event.cursor !== latestKanbanCursor
+    if (event.kind === 'steps' || event.kind === 'thinking' || isCollapsibleKanban) {
       segment.push(event)
       continue
     }
@@ -336,11 +414,22 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   return deduped
 }
 
+function getLatestKanbanCursor(events: TimelineEvent[]): string | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event.kind === 'kanban') {
+      return event.cursor
+    }
+  }
+  return null
+}
+
 function finalizeTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
   const sorted = sortTimelineEvents(events)
-  const coalesced = coalesceTimelineEvents(sorted)
+  const latestKanbanCursor = getLatestKanbanCursor(sorted)
+  const coalesced = coalesceTimelineEvents(sorted, latestKanbanCursor)
   const resorted = sortTimelineEvents(coalesced)
-  return coalesceTimelineEvents(resorted)
+  return coalesceTimelineEvents(resorted, latestKanbanCursor)
 }
 
 export function prepareTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {

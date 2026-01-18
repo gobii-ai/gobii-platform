@@ -64,6 +64,7 @@ export type ToolClusterEvent = {
   earliestTimestamp?: string | null
   entries: ToolCallEntry[]
   thinkingEntries?: ThinkingEvent[]
+  kanbanEntries?: KanbanEvent[]
 }
 
 export type ProcessingWebTask = {

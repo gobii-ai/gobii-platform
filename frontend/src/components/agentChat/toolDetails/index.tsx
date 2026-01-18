@@ -17,6 +17,7 @@ import { RequestContactPermissionDetail, SecureCredentialsDetail } from './detai
 import { AnalysisToolDetail } from './details/analysis'
 import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedule'
 import { ChartDetail } from './details/chart'
+import { KanbanUpdateDetail } from './details/kanban'
 
 export { normalizeStructuredValue } from './normalize'
 export {
@@ -52,6 +53,7 @@ export {
   AmazonProductReviewsDetail,
   AmazonProductSearchDetail,
   ChartDetail,
+  KanbanUpdateDetail,
 }
 
 export const TOOL_DETAIL_COMPONENTS = {

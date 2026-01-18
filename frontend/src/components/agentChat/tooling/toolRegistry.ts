@@ -1,7 +1,7 @@
-import { Brain, Waypoints } from 'lucide-react'
+import { Brain, LayoutGrid, Waypoints } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
-import type { ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import type { KanbanEvent, ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
   ToolDescriptor,
@@ -14,6 +14,7 @@ import {
   truncate,
 } from '../../tooling/toolMetadata'
 import { ThinkingDetail } from '../toolDetails/details/common'
+import { KanbanUpdateDetail } from '../toolDetails/details/kanban'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
 
@@ -265,10 +266,38 @@ function buildThinkingEntry(clusterCursor: string, entry: ThinkingEvent): ToolEn
   }
 }
 
+function buildKanbanEntry(clusterCursor: string, entry: KanbanEvent): ToolEntryDisplay | null {
+  if (!entry?.cursor) {
+    return null
+  }
+  return {
+    id: `kanban:${entry.cursor}`,
+    clusterCursor,
+    cursor: entry.cursor,
+    toolName: 'kanban',
+    label: 'Kanban update',
+    caption: entry.displayText || 'Kanban update',
+    timestamp: entry.timestamp ?? null,
+    icon: LayoutGrid,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    parameters: null,
+    rawParameters: entry,
+    result: entry,
+    summary: null,
+    charterText: null,
+    sqlStatements: undefined,
+    detailComponent: KanbanUpdateDetail,
+    meta: undefined,
+    sourceEntry: undefined,
+  }
+}
+
 export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTransform {
   const entries: ToolEntryDisplay[] = []
   let skippedCount = 0
   const thinkingEntries = cluster.thinkingEntries ?? []
+  const kanbanEntries = cluster.kanbanEntries ?? []
 
   for (const entry of cluster.entries) {
     const transformed = buildToolEntry(cluster.cursor, entry)
@@ -281,6 +310,13 @@ export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTran
 
   for (const entry of thinkingEntries) {
     const transformed = buildThinkingEntry(cluster.cursor, entry)
+    if (transformed) {
+      entries.push(transformed)
+    }
+  }
+
+  for (const entry of kanbanEntries) {
+    const transformed = buildKanbanEntry(cluster.cursor, entry)
     if (transformed) {
       entries.push(transformed)
     }
