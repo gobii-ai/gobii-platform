@@ -318,8 +318,12 @@ class PipedreamManagerConnectLinkTests(TestCase):
         res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"instruction": "x"})
 
         self.assertEqual(res.get("status"), "action_required")
-        self.assertIn("ctok_reuse", res.get("connect_url", ""))
-        self.assertIn("app=google_sheets", res.get("connect_url", ""))
+        # Now returns JIT URL instead of direct Pipedream URL
+        connect_url = res.get("connect_url", "")
+        self.assertIn("/connect/pipedream/", connect_url)
+        self.assertIn(str(agent.id), connect_url)
+        self.assertIn("/google_sheets/", connect_url)
+        # create_connect_session should NOT be called since we reuse existing session
         mock_create.assert_not_called()
         session.refresh_from_db()
         self.assertEqual(session.status, PipedreamConnectSession.Status.PENDING)
