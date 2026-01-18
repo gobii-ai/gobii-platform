@@ -10,14 +10,15 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        # First convert existing empty strings to NULL to avoid unique constraint issues
-        migrations.RunSQL(
-            sql="UPDATE api_pipedreamconnectsession SET connect_token = NULL WHERE connect_token = '';",
-            reverse_sql="UPDATE api_pipedreamconnectsession SET connect_token = '' WHERE connect_token IS NULL;",
-        ),
+        # First allow NULLs in the column
         migrations.AlterField(
             model_name='pipedreamconnectsession',
             name='connect_token',
             field=models.CharField(blank=True, default=None, max_length=128, null=True, unique=True),
+        ),
+        # Then convert existing empty strings to NULL to avoid unique constraint issues
+        migrations.RunSQL(
+            sql="UPDATE api_pipedreamconnectsession SET connect_token = NULL WHERE connect_token = '';",
+            reverse_sql="UPDATE api_pipedreamconnectsession SET connect_token = '' WHERE connect_token IS NULL;",
         ),
     ]
