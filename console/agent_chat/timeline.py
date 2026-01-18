@@ -943,7 +943,9 @@ def fetch_timeline_window(
     oldest_cursor = truncated[0].cursor if truncated else None
     newest_cursor = truncated[-1].cursor if truncated else None
 
-    has_more_older = _has_more_before(agent, oldest_cursor)
+    has_more_older = False
+    if oldest_cursor and (direction != "initial" or len(filtered) >= limit):
+        has_more_older = _has_more_before(agent, oldest_cursor)
     has_more_newer = False if direction == "initial" else _has_more_after(agent, newest_cursor)
 
     processing_snapshot = build_processing_snapshot(agent)

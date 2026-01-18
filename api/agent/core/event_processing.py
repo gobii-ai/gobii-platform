@@ -3167,7 +3167,7 @@ def _run_agent_loop(
 
             executed_calls = 0
             followup_required = False
-            any_explicit_continuation = False  # Track if any tool said will_continue_work=True
+            last_explicit_continue: Optional[bool] = None  # Final explicit will_continue_work in batch
             try:
                 tool_names = [_get_tool_call_name(c) for c in (tool_calls or [])]
                 has_non_sleep_calls = any(name != "sleep_until_next_trigger" for name in tool_names)
@@ -3481,16 +3481,17 @@ def _run_agent_loop(
                         attach_prompt_archive=_attach_prompt_archive,
                     )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
-                    tool_requires_followup = not allow_auto_sleep
-
-                    if tool_requires_followup:
-                        followup_required = True
-
-                    # Track if any tool explicitly requested continuation
+                    tool_had_error = _is_error_status(result)
+                    explicit_continue = None
                     if isinstance(tool_params, dict):
-                        will_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
-                        if will_continue is True:
-                            any_explicit_continuation = True
+                        explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+                        if explicit_continue is not None:
+                            last_explicit_continue = explicit_continue
+
+                    if tool_had_error:
+                        followup_required = True
+                    elif explicit_continue is None and not allow_auto_sleep:
+                        followup_required = True
 
                     executed_calls += 1
 
@@ -3503,12 +3504,19 @@ def _run_agent_loop(
                 logger.info("Agent %s is sleeping.", agent.id)
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
+            elif not followup_required and last_explicit_continue is False:
+                logger.info(
+                    "Agent %s: tool batch ended with explicit stop; auto-sleeping.",
+                    agent.id,
+                )
+                _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                return cumulative_token_usage
             # Implied send without continuation phrase = agent is done, force stop
             elif (
                 implied_stop_after_send
                 and message_delivery_ok
                 and not followup_required
-                and not any_explicit_continuation
+                and last_explicit_continue is None
             ):
                 logger.info(
                     "Agent %s: implied send without continuation phrase; auto-sleeping.",
@@ -3518,7 +3526,7 @@ def _run_agent_loop(
                 return cumulative_token_usage
             elif (
                 not followup_required
-                and not any_explicit_continuation
+                and last_explicit_continue is None
                 and executed_calls > 0
                 and executed_calls >= actionable_calls_total
             ):
@@ -3528,7 +3536,7 @@ def _run_agent_loop(
                 )
                 _attempt_cycle_close_for_sleep(agent, budget_ctx)
                 return cumulative_token_usage
-            elif not followup_required and any_explicit_continuation:
+            elif not followup_required and last_explicit_continue is True:
                 logger.info(
                     "Agent %s: tools returned auto_sleep_ok but agent explicitly requested continuation; continuing.",
                     agent.id,

@@ -208,7 +208,15 @@ function navigateTo(path: string) {
 export function ImmersiveApp() {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
-  const embed = useMemo(() => parseBooleanFlag(new URLSearchParams(location.search).get('embed')), [location.search])
+  const embed = useMemo(() => {
+    if (parseBooleanFlag(new URLSearchParams(location.search).get('embed'))) {
+      return true
+    }
+    if (typeof window === 'undefined') {
+      return false
+    }
+    return window.parent !== window
+  }, [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
