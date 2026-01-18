@@ -262,6 +262,8 @@ jobs:
             tag: batch_eval_fingerprint
           - batch: eval_sim
             tag: eval_sim
+          - batch: batch_pipedream_jit_connect
+            tag: pipedream_jit_connect
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
