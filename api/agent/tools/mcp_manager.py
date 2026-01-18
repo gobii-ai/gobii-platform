@@ -91,7 +91,7 @@ def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, An
     updated_properties = dict(properties)
     updated_properties["will_continue_work"] = {
         "type": "boolean",
-        "description": "REQUIRED. true = work remains (cards in todo/doing). false = all work done AND marked done, report sent.",
+        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
     }
     updated_parameters["properties"] = updated_properties
     # Add to required list

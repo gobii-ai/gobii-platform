@@ -30,8 +30,15 @@ export default defineConfig(({ mode }) => ({
     },
   },
   server: {
-    host: '127.0.0.1',
+    // Use VITE_HOST to bind to all interfaces for mobile/remote testing
+    host: process.env.VITE_HOST || '127.0.0.1',
     port: 5173,
+    cors: true,
+    // When accessed via external IP, Vite needs to know its public origin
+    origin: process.env.VITE_ORIGIN,
+    hmr: process.env.VITE_HMR_HOST
+      ? { host: process.env.VITE_HMR_HOST }
+      : true,
   },
   preview: {
     host: '127.0.0.1',

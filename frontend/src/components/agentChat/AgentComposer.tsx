@@ -191,15 +191,11 @@ export function AgentComposer({
 
   const scrollToBottom = useCallback(() => {
     if (!isTouchDevice) return
-    const target =
-      document.getElementById('timeline-bottom-sentinel') ||
-      document.getElementById('timeline-events') ||
-      document.scrollingElement
-    if (target && 'scrollIntoView' in target) {
-      target.scrollIntoView({ block: 'end', behavior: 'smooth' })
-      return
+    // Container scrolling: scroll the timeline-shell, not the window
+    const container = document.getElementById('timeline-shell')
+    if (container) {
+      container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' })
     }
-    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
   }, [isTouchDevice])
 
   // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation

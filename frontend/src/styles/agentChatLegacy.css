@@ -5,26 +5,24 @@
 
 /* ==========================================================================
    Canvas Background - Flat, paper-like, beautiful
+   Container scrolling architecture for mobile viewport stability
    ========================================================================== */
 
 .agent-chat-page {
   position: relative;
-  min-height: var(--app-viewport-height, 100vh);
-  background: #fafbfc;
-  isolation: isolate;
-}
-
-/* Subtle atmospheric gradients */
-.agent-chat-page::before {
-  content: "";
-  position: fixed;
-  inset: 0;
+  /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
+  height: 100vh;
+  height: 100dvh;
+  /* Flex container for banner + content + composer */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* Prevent body scroll - timeline scrolls internally */
+  /* Gradient background */
   background:
-    radial-gradient(ellipse 80% 50% at 20% 20%, rgba(99, 102, 241, 0.06) 0%, transparent 50%),
-    radial-gradient(ellipse 60% 40% at 80% 30%, rgba(139, 92, 246, 0.04) 0%, transparent 50%),
-    radial-gradient(ellipse 70% 50% at 50% 80%, rgba(59, 130, 246, 0.03) 0%, transparent 50%);
-  pointer-events: none;
-  z-index: 0;
+    radial-gradient(ellipse 120% 80% at 20% 10%, rgba(99, 102, 241, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 100% 70% at 85% 20%, rgba(139, 92, 246, 0.04) 0%, transparent 55%),
+    radial-gradient(ellipse 140% 100% at 50% 100%, rgba(59, 130, 246, 0.04) 0%, rgba(99, 102, 241, 0.02) 40%, transparent 70%),
+    linear-gradient(to bottom, #fafbfc 0%, #f8fafc 100%);
 }
 
 /* ==========================================================================
@@ -504,20 +502,96 @@
 }
 
 /* ==========================================================================
-   Main Content Area
+   Main Content Area - Container Scrolling Architecture
    ========================================================================== */
 
-#agent-workspace-root {
-  min-height: 0;
+/* Main content flex child - fills remaining space after banner */
+.agent-chat-main {
+  flex: 1;
+  min-height: 0; /* Critical for flex child to shrink and enable overflow */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   position: relative;
-  z-index: 1;
+  /* Sidebar offset */
+  padding-left: 15rem;
+  transition: padding-left 0.2s ease;
 }
 
+.agent-chat-main--sidebar-collapsed {
+  padding-left: 5rem;
+}
+
+@media (max-width: 767px) {
+  .agent-chat-main,
+  .agent-chat-main--sidebar-collapsed {
+    padding-left: 0;
+  }
+}
+
+#agent-workspace-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+/* Scrollable timeline container - this is what scrolls, not the body */
 #timeline-shell {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  width: 100%;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  /* Scroll snap helps with initial positioning */
+  scroll-snap-type: y proximity;
+  background: transparent;
+}
+
+/* Disable scroll-snap when user has scrolled up (not pinned to bottom) */
+#timeline-shell[data-scroll-pinned="false"] {
+  scroll-snap-type: none;
+}
+
+/* Spacer that grows to push content to bottom when there's extra space */
+/* Also provides padding for the fixed banner */
+#timeline-spacer {
+  flex: 1 1 auto;
+  min-height: calc(var(--agent-chat-banner-height, 0px) + 0.75rem);
+  background: transparent;
+}
+
+/* Inner container for max-width constraint - doesn't grow */
+#timeline-inner {
+  flex: 0 0 auto;
   width: 100%;
   max-width: min(56rem, 100%);
   margin: 0 auto;
-  transform: translateZ(0);
+  padding: 0 1rem;
+  padding-bottom: 0;
+  background: transparent;
+}
+
+@media (min-width: 640px) {
+  #timeline-inner {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  #timeline-inner {
+    padding-left: 2.5rem;
+    padding-right: 2.5rem;
+  }
 }
 
 :root {
@@ -528,70 +602,59 @@
 
 #timeline-events {
   --timeline-row-gap: 1rem;
-  --timeline-bottom-spacing: 1.25rem; /* Must match BOTTOM_PANEL_GAP_PX in AgentChatPage.tsx */
-  padding: 0 1rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
+  padding: 0;
+  background: transparent;
 }
 
+/* Extra padding when jump button is visible */
 #timeline-events[data-has-jump-button="true"] {
-  padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing) + 2rem);
+  padding-bottom: 3rem;
 }
 
-/* Working panel height is already included in dynamically-measured --composer-height */
+/* Ensure content above progress bar isn't cut off */
+#timeline-events[data-has-working-panel="true"] {
+  scroll-padding-bottom: 1rem;
+}
 
 #timeline-events.timeline-align-end {
   justify-content: flex-end;
 }
 
-#timeline-events::-webkit-scrollbar {
+/* Custom scrollbar for timeline */
+#timeline-shell::-webkit-scrollbar {
   width: 6px;
 }
 
-#timeline-events::-webkit-scrollbar-track {
+#timeline-shell::-webkit-scrollbar-track {
   background: transparent;
 }
 
-#timeline-events::-webkit-scrollbar-thumb {
+#timeline-shell::-webkit-scrollbar-thumb {
   background: rgba(148, 163, 184, 0.25);
   border-radius: 9999px;
   transition: background 0.2s ease;
 }
 
-#timeline-events::-webkit-scrollbar-thumb:hover {
+#timeline-shell::-webkit-scrollbar-thumb:hover {
   background: rgba(99, 102, 241, 0.3);
 }
 
 
 /* ==========================================================================
-   Composer - Floating input at bottom
+   Composer - Flex child at bottom (container scrolling architecture)
    ========================================================================== */
 
 .composer-shell {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: calc(var(--app-viewport-bottom-inset, 0px) + 1.25rem);
+  /* Flex child at bottom of agent-workspace-root */
+  flex-shrink: 0;
   display: flex;
   justify-content: center;
   padding: 0 1.5rem;
+  padding-top: 0;
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.25rem);
   z-index: 40;
   pointer-events: none;
-  transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  transform: translateZ(0);
-}
-
-.has-sidebar .composer-shell {
-  left: 15rem;
-}
-
-.has-sidebar--collapsed .composer-shell {
-  left: 5rem;
-}
-
-@media (max-width: 767px) {
-  .has-sidebar .composer-shell,
-  .has-sidebar--collapsed .composer-shell {
-    left: 0;
-  }
+  background: transparent;
 }
 
 .composer-surface {
@@ -655,7 +718,7 @@
 
 .composer-input-surface {
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.04);
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.7);
@@ -691,10 +754,12 @@
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: linear-gradient(135deg, rgba(248, 250, 252, 0.98) 0%, rgba(241, 245, 249, 0.96) 100%);
+  background: rgba(255, 255, 255, 0.65);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-radius: 1rem 1rem 0 0;
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  border-bottom: none;
+  border: none;
+  box-shadow: 0 -4px 20px -8px rgba(99, 102, 241, 0.08);
   overflow: hidden;
   transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
@@ -985,11 +1050,6 @@
 .composer-shell[data-panel-visible="true"] .composer-input-surface {
   border-top-left-radius: 0;
   border-top-right-radius: 0;
-  border-top: 1px solid rgba(226, 232, 240, 0.5);
-}
-
-.composer-shell[data-panel-visible="true"][data-expanded="true"] .composer-input-surface {
-  margin-top: -1px;
 }
 
 /* ==========================================================================
@@ -1031,16 +1091,16 @@
 }
 
 /* ==========================================================================
-   Jump to Latest Button
+   Jump to Latest Button - Fixed at bottom of viewport
    ========================================================================== */
 
 .jump-to-latest {
   position: fixed;
   left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1rem);
   z-index: 50;
   width: 2.5rem;
   height: 2.5rem;
-  bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1.75rem);
   border-radius: 9999px;
   border: 1px solid rgba(255, 255, 255, 0.7);
   background: rgba(255, 255, 255, 0.85);
@@ -1056,17 +1116,20 @@
   transition: all 0.2s ease;
 }
 
+/* Offset for sidebar */
 .has-sidebar .jump-to-latest {
   left: calc(50% + 7.5rem);
 }
 
-.has-sidebar--collapsed .jump-to-latest {
+.has-sidebar--collapsed .jump-to-latest,
+.agent-chat-main--sidebar-collapsed .jump-to-latest {
   left: calc(50% + 2.5rem);
 }
 
 @media (max-width: 767px) {
   .has-sidebar .jump-to-latest,
-  .has-sidebar--collapsed .jump-to-latest {
+  .has-sidebar--collapsed .jump-to-latest,
+  .agent-chat-main--sidebar-collapsed .jump-to-latest {
     left: 50%;
   }
 }
@@ -1141,6 +1204,7 @@
 .timeline-bottom-sentinel {
   width: 100%;
   height: 1px;
+  scroll-snap-align: end;
 }
 
 .timeline-load-button {
@@ -1233,6 +1297,7 @@
 .timeline-event {
   position: relative;
   contain: layout style;
+  scroll-margin-bottom: 1rem;
 }
 
 .timeline-event--incoming {
@@ -1491,23 +1556,22 @@
 @media (max-width: 768px) {
   .composer-shell {
     padding: 0 0.75rem;
-    bottom: calc(var(--app-viewport-bottom-inset, 0px) + 0.75rem);
+    padding-top: 0;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
   }
 
-  #timeline-events {
-    padding: 0 0.5rem calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing));
+  #timeline-inner {
+    padding: 0 0.5rem;
+    padding-bottom: 0;
   }
 
   #timeline-events[data-has-jump-button="true"] {
-    padding-bottom: calc(var(--composer-height, 6.5rem) + var(--timeline-bottom-spacing) + 1.5rem);
+    padding-bottom: calc(var(--timeline-bottom-spacing) + 3rem);
   }
-
 
   .jump-to-latest {
     width: 2.25rem;
     height: 2.25rem;
-    bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1rem);
-    transform: translateX(-50%);
   }
 
   .composer-input-surface textarea {
@@ -2496,7 +2560,7 @@
    ========================================================================== */
 
 .response-progress-container {
-  padding: 0.75rem 0;
+  padding: 0.75rem 0 0.75rem;
   animation: progressFadeIn 0.4s ease-out;
 }
 
@@ -3403,8 +3467,8 @@
 
 .agent-fab {
   position: fixed;
-  right: calc(0.75rem + 1rem + 0.25rem);
-  bottom: calc(var(--app-viewport-bottom-inset, 0px) + var(--composer-height, 6.5rem) + 1.25rem);
+  right: 1rem;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + var(--composer-height, 6.5rem) + 1rem);
   z-index: 50;
   display: none;
   align-items: center;

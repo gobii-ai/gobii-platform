@@ -211,8 +211,8 @@ export type AgentChatPageProps = {
 
 const STREAMING_STALE_MS = 6000
 const STREAMING_REFRESH_INTERVAL_MS = 6000
-const SCROLL_END_TOLERANCE_PX = 4
-const BOTTOM_PANEL_GAP_PX = 20
+// Threshold for detecting intentional scroll-up gesture on touch devices
+const TOUCH_SCROLL_UNPIN_THRESHOLD = 40
 
 export function AgentChatPage({
   agentId,
@@ -407,70 +407,65 @@ export function AgentChatPage({
     showContextSwitcher,
   ])
 
-  const getScrollContainer = useCallback(() => document.scrollingElement ?? document.documentElement ?? document.body, [])
-  const getScrollDistanceToBottom = useCallback(() => {
-    const target = getScrollContainer()
-    // Use visualViewport for accurate measurement on mobile (accounts for keyboard, browser chrome)
-    const viewportHeight = window.visualViewport?.height ?? window.innerHeight
-    const documentHeight = target.scrollHeight
-    const scrollTop = target.scrollTop
-    // On mobile, clientHeight can include hidden browser chrome - use visualViewport when available
-    const effectiveClientHeight = window.visualViewport ? viewportHeight : target.clientHeight
-    return documentHeight - effectiveClientHeight - scrollTop
-  }, [getScrollContainer])
-  const getBottomGapOffset = useCallback(() => {
-    const timeline = timelineRef.current
-    if (!timeline) return 0
-    const timelineStyle = window.getComputedStyle(timeline)
-    const paddingBottom = parseFloat(timelineStyle.paddingBottom) || 0
+  // IntersectionObserver-based bottom detection - simpler and more reliable than scroll math
+  const bottomSentinelRef = useRef<HTMLElement | null>(null)
+  // Track whether sentinel exists to re-run effect when it appears
+  const hasSentinel = !initialLoading && !hasMoreNewer
+  useEffect(() => {
+    // Find the bottom sentinel element and scroll container
+    const sentinel = document.getElementById('timeline-bottom-sentinel')
+    const container = document.getElementById('timeline-shell')
+    bottomSentinelRef.current = sentinel
 
-    const rootStyle = window.getComputedStyle(document.documentElement)
-    const composerHeightRaw = rootStyle.getPropertyValue('--composer-height')
-    let composerHeight = composerHeightRaw ? parseFloat(composerHeightRaw) : 0
-
-    if (!composerHeight) {
-      const composer = document.getElementById('agent-composer-shell')
-      composerHeight = composer?.getBoundingClientRect().height ?? 0
+    // If no sentinel yet, mark as at-bottom by default (will be corrected when it appears)
+    if (!sentinel || !container) {
+      isNearBottomRef.current = true
+      setIsNearBottom(true)
+      return
     }
 
-    return Math.max(0, paddingBottom - composerHeight)
-  }, [])
-  const getAdjustedDistanceToBottom = useCallback(() => {
-    const scrollDistance = getScrollDistanceToBottom()
-    const bottomGapOffset = getBottomGapOffset()
-    const visualGap = bottomGapOffset > 0 ? BOTTOM_PANEL_GAP_PX : 0
-    return scrollDistance - bottomGapOffset + visualGap
-  }, [getBottomGapOffset, getScrollDistanceToBottom])
-  const updateIsNearBottom = useCallback(() => {
-    const adjustedDistance = getAdjustedDistanceToBottom()
-    const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
-    isNearBottomRef.current = nextIsNearBottom
-    setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
-    return adjustedDistance
-  }, [getAdjustedDistanceToBottom])
-
-  useEffect(() => {
-    const scroller = getScrollContainer()
-
-    // Mobile detection for adaptive thresholds
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
-
-    // Use larger thresholds on mobile to account for browser chrome changes (address bar, keyboard)
-    const restickThreshold = isTouchDevice ? 80 : 20
-    const touchScrollThreshold = 40 // More intentional gesture required to unpin
     const isAutoPinSuppressed = () => {
       const suppressedUntil = autoScrollPinSuppressedUntilRef.current
       return typeof suppressedUntil === 'number' && suppressedUntil > Date.now()
     }
 
-    // Detect user scrolling UP via wheel - immediately unstick
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        const isVisible = entry.isIntersecting
+        isNearBottomRef.current = isVisible
+        setIsNearBottom(isVisible)
+
+        // Auto-restick when user scrolls to bottom (sentinel becomes visible)
+        if (isVisible && !autoScrollPinnedRef.current && !isAutoPinSuppressed()) {
+          setAutoScrollPinned(true)
+        }
+      },
+      {
+        // Use container as root for container scrolling
+        root: container,
+        // 100px buffer so we detect "near bottom" before hitting the exact bottom
+        rootMargin: '0px 0px 100px 0px',
+        threshold: 0,
+      },
+    )
+
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [setAutoScrollPinned, hasSentinel])
+
+  // Detect user scrolling UP to immediately unpin (wheel, touch, keyboard)
+  useEffect(() => {
+    const container = document.getElementById('timeline-shell')
+    if (!container) return
+
+    // Detect scroll-up via wheel
     const handleWheel = (e: WheelEvent) => {
       if (e.deltaY < 0 && autoScrollPinnedRef.current) {
         setAutoScrollPinned(false)
       }
     }
 
-    // Detect user scrolling UP via touch
+    // Detect scroll-up via touch gesture
     let touchStartY = 0
     let touchStartTime = 0
     const handleTouchStart = (e: TouchEvent) => {
@@ -482,13 +477,13 @@ export function AgentChatPage({
       const touchY = e.touches[0]?.clientY ?? 0
       const deltaY = touchY - touchStartY
       const elapsed = Date.now() - touchStartTime
-      // Require more intentional gesture: larger movement AND not too fast (avoid accidental taps)
-      if (deltaY > touchScrollThreshold && elapsed > 50) {
+      // Require intentional gesture: larger movement AND not too fast (avoid accidental taps)
+      if (deltaY > TOUCH_SCROLL_UNPIN_THRESHOLD && elapsed > 50) {
         setAutoScrollPinned(false)
       }
     }
 
-    // Detect user scrolling UP via keyboard
+    // Detect scroll-up via keyboard
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!autoScrollPinnedRef.current) return
       const scrollUpKeys = ['ArrowUp', 'PageUp', 'Home']
@@ -497,63 +492,19 @@ export function AgentChatPage({
       }
     }
 
-    // Track scroll direction - only restick when user scrolls DOWN to bottom
-    let lastScrollTop = scroller?.scrollTop ?? window.scrollY
-    let scrollTicking = false
-
-    const handleScroll = () => {
-      if (scrollTicking) return
-      scrollTicking = true
-      requestAnimationFrame(() => {
-        scrollTicking = false
-        const target = scroller || document.documentElement || document.body
-        const currentScrollTop = target.scrollTop
-        const scrolledDown = currentScrollTop > lastScrollTop
-        lastScrollTop = currentScrollTop
-        const adjustedDistance = getAdjustedDistanceToBottom()
-        const nextIsNearBottom = adjustedDistance <= SCROLL_END_TOLERANCE_PX
-        const nearBottomForRestick = adjustedDistance <= restickThreshold
-        isNearBottomRef.current = nextIsNearBottom
-        setIsNearBottom((current) => (current === nextIsNearBottom ? current : nextIsNearBottom))
-
-        // Only restick if user actively scrolled down to the bottom
-        if (!autoScrollPinnedRef.current && scrolledDown && nearBottomForRestick && !isAutoPinSuppressed()) {
-          setAutoScrollPinned(true)
-        }
-      })
-    }
-
-    window.addEventListener('wheel', handleWheel, { passive: true })
-    window.addEventListener('touchstart', handleTouchStart, { passive: true })
-    window.addEventListener('touchmove', handleTouchMove, { passive: true })
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('scroll', handleScroll, { passive: true })
+    // Listen on the container, not window
+    container.addEventListener('wheel', handleWheel, { passive: true })
+    container.addEventListener('touchstart', handleTouchStart, { passive: true })
+    container.addEventListener('touchmove', handleTouchMove, { passive: true })
+    window.addEventListener('keydown', handleKeyDown) // Keyboard stays on window
 
     return () => {
-      window.removeEventListener('wheel', handleWheel)
-      window.removeEventListener('touchstart', handleTouchStart)
-      window.removeEventListener('touchmove', handleTouchMove)
+      container.removeEventListener('wheel', handleWheel)
+      container.removeEventListener('touchstart', handleTouchStart)
+      container.removeEventListener('touchmove', handleTouchMove)
       window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('scroll', handleScroll)
     }
-  }, [getAdjustedDistanceToBottom, getScrollContainer, setAutoScrollPinned])
-
-  useEffect(() => {
-    updateIsNearBottom()
-    const handleResize = () => {
-      updateIsNearBottom()
-    }
-
-    window.addEventListener('resize', handleResize)
-    window.visualViewport?.addEventListener('resize', handleResize)
-    window.visualViewport?.addEventListener('scroll', handleResize)
-
-    return () => {
-      window.removeEventListener('resize', handleResize)
-      window.visualViewport?.removeEventListener('resize', handleResize)
-      window.visualViewport?.removeEventListener('scroll', handleResize)
-    }
-  }, [updateIsNearBottom])
+  }, [setAutoScrollPinned])
 
   // Unpin auto-scroll when processing ends so user's reading position is preserved
   const prevProcessingRef = useRef(processingActive)
@@ -577,33 +528,38 @@ export function AgentChatPage({
 
   const pendingScrollFrameRef = useRef<number | null>(null)
 
+  const jumpToBottom = useCallback(() => {
+    // Container scrolling: scroll the timeline-shell, not the window
+    const container = document.getElementById('timeline-shell')
+    const sentinel = document.getElementById('timeline-bottom-sentinel')
+    if (sentinel) {
+      // scrollIntoView is more reliable across browsers
+      sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
+    } else if (container) {
+      container.scrollTop = container.scrollHeight + 10000
+    }
+    // Immediately mark as at-bottom (IntersectionObserver will confirm, but this avoids race conditions)
+    isNearBottomRef.current = true
+    setIsNearBottom(true)
+  }, [])
+
   const scrollToBottom = useCallback(() => {
     if (pendingScrollFrameRef.current !== null) {
       return
     }
     pendingScrollFrameRef.current = requestAnimationFrame(() => {
       pendingScrollFrameRef.current = null
-      const adjustedDistance = getAdjustedDistanceToBottom()
-      if (adjustedDistance > 0) {
-        window.scrollBy({ top: adjustedDistance })
-      }
-      updateIsNearBottom()
+      jumpToBottom()
     })
-  }, [getAdjustedDistanceToBottom, updateIsNearBottom])
+  }, [jumpToBottom])
 
   // Keep track of composer height to adjust scroll when it changes
   const prevComposerHeight = useRef<number | null>(null)
 
-  const jumpToBottom = useCallback(() => {
-    const target = document.scrollingElement ?? document.documentElement ?? document.body
-    // Scroll to a very large number to ensure we hit the bottom regardless of recent layout changes
-    window.scrollTo({ top: target.scrollHeight + 10000, behavior: 'auto' })
-    updateIsNearBottom()
-  }, [updateIsNearBottom])
-
   useEffect(() => {
     const composer = document.getElementById('agent-composer-shell')
-    if (!composer) return
+    const container = document.getElementById('timeline-shell')
+    if (!composer || !container) return
 
     const observer = new ResizeObserver((entries) => {
       const height = entries[0].borderBoxSize?.[0]?.blockSize ?? entries[0].contentRect.height
@@ -612,23 +568,22 @@ export function AgentChatPage({
         const delta = height - prevComposerHeight.current
         // If composer grew and we're at the bottom, scroll down to keep content visible
         if (delta > 0 && (autoScrollPinnedRef.current || isNearBottomRef.current)) {
-          window.scrollBy({ top: delta })
+          container.scrollTop += delta
         }
       }
 
       prevComposerHeight.current = height
 
+      // If pinned, ensure we stay at the bottom
       if (autoScrollPinnedRef.current) {
-        // Ensure we stay pinned if we were pinned
         jumpToBottom()
-      } else {
-        updateIsNearBottom()
       }
+      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(composer)
     return () => observer.disconnect()
-  }, [jumpToBottom, updateIsNearBottom])
+  }, [jumpToBottom])
 
   const [timelineNode, setTimelineNode] = useState<HTMLDivElement | null>(null)
   const captureTimelineRef = useCallback((node: HTMLDivElement | null) => {
@@ -641,16 +596,16 @@ export function AgentChatPage({
     if (!timelineNode) return
 
     const observer = new ResizeObserver(() => {
+      // If pinned, ensure we stay at the bottom when content changes
       if (autoScrollPinnedRef.current) {
         jumpToBottom()
-      } else {
-        updateIsNearBottom()
       }
+      // IntersectionObserver handles isNearBottom updates automatically
     })
 
     observer.observe(timelineNode)
     return () => observer.disconnect()
-  }, [timelineNode, jumpToBottom, updateIsNearBottom])
+  }, [timelineNode, jumpToBottom])
 
   useEffect(() => () => {
     if (pendingScrollFrameRef.current !== null) {
@@ -666,27 +621,31 @@ export function AgentChatPage({
 
   useEffect(() => {
     if (isNewAgent) {
+      // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
       didInitialScrollRef.current = true
+      setAutoScrollPinned(true)
       return
     }
     if (!initialLoading && events.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
       setAutoScrollPinned(true)
-      // Use a small timeout to allow layout to settle before jumping
-      requestAnimationFrame(() => jumpToBottom())
+      // Immediate scroll attempt
+      jumpToBottom()
+      // Plus delayed scroll to catch any async layout (images, fonts, etc)
+      const timeout = setTimeout(() => jumpToBottom(), 50)
+      return () => clearTimeout(timeout)
     }
   }, [events.length, initialLoading, isNewAgent, jumpToBottom, setAutoScrollPinned])
 
   useLayoutEffect(() => {
     if (shouldScrollOnNextUpdateRef.current || forceScrollOnNextUpdateRef.current) {
       forceScrollOnNextUpdateRef.current = false
-      scrollToBottom()
-      return
+      // Scroll synchronously in layout effect to avoid visual flash
+      jumpToBottom()
     }
-    updateIsNearBottom()
+    // IntersectionObserver handles isNearBottom updates automatically
   }, [
-    scrollToBottom,
-    updateIsNearBottom,
+    jumpToBottom,
     events,
     streaming,
     loadingOlder,
@@ -997,9 +956,7 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
-  const selectionMainClassName = `min-h-screen has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-  const selectionMainStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
-  const viewportPageStyle = { minHeight: 'var(--app-viewport-height, 100vh)' }
+  const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
   const selectionSidebarProps = {
     agents: rosterAgents,
     activeAgentId: null,
@@ -1012,9 +969,9 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
   }
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
+    <div className="agent-chat-page">
       <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName} style={selectionMainStyle}>{content}</main>
+      <main className={selectionMainClassName}>{content}</main>
     </div>
   )
 
@@ -1045,7 +1002,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page min-h-screen" style={viewportPageStyle}>
+    <div className="agent-chat-page">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
