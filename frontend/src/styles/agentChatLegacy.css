@@ -10,9 +10,9 @@
 
 .agent-chat-page {
   position: relative;
-  /* Use fixed height with svh for stable mobile viewport (address bar visible) */
+  /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
   height: 100vh;
-  height: 100svh;
+  height: 100dvh;
   /* Flex container for banner + content + composer */
   display: flex;
   flex-direction: column;
@@ -582,7 +582,7 @@
   max-width: min(56rem, 100%);
   margin: 0 auto;
   padding: 0 1rem;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
 }
 
 @media (min-width: 640px) {
@@ -2559,7 +2559,7 @@
    ========================================================================== */
 
 .response-progress-container {
-  padding: 0.75rem 0;
+  padding: 0.75rem 0 0;
   animation: progressFadeIn 0.4s ease-out;
 }
 
