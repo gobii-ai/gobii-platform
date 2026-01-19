@@ -9,6 +9,7 @@ import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
+  suppressedThinkingCursor?: string | null
 }
 
 function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
@@ -23,8 +24,11 @@ function slugify(value: string) {
     .replace(/^-+|-+$/g, '')
 }
 
-export function ToolClusterCard({ cluster }: ToolClusterCardProps) {
-  const transformed = useMemo(() => transformToolCluster(cluster), [cluster])
+export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
+  const transformed = useMemo(
+    () => transformToolCluster(cluster, { suppressedThinkingCursor }),
+    [cluster, suppressedThinkingCursor],
+  )
 
   const { openKey, setOpenKey } = useToolDetailController()
   const [collapsed, setCollapsed] = useState<boolean>(transformed.collapsible)

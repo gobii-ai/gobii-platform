@@ -118,6 +118,7 @@ export function AgentChatLayout({
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
+  const suppressedThinkingCursor = streaming?.cursor ?? null
   // Show streaming reasoning while streaming, or briefly after done to allow collapse animation
   // (streaming is cleared when historical thinking event arrives)
   const showStreamingReasoning = hasStreamingReasoning && (isStreaming || streaming?.done)
@@ -209,6 +210,7 @@ export function AgentChatLayout({
                     events={events}
                     agentColorHex={agentColorHex || undefined}
                     initialLoading={initialLoading}
+                    suppressedThinkingCursor={suppressedThinkingCursor}
                   />
                 </div>
 

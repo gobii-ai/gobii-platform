@@ -6,6 +6,7 @@ import type {
   ProcessingWebTask,
   StreamEventPayload,
   StreamState,
+  ThinkingEvent,
   TimelineEvent,
 } from '../types/agentChat'
 import type { InsightEvent } from '../types/insight'
@@ -52,6 +53,42 @@ function normalizeProcessingUpdate(input: ProcessingUpdateInput): ProcessingSnap
     return { active: input, webTasks: [] }
   }
   return coerceProcessingSnapshot(input)
+}
+
+function findLatestThinkingEvent(events: TimelineEvent[]): ThinkingEvent | null {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    const event = events[i]
+    if (event.kind === 'thinking') {
+      return event
+    }
+    if (event.kind === 'steps' && event.thinkingEntries?.length) {
+      return event.thinkingEntries[event.thinkingEntries.length - 1]
+    }
+  }
+  return null
+}
+
+function buildTimelineThinkingStream(event: ThinkingEvent): StreamState {
+  return {
+    streamId: `timeline:${event.cursor}`,
+    reasoning: event.reasoning,
+    content: '',
+    done: true,
+    source: 'timeline',
+    cursor: event.cursor,
+  }
+}
+
+function isThinkingOnlyEvent(event: TimelineEvent): boolean {
+  if (event.kind === 'thinking') {
+    return true
+  }
+  if (event.kind !== 'steps') {
+    return false
+  }
+  const hasTools = event.entries.length > 0 || Boolean(event.kanbanEntries?.length)
+  const hasThinking = Boolean(event.thinkingEntries?.length)
+  return hasThinking && !hasTools
 }
 
 const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
@@ -520,7 +557,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         limit: TIMELINE_WINDOW_SIZE,
       })
       const incoming = prepareTimelineEvents(snapshot.events)
-      const hasThinkingEvent = incoming.some((event) => event.kind === 'thinking')
+      const latestThinking = findLatestThinkingEvent(incoming)
       const hasAgentActivity = hasAgentResponse(incoming)
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
@@ -530,21 +567,18 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         const agentColorHex = snapshot.agent_color_hex
           ? normalizeHexColor(snapshot.agent_color_hex)
           : current.agentColorHex
-      const hasStreamingContent = Boolean(current.streaming?.content?.trim())
-      const allowThinkingClear = Boolean(current.streaming) && !hasStreamingContent
-      const streamingDone = Boolean(current.streaming?.done)
-      // Only clear the streaming bubble after the stream finishes; defer if it is still streaming.
-      const shouldClearThinkingStream = hasThinkingEvent && allowThinkingClear && streamingDone
-      const shouldDeferThinkingClear = hasThinkingEvent && allowThinkingClear && !streamingDone
-      const nextStreaming = shouldClearThinkingStream ? null : current.streaming
-      const nextStreamingClearOnDone =
-        shouldClearThinkingStream
-          ? false
-          : shouldDeferThinkingClear
-            ? true
-            : allowThinkingClear
-              ? current.streamingClearOnDone
-              : false
+        let nextStreaming = current.streaming
+        let nextStreamingClearOnDone = current.streamingClearOnDone
+
+        if (latestThinking && nextStreaming?.source === 'stream' && !nextStreaming.cursor) {
+          nextStreaming = { ...nextStreaming, cursor: latestThinking.cursor }
+        }
+
+        const hasNonThinkingIncoming = incoming.some((event) => !isThinkingOnlyEvent(event))
+        if (nextStreaming?.source === 'timeline' && hasNonThinkingIncoming) {
+          nextStreaming = null
+          nextStreamingClearOnDone = false
+        }
         const baseEvents = removeOptimisticMatches(current.events, incoming)
         const basePendingEvents = removeOptimisticMatches(current.pendingEvents, incoming)
 
@@ -800,30 +834,38 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         }
       }
 
-      const shouldClearStream = normalized.kind === 'message' && normalized.message.isOutbound
-      const hasStreamingContent = Boolean(state.streaming?.content?.trim())
-      const allowThinkingClear = Boolean(state.streaming) && !hasStreamingContent
-      const streamingDone = Boolean(state.streaming?.done)
-      // Only clear the streaming bubble after the stream finishes; defer if it is still streaming.
-      const shouldClearThinkingStream = normalized.kind === 'thinking' && allowThinkingClear && streamingDone
-      const shouldDeferThinkingClear = normalized.kind === 'thinking' && allowThinkingClear && !streamingDone
-      const nextStreaming = shouldClearStream || shouldClearThinkingStream ? null : state.streaming
-      const nextStreamingClearOnDone =
-        shouldClearStream || shouldClearThinkingStream
-          ? false
-          : shouldDeferThinkingClear
-            ? true
-            : allowThinkingClear
-              ? state.streamingClearOnDone
-              : false
+      const isThinkingEvent = normalized.kind === 'thinking'
+      const isOutboundMessage = normalized.kind === 'message' && normalized.message.isOutbound
+      let nextStreaming = state.streaming
+      let nextStreamingClearOnDone = state.streamingClearOnDone
+      let nextStreamingThinkingCollapsed = state.streamingThinkingCollapsed
 
-      if (normalized.kind === 'thinking' || normalized.kind === 'steps' || shouldClearStream) {
+      if (isThinkingEvent) {
+        if (nextStreaming?.source === 'stream') {
+          if (!nextStreaming.cursor) {
+            nextStreaming = { ...nextStreaming, cursor: normalized.cursor }
+          }
+        } else {
+          nextStreaming = buildTimelineThinkingStream(normalized)
+          nextStreamingClearOnDone = false
+          nextStreamingThinkingCollapsed = false
+        }
+      } else if (nextStreaming?.source === 'timeline') {
+        nextStreaming = null
+        nextStreamingClearOnDone = false
+      }
+
+      if (isOutboundMessage) {
+        nextStreaming = null
+        nextStreamingClearOnDone = false
+      }
+
+      if (normalized.kind === 'thinking' || normalized.kind === 'steps' || isOutboundMessage) {
         awaitingResponse = false
       }
 
       // Reset progress bar when new activity arrives live (indicates new work cycle)
       // This only affects live events, not cached state when switching agents
-      const isOutboundMessage = normalized.kind === 'message' && normalized.message.isOutbound
       const shouldResetProgress = normalized.kind === 'steps' || normalized.kind === 'thinking' || isOutboundMessage
       const nextProcessingStartedAt = shouldResetProgress ? Date.now() : state.processingStartedAt
 
@@ -835,6 +877,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           hasUnseenActivity: true,
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
+          streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
           awaitingResponse,
           processingStartedAt: nextProcessingStartedAt,
         }
@@ -850,6 +893,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         pendingEvents: [],
         streaming: nextStreaming,
         streamingClearOnDone: nextStreamingClearOnDone,
+        streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
         awaitingResponse,
         processingStartedAt: nextProcessingStartedAt,
       }
@@ -873,7 +917,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       let base: StreamState
       if (isStart || !existingStream || existingStream.streamId !== payload.stream_id) {
         isNewStream = true
-        base = { streamId: payload.stream_id, reasoning: '', content: '', done: false }
+        base = { streamId: payload.stream_id, reasoning: '', content: '', done: false, source: 'stream', cursor: null }
       } else {
         base = existingStream
       }
@@ -893,6 +937,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         reasoning: reasoningDelta ? `${base.reasoning}${reasoningDelta}` : base.reasoning,
         content: contentDelta ? `${base.content}${contentDelta}` : base.content,
         done: isDone ? true : isDelta ? false : base.done,
+        source: base.source ?? 'stream',
+        cursor: base.cursor ?? null,
       }
 
       const hasUnseenActivity = !state.autoScrollPinned
@@ -950,7 +996,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
       const nextStreamingClearOnDone = hasStreamingContent ? false : state.streamingClearOnDone
       const nextStreamingThinkingCollapsed =
-        isDone && next.reasoning ? true : state.streamingThinkingCollapsed
+        isNewStream ? false : isDone && next.reasoning ? true : state.streamingThinkingCollapsed
       return {
         streaming: next,
         hasUnseenActivity,

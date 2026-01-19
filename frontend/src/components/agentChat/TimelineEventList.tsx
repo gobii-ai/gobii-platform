@@ -10,6 +10,7 @@ type TimelineEventListProps = {
   events: TimelineEvent[]
   initialLoading?: boolean
   agentColorHex?: string
+  suppressedThinkingCursor?: string | null
 }
 
 export const TimelineEventList = memo(function TimelineEventList({
@@ -17,6 +18,7 @@ export const TimelineEventList = memo(function TimelineEventList({
   events,
   initialLoading = false,
   agentColorHex,
+  suppressedThinkingCursor,
 }: TimelineEventListProps) {
   if (initialLoading) {
     return (
@@ -61,13 +63,20 @@ export const TimelineEventList = memo(function TimelineEventList({
             <ToolClusterCard
               key={event.cursor}
               cluster={cluster}
+              suppressedThinkingCursor={suppressedThinkingCursor}
             />
           )
         }
         if (event.kind === 'kanban') {
           return <KanbanEventCard key={event.cursor} event={event} />
         }
-        return <ToolClusterCard key={event.cursor} cluster={event} />
+        return (
+          <ToolClusterCard
+            key={event.cursor}
+            cluster={event}
+            suppressedThinkingCursor={suppressedThinkingCursor}
+          />
+        )
       })}
     </ToolDetailProvider>
   )

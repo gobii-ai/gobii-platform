@@ -238,9 +238,16 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
   }
 }
 
-function buildThinkingEntry(clusterCursor: string, entry: ThinkingEvent): ToolEntryDisplay | null {
+function buildThinkingEntry(
+  clusterCursor: string,
+  entry: ThinkingEvent,
+  suppressedThinkingCursor?: string | null,
+): ToolEntryDisplay | null {
   const reasoning = entry.reasoning?.trim() || ''
   if (!reasoning) {
+    return null
+  }
+  if (suppressedThinkingCursor && entry.cursor === suppressedThinkingCursor) {
     return null
   }
   return {
@@ -293,11 +300,15 @@ function buildKanbanEntry(clusterCursor: string, entry: KanbanEvent): ToolEntryD
   }
 }
 
-export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTransform {
+export function transformToolCluster(
+  cluster: ToolClusterEvent,
+  options?: { suppressedThinkingCursor?: string | null },
+): ToolClusterTransform {
   const entries: ToolEntryDisplay[] = []
   let skippedCount = 0
   const thinkingEntries = cluster.thinkingEntries ?? []
   const kanbanEntries = cluster.kanbanEntries ?? []
+  const suppressedThinkingCursor = options?.suppressedThinkingCursor ?? null
 
   for (const entry of cluster.entries) {
     const transformed = buildToolEntry(cluster.cursor, entry)
@@ -309,7 +320,7 @@ export function transformToolCluster(cluster: ToolClusterEvent): ToolClusterTran
   }
 
   for (const entry of thinkingEntries) {
-    const transformed = buildThinkingEntry(cluster.cursor, entry)
+    const transformed = buildThinkingEntry(cluster.cursor, entry, suppressedThinkingCursor)
     if (transformed) {
       entries.push(transformed)
     }

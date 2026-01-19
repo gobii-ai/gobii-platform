@@ -150,4 +150,6 @@ export type StreamState = {
   reasoning: string
   content: string
   done: boolean
+  cursor?: string | null
+  source?: 'stream' | 'timeline'
 }
