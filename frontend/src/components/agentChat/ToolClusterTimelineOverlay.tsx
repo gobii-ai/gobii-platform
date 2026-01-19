@@ -47,7 +47,10 @@ function deriveThinkingPreview(entry: ToolEntryDisplay): string | null {
   if (firstLineIndex === -1) {
     return null
   }
-  const firstLine = lines[firstLineIndex].trimEnd()
+  const firstLine = lines[firstLineIndex]
+    .trimEnd()
+    .replace(/\*\*(.*?)\*\*/g, '$1')
+    .replace(/__(.*?)__/g, '$1')
   const remainder = lines.slice(firstLineIndex + 1).join('\n')
   const hasMore = remainder.trim().length > 0
   return hasMore ? `${firstLine}…` : firstLine
