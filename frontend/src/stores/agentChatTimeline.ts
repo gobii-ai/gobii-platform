@@ -438,9 +438,12 @@ export function prepareTimelineEvents(events: TimelineEvent[]): TimelineEvent[] 
 
 export function mergeTimelineEvents(existing: TimelineEvent[], incoming: TimelineEvent[]): TimelineEvent[] {
   const map = new Map<string, TimelineEvent>()
+  // Existing events are already normalized when stored; avoid re-sanitizing each merge.
   for (const event of existing) {
-    const normalized = normalizeTimelineEvent(event)
-    map.set(normalized.cursor, normalized)
+    if (!event?.cursor) {
+      continue
+    }
+    map.set(event.cursor, event)
   }
   for (const event of incoming) {
     const normalized = normalizeTimelineEvent(event)

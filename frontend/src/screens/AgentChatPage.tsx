@@ -799,12 +799,12 @@ export function AgentChatPage({
     window.location.assign('/console/agents/create/quick/')
   }, [onCreateAgent])
 
-  const handleJumpToLatest = async () => {
+  const handleJumpToLatest = useCallback(async () => {
     forceScrollOnNextUpdateRef.current = true
     await jumpToLatest()
     setAutoScrollPinned(true)
     scrollToBottom()
-  }
+  }, [jumpToLatest, scrollToBottom, setAutoScrollPinned])
 
   const handleComposerFocus = useCallback(() => {
     if (typeof window === 'undefined') return
@@ -825,7 +825,7 @@ export function AgentChatPage({
     }, 180)
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
-  const handleSend = async (body: string, attachments: File[] = []) => {
+  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
       return
     }
@@ -856,9 +856,9 @@ export function AgentChatPage({
       return
     }
     await sendMessage(body, attachments)
-    if (!autoScrollPinned) return
+    if (!autoScrollPinnedRef.current) return
     scrollToBottom()
-  }
+  }, [activeAgentId, isNewAgent, onAgentCreated, queryClient, scrollToBottom, sendMessage])
 
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
