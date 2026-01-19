@@ -45,25 +45,13 @@ def get_spawn_work_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[st
                 "Use this when you need to search or scrape via Bright Data tools. "
                 "Provide a clear, self-contained query. "
                 "The task runs outside the agent history and returns a summarized result with citations. "
+                "If you have pending work tasks, you can sleep; event processing will re-trigger once all work tasks complete. "
                 f"Allowed tools: {', '.join(WORK_TASK_ALLOWED_MCP_TOOLS)}. {limit_sentence}"
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Research request to run."},
-                    "max_steps": {
-                        "type": "integer",
-                        "description": "Optional override for max tool iterations (bounded by config).",
-                    },
-                    "tools": {
-                        "type": "array",
-                        "items": {"type": "string"},
-                        "description": "Optional subset of allowed tools to enable for this task.",
-                    },
-                    "output_format": {
-                        "type": "string",
-                        "description": "Optional response style hint (e.g., 'summary', 'bulleted').",
-                    },
                 },
                 "required": ["query"],
             },
@@ -78,33 +66,10 @@ def execute_spawn_work_task(agent: PersistentAgent, params: Dict[str, Any]) -> D
     if not query:
         return {"status": "error", "message": "Missing required parameter: query"}
 
-    output_format = (params or {}).get("output_format")
-    requested_tools = (params or {}).get("tools") or []
-
     settings = get_work_task_settings()
 
-    # Validate requested tool subset
-    if requested_tools:
-        invalid = [tool for tool in requested_tools if tool not in WORK_TASK_ALLOWED_MCP_TOOLS]
-        if invalid:
-            return {
-                "status": "error",
-                "message": f"Invalid tool(s) requested: {', '.join(sorted(invalid))}.",
-            }
-        allowed_tools = list(requested_tools)
-    else:
-        allowed_tools = list(WORK_TASK_ALLOWED_MCP_TOOLS)
-
-    # Clamp max steps
-    max_steps_override = params.get("max_steps")
     max_steps = settings.max_steps
-    if max_steps_override is not None:
-        try:
-            candidate = int(max_steps_override)
-        except (TypeError, ValueError):
-            return {"status": "error", "message": "max_steps must be an integer"}
-        if candidate > 0:
-            max_steps = min(candidate, settings.max_steps)
+    allowed_tools = list(WORK_TASK_ALLOWED_MCP_TOOLS)
 
     # Active tasks limit (per agent)
     active_count = WorkTask.objects.filter(
@@ -222,7 +187,6 @@ def execute_spawn_work_task(agent: PersistentAgent, params: Dict[str, Any]) -> D
         process_work_task.delay(
             str(task.id),
             allowed_tools=allowed_tools,
-            output_format=output_format,
             max_steps=max_steps,
             budget_id=budget_id,
             branch_id=branch_id,
