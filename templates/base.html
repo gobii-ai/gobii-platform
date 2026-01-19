@@ -99,8 +99,8 @@
 
   {% if user.is_authenticated %}
     rdt('init', '{{ settings.REDDIT_PIXEL_ID }}', {
-        email: '{{ user.email }}',
-        externalId: '{{ user.id }}',
+        email: '{{ analytics.data.email_hash }}',
+        externalId: '{{ analytics.data.id_hash }}',
     });
   {% else %}
     rdt('init','{{ settings.REDDIT_PIXEL_ID }}');
@@ -315,7 +315,7 @@
 
   {% if user.is_authenticated %}
     {# link external id #}
-    fbq('init', '{{ settings.META_PIXEL_ID }}', { em: '{{ user.email }}', external_id: '{{ user.id }}' });
+    fbq('init', '{{ settings.META_PIXEL_ID }}', { em: '{{ analytics.data.email_hash }}', external_id: '{{ analytics.data.id_hash }}' });
   {%  else %}
     fbq('init', '{{ settings.META_PIXEL_ID }}');
   {% endif %}
@@ -454,16 +454,16 @@
       (function () {
         {% if settings.REDDIT_PIXEL_ID %}
         const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
-        const signupUserId = "{{ signup_user_id|default_if_none:'' }}";
+        const signupIdHash = "{{ analytics.data.id_hash|default_if_none:'' }}";
         const signupEmailHash = "{{ analytics.data.email_hash }}";
         const registrationValue = Number("{{ settings.CAPI_REGISTRATION_VALUE|default_if_none:'0' }}");
         const registrationCurrency = "USD";
 
-        /* Avoid ReferenceError if the pixel hasn’t loaded yet */
+        /* Avoid ReferenceError if the pixel hasn't loaded yet */
         if (typeof window.rdt === 'function') {
           rdt('track', 'SignUp', {
             email: signupEmailHash,
-            externalId : signupUserId || "{{ user.id|default_if_none:'' }}",
+            externalId: signupIdHash,
             conversionId: signupEventId || "reg-{{ user.id }}",
             value: registrationValue,
             currency: registrationCurrency,
@@ -531,11 +531,10 @@
         // --- pull any UTM cookies you created earlier (optional) ---
         const utmParams = window.getUTMParams ? window.getUTMParams() : {};
         const signupEventId = "{{ signup_event_id|default_if_none:'' }}";
-        const signupUserId = "{{ signup_user_id|default_if_none:'' }}";
 
         const options = {
-          external_id : signupUserId || "{{ user.id|default_if_none:'' }}",
-          em          : "{{ analytics.data.email_hash }}"
+          external_id: "{{ analytics.data.id_hash|default_if_none:'' }}",
+          em: "{{ analytics.data.email_hash }}"
         };
 
         if (signupEventId) {
