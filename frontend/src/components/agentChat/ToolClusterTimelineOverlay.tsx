@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { Workflow, X } from 'lucide-react'
 
 import { formatRelativeTimestamp } from '../../util/time'
+import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
@@ -15,13 +16,6 @@ type ToolClusterTimelineOverlayProps = {
 function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
   const IconComponent = icon ?? Workflow
   return <IconComponent className={className} aria-hidden="true" />
-}
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
 }
 
 function deriveCaption(entry: ToolEntryDisplay): string | null {
