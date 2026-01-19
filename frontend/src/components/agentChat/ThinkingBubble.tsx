@@ -1,4 +1,4 @@
-import { useEffect, useRef, useLayoutEffect } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import { useTypewriter } from '../../hooks/useTypewriter'
 
 type ThinkingBubbleProps = {
@@ -7,6 +7,8 @@ type ThinkingBubbleProps = {
   collapsed: boolean
   onToggle: () => void
 }
+
+const SCROLL_BOTTOM_THRESHOLD = 12
 
 /**
  * ThinkingBubble displays AI reasoning/thinking content in a consistent
@@ -18,10 +20,11 @@ type ThinkingBubbleProps = {
 export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: ThinkingBubbleProps) {
   const prevStreamingRef = useRef(isStreaming)
   const contentRef = useRef<HTMLDivElement>(null)
+  const autoScrollEnabledRef = useRef(true)
 
   // Typewriter effect - always enabled when there's content to animate
   // Uses faster settings for smooth perceived streaming
-  const { displayedContent, isWaiting } = useTypewriter(reasoning, isStreaming, {
+  const { displayedContent, isWaiting, isAnimating } = useTypewriter(reasoning, isStreaming, {
     charsPerFrame: 4,
     frameIntervalMs: 10,
     waitingThresholdMs: 200,
@@ -30,12 +33,21 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
 
   const hasTargetContent = reasoning.trim().length > 0
 
-  // Auto-scroll content to bottom when streaming new content
+  const updateAutoScrollEnabled = useCallback(() => {
+    const node = contentRef.current
+    if (!node) {
+      return
+    }
+    const remaining = node.scrollHeight - node.scrollTop - node.clientHeight
+    autoScrollEnabledRef.current = remaining <= SCROLL_BOTTOM_THRESHOLD
+  }, [])
+
+  // Auto-scroll content to bottom while typewriter animates (unless user scrolls away)
   useLayoutEffect(() => {
-    if (isStreaming && !collapsed && contentRef.current) {
+    if (!collapsed && contentRef.current && autoScrollEnabledRef.current && (isStreaming || isAnimating)) {
       contentRef.current.scrollTop = contentRef.current.scrollHeight
     }
-  }, [isStreaming, collapsed, displayedContent])
+  }, [collapsed, displayedContent, isAnimating, isStreaming])
 
   // Auto-collapse when streaming ends (if expanded)
   useEffect(() => {
@@ -90,7 +102,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
           </span>
         </button>
         {!collapsed && (
-          <div ref={contentRef} className="thinking-window-content">
+          <div ref={contentRef} className="thinking-window-content" onScroll={updateAutoScrollEnabled}>
             {displayedContent}
           </div>
         )}
