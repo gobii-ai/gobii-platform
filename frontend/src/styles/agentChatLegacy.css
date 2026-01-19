@@ -1779,6 +1779,21 @@
   padding: 0.85rem 1rem 1rem;
 }
 
+.tool-chip-detail--kanban {
+  width: 100%;
+  max-width: none;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+.tool-chip-detail--kanban .tool-chip-detail-header {
+  margin-bottom: 0.65rem;
+  padding: 0 0.25rem;
+}
+
 .tool-cluster-detail-host {
   width: 100%;
   margin-top: 0.65rem;
@@ -1857,6 +1872,15 @@
   overflow-y: auto;
 }
 
+.tool-chip-panel--kanban {
+  margin-top: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  max-height: none;
+  overflow: visible;
+}
+
 .tool-chip-panel-title {
   font-size: 0.72rem;
   font-weight: 600;
@@ -1869,6 +1893,262 @@
   margin-top: 0.35rem;
   font-size: 0.86rem;
   color: #334155;
+}
+
+/* Tool cluster timeline overlay */
+.tool-cluster-timeline-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem 1.5rem;
+}
+
+.tool-cluster-timeline-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.tool-cluster-timeline-dialog {
+  position: relative;
+  z-index: 1;
+  width: min(820px, 94vw);
+  max-height: min(85vh, 780px);
+  display: flex;
+  flex-direction: column;
+  border-radius: 1.75rem;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.98), rgba(234, 247, 255, 0.95));
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+  animation: tool-cluster-timeline-in 0.22s ease;
+}
+
+.tool-cluster-timeline-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem 0.4rem;
+}
+
+.tool-cluster-timeline-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.tool-cluster-timeline-count {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.tool-cluster-timeline-subtitle {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.26em;
+  color: #475569;
+}
+
+.tool-cluster-timeline-close {
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 999px;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  background: rgba(255, 255, 255, 0.86);
+  color: #475569;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.tool-cluster-timeline-close:hover,
+.tool-cluster-timeline-close:focus-visible {
+  background: rgba(255, 255, 255, 0.98);
+  color: #0f172a;
+  outline: none;
+}
+
+.tool-cluster-timeline-body {
+  padding: 0 1rem 1rem;
+  overflow-y: auto;
+}
+
+.tool-cluster-timeline-list {
+  --timeline-icon-size: 1.85rem;
+  --timeline-row-padding-x: 0.5rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tool-cluster-timeline-list::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--timeline-row-padding-x) + (var(--timeline-icon-size) / 2));
+  top: 0.3rem;
+  bottom: 0.3rem;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(99, 102, 241, 0.28), rgba(14, 165, 233, 0.18));
+  opacity: 0.7;
+}
+
+.tool-cluster-timeline-item {
+  position: relative;
+}
+
+.tool-cluster-timeline-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: flex-start;
+  gap: 0.7rem;
+  width: 100%;
+  padding: 0.48rem var(--timeline-row-padding-x);
+  border-radius: 0.8rem;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease;
+}
+
+.tool-cluster-timeline-row:hover,
+.tool-cluster-timeline-row:focus-visible {
+  background: rgba(224, 231, 255, 0.6);
+  border-color: rgba(99, 102, 241, 0.28);
+  outline: none;
+}
+
+.tool-cluster-timeline-row[data-open="true"] {
+  background: rgba(224, 231, 255, 0.72);
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.tool-cluster-timeline-icon {
+  display: grid;
+  place-items: center;
+  width: var(--timeline-icon-size);
+  height: var(--timeline-icon-size);
+  border-radius: 0.75rem;
+  flex-shrink: 0;
+  align-self: center;
+}
+
+.tool-cluster-timeline-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tool-cluster-timeline-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.tool-cluster-timeline-caption {
+  font-size: 0.7rem;
+  color: #475569;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tool-cluster-timeline-preview {
+  font-size: 0.73rem;
+  color: #334155;
+  line-height: 1.35;
+}
+
+.tool-cluster-timeline-preview-markdown,
+.tool-cluster-timeline-preview-markdown > p {
+  margin: 0;
+}
+
+.tool-cluster-timeline-item[data-kind="thinking"] .tool-cluster-timeline-preview {
+  font-style: italic;
+  color: #1f2937;
+}
+
+.tool-cluster-timeline-time {
+  font-size: 0.66rem;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+  margin-top: 0.15rem;
+}
+
+.tool-cluster-timeline-detail {
+  margin: 0.35rem 0 0 calc(var(--timeline-row-padding-x) + var(--timeline-icon-size) + 0.35rem);
+  padding-left: 1rem;
+  border-left: 2px solid rgba(99, 102, 241, 0.22);
+}
+
+@keyframes tool-cluster-timeline-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tool-cluster-timeline-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .tool-cluster-timeline-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .tool-cluster-timeline-dialog {
+    width: 100%;
+    max-height: 86vh;
+    border-radius: 1.5rem 1.5rem 0 0;
+    animation: tool-cluster-timeline-up 0.26s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .tool-cluster-timeline-header {
+    padding: 0.8rem 1rem 0.4rem;
+  }
+
+  .tool-cluster-timeline-body {
+    padding: 0 1rem 1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tool-cluster-timeline-dialog {
+    animation: none;
+  }
+
+  .tool-cluster-timeline-row {
+    transition: none;
+  }
 }
 
 .tool-search-query-inline {
