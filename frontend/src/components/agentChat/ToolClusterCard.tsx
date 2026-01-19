@@ -180,8 +180,11 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
   const renderDetail = (entry: ToolEntryDisplay) => {
     const DetailComponent = entry.detailComponent
     const detailRelative = formatRelativeTimestamp(entry.timestamp) || entry.timestamp || ''
+    const isKanbanDetail = entry.toolName === 'kanban'
+    const detailClassName = isKanbanDetail ? 'tool-chip-detail tool-chip-detail--kanban' : 'tool-chip-detail'
+    const panelClassName = isKanbanDetail ? 'tool-chip-panel tool-chip-panel--kanban' : 'tool-chip-panel'
     return (
-      <div className="tool-chip-detail">
+      <div className={detailClassName}>
         <div className="tool-chip-detail-header">
           <span className={`tool-chip-detail-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
             <ToolIcon icon={entry.icon} className="h-5 w-5" />
@@ -200,7 +203,7 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
             </svg>
           </button>
         </div>
-        <div className="tool-chip-panel">
+        <div className={panelClassName}>
           <DetailComponent entry={entry} />
         </div>
       </div>

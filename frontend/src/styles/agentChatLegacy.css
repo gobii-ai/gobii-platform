@@ -1779,6 +1779,21 @@
   padding: 0.85rem 1rem 1rem;
 }
 
+.tool-chip-detail--kanban {
+  width: 100%;
+  max-width: none;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  backdrop-filter: none;
+}
+
+.tool-chip-detail--kanban .tool-chip-detail-header {
+  margin-bottom: 0.65rem;
+  padding: 0 0.25rem;
+}
+
 .tool-cluster-detail-host {
   width: 100%;
   margin-top: 0.65rem;
@@ -1855,6 +1870,15 @@
   color: #475569;
   max-height: min(28rem, 55vh);
   overflow-y: auto;
+}
+
+.tool-chip-panel--kanban {
+  margin-top: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 .tool-chip-panel-title {
