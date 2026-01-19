@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { memo, useEffect, useRef, useState } from 'react'
 import { Check, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -33,7 +33,7 @@ function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; labe
   )
 }
 
-export function AgentChatBanner({
+export const AgentChatBanner = memo(function AgentChatBanner({
   agentName,
   agentAvatarUrl,
   agentColorHex,
@@ -181,4 +181,4 @@ export function AgentChatBanner({
       </div>
     </div>
   )
-}
+})

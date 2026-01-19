@@ -6,7 +6,7 @@ import type {
   TdHTMLAttributes,
   ThHTMLAttributes,
 } from 'react'
-import { memo } from 'react'
+import { memo, useMemo } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkBreaks from 'remark-breaks'
 import remarkGfm from 'remark-gfm'
@@ -115,7 +115,14 @@ const markdownComponents = {
 }
 
 export function MarkdownViewer({ content, className, enableHighlight = true }: MarkdownViewerProps) {
-  const rehypePlugins = enableHighlight ? [rehypeHighlight as unknown as any] : []
+  const hasCodeFence = useMemo(
+    () => /(^|\n)\s*```/.test(content) || /(^|\n)\s*~~~/.test(content) || /(^|\n)( {4}|\t)\S/.test(content),
+    [content],
+  )
+  const rehypePlugins = useMemo(
+    () => (enableHighlight && hasCodeFence ? [rehypeHighlight as unknown as any] : []),
+    [enableHighlight, hasCodeFence],
+  )
   return (
     <div className={className}>
       <ReactMarkdown

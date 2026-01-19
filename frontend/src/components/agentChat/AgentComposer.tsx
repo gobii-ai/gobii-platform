@@ -1,5 +1,5 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
-import { useCallback, useEffect, useId, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
@@ -107,7 +107,7 @@ type AgentComposerProps = {
   isInsightsPaused?: boolean
 }
 
-export function AgentComposer({
+export const AgentComposer = memo(function AgentComposer({
   onSubmit,
   disabled = false,
   autoFocus = false,
@@ -294,14 +294,6 @@ export function AgentComposer({
     lastRotationTimeRef.current = Date.now()
     setCountdownProgress(0)
   }, [currentInsightIndex])
-
-  useEffect(() => {
-    return () => {
-      if (focusScrollTimeoutRef.current !== null) {
-        window.clearTimeout(focusScrollTimeoutRef.current)
-      }
-    }
-  }, [])
 
   useEffect(() => {
     return () => {
@@ -714,4 +706,4 @@ export function AgentComposer({
       </div>
     </div>
   )
-}
+})

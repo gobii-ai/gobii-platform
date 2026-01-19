@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from 'react'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
@@ -140,7 +140,7 @@ export function AgentChatLayout({
   const showJumpButton = hasMoreNewer || hasUnseenActivity || !isNearBottom
 
   const showBanner = Boolean(agentName)
-  const composerPalette = buildAgentComposerPalette(agentColorHex)
+  const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
