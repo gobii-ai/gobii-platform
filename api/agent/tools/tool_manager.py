@@ -17,6 +17,7 @@ from django.db.models import F
 from ...models import PersistentAgent, PersistentAgentEnabledTool
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
+from ..work_task_shared import is_work_task_tool_name
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
 from .http_request import get_http_request_tool, execute_http_request
@@ -335,6 +336,9 @@ def enable_tools(agent: PersistentAgent, tool_names: Iterable[str]) -> Dict[str,
             continue
         resolved_seen.add(resolved_name)
 
+        if entry.provider == "mcp" and is_work_task_tool_name(resolved_name):
+            invalid.append(name)
+            continue
         if entry.provider == "mcp" and manager.is_tool_blacklisted(resolved_name):
             invalid.append(name)
             continue
@@ -387,6 +391,11 @@ def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEn
     """Enable a tool just in time without recording usage (execution will handle usage)."""
     tool_name = entry.full_name
     if entry.provider == "mcp":
+        if is_work_task_tool_name(tool_name):
+            return {
+                "status": "error",
+                "message": f"Tool '{tool_name}' must be executed via spawn_work_task",
+            }
         manager = _get_manager()
         if manager.is_tool_blacklisted(tool_name):
             return {
@@ -433,6 +442,11 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     manager = _get_manager()
     limit = get_enabled_tool_limit(agent)
 
+    if is_work_task_tool_name(tool_name):
+        return {
+            "status": "error",
+            "message": f"Tool '{tool_name}' must be executed via spawn_work_task",
+        }
     if manager.is_tool_blacklisted(tool_name):
         return {
             "status": "error",
@@ -577,6 +591,9 @@ def ensure_default_tools_enabled(
         }
 
     for tool_name in missing_mcp:
+        if is_work_task_tool_name(tool_name):
+            logger.info("Skipping default tool '%s' reserved for work tasks", tool_name)
+            continue
         if manager.is_tool_blacklisted(tool_name):
             logger.warning("Default tool '%s' is blacklisted, skipping", tool_name)
             continue
@@ -598,6 +615,15 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
     """Return tool definitions for all enabled tools (MCP + built-ins)."""
     manager = _get_manager()
     definitions = manager.get_enabled_tools_definitions(agent)
+    if definitions:
+        filtered: List[Dict[str, Any]] = []
+        for entry in definitions:
+            function_block = entry.get("function") if isinstance(entry, dict) else {}
+            tool_name = function_block.get("name") if isinstance(function_block, dict) else None
+            if tool_name and is_work_task_tool_name(tool_name):
+                continue
+            filtered.append(entry)
+        definitions = filtered
 
     enabled_builtin_rows = PersistentAgentEnabledTool.objects.filter(
         agent=agent,
@@ -809,6 +835,11 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
 
     # Use the resolved tool name (may differ from input if normalized)
     resolved_name = entry.full_name
+    if entry.provider == "mcp" and is_work_task_tool_name(resolved_name):
+        return {
+            "status": "error",
+            "message": f"Tool '{resolved_name}' must be executed via spawn_work_task",
+        }
 
     # Coerce params to match expected types (handles LLM passing "true" instead of true, etc.)
     params = _coerce_params_to_schema(params, entry.parameters)

@@ -21,6 +21,14 @@ WORK_TASK_ALLOWED_MCP_TOOLS_BY_TYPE: Dict[WorkTaskType, List[str]] = {
     ],
 }
 
+_WORK_TASK_TOOL_NAMES: List[str] = []
+_WORK_TASK_TOOL_SET: set[str] = set()
+for _tool_list in WORK_TASK_ALLOWED_MCP_TOOLS_BY_TYPE.values():
+    for _tool_name in _tool_list:
+        if _tool_name not in _WORK_TASK_TOOL_SET:
+            _WORK_TASK_TOOL_NAMES.append(_tool_name)
+            _WORK_TASK_TOOL_SET.add(_tool_name)
+
 
 def get_work_task_type_values() -> List[str]:
     return [task_type.value for task_type in WorkTaskType]
@@ -42,6 +50,16 @@ def get_allowed_tools_for_type(task_type: str | WorkTaskType | None) -> List[str
     if resolved is None:
         return []
     return list(WORK_TASK_ALLOWED_MCP_TOOLS_BY_TYPE.get(resolved, []))
+
+
+def get_work_task_tool_names() -> List[str]:
+    return list(_WORK_TASK_TOOL_NAMES)
+
+
+def is_work_task_tool_name(tool_name: str | None) -> bool:
+    if not tool_name:
+        return False
+    return tool_name in _WORK_TASK_TOOL_SET
 
 
 def extract_mcp_server_name(tool_name: str) -> str:

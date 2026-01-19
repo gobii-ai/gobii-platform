@@ -19,6 +19,7 @@ from ...evals.execution import get_current_eval_routing_profile
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
+from ..work_task_shared import is_work_task_tool_name
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
@@ -540,6 +541,8 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         manager.initialize()
 
     mcp_tools = manager.get_tools_for_agent(agent)
+    if mcp_tools:
+        mcp_tools = [tool for tool in mcp_tools if not is_work_task_tool_name(tool.full_name)]
 
     builtin_catalog: List[Dict[str, Any]] = []
     for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
