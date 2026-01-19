@@ -6,6 +6,7 @@ import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
+import { slugify } from '../../util/slugify'
 import { scrollIntoViewIfNeeded } from './scrollIntoView'
 
 type ToolClusterCardProps = {
@@ -16,13 +17,6 @@ type ToolClusterCardProps = {
 function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
   const IconComponent = icon ?? Workflow
   return <IconComponent className={className} aria-hidden="true" />
-}
-
-function slugify(value: string) {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
 }
 
 export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
