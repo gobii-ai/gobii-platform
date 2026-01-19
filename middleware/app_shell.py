@@ -117,7 +117,10 @@ def _format_signup_tracking_snippet() -> str:
 
         // Meta/Facebook
         if (p.meta && typeof window.fbq === 'function') {
-          fbq('track', 'CompleteRegistration', {}, {
+          fbq('track', 'CompleteRegistration', {
+            value: val,
+            currency: cur
+          }, {
             external_id: data.idHash,
             em: data.emailHash,
             eventID: data.eventId
