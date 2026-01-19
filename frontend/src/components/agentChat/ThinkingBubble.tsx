@@ -39,7 +39,7 @@ export function ThinkingBubble({ reasoning, isStreaming, collapsed, onToggle }: 
       return
     }
     const remaining = node.scrollHeight - node.scrollTop - node.clientHeight
-    autoScrollEnabledRef.current = remaining <= SCROLL_BOTTOM_THRESHOLD
+    autoScrollEnabledRef.current = Math.round(remaining) <= SCROLL_BOTTOM_THRESHOLD
   }, [])
 
   // Auto-scroll content to bottom while typewriter animates (unless user scrolls away)
