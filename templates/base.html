@@ -463,7 +463,7 @@
           rdt('track', 'SignUp', {
             email: signupEmailHash,
             externalId: signupIdHash,
-            conversionId: signupEventId || "reg-{{ user.id }}",
+            conversionId: signupEventId || ('reg-' + signupIdHash),
             value: registrationValue,
             currency: registrationCurrency,
           });

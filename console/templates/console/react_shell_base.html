@@ -84,6 +84,7 @@
   <script>
   (function () {
     var signupEventId = "{{ signup_event_id|default_if_none:'' }}";
+    var signupIdHash = "{{ analytics.data.id_hash|default_if_none:'' }}";
     var signupEmailHash = "{{ analytics.data.email_hash|default_if_none:'' }}";
     var registrationValue = Number("{{ settings.CAPI_REGISTRATION_VALUE|default_if_none:'0' }}");
     var registrationCurrency = "USD";
@@ -92,8 +93,8 @@
     if (typeof window.rdt === 'function') {
       rdt('track', 'SignUp', {
         email: signupEmailHash,
-        externalId: "{{ analytics.data.id_hash|default_if_none:'' }}",
-        conversionId: signupEventId || "reg-{{ user.id }}",
+        externalId: signupIdHash,
+        conversionId: signupEventId || ('reg-' + signupIdHash),
         value: registrationValue,
         currency: registrationCurrency,
       });
@@ -104,7 +105,7 @@
     if (window.ttq && typeof window.ttq.track === 'function') {
       ttq.track('CompleteRegistration', {
         event_id: signupEventId,
-        external_id: "{{ analytics.data.id_hash|default_if_none:'' }}",
+        external_id: signupIdHash,
         email: signupEmailHash,
         value: registrationValue,
         currency: registrationCurrency,
@@ -124,7 +125,7 @@
         value: registrationValue,
         currency: registrationCurrency,
       }, {
-        external_id: "{{ analytics.data.id_hash|default_if_none:'' }}",
+        external_id: signupIdHash,
         em: signupEmailHash,
         eventID: signupEventId
       });
