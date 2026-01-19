@@ -52,8 +52,13 @@ def get_spawn_work_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[st
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Research request to run."},
+                    "type": {
+                        "type": "string",
+                        "description": "Work task type.",
+                        "enum": ["research"],
+                    },
                 },
-                "required": ["query"],
+                "required": ["query", "type"],
             },
         },
     }
@@ -65,6 +70,11 @@ def execute_spawn_work_task(agent: PersistentAgent, params: Dict[str, Any]) -> D
     query = (params or {}).get("query")
     if not query:
         return {"status": "error", "message": "Missing required parameter: query"}
+    task_type = (params or {}).get("type")
+    if not task_type:
+        return {"status": "error", "message": "Missing required parameter: type"}
+    if task_type != "research":
+        return {"status": "error", "message": "Invalid work task type. Use 'research'."}
 
     settings = get_work_task_settings()
 

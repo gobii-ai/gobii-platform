@@ -3855,6 +3855,14 @@ def _get_system_instruction(
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
 
+        "## Work Task Guidance\n\n"
+        "Prefer `spawn_work_task` for low-cost, stateless research that relies on Bright Data tools (search/scrape/extract) for faster, more efficient execution. "
+        "Do not avoid work tasks just to maintain state or kanban progress—you can store the summarized results in SQLite and update kanban after the task completes. "
+        "Only call Bright Data MCP tools directly when the task must run inside the current agent turn. "
+        "Work tasks run asynchronously and return a summarized result with citations. "
+        "If work tasks are pending, you may sleep; event processing will re-trigger once all work tasks complete. "
+        "\n\n"
+
         "## Tool Rules\n\n"
 
         "**⚠️ REMINDER: Tool calls use the API's tool_calls field, NOT your message text.**\n"
