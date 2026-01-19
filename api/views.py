@@ -967,3 +967,114 @@ class LinkShortenerRedirectView(View):
 
         link.increment_hits()
         return HttpResponseRedirect(url)
+
+
+class PipedreamConnectRedirectView(View):
+    """
+    Just-in-time Pipedream connect link generator.
+
+    Generates a fresh Pipedream connect link on each request and redirects the user,
+    avoiding the 4-hour expiration issue with pre-generated links.
+    """
+
+    @tracer.start_as_current_span('PIPEDREAM JIT Connect')
+    def get(self, request, agent_id, app_slug):
+        from django.conf import settings
+        from django.contrib.auth.views import redirect_to_login
+        from django.template.response import TemplateResponse
+        from api.integrations.pipedream_connect import create_connect_session
+
+        span = trace.get_current_span()
+        span.set_attribute('agent_id', str(agent_id))
+        span.set_attribute('app_slug', app_slug)
+
+        # Redirect unauthenticated users to login (with next= to return here after)
+        if not request.user.is_authenticated:
+            logger.info("PD JIT Connect: redirecting to login agent=%s", agent_id)
+            return redirect_to_login(
+                next=request.get_full_path(),
+                login_url=settings.LOGIN_URL,
+            )
+
+        # Check if Pipedream integration is configured
+        if not all([
+            getattr(settings, 'PIPEDREAM_CLIENT_ID', ''),
+            getattr(settings, 'PIPEDREAM_CLIENT_SECRET', ''),
+            getattr(settings, 'PIPEDREAM_PROJECT_ID', ''),
+        ]):
+            logger.warning("PD JIT Connect: Pipedream not configured")
+            return TemplateResponse(
+                request,
+                "integrations/pipedream_connect_error.html",
+                context={
+                    'title': 'Integration Not Available',
+                    'heading': 'Integration not available',
+                    'icon_type': 'info',
+                    'message': 'Third-party integrations are not configured on this Gobii instance.',
+                    'message_secondary': 'If you are self-hosting, please configure the Pipedream environment variables (PIPEDREAM_CLIENT_ID, PIPEDREAM_CLIENT_SECRET, PIPEDREAM_PROJECT_ID).',
+                    'show_retry': False,
+                    'show_support': False,
+                },
+                status=503,
+            )
+
+        # Get the agent - redirect to console if not found
+        try:
+            agent = PersistentAgent.objects.get(id=agent_id)
+        except PersistentAgent.DoesNotExist:
+            logger.warning("PD JIT Connect: agent not found agent=%s", agent_id)
+            return HttpResponseRedirect('/console/')
+
+        # Redirect to console if agent is expired
+        if agent.life_state == PersistentAgent.LifeState.EXPIRED:
+            logger.info("PD JIT Connect: agent expired agent=%s", agent_id)
+            return HttpResponseRedirect('/console/')
+
+        # Check user has access to this agent (owns it or is in the org)
+        has_access = (agent.user_id == request.user.id) or (
+                agent.organization_id and OrganizationMembership.objects.filter(
+                org_id=agent.organization_id,
+                user_id=request.user.id,
+                status=OrganizationMembership.OrgStatus.ACTIVE
+            ).exists()
+        )
+
+        if not has_access:
+            logger.warning(
+                "PD JIT Connect: access denied user=%s agent=%s",
+                request.user.id, agent_id
+            )
+            # Redirect to console rather than 404 for better UX
+            return HttpResponseRedirect('/console/')
+
+        # Always create a fresh connect link (Pipedream links are single-use)
+        session, connect_url = create_connect_session(agent, app_slug)
+
+        if not connect_url:
+            logger.error(
+                "PD JIT Connect: failed to generate link agent=%s app=%s session=%s",
+                agent_id, app_slug, session.id
+            )
+            return TemplateResponse(
+                request,
+                "integrations/pipedream_connect_error.html",
+                status=503,
+            )
+
+        logger.info(
+            "PD JIT Connect: redirecting user=%s agent=%s app=%s session=%s",
+            request.user.id, agent_id, app_slug, session.id
+        )
+
+        Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.PIPEDREAM_JIT_CONNECT_REDIRECT,
+            source=AnalyticsSource.CONSOLE,
+            properties={
+                'agent_id': str(agent_id),
+                'app_slug': app_slug,
+                'session_id': str(session.id),
+            }
+        )
+
+        return HttpResponseRedirect(connect_url)
