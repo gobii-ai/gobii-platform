@@ -17,6 +17,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentSystemMessage,
+    WorkTaskStep,
 )
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
@@ -30,6 +31,7 @@ from .kanban_events import persist_kanban_event
 from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
+    build_tool_cluster_from_work_steps,
     serialize_kanban_event,
     serialize_message_event,
     serialize_processing_snapshot,
@@ -138,6 +140,27 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
         _broadcast_audit_event(str(step.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
+
+
+@receiver(post_save, sender=WorkTaskStep)
+def broadcast_new_work_task_step(sender, instance: WorkTaskStep, created: bool, **kwargs):
+    if not created:
+        return
+    task = getattr(instance, "task", None)
+    agent_id = getattr(task, "agent_id", None)
+    if not agent_id:
+        return
+
+    def _on_commit():
+        try:
+            step = WorkTaskStep.objects.select_related("task").get(id=instance.id)
+            payload = build_tool_cluster_from_work_steps([step])
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to serialize work task step %s: %s", getattr(instance, "id", None), exc)
+            return
+        _send(_group_name(agent_id), "timeline_event", payload)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentCompletion)

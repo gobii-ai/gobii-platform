@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone as dt_timezone
+import json
 import re
 from urllib.parse import urlencode
 import uuid
@@ -32,6 +33,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
     ToolFriendlyName,
+    WorkTaskStep,
 )
 
 from .kanban_events import ensure_kanban_baseline_event
@@ -93,7 +95,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step", "thinking", "kanban"]
+    kind: Literal["message", "step", "work_step", "thinking", "kanban"]
     identifier: str
 
     def encode(self) -> str:
@@ -123,6 +125,13 @@ class StepEnvelope:
     cursor: CursorPayload
     step: PersistentAgentStep
     tool_call: PersistentAgentToolCall
+
+
+@dataclass(slots=True)
+class WorkTaskStepEnvelope:
+    sort_key: tuple[int, str, str]
+    cursor: CursorPayload
+    step: WorkTaskStep
 
 
 @dataclass(slots=True)
@@ -199,6 +208,7 @@ def _relative_timestamp(dt: datetime | None) -> str | None:
         # Fallback to timesince when humanize isn't available
         return f"{timesince(dt, now)} ago"
     return str(humanized)
+
 
 
 def _microsecond_epoch(dt: datetime) -> int:
@@ -414,8 +424,43 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     }
 
 
-def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -> dict:
-    serialized_entries = [_serialize_step_entry(env, labels) for env in entries]
+def _serialize_work_step_entry(env: WorkTaskStepEnvelope, labels: Mapping[str, str]) -> dict:
+    step = env.step
+    tool_name = step.tool_name or ""
+    meta = _tool_icon_for(tool_name)
+    meta["label"] = _friendly_tool_label(tool_name, labels)
+
+    result_payload = step.tool_result
+    if isinstance(result_payload, str):
+        result_text = result_payload
+    elif result_payload is None:
+        result_text = None
+    else:
+        try:
+            result_text = json.dumps(result_payload, default=str)
+        except (TypeError, ValueError):
+            result_text = str(result_payload)
+
+    return {
+        "id": str(step.id),
+        "cursor": env.cursor.encode(),
+        "timestamp": _format_timestamp(step.created_at),
+        "caption": None,
+        "toolName": tool_name,
+        "meta": meta,
+        "parameters": step.tool_params,
+        "result": result_text,
+        "source": "work_task",
+    }
+
+
+def _build_cluster(entries: Sequence[StepEnvelope | WorkTaskStepEnvelope], labels: Mapping[str, str]) -> dict:
+    serialized_entries = []
+    for env in entries:
+        if isinstance(env, WorkTaskStepEnvelope):
+            serialized_entries.append(_serialize_work_step_entry(env, labels))
+        else:
+            serialized_entries.append(_serialize_step_entry(env, labels))
     earliest = entries[0]
     latest = entries[-1]
     return {
@@ -473,6 +518,34 @@ def _steps_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor
         # This includes: created_at > cursor_time OR (created_at == cursor_time AND id > cursor_id)
         dt = _dt_from_cursor(cursor)
         if cursor.kind == "step":
+            try:
+                cursor_uuid = uuid.UUID(cursor.identifier)
+                qs = qs.filter(
+                    Q(created_at__gt=dt) | Q(created_at=dt, id__gt=cursor_uuid)
+                )
+            except Exception:
+                qs = qs.filter(created_at__gt=dt)
+        else:
+            qs = qs.filter(created_at__gt=dt)
+    return list(qs[:limit])
+
+
+def _work_steps_queryset(
+    agent: PersistentAgent,
+    direction: TimelineDirection,
+    cursor: CursorPayload | None,
+) -> Sequence[WorkTaskStep]:
+    limit = MAX_PAGE_SIZE * 3
+    qs = (
+        WorkTaskStep.objects.filter(task__agent=agent)
+        .select_related("task")
+        .order_by("-created_at", "-id")
+    )
+    if direction == "older" and cursor is not None:
+        qs = qs.filter(created_at__lte=_dt_from_cursor(cursor))
+    elif direction == "newer" and cursor is not None:
+        dt = _dt_from_cursor(cursor)
+        if cursor.kind == "work_step":
             try:
                 cursor_uuid = uuid.UUID(cursor.identifier)
                 qs = qs.filter(
@@ -583,6 +656,21 @@ def _envelop_steps(steps: Iterable[PersistentAgentStep]) -> list[StepEnvelope]:
     return envelopes
 
 
+def _envelop_work_steps(steps: Iterable[WorkTaskStep]) -> list[WorkTaskStepEnvelope]:
+    envelopes: list[WorkTaskStepEnvelope] = []
+    for step in steps:
+        sort_value = _microsecond_epoch(step.created_at)
+        cursor = CursorPayload(value=sort_value, kind="work_step", identifier=str(step.id))
+        envelopes.append(
+            WorkTaskStepEnvelope(
+                sort_key=(sort_value, "work_step", str(step.id)),
+                cursor=cursor,
+                step=step,
+            )
+        )
+    return envelopes
+
+
 def _envelop_thinking(completions: Iterable[PersistentAgentCompletion]) -> list[ThinkingEnvelope]:
     envelopes: list[ThinkingEnvelope] = []
     for completion in completions:
@@ -624,10 +712,10 @@ def _envelop_kanban_events(events: Iterable[PersistentAgentKanbanEvent]) -> list
 
 
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | WorkTaskStepEnvelope | ThinkingEnvelope | KanbanEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | WorkTaskStepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
@@ -642,10 +730,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | WorkTaskStepEnvelope | ThinkingEnvelope | KanbanEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | WorkTaskStepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -681,6 +769,21 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
             step_exists = step_exists or PersistentAgentStep.objects.filter(
                 agent=agent,
                 tool_call__isnull=False,
+                created_at=dt,
+                id__lt=uuid_identifier,
+            ).exists()
+        except Exception:
+            pass
+
+    work_step_exists = WorkTaskStep.objects.filter(
+        task__agent=agent,
+        created_at__lt=dt,
+    ).exists()
+    if cursor.kind == "work_step":
+        try:
+            uuid_identifier = uuid.UUID(cursor.identifier)
+            work_step_exists = work_step_exists or WorkTaskStep.objects.filter(
+                task__agent=agent,
                 created_at=dt,
                 id__lt=uuid_identifier,
             ).exists()
@@ -727,7 +830,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or kanban_exists
+    return message_exists or step_exists or work_step_exists or completion_exists or kanban_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -757,6 +860,21 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             step_exists = step_exists or PersistentAgentStep.objects.filter(
                 agent=agent,
                 tool_call__isnull=False,
+                created_at=dt,
+                id__gt=uuid_identifier,
+            ).exists()
+        except Exception:
+            pass
+
+    work_step_exists = WorkTaskStep.objects.filter(
+        task__agent=agent,
+        created_at__gt=dt,
+    ).exists()
+    if cursor.kind == "work_step":
+        try:
+            uuid_identifier = uuid.UUID(cursor.identifier)
+            work_step_exists = work_step_exists or WorkTaskStep.objects.filter(
+                task__agent=agent,
                 created_at=dt,
                 id__gt=uuid_identifier,
             ).exists()
@@ -802,7 +920,7 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or kanban_exists
+    return message_exists or step_exists or work_step_exists or completion_exists or kanban_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -897,6 +1015,7 @@ def fetch_timeline_window(
 
     message_envelopes = _envelop_messages(_messages_queryset(agent, direction, cursor_payload))
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
+    work_step_envelopes = _envelop_work_steps(_work_steps_queryset(agent, direction, cursor_payload))
     thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
     kanban_envelopes = _envelop_kanban_events(_kanban_queryset(agent, direction, cursor_payload))
     if direction == "initial" and not kanban_envelopes:
@@ -904,8 +1023,8 @@ def fetch_timeline_window(
         if baseline_event:
             kanban_envelopes = _envelop_kanban_events([baseline_event])
 
-    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes, *thinking_envelopes, *kanban_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | WorkTaskStepEnvelope | ThinkingEnvelope | KanbanEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *work_step_envelopes, *thinking_envelopes, *kanban_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -916,16 +1035,24 @@ def fetch_timeline_window(
     truncated.sort(key=lambda env: env.sort_key)
 
     tool_label_map = _load_tool_label_map(
-        env.tool_call.tool_name for env in truncated if isinstance(env, StepEnvelope)
+        (
+            env.tool_call.tool_name
+            if isinstance(env, StepEnvelope)
+            else env.step.tool_name
+            if isinstance(env, WorkTaskStepEnvelope)
+            else None
+        )
+        for env in truncated
+        if isinstance(env, (StepEnvelope, WorkTaskStepEnvelope))
     )
 
     timeline_events: list[dict] = []
-    cluster_buffer: list[StepEnvelope] = []
+    cluster_buffer: list[StepEnvelope | WorkTaskStepEnvelope] = []
     agent_name = getattr(agent, "name", None) or "Agent"
     if " " in agent_name:
         agent_name = agent_name.split()[0]
     for env in truncated:
-        if isinstance(env, StepEnvelope):
+        if isinstance(env, (StepEnvelope, WorkTaskStepEnvelope)):
             cluster_buffer.append(env)
             continue
         if cluster_buffer:
@@ -993,6 +1120,16 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
         raise ValueError("No tool calls available")
     label_map = _load_tool_label_map(
         env.tool_call.tool_name for env in envelopes if env.tool_call
+    )
+    return _build_cluster(envelopes, label_map)
+
+
+def build_tool_cluster_from_work_steps(steps: Sequence[WorkTaskStep]) -> dict:
+    envelopes = _envelop_work_steps(steps)
+    if not envelopes:
+        raise ValueError("No work task tool calls available")
+    label_map = _load_tool_label_map(
+        env.step.tool_name for env in envelopes if env.step
     )
     return _build_cluster(envelopes, label_map)
 

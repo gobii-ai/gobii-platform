@@ -44,6 +44,7 @@ export type ToolCallEntry = {
   meta: ToolMeta
   summary?: string
   caption?: string | null
+  source?: 'agent' | 'work_task'
   timestamp?: string | null
   toolName?: string | null
   showSql?: boolean
