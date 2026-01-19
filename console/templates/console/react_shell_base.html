@@ -36,7 +36,7 @@
   <script>
   !function(w,d){if(!w.rdt){var p=w.rdt=function(){p.sendEvent?p.sendEvent.apply(p,arguments):p.callQueue.push(arguments)};p.callQueue=[];var t=d.createElement("script");t.src="https://www.redditstatic.com/ads/pixel.js",t.async=!0;var s=d.getElementsByTagName("script")[0];s.parentNode.insertBefore(t,s)}}(window,document);
   {% if user.is_authenticated %}
-    rdt('init', '{{ settings.REDDIT_PIXEL_ID }}', { email: '{{ user.email }}', externalId: '{{ user.id }}' });
+    rdt('init', '{{ settings.REDDIT_PIXEL_ID }}', { email: '{{ analytics.data.email_hash }}', externalId: '{{ analytics.data.id_hash }}' });
   {% else %}
     rdt('init','{{ settings.REDDIT_PIXEL_ID }}');
   {% endif %}
@@ -55,7 +55,7 @@
   }(window, document, 'ttq');
   </script>
   {% if user.is_authenticated %}
-  <script>ttq.identify({ email: '{{ user.email }}', external_id: '{{ user.id }}' });</script>
+  <script>ttq.identify({ email: '{{ analytics.data.email_hash }}', external_id: '{{ analytics.data.id_hash }}' });</script>
   {% endif %}
   {% endif %}
 
@@ -71,7 +71,7 @@
   s.parentNode.insertBefore(t,s)}(window, document,'script',
   'https://connect.facebook.net/en_US/fbevents.js');
   {% if user.is_authenticated %}
-    fbq('init', '{{ settings.META_PIXEL_ID }}', { em: '{{ user.email }}', external_id: '{{ user.id }}' });
+    fbq('init', '{{ settings.META_PIXEL_ID }}', { em: '{{ analytics.data.email_hash }}', external_id: '{{ analytics.data.id_hash }}' });
   {% else %}
     fbq('init', '{{ settings.META_PIXEL_ID }}');
   {% endif %}
@@ -84,7 +84,7 @@
   <script>
   (function () {
     var signupEventId = "{{ signup_event_id|default_if_none:'' }}";
-    var signupUserId = "{{ signup_user_id|default_if_none:'' }}";
+    var signupIdHash = "{{ analytics.data.id_hash|default_if_none:'' }}";
     var signupEmailHash = "{{ analytics.data.email_hash|default_if_none:'' }}";
     var registrationValue = Number("{{ settings.CAPI_REGISTRATION_VALUE|default_if_none:'0' }}");
     var registrationCurrency = "USD";
@@ -93,8 +93,8 @@
     if (typeof window.rdt === 'function') {
       rdt('track', 'SignUp', {
         email: signupEmailHash,
-        externalId: signupUserId || "{{ user.id|default_if_none:'' }}",
-        conversionId: signupEventId || "reg-{{ user.id }}",
+        externalId: signupIdHash,
+        conversionId: signupEventId || ('reg-' + signupIdHash),
         value: registrationValue,
         currency: registrationCurrency,
       });
@@ -105,7 +105,7 @@
     if (window.ttq && typeof window.ttq.track === 'function') {
       ttq.track('CompleteRegistration', {
         event_id: signupEventId,
-        external_id: "{{ analytics.data.id_hash|default_if_none:'' }}",
+        external_id: signupIdHash,
         email: signupEmailHash,
         value: registrationValue,
         currency: registrationCurrency,
@@ -121,8 +121,11 @@
 
     {% if settings.META_PIXEL_ID %}
     if (typeof window.fbq === 'function') {
-      fbq('track', 'CompleteRegistration', {}, {
-        external_id: signupUserId || "{{ user.id|default_if_none:'' }}",
+      fbq('track', 'CompleteRegistration', {
+        value: registrationValue,
+        currency: registrationCurrency,
+      }, {
+        external_id: signupIdHash,
         em: signupEmailHash,
         eventID: signupEventId
       });

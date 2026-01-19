@@ -23,10 +23,10 @@
         const fbOpts = {};
         {% if user.is_authenticated %}
         if ("{{ analytics.data.id_hash|default_if_none:'' }}") {
-          fbOpts.external_id = "{{ user.id }}";
+          fbOpts.external_id = "{{ analytics.data.id_hash }}";
         }
         if ("{{ analytics.data.email_hash|default_if_none:'' }}") {
-          fbOpts.em = "{{ user.email }}";
+          fbOpts.em = "{{ analytics.data.email_hash }}";
         }
         {% endif %}
         fbq("track", "ViewContent", payload, fbOpts);

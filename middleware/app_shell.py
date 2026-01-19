@@ -97,8 +97,8 @@ def _format_signup_tracking_snippet() -> str:
         if (p.reddit && typeof window.rdt === 'function') {
           rdt('track', 'SignUp', {
             email: data.emailHash,
-            externalId: data.userId,
-            conversionId: data.eventId || ('reg-' + data.userId),
+            externalId: data.idHash,
+            conversionId: data.eventId,
             value: val,
             currency: cur
           });
@@ -117,8 +117,11 @@ def _format_signup_tracking_snippet() -> str:
 
         // Meta/Facebook
         if (p.meta && typeof window.fbq === 'function') {
-          fbq('track', 'CompleteRegistration', {}, {
-            external_id: data.userId,
+          fbq('track', 'CompleteRegistration', {
+            value: val,
+            currency: cur
+          }, {
+            external_id: data.idHash,
             em: data.emailHash,
             eventID: data.eventId
           });
