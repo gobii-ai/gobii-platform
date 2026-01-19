@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Workflow } from 'lucide-react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
+import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -32,11 +33,13 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
 
   const { openKey, setOpenKey } = useToolDetailController()
   const [collapsed, setCollapsed] = useState<boolean>(transformed.collapsible)
+  const [timelineOpen, setTimelineOpen] = useState(false)
   const detailHostRef = useRef<HTMLDivElement>(null)
   const closeScrollRef = useRef<number | null>(null)
   const pendingScrollKeyRef = useRef<string | null>(null)
   const lastOpenKeyRef = useRef<string | null>(null)
   const previousCollapsibleRef = useRef<boolean>(transformed.collapsible)
+  const timelineDialogId = useMemo(() => `tool-cluster-timeline-dialog-${slugify(cluster.cursor)}`, [cluster.cursor])
 
   useEffect(() => {
     const wasCollapsible = previousCollapsibleRef.current
@@ -44,6 +47,7 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
 
     if (!transformed.collapsible) {
       setCollapsed(false)
+      setTimelineOpen(false)
       return
     }
 
@@ -78,19 +82,8 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
 
   const handleToggleCluster = useCallback(() => {
     if (!transformed.collapsible) return
-    setCollapsed((prev) => {
-      const next = !prev
-      if (next) {
-        setOpenKey((current) => {
-          if (current && current.startsWith(`${cluster.cursor}::`)) {
-            return null
-          }
-          return current
-        })
-      }
-      return next
-    })
-  }, [setOpenKey, transformed.collapsible, cluster.cursor])
+    setTimelineOpen(true)
+  }, [transformed.collapsible])
 
   const handleChipClick = useCallback(
     (entry: ToolEntryDisplay) => {
@@ -227,7 +220,9 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
               type="button"
               className="tool-cluster-batch-toggle"
               data-role="cluster-toggle"
-              aria-expanded={collapsed ? 'false' : 'true'}
+              aria-expanded={timelineOpen ? 'true' : 'false'}
+              aria-haspopup="dialog"
+              aria-controls={timelineDialogId}
               onClick={handleToggleCluster}
             >
               <span className="tool-cluster-batch-icon">
@@ -280,6 +275,9 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
           {!collapsed && activeEntry ? renderDetail(activeEntry) : null}
         </div>
       </div>
+      {transformed.collapsible ? (
+        <ToolClusterTimelineOverlay open={timelineOpen} cluster={transformed} onClose={() => setTimelineOpen(false)} />
+      ) : null}
     </article>
   )
 }
