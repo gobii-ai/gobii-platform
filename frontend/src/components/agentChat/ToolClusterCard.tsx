@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Workflow } from 'lucide-react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
@@ -19,7 +19,7 @@ function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefi
   return <IconComponent className={className} aria-hidden="true" />
 }
 
-export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
+export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
   const transformed = useMemo(
     () => transformToolCluster(cluster, { suppressedThinkingCursor }),
     [cluster, suppressedThinkingCursor],
@@ -274,4 +274,4 @@ export function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClust
       ) : null}
     </article>
   )
-}
+})

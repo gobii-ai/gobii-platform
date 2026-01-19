@@ -20,6 +20,14 @@ type TypewriterResult = {
   isAnimating: boolean
 }
 
+function getAdaptiveCharsPerFrame(base: number, contentLength: number): number {
+  if (contentLength <= 600) return base
+  if (contentLength <= 1600) return Math.max(base, 4)
+  if (contentLength <= 3600) return Math.max(base, 6)
+  if (contentLength <= 7000) return Math.max(base, 8)
+  return Math.max(base, 12)
+}
+
 /**
  * Typewriter effect hook that animates text character-by-character.
  * Creates perceived lower latency by smoothing out network chunk delivery.
@@ -43,11 +51,14 @@ export function useTypewriter(
   const [displayedContent, setDisplayedContent] = useState('')
   const [isWaiting, setIsWaiting] = useState(false)
   const [isAnimating, setIsAnimating] = useState(false)
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false)
+  const [isPageVisible, setIsPageVisible] = useState(true)
 
   const displayedLengthRef = useRef(0)
   const animationFrameRef = useRef<number | null>(null)
   const lastUpdateTimeRef = useRef(Date.now())
   const waitingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const targetContentRef = useRef(targetContent)
 
   // Track when target content changes (new network data arrived)
   const prevTargetLengthRef = useRef(0)
@@ -64,12 +75,61 @@ export function useTypewriter(
   }, [])
 
   useEffect(() => {
+    targetContentRef.current = targetContent
+  }, [targetContent])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('matchMedia' in window)) {
+      return
+    }
+    const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const legacyMedia = media as MediaQueryList & {
+      addListener?: (listener: (event: MediaQueryListEvent) => void) => void
+      removeListener?: (listener: (event: MediaQueryListEvent) => void) => void
+    }
+    const update = () => setPrefersReducedMotion(media.matches)
+    update()
+    if (typeof legacyMedia.addEventListener === 'function') {
+      legacyMedia.addEventListener('change', update)
+      return () => legacyMedia.removeEventListener('change', update)
+    }
+    if (typeof legacyMedia.addListener === 'function') {
+      legacyMedia.addListener(update)
+      return () => legacyMedia.removeListener?.(update)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (typeof document === 'undefined') {
+      return
+    }
+    const handleVisibilityChange = () => {
+      const visible = document.visibilityState !== 'hidden'
+      setIsPageVisible(visible)
+      if (!visible) {
+        setDisplayedContent(targetContentRef.current)
+        displayedLengthRef.current = targetContentRef.current.length
+        setIsWaiting(false)
+        setIsAnimating(false)
+        cancelAnimation()
+      }
+    }
+    handleVisibilityChange()
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [cancelAnimation])
+
+  const adaptiveCharsPerFrame = getAdaptiveCharsPerFrame(charsPerFrame, targetContent.length)
+  const motionDisabled = disabled || prefersReducedMotion || !isPageVisible
+
+  useEffect(() => {
     // Disabled mode: show content immediately
-    if (disabled) {
+    if (motionDisabled) {
       setDisplayedContent(targetContent)
       displayedLengthRef.current = targetContent.length
       setIsWaiting(false)
       setIsAnimating(false)
+      cancelAnimation()
       return
     }
 
@@ -108,7 +168,7 @@ export function useTypewriter(
 
       if (currentLength < targetLength) {
         // Reveal more characters
-        const newLength = Math.min(currentLength + charsPerFrame, targetLength)
+        const newLength = Math.min(currentLength + adaptiveCharsPerFrame, targetLength)
         displayedLengthRef.current = newLength
         setDisplayedContent(targetContent.slice(0, newLength))
         setIsAnimating(true)
@@ -148,7 +208,7 @@ export function useTypewriter(
     }
 
     return cancelAnimation
-  }, [targetContent, isStreaming, charsPerFrame, frameIntervalMs, waitingThresholdMs, disabled, cancelAnimation])
+  }, [adaptiveCharsPerFrame, cancelAnimation, frameIntervalMs, isStreaming, motionDisabled, targetContent, waitingThresholdMs])
 
   // Reset when content is cleared/reset
   useEffect(() => {
@@ -167,8 +227,8 @@ export function useTypewriter(
   }, [cancelAnimation])
 
   return {
-    displayedContent: disabled ? targetContent : displayedContent,
-    isWaiting: disabled ? false : isWaiting,
-    isAnimating: disabled ? false : isAnimating,
+    displayedContent: motionDisabled ? targetContent : displayedContent,
+    isWaiting: motionDisabled ? false : isWaiting,
+    isAnimating: motionDisabled ? false : isAnimating,
   }
 }
