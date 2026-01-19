@@ -1,4 +1,3 @@
-from datetime import timedelta
 from unittest.mock import patch, MagicMock
 import uuid as uuid_module
 
@@ -6,12 +5,10 @@ from django.test import TestCase, Client, tag, override_settings
 from django.contrib.auth import get_user_model
 from django.contrib.sites.models import Site
 from django.urls import reverse
-from django.utils import timezone
 
 from api.models import (
     PersistentAgent,
     BrowserUseAgent,
-    PipedreamConnectSession,
     Organization,
     OrganizationMembership,
 )
@@ -220,89 +217,6 @@ class PipedreamJitConnectRedirectTests(TestCase):
 
             self.assertEqual(response.status_code, 302)
             self.assertIn(f"app={app_slug}", response.url)
-
-    def test_reuses_existing_valid_session(self):
-        """Existing pending session with sufficient time should be reused."""
-        self.client.login(username="jit@example.com", password="testpass123")
-
-        # Create an existing session with plenty of time remaining (3 hours from now)
-        existing_session = PipedreamConnectSession.objects.create(
-            agent=self.agent,
-            app_slug="google_sheets",
-            external_user_id=str(self.agent.id),
-            conversation_id=str(self.agent.id),
-            connect_token="existing_token",
-            connect_link_url="https://pipedream.com/connect?token=existing&app=google_sheets",
-            expires_at=timezone.now() + timedelta(hours=3),
-            webhook_secret="secret123",
-            status=PipedreamConnectSession.Status.PENDING,
-        )
-
-        url = self._get_url(self.agent.id, "google_sheets")
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, "https://pipedream.com/connect?token=existing&app=google_sheets")
-
-    @patch("api.integrations.pipedream_connect.create_connect_session")
-    def test_creates_new_session_when_existing_expired(self, mock_create_session):
-        """Expired session should not be reused - create a new one."""
-        self.client.login(username="jit@example.com", password="testpass123")
-
-        # Create an expired session (5 minutes remaining, less than 15 min buffer)
-        PipedreamConnectSession.objects.create(
-            agent=self.agent,
-            app_slug="google_sheets",
-            external_user_id=str(self.agent.id),
-            conversation_id=str(self.agent.id),
-            connect_token="expired_token",
-            connect_link_url="https://pipedream.com/connect?token=expired&app=google_sheets",
-            expires_at=timezone.now() + timedelta(minutes=5),
-            webhook_secret="secret123",
-            status=PipedreamConnectSession.Status.PENDING,
-        )
-
-        # Mock should be called since existing session is too close to expiry
-        mock_session = MagicMock()
-        mock_session.id = "new-session-id"
-        mock_create_session.return_value = (mock_session, "https://pipedream.com/connect?token=new&app=google_sheets")
-
-        url = self._get_url(self.agent.id, "google_sheets")
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, "https://pipedream.com/connect?token=new&app=google_sheets")
-        mock_create_session.assert_called_once()
-
-    @patch("api.integrations.pipedream_connect.create_connect_session")
-    def test_does_not_reuse_successful_session(self, mock_create_session):
-        """Sessions that already succeeded should not be reused."""
-        self.client.login(username="jit@example.com", password="testpass123")
-
-        # Create a successful (completed) session
-        PipedreamConnectSession.objects.create(
-            agent=self.agent,
-            app_slug="google_sheets",
-            external_user_id=str(self.agent.id),
-            conversation_id=str(self.agent.id),
-            connect_token="completed_token",
-            connect_link_url="https://pipedream.com/connect?token=completed&app=google_sheets",
-            expires_at=timezone.now() + timedelta(hours=3),
-            webhook_secret="secret123",
-            status=PipedreamConnectSession.Status.SUCCESS,
-        )
-
-        # Mock should be called since existing session is not PENDING
-        mock_session = MagicMock()
-        mock_session.id = "new-session-id"
-        mock_create_session.return_value = (mock_session, "https://pipedream.com/connect?token=new&app=google_sheets")
-
-        url = self._get_url(self.agent.id, "google_sheets")
-        response = self.client.get(url)
-
-        self.assertEqual(response.status_code, 302)
-        self.assertEqual(response.url, "https://pipedream.com/connect?token=new&app=google_sheets")
-        mock_create_session.assert_called_once()
 
 
 @tag("pipedream_jit_connect")

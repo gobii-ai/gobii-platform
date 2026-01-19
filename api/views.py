@@ -975,22 +975,14 @@ class PipedreamConnectRedirectView(View):
 
     Generates a fresh Pipedream connect link on each request and redirects the user,
     avoiding the 4-hour expiration issue with pre-generated links.
-
-    Reuses existing pending sessions if they have sufficient time remaining (>15 min).
     """
-
-    # Buffer before expiration to consider a session too stale to reuse (15 minutes)
-    SESSION_REUSE_BUFFER_SECONDS = 15 * 60
 
     @tracer.start_as_current_span('PIPEDREAM JIT Connect')
     def get(self, request, agent_id, app_slug):
-        from datetime import timedelta
         from django.conf import settings
         from django.contrib.auth.views import redirect_to_login
         from django.template.response import TemplateResponse
-        from django.utils import timezone
         from api.integrations.pipedream_connect import create_connect_session
-        from api.models import PipedreamConnectSession
 
         span = trace.get_current_span()
         span.set_attribute('agent_id', str(agent_id))
@@ -1055,32 +1047,8 @@ class PipedreamConnectRedirectView(View):
             # Redirect to console rather than 404 for better UX
             return HttpResponseRedirect('/console/')
 
-        # Try to reuse an existing pending session with sufficient time remaining
-        now = timezone.now()
-        min_expiry = now + timedelta(seconds=self.SESSION_REUSE_BUFFER_SECONDS)
-
-        existing_session = (
-            PipedreamConnectSession.objects
-            .filter(
-                agent=agent,
-                app_slug=app_slug,
-                status=PipedreamConnectSession.Status.PENDING,
-                expires_at__gt=min_expiry,
-            )
-            .order_by('-created_at')
-            .first()
-        )
-
-        if existing_session and existing_session.connect_link_url:
-            logger.info(
-                "PD JIT Connect: reusing session user=%s agent=%s app=%s session=%s expires_at=%s",
-                request.user.id, agent_id, app_slug, existing_session.id, existing_session.expires_at
-            )
-            connect_url = existing_session.connect_link_url
-            session = existing_session
-        else:
-            # Create a fresh connect link
-            session, connect_url = create_connect_session(agent, app_slug)
+        # Always create a fresh connect link (Pipedream links are single-use)
+        session, connect_url = create_connect_session(agent, app_slug)
 
         if not connect_url:
             logger.error(
