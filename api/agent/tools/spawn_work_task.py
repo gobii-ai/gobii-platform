@@ -11,7 +11,12 @@ from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.work_task_settings import get_work_task_settings
 from api.agent.core.budget import get_current_context as get_budget_context, AgentBudgetManager
-from api.agent.work_task_shared import WORK_TASK_ALLOWED_MCP_TOOLS
+from api.agent.work_task_shared import (
+    WorkTaskType,
+    coerce_work_task_type,
+    get_allowed_tools_for_type,
+    get_work_task_type_values,
+)
 from api.models import PersistentAgent, WorkTask
 
 logger = logging.getLogger(__name__)
@@ -35,6 +40,8 @@ def get_spawn_work_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[st
     if not limit_bits:
         limit_bits.append("Task limits enforced per deployment settings.")
     limit_sentence = " ".join(limit_bits)
+    research_tools = get_allowed_tools_for_type(WorkTaskType.RESEARCH)
+    work_task_types = get_work_task_type_values()
 
     return {
         "type": "function",
@@ -46,7 +53,7 @@ def get_spawn_work_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[st
                 "Provide a clear, self-contained query. "
                 "The task runs outside the agent history and returns a summarized result with citations. "
                 "If you have pending work tasks, you can sleep; event processing will re-trigger once all work tasks complete. "
-                f"Allowed tools: {', '.join(WORK_TASK_ALLOWED_MCP_TOOLS)}. {limit_sentence}"
+                f"Allowed tools: {', '.join(research_tools)}. {limit_sentence}"
             ),
             "parameters": {
                 "type": "object",
@@ -55,7 +62,7 @@ def get_spawn_work_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[st
                     "type": {
                         "type": "string",
                         "description": "Work task type.",
-                        "enum": ["research"],
+                        "enum": work_task_types,
                     },
                 },
                 "required": ["query", "type"],
@@ -73,13 +80,19 @@ def execute_spawn_work_task(agent: PersistentAgent, params: Dict[str, Any]) -> D
     task_type = (params or {}).get("type")
     if not task_type:
         return {"status": "error", "message": "Missing required parameter: type"}
-    if task_type != "research":
-        return {"status": "error", "message": "Invalid work task type. Use 'research'."}
+    resolved_type = coerce_work_task_type(task_type)
+    if resolved_type is None:
+        return {
+            "status": "error",
+            "message": f"Invalid work task type. Use one of: {', '.join(get_work_task_type_values())}.",
+        }
 
     settings = get_work_task_settings()
 
     max_steps = settings.max_steps
-    allowed_tools = list(WORK_TASK_ALLOWED_MCP_TOOLS)
+    allowed_tools = get_allowed_tools_for_type(resolved_type)
+    if not allowed_tools:
+        return {"status": "error", "message": "No tools configured for this work task type."}
 
     # Active tasks limit (per agent)
     active_count = WorkTask.objects.filter(

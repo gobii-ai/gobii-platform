@@ -1,18 +1,47 @@
 import json
 import re
+from enum import Enum
 from typing import Any, Dict, List
 
-WORK_TASK_ALLOWED_MCP_TOOLS: List[str] = [
-    "mcp_brightdata_search_engine",
-    "mcp_brightdata_scrape_as_markdown",
-    "mcp_brightdata_web_data_amazon_product",
-    "mcp_brightdata_web_data_amazon_product_search",
-    "mcp_brightdata_web_data_linkedin_person_profile",
-    "mcp_brightdata_web_data_linkedin_company_profile",
-    "mcp_brightdata_web_data_linkedin_job_listings",
-    "mcp_brightdata_web_data_linkedin_posts",
-    "mcp_brightdata_web_data_linkedin_people_search",
-]
+class WorkTaskType(str, Enum):
+    RESEARCH = "research"
+
+
+WORK_TASK_ALLOWED_MCP_TOOLS_BY_TYPE: Dict[WorkTaskType, List[str]] = {
+    WorkTaskType.RESEARCH: [
+        "mcp_brightdata_search_engine",
+        "mcp_brightdata_scrape_as_markdown",
+        "mcp_brightdata_web_data_amazon_product",
+        "mcp_brightdata_web_data_amazon_product_search",
+        "mcp_brightdata_web_data_linkedin_person_profile",
+        "mcp_brightdata_web_data_linkedin_company_profile",
+        "mcp_brightdata_web_data_linkedin_job_listings",
+        "mcp_brightdata_web_data_linkedin_posts",
+        "mcp_brightdata_web_data_linkedin_people_search",
+    ],
+}
+
+
+def get_work_task_type_values() -> List[str]:
+    return [task_type.value for task_type in WorkTaskType]
+
+
+def coerce_work_task_type(task_type: str | WorkTaskType | None) -> WorkTaskType | None:
+    if isinstance(task_type, WorkTaskType):
+        return task_type
+    if not task_type:
+        return None
+    try:
+        return WorkTaskType(str(task_type))
+    except ValueError:
+        return None
+
+
+def get_allowed_tools_for_type(task_type: str | WorkTaskType | None) -> List[str]:
+    resolved = coerce_work_task_type(task_type)
+    if resolved is None:
+        return []
+    return list(WORK_TASK_ALLOWED_MCP_TOOLS_BY_TYPE.get(resolved, []))
 
 
 def extract_mcp_server_name(tool_name: str) -> str:

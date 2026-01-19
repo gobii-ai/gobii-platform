@@ -16,10 +16,11 @@ from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import compute_cost_breakdown, extract_token_usage
 from api.agent.tools.mcp_manager import execute_platform_mcp_tool, get_mcp_manager
 from api.agent.work_task_shared import (
-    WORK_TASK_ALLOWED_MCP_TOOLS,
+    WorkTaskType,
     build_work_task_tool_result,
     coerce_summary_payload,
     extract_mcp_server_name,
+    get_allowed_tools_for_type,
     serialize_tool_result,
 )
 from api.models import WorkTask, WorkTaskStep
@@ -358,8 +359,10 @@ def process_work_task(
         max_steps = settings.max_steps
 
     tool_limit = settings.max_tool_calls
-    allowed_tools = allowed_tools or list(WORK_TASK_ALLOWED_MCP_TOOLS)
-    allowed_tools = [tool for tool in allowed_tools if tool in WORK_TASK_ALLOWED_MCP_TOOLS]
+    allowed_defaults = get_allowed_tools_for_type(WorkTaskType.RESEARCH)
+    allowed_tools = allowed_tools or allowed_defaults
+    allowed_set = set(allowed_defaults)
+    allowed_tools = [tool for tool in allowed_tools if tool in allowed_set]
 
     llm_config = get_work_task_llm_config()
     failure_message: Optional[str] = None
