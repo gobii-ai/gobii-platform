@@ -65,6 +65,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'browser', label: 'Browser' },
   { id: 'embedding', label: 'Embedding' },
   { id: 'file_handler', label: 'File handler' },
+  { id: 'work_task', label: 'Work task' },
 ]
 
 const reasoningEffortOptions = [
@@ -201,7 +202,7 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
-type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler'
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'work_task'
 
 const getTierStyle = (tierKey?: string | null) => TIER_STYLE_MAP[tierKey ?? 'standard'] ?? TIER_STYLE_MAP.standard
 
@@ -729,6 +730,27 @@ function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
   return mapped
 }
 
+function mapWorkTaskTiers(tiers: llmApi.WorkTaskTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'work_task',
+      intelligenceTier: null,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'work_task')
+  return mapped
+}
+
 // Profile-based mapping functions
 function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
@@ -796,7 +818,9 @@ function AddEndpointModal({
       ? choices.embedding_endpoints
       : scope === 'file_handler'
         ? choices.file_handler_endpoints
-        : choices.persistent_endpoints
+        : scope === 'work_task'
+          ? choices.work_task_endpoints
+          : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
   const [extractionSelected, setExtractionSelected] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -1213,7 +1237,9 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                     ? 'Edit browser endpoint'
                     : endpoint.type === 'file_handler'
                       ? 'Edit file handler endpoint'
-                      : 'Edit embedding endpoint'}
+                      : endpoint.type === 'work_task'
+                        ? 'Edit work task endpoint'
+                        : 'Edit embedding endpoint'}
               </h3>
               <button
                 onClick={() => {
@@ -1466,8 +1492,11 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
   const isFileHandler = endpoint.type === 'file_handler'
+  const isWorkTask = endpoint.type === 'work_task'
   const isPersistent = endpoint.type === 'persistent'
   const isToolingEndpoint = !isEmbedding && !isFileHandler
+  const isReasoningEligible = isPersistent
+  const showVision = !isWorkTask
 
   return (
     <div className="space-y-3">
@@ -1515,11 +1544,13 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Supports temperature
         </label>
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-          Vision
-        </label>
-        {!isBrowser && isToolingEndpoint && (
+        {showVision && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Vision
+          </label>
+        )}
+        {isReasoningEligible && (
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -1550,7 +1581,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           Low latency
         </label>
       </div>
-      {!isBrowser && isToolingEndpoint && (
+      {isReasoningEligible && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span className="font-semibold text-slate-700">Default reasoning effort</span>
           <select
@@ -1606,6 +1637,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     browser: 'Add browser endpoint',
     embedding: 'Add embedding endpoint',
     file_handler: 'Add file handler endpoint',
+    work_task: 'Add work task endpoint',
   }[type]
 
   const handleSubmit = async () => {
@@ -1692,10 +1724,12 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Supports temperature
             </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-              Vision
-            </label>
+            {type !== 'work_task' && (
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                Vision
+              </label>
+            )}
             {type === 'persistent' && (
               <label className="inline-flex items-center gap-2">
                 <input
@@ -2368,6 +2402,10 @@ export function LlmConfigScreen() {
     () => mapFileHandlerTiers(overviewQuery.data?.file_handlers?.tiers),
     [overviewQuery.data?.file_handlers?.tiers],
   )
+  const workTaskTiers = useMemo(
+    () => mapWorkTaskTiers(overviewQuery.data?.work_tasks?.tiers),
+    [overviewQuery.data?.work_tasks?.tiers],
+  )
 
   const browserTierGroups = useMemo(
     () => buildTierGroups(browserTiers, intelligenceTiers),
@@ -2378,6 +2416,7 @@ export function LlmConfigScreen() {
     browser_endpoints: [],
     embedding_endpoints: [],
     file_handler_endpoints: [],
+    work_task_endpoints: [],
   }
 
   useEffect(() => {
@@ -2531,13 +2570,15 @@ export function LlmConfigScreen() {
     type: llmApi.ProviderEndpoint['type'],
     values: EndpointFormValues & { key: string },
   ) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'work_task' = type === 'browser'
       ? 'browser'
       : type === 'embedding'
         ? 'embedding'
         : type === 'file_handler'
           ? 'file_handler'
-          : 'persistent'
+          : type === 'work_task'
+            ? 'work_task'
+            : 'persistent'
     const payload: Record<string, unknown> = {
       provider_id: provider.id,
       key: values.key,
@@ -2561,6 +2602,14 @@ export function LlmConfigScreen() {
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
       payload.supports_vision = values.supportsVision ?? false
+      payload.enabled = true
+    } else if (type === 'work_task') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.supports_temperature = values.supportsTemperature ?? true
+      payload.supports_tool_choice = values.supportsToolChoice ?? true
+      payload.use_parallel_tool_calls = values.useParallelToolCalls ?? true
       payload.enabled = true
     } else {
       payload.model = values.model
@@ -2594,13 +2643,15 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'work_task' = endpoint.type === 'browser'
       ? 'browser'
       : endpoint.type === 'embedding'
         ? 'embedding'
         : endpoint.type === 'file_handler'
           ? 'file_handler'
-          : 'persistent'
+          : endpoint.type === 'work_task'
+            ? 'work_task'
+            : 'persistent'
     const payload: Record<string, unknown> = {}
     if (values.model) {
       payload.model = values.model
@@ -2618,14 +2669,22 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.max_output_tokens)
       payload.max_output_tokens = parsed ?? null
     }
-    if (kind !== 'browser' && values.temperature !== undefined) {
+    if (kind === 'persistent' && values.temperature !== undefined) {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
-    if (values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
-    if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
-    if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
-    if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (values.supportsTemperature !== undefined && (kind === 'persistent' || kind === 'browser' || kind === 'work_task')) {
+      payload.supports_temperature = values.supportsTemperature
+    }
+    if (values.supportsVision !== undefined && (kind === 'persistent' || kind === 'browser' || kind === 'file_handler')) {
+      payload.supports_vision = values.supportsVision
+    }
+    if (values.supportsToolChoice !== undefined && (kind === 'persistent' || kind === 'work_task')) {
+      payload.supports_tool_choice = values.supportsToolChoice
+    }
+    if (values.useParallelToolCalls !== undefined && (kind === 'persistent' || kind === 'work_task')) {
+      payload.use_parallel_tool_calls = values.useParallelToolCalls
+    }
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
@@ -2648,13 +2707,15 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'work_task' = endpoint.type === 'browser'
       ? 'browser'
       : endpoint.type === 'embedding'
         ? 'embedding'
         : endpoint.type === 'file_handler'
           ? 'file_handler'
-          : 'persistent'
+          : endpoint.type === 'work_task'
+            ? 'work_task'
+            : 'persistent'
     const displayName = endpoint.name || endpoint.api_base || endpoint.browser_base_url || endpoint.id
     return confirmDestructiveAction({
       title: `Delete endpoint "${displayName}"?`,
@@ -2784,6 +2845,9 @@ export function LlmConfigScreen() {
         if (scope === 'file_handler') {
           return llmApi.updateFileHandlerTierEndpoint(entry.id, payload)
         }
+        if (scope === 'work_task') {
+          return llmApi.updateWorkTaskTierEndpoint(entry.id, payload)
+        }
         return llmApi.updatePersistentTierEndpoint(entry.id, payload)
       })
       return Promise.all(ops)
@@ -2830,6 +2894,14 @@ export function LlmConfigScreen() {
         }
         if (scope === 'file_handler') {
           return runMutation(() => llmApi.deleteFileHandlerTierEndpoint(endpoint.id), {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          })
+        }
+        if (scope === 'work_task') {
+          return runMutation(() => llmApi.deleteWorkTaskTierEndpoint(endpoint.id), {
             successMessage: 'Endpoint removed',
             label: 'Removing endpoint…',
             busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
@@ -2960,8 +3032,34 @@ export function LlmConfigScreen() {
       }),
     })
 
+  const handleWorkTaskTierAdd = () => runMutation(() => llmApi.createWorkTaskTier({}), {
+    successMessage: 'Work task tier added',
+    label: 'Creating work task tier…',
+    busyKey: actionKey('work_task', 'add'),
+    context: 'Work task tiers',
+  })
+  const handleWorkTaskTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateWorkTaskTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving work task tier up…' : 'Moving work task tier down…',
+      busyKey: actionKey('work_task', tierId, 'move', direction),
+      busyKeys: [actionKey('work_task', tierId, 'move')],
+      context: 'Work task tiers',
+    })
+  const handleWorkTaskTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete work task tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteWorkTaskTier(tier.id), {
+        successMessage: 'Work task tier removed',
+        label: 'Removing work task tier…',
+        busyKey: actionKey('work_task', tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
-    const useProfile = Boolean(selectedProfile && scope !== 'file_handler')
+    const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'work_task')
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
@@ -3002,6 +3100,8 @@ export function LlmConfigScreen() {
         response = await llmApi.addEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else if (scope === 'file_handler') {
         response = await llmApi.addFileHandlerTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
+      } else if (scope === 'work_task') {
+        response = await llmApi.addWorkTaskTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else {
         response = await llmApi.addPersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       }
@@ -3032,6 +3132,9 @@ export function LlmConfigScreen() {
         }
         if (scope === 'file_handler') {
           return llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload)
+        }
+        if (scope === 'work_task') {
+          return llmApi.updateWorkTaskTierEndpoint(tierEndpointId, payload)
         }
         return llmApi.updatePersistentTierEndpoint(tierEndpointId, payload)
       })
@@ -4009,6 +4112,43 @@ export function LlmConfigScreen() {
                 )
               })}
               {fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <Clock3 className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Work task tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for stateless work task workers.</p>
+                  </div>
+                </div>
+                <button type="button" className={button.secondary} onClick={handleWorkTaskTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
+              </div>
+              {workTaskTiers.map((tier, index) => {
+                const lastIndex = workTaskTiers.length - 1
+                return (
+                  <TierCard
+                    key={tier.id}
+                    tier={tier}
+                    pendingWeights={pendingWeights}
+                    scope="work_task"
+                    canMoveUp={index > 0}
+                    canMoveDown={index < lastIndex}
+                    isDirty={dirtyTierIds.has(`work_task:${tier.id}`)}
+                    isSaving={savingTierIds.has(`work_task:${tier.id}`)}
+                    onMove={(direction) => handleWorkTaskTierMove(tier.id, direction)}
+                    onRemove={handleWorkTaskTierRemove}
+                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'work_task')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'work_task')}
+                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'work_task')}
+                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'work_task')}
+                    isActionBusy={isBusy}
+                  />
+                )
+              })}
+              {workTaskTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No work task tiers configured.</p>}
             </div>
           </div>
         </SectionCard>

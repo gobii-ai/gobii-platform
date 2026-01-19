@@ -98,6 +98,7 @@ from .prompt_context import (
 from ..tools.email_sender import execute_send_email
 from ..tools.sms_sender import execute_send_sms
 from ..tools.spawn_web_task import execute_spawn_web_task
+from ..tools.spawn_work_task import execute_spawn_work_task
 from ..tools.schedule_updater import execute_update_schedule
 from ..tools.charter_updater import execute_update_charter
 from ..tools.database_enabler import execute_enable_database
@@ -3366,6 +3367,8 @@ def _run_agent_loop(
                         elif tool_name == "spawn_web_task":
                             # Delegate recursion gating to execute_spawn_web_task which reads fresh branch depth from Redis
                             result = execute_spawn_web_task(agent, exec_params)
+                        elif tool_name == "spawn_work_task":
+                            result = execute_spawn_work_task(agent, exec_params)
                         elif tool_name == "send_email":
                             result = execute_send_email(agent, exec_params)
                         elif tool_name == "send_sms":
@@ -3480,6 +3483,48 @@ def _run_agent_loop(
                         attach_completion=_attach_completion,
                         attach_prompt_archive=_attach_prompt_archive,
                     )
+                    if tool_name == "spawn_work_task" and step and isinstance(result, dict):
+                        task_id = result.get("task_id")
+                        if task_id:
+                            try:
+                                from api.models import WorkTask, PersistentAgentToolCall
+                                from api.agent.work_task_shared import (
+                                    build_work_task_tool_result,
+                                    coerce_summary_payload,
+                                    serialize_tool_result,
+                                )
+
+                                WorkTask.objects.filter(id=task_id).update(tool_call_step_id=step.id)
+                                task_data = (
+                                    WorkTask.objects.filter(id=task_id)
+                                    .values("result_summary", "status", "error_message")
+                                    .first()
+                                )
+                                if task_data and task_data.get("status") in {
+                                    WorkTask.StatusChoices.COMPLETED,
+                                    WorkTask.StatusChoices.FAILED,
+                                    WorkTask.StatusChoices.CANCELLED,
+                                }:
+                                    status_value = task_data.get("status")
+                                    tool_status = "success" if status_value == WorkTask.StatusChoices.COMPLETED else "error"
+                                    summary_payload = (
+                                        coerce_summary_payload(task_data.get("result_summary") or "")
+                                        if task_data.get("result_summary")
+                                        else None
+                                    )
+                                    tool_payload = build_work_task_tool_result(
+                                        task_id=str(task_id),
+                                        status=tool_status,
+                                        result_summary=summary_payload,
+                                        error_message=task_data.get("error_message") or None,
+                                    )
+                                    PersistentAgentToolCall.objects.filter(step_id=step.id).update(
+                                        result=serialize_tool_result(tool_payload)
+                                    )
+                            except Exception:
+                                logger.debug(
+                                    "Failed to bind tool call step to work task %s", task_id, exc_info=True
+                                )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                     tool_had_error = _is_error_status(result)
                     explicit_continue = None

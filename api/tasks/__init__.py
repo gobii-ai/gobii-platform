@@ -14,6 +14,7 @@ from .browser_agent_tasks import (
     _safe_aclose,
     _jsonify,
 )
+from .work_agent_tasks import process_work_task
 
 from .proxy_tasks import (
     sync_all_ip_blocks,

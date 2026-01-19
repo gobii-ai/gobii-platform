@@ -36,7 +36,7 @@ from .models import (
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, Plan, PlanVersion, PlanVersionPrice,
-    EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
+    EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost, WorkTaskConfig,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
     MeteringBatch,
     UsageThresholdSent,
@@ -46,6 +46,8 @@ from .models import (
     IntelligenceTier,
     EvalRun,
     EvalRunTask,
+    WorkTask,
+    WorkTaskStep,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -718,6 +720,40 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         if TaskCreditConfig.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
+        return False
+
+
+@admin.register(WorkTaskConfig)
+class WorkTaskConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "max_work_task_steps",
+        "max_work_task_tool_calls",
+        "max_work_tasks_per_day",
+        "max_active_work_tasks",
+        "updated_at",
+    )
+    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "max_work_task_steps",
+                    "max_work_task_tool_calls",
+                    "max_work_tasks_per_day",
+                    "max_active_work_tasks",
+                )
+            },
+        ),
+        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if WorkTaskConfig.objects.exists():
             return False
         return super().has_add_permission(request)
 
@@ -1499,6 +1535,48 @@ class BrowserUseAgentTaskStepAdmin(admin.ModelAdmin):
     list_filter = ("is_result", "created_at")
     search_fields = ("task__id", "description")
     ordering = ("-created_at",)
+
+
+class WorkTaskStepInline(admin.TabularInline):
+    model = WorkTaskStep
+    extra = 0
+    fields = ("step_number", "tool_name", "tool_params_preview", "tool_result_preview", "created_at")
+    readonly_fields = ("step_number", "tool_name", "tool_params_preview", "tool_result_preview", "created_at")
+
+    def tool_params_preview(self, obj):
+        preview = str(obj.tool_params) if obj.tool_params else ""
+        return (preview[:120] + "...") if len(preview) > 120 else preview
+    tool_params_preview.short_description = "Tool Params"
+
+    def tool_result_preview(self, obj):
+        preview = str(obj.tool_result) if obj.tool_result else ""
+        return (preview[:120] + "...") if len(preview) > 120 else preview
+    tool_result_preview.short_description = "Tool Result"
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(WorkTask)
+class WorkTaskAdmin(admin.ModelAdmin):
+    list_display = ("id", "agent", "user", "status", "credits_cost", "created_at", "updated_at")
+    list_filter = ("status", "user", "meter_batch_key", "metered")
+    search_fields = ("id", "agent__name", "user__email", "query")
+    readonly_fields = ("id", "created_at", "updated_at", "credits_cost", "result_summary", "error_message")
+    raw_id_fields = ("agent", "user", "organization", "tool_call_step")
+    inlines = [WorkTaskStepInline]
+
+
+@admin.register(WorkTaskStep)
+class WorkTaskStepAdmin(admin.ModelAdmin):
+    list_display = ("id", "task", "step_number", "tool_name", "created_at")
+    list_filter = ("tool_name", "created_at")
+    search_fields = ("task__id", "tool_name")
+    ordering = ("-created_at",)
+
 
 @admin.register(PaidPlanIntent)
 class PaidPlanIntentAdmin(admin.ModelAdmin):
@@ -3963,6 +4041,9 @@ from .models import (
     FileHandlerModelEndpoint,
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
+    WorkTaskModelEndpoint,
+    WorkTaskLLMTier,
+    WorkTaskTierEndpoint,
     BrowserModelEndpoint,
     BrowserLLMPolicy,
     BrowserLLMTier,
@@ -4114,6 +4195,48 @@ class FileHandlerLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [FileHandlerTierEndpointInline]
+
+
+@admin.register(WorkTaskModelEndpoint)
+class WorkTaskModelEndpointAdmin(admin.ModelAdmin):
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "api_base",
+        "low_latency",
+        "supports_temperature",
+        "supports_tool_choice",
+        "use_parallel_tool_calls",
+        "enabled",
+    )
+    list_filter = ("enabled", "low_latency", "provider")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "low_latency",
+        "litellm_model",
+        "api_base",
+        "supports_temperature",
+        "supports_tool_choice",
+        "use_parallel_tool_calls",
+    )
+
+
+class WorkTaskTierEndpointInline(admin.TabularInline):
+    model = WorkTaskTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(WorkTaskLLMTier)
+class WorkTaskLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
+    ordering = ("order",)
+    inlines = [WorkTaskTierEndpointInline]
 
 
 @admin.register(IntelligenceTier)

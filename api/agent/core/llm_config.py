@@ -1179,11 +1179,18 @@ def is_llm_bootstrap_required(*, force_refresh: bool = False) -> bool:
     return required
 
 
+def get_work_task_llm_config():
+    from .work_task_config import get_work_task_llm_config as _get_work_task_llm_config
+
+    return _get_work_task_llm_config()
+
+
 __all__ = [
     "get_llm_config",
     "get_llm_config_with_failover",
     "REFERENCE_TOKENIZER_MODEL",
     "get_summarization_llm_config",
+    "get_work_task_llm_config",
     "LLMNotConfiguredError",
     "invalidate_llm_bootstrap_cache",
     "is_llm_bootstrap_required",

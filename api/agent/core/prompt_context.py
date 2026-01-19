@@ -84,6 +84,7 @@ from ..tools.spawn_web_task import (
     get_browser_daily_task_limit,
     get_spawn_web_task_tool,
 )
+from ..tools.spawn_work_task import get_spawn_work_task_tool
 from ..tools.sqlite_kanban import format_kanban_friendly_id
 from ..tools.sqlite_state import (
     AGENT_CONFIG_TABLE,
@@ -4700,6 +4701,7 @@ def get_agent_tools(agent: PersistentAgent = None) -> List[dict]:
         get_send_sms_tool(),
         get_send_chat_tool(),
         get_spawn_web_task_tool(agent),
+        get_spawn_work_task_tool(agent),
         get_secure_credentials_request_tool(),
         # MCP management tools
         get_search_tools_tool(),

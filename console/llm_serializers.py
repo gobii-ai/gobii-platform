@@ -18,6 +18,9 @@ from api.models import (
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
     FileHandlerModelEndpoint,
+    WorkTaskLLMTier,
+    WorkTaskTierEndpoint,
+    WorkTaskModelEndpoint,
     IntelligenceTier,
     LLMProvider,
     LLMRoutingProfile,
@@ -127,6 +130,24 @@ def _serialize_file_handler_endpoint(endpoint: FileHandlerModelEndpoint) -> dict
     return data
 
 
+def _serialize_work_task_endpoint(endpoint: WorkTaskModelEndpoint) -> dict[str, Any]:
+    label = f"{endpoint.provider.display_name if endpoint.provider else 'Unlinked'} · {endpoint.litellm_model}"
+    data = _serialize_endpoint_common(endpoint, label=label)
+    data.update(
+        {
+            "key": endpoint.key,
+            "model": endpoint.litellm_model,
+            "api_base": endpoint.api_base,
+            "supports_temperature": endpoint.supports_temperature,
+            "supports_tool_choice": endpoint.supports_tool_choice,
+            "use_parallel_tool_calls": endpoint.use_parallel_tool_calls,
+            "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
+            "type": "work_task",
+        }
+    )
+    return data
+
+
 def build_llm_overview() -> dict[str, Any]:
     providers = (
         LLMProvider.objects.all()
@@ -136,6 +157,7 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("browser_endpoints", queryset=BrowserModelEndpoint.objects.select_related("provider")),
             Prefetch("embedding_endpoints", queryset=EmbeddingsModelEndpoint.objects.select_related("provider")),
             Prefetch("file_handler_endpoints", queryset=FileHandlerModelEndpoint.objects.select_related("provider")),
+            Prefetch("work_task_endpoints", queryset=WorkTaskModelEndpoint.objects.select_related("provider")),
         )
     )
 
@@ -144,6 +166,7 @@ def build_llm_overview() -> dict[str, Any]:
     browser_choices: list[dict[str, Any]] = []
     embedding_choices: list[dict[str, Any]] = []
     file_handler_choices: list[dict[str, Any]] = []
+    work_task_choices: list[dict[str, Any]] = []
 
     for provider in providers:
         persistent_endpoints = [
@@ -162,11 +185,16 @@ def build_llm_overview() -> dict[str, Any]:
             _serialize_file_handler_endpoint(endpoint)
             for endpoint in provider.file_handler_endpoints.all()
         ]
+        work_task_endpoints = [
+            _serialize_work_task_endpoint(endpoint)
+            for endpoint in provider.work_task_endpoints.all()
+        ]
 
         persistent_choices.extend(persistent_endpoints)
         browser_choices.extend(browser_endpoints)
         embedding_choices.extend(embedding_endpoints)
         file_handler_choices.extend(file_handler_endpoints)
+        work_task_choices.extend(work_task_endpoints)
 
         provider_payload.append(
             {
@@ -180,7 +208,13 @@ def build_llm_overview() -> dict[str, Any]:
                 "vertex_project": provider.vertex_project,
                 "vertex_location": provider.vertex_location,
                 "status": _provider_key_status(provider),
-                "endpoints": persistent_endpoints + browser_endpoints + embedding_endpoints + file_handler_endpoints,
+                "endpoints": (
+                    persistent_endpoints
+                    + browser_endpoints
+                    + embedding_endpoints
+                    + file_handler_endpoints
+                    + work_task_endpoints
+                ),
             }
         )
 
@@ -371,6 +405,36 @@ def build_llm_overview() -> dict[str, Any]:
             }
         )
 
+    work_task_payload: list[dict[str, Any]] = []
+    work_task_tiers = WorkTaskLLMTier.objects.prefetch_related(
+        Prefetch(
+            "tier_endpoints",
+            queryset=WorkTaskTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+        )
+    ).order_by("order")
+    for tier in work_task_tiers:
+        tier_endpoints = []
+        for te in tier.tier_endpoints.all():
+            endpoint = te.endpoint
+            label_provider = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+            tier_endpoints.append(
+                {
+                    "id": str(te.id),
+                    "endpoint_id": str(endpoint.id),
+                    "label": f"{label_provider} · {endpoint.litellm_model}",
+                    "weight": float(te.weight),
+                    "endpoint_key": endpoint.key,
+                }
+            )
+        work_task_payload.append(
+            {
+                "id": str(tier.id),
+                "order": tier.order,
+                "description": tier.description,
+                "endpoints": tier_endpoints,
+            }
+        )
+
     stats = {
         "active_providers": LLMProvider.objects.filter(enabled=True).count(),
         "persistent_endpoints": PersistentModelEndpoint.objects.filter(enabled=True).count(),
@@ -395,11 +459,13 @@ def build_llm_overview() -> dict[str, Any]:
         "browser": browser_payload,
         "embeddings": {"tiers": embedding_payload},
         "file_handlers": {"tiers": file_handler_payload},
+        "work_tasks": {"tiers": work_task_payload},
         "choices": {
             "persistent_endpoints": persistent_choices,
             "browser_endpoints": browser_choices,
             "embedding_endpoints": embedding_choices,
             "file_handler_endpoints": file_handler_choices,
+            "work_task_endpoints": work_task_choices,
         },
     }
 

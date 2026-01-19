@@ -20,7 +20,7 @@ from util.subscription_helper import (
     report_task_usage_to_stripe,
     report_organization_task_usage_to_stripe,
 )
-from api.models import BrowserUseAgentTask, PersistentAgentStep, MeteringBatch, Organization
+from api.models import BrowserUseAgentTask, WorkTask, PersistentAgentStep, MeteringBatch, Organization
 
 import logging
 
@@ -141,6 +141,20 @@ def _rollup_for_user(user) -> int:
         .values_list("meter_batch_key", flat=True)
         .distinct()
     )
+    pending_work_task_keys = (
+        WorkTask.objects
+        .filter(
+            user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=False,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+            task_credit__additional_task=True,
+            task_credit__organization__isnull=True,
+        )
+        .values_list("meter_batch_key", flat=True)
+        .distinct()
+    )
     pending_step_keys = (
         PersistentAgentStep.objects
         .filter(
@@ -156,7 +170,11 @@ def _rollup_for_user(user) -> int:
         .distinct()
     )
 
-    pending_keys = {k for k in pending_task_keys if k} | {k for k in pending_step_keys if k}
+    pending_keys = (
+        {k for k in pending_task_keys if k}
+        | {k for k in pending_work_task_keys if k}
+        | {k for k in pending_step_keys if k}
+    )
     batch_key = None
 
     if pending_keys:
@@ -166,6 +184,15 @@ def _rollup_for_user(user) -> int:
         batch_key = uuid.uuid4().hex
 
         candidate_tasks = BrowserUseAgentTask.objects.filter(
+            user_id=user.id,
+            metered=False,
+            meter_batch_key__isnull=True,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+            task_credit__additional_task=True,
+            task_credit__organization__isnull=True,
+        )
+        candidate_work_tasks = WorkTask.objects.filter(
             user_id=user.id,
             metered=False,
             meter_batch_key__isnull=True,
@@ -185,18 +212,29 @@ def _rollup_for_user(user) -> int:
         )
 
         buat_ids = list(candidate_tasks.values_list('id', flat=True))
+        work_task_ids = list(candidate_work_tasks.values_list('id', flat=True))
         step_ids = list(candidate_steps.values_list('id', flat=True))
 
-        if not buat_ids and not step_ids:
+        if not buat_ids and not work_task_ids and not step_ids:
             # Nothing to do for this user
             return 0
 
         # Reserve rows for this batch
         BrowserUseAgentTask.objects.filter(id__in=buat_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+        WorkTask.objects.filter(id__in=work_task_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
         PersistentAgentStep.objects.filter(id__in=step_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
 
     # Compute totals for the reserved batch only
     batch_tasks_qs = BrowserUseAgentTask.objects.filter(
+        user_id=user.id,
+        metered=False,
+        meter_batch_key=batch_key,
+        created_at__gte=start_dt,
+        created_at__lt=end_dt,
+        task_credit__additional_task=True,
+        task_credit__organization__isnull=True,
+    )
+    batch_work_tasks_qs = WorkTask.objects.filter(
         user_id=user.id,
         metered=False,
         meter_batch_key=batch_key,
@@ -216,9 +254,10 @@ def _rollup_for_user(user) -> int:
     )
 
     total_buat = batch_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+    total_work = batch_work_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
     total_steps = batch_steps_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
 
-    total = (total_buat or Decimal("0")) + (total_steps or Decimal("0"))
+    total = (total_buat or Decimal("0")) + (total_work or Decimal("0")) + (total_steps or Decimal("0"))
     rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
     try:
@@ -254,6 +293,7 @@ def _rollup_for_user(user) -> int:
 
             # Mark all rows in this reserved batch as metered, but preserve meter_batch_key for audit
             batch_tasks_qs.update(metered=True)
+            batch_work_tasks_qs.update(metered=True)
             batch_steps_qs.update(metered=True)
 
             logger.info(
@@ -279,6 +319,7 @@ def _rollup_for_user(user) -> int:
                 )
 
                 batch_tasks_qs.update(metered=True)
+                batch_work_tasks_qs.update(metered=True)
                 batch_steps_qs.update(metered=True)
                 logger.info(
                     "Rollup finalize (zero) user=%s batch=%s total=%s",
@@ -288,6 +329,7 @@ def _rollup_for_user(user) -> int:
             else:
                 # Release reservation to allow accumulation in later runs
                 batch_tasks_qs.update(meter_batch_key=None)
+                batch_work_tasks_qs.update(meter_batch_key=None)
                 batch_steps_qs.update(meter_batch_key=None)
                 logger.info(
                     "Rollup carry-forward user=%s batch=%s total=%s rounded=%s",
@@ -320,6 +362,19 @@ def _rollup_for_organization(org) -> int:
         .values_list("meter_batch_key", flat=True)
         .distinct()
     )
+    pending_work_task_keys = (
+        WorkTask.objects
+        .filter(
+            task_credit__organization_id=org.id,
+            task_credit__additional_task=True,
+            metered=False,
+            meter_batch_key__isnull=False,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+        .values_list("meter_batch_key", flat=True)
+        .distinct()
+    )
     pending_step_keys = (
         PersistentAgentStep.objects
         .filter(
@@ -334,7 +389,11 @@ def _rollup_for_organization(org) -> int:
         .distinct()
     )
 
-    pending_keys = {k for k in pending_task_keys if k} | {k for k in pending_step_keys if k}
+    pending_keys = (
+        {k for k in pending_task_keys if k}
+        | {k for k in pending_work_task_keys if k}
+        | {k for k in pending_step_keys if k}
+    )
     batch_key = None
 
     if pending_keys:
@@ -343,6 +402,14 @@ def _rollup_for_organization(org) -> int:
         batch_key = uuid.uuid4().hex
 
         candidate_tasks = BrowserUseAgentTask.objects.filter(
+            task_credit__organization_id=org.id,
+            task_credit__additional_task=True,
+            metered=False,
+            meter_batch_key__isnull=True,
+            created_at__gte=start_dt,
+            created_at__lt=end_dt,
+        )
+        candidate_work_tasks = WorkTask.objects.filter(
             task_credit__organization_id=org.id,
             task_credit__additional_task=True,
             metered=False,
@@ -360,15 +427,25 @@ def _rollup_for_organization(org) -> int:
         )
 
         buat_ids = list(candidate_tasks.values_list('id', flat=True))
+        work_task_ids = list(candidate_work_tasks.values_list('id', flat=True))
         step_ids = list(candidate_steps.values_list('id', flat=True))
 
-        if not buat_ids and not step_ids:
+        if not buat_ids and not work_task_ids and not step_ids:
             return 0
 
         BrowserUseAgentTask.objects.filter(id__in=buat_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
+        WorkTask.objects.filter(id__in=work_task_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
         PersistentAgentStep.objects.filter(id__in=step_ids, meter_batch_key__isnull=True).update(meter_batch_key=batch_key)
 
     batch_tasks_qs = BrowserUseAgentTask.objects.filter(
+        task_credit__organization_id=org.id,
+        task_credit__additional_task=True,
+        metered=False,
+        meter_batch_key=batch_key,
+        created_at__gte=start_dt,
+        created_at__lt=end_dt,
+    )
+    batch_work_tasks_qs = WorkTask.objects.filter(
         task_credit__organization_id=org.id,
         task_credit__additional_task=True,
         metered=False,
@@ -386,9 +463,10 @@ def _rollup_for_organization(org) -> int:
     )
 
     total_buat = batch_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
+    total_work = batch_work_tasks_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
     total_steps = batch_steps_qs.aggregate(total=Coalesce(Sum("credits_cost"), Decimal("0")))['total']
 
-    total = (total_buat or Decimal("0")) + (total_steps or Decimal("0"))
+    total = (total_buat or Decimal("0")) + (total_work or Decimal("0")) + (total_steps or Decimal("0"))
     rounded = int(Decimal(total).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
     try:
@@ -421,6 +499,7 @@ def _rollup_for_organization(org) -> int:
                 logger.exception("Failed to store Stripe meter event id for organization %s batch %s", org.id, batch_key)
 
             batch_tasks_qs.update(metered=True)
+            batch_work_tasks_qs.update(metered=True)
             batch_steps_qs.update(metered=True)
 
             logger.info(
@@ -446,6 +525,7 @@ def _rollup_for_organization(org) -> int:
                 )
 
                 batch_tasks_qs.update(metered=True)
+                batch_work_tasks_qs.update(metered=True)
                 batch_steps_qs.update(metered=True)
                 logger.info(
                     "Rollup finalize (zero) org=%s batch=%s total=%s",
@@ -454,6 +534,7 @@ def _rollup_for_organization(org) -> int:
                 return 1
             else:
                 batch_tasks_qs.update(meter_batch_key=None)
+                batch_work_tasks_qs.update(meter_batch_key=None)
                 batch_steps_qs.update(meter_batch_key=None)
                 logger.info(
                     "Rollup carry-forward org=%s batch=%s total=%s rounded=%s",
@@ -470,7 +551,7 @@ def rollup_and_meter_usage_task(self) -> int:
     """
     Aggregate unmetered fractional task usage for all paid users and report to Stripe.
 
-    - Finds all unmetered `BrowserUseAgentTask` and `PersistentAgentStep` rows within
+    - Finds all unmetered `BrowserUseAgentTask`, `WorkTask`, and `PersistentAgentStep` rows within
       each user's current billing period.
     - Sums `credits_cost` across both tables, rounds to the nearest whole integer.
     - Reports that integer quantity via Stripe meter event once per user.
@@ -493,6 +574,17 @@ def rollup_and_meter_usage_task(self) -> int:
         .values_list("user_id", flat=True)
         .distinct()
     )
+    work_task_users = (
+        WorkTask.objects
+        .filter(
+            metered=False,
+            user__isnull=False,
+            task_credit__additional_task=True,
+            task_credit__organization__isnull=True,
+        )
+        .values_list("user_id", flat=True)
+        .distinct()
+    )
     step_users = (
         PersistentAgentStep.objects
         .filter(
@@ -504,13 +596,23 @@ def rollup_and_meter_usage_task(self) -> int:
         .distinct()
     )
 
-    user_ids = set(task_users) | set(step_users)
+    user_ids = set(task_users) | set(work_task_users) | set(step_users)
     logger.info("Rollup metering: candidate users=%s", len(user_ids))
     if not user_ids:
         logger.info("Rollup metering: no user candidates")
 
     org_task_orgs = (
         BrowserUseAgentTask.objects
+        .filter(
+            metered=False,
+            task_credit__organization__isnull=False,
+            task_credit__additional_task=True,
+        )
+        .values_list("task_credit__organization_id", flat=True)
+        .distinct()
+    )
+    org_work_task_orgs = (
+        WorkTask.objects
         .filter(
             metered=False,
             task_credit__organization__isnull=False,
@@ -529,7 +631,11 @@ def rollup_and_meter_usage_task(self) -> int:
         .values_list("task_credit__organization_id", flat=True)
         .distinct()
     )
-    org_ids = {oid for oid in org_task_orgs if oid} | {oid for oid in org_step_orgs if oid}
+    org_ids = (
+        {oid for oid in org_task_orgs if oid}
+        | {oid for oid in org_work_task_orgs if oid}
+        | {oid for oid in org_step_orgs if oid}
+    )
     logger.info("Rollup metering: candidate orgs=%s", len(org_ids))
 
     if not user_ids and not org_ids:

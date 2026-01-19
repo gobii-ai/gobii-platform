@@ -62,6 +62,12 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_TASKS,
     DEFAULT_VISION_DETAIL_LEVEL,
 )
+from api.services.work_task_settings import (
+    DEFAULT_MAX_ACTIVE_WORK_TASKS,
+    DEFAULT_MAX_WORK_TASK_STEPS,
+    DEFAULT_MAX_WORK_TASK_TOOL_CALLS,
+    DEFAULT_MAX_WORK_TASKS_PER_DAY,
+)
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     DEFAULT_SEARCH_WEB_RESULT_COUNT,
@@ -680,6 +686,52 @@ class TaskCreditConfig(models.Model):
 
     def __str__(self):
         return "Task credit configuration"
+
+
+class WorkTaskConfig(models.Model):
+    """Singleton configuration for work task limits."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    max_work_task_steps = models.PositiveIntegerField(
+        default=DEFAULT_MAX_WORK_TASK_STEPS,
+        help_text="Maximum LLM steps per work task; set to 0 to use the system default.",
+    )
+    max_work_task_tool_calls = models.PositiveIntegerField(
+        default=DEFAULT_MAX_WORK_TASK_TOOL_CALLS,
+        help_text="Maximum tool calls per work task; set to 0 for unlimited.",
+    )
+    max_work_tasks_per_day = models.PositiveIntegerField(
+        default=DEFAULT_MAX_WORK_TASKS_PER_DAY,
+        help_text="Maximum work tasks that can start each day; set to 0 for unlimited.",
+    )
+    max_active_work_tasks = models.PositiveIntegerField(
+        default=DEFAULT_MAX_ACTIVE_WORK_TASKS,
+        help_text="Maximum concurrently active work tasks; set to 0 for unlimited.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Work task configuration"
+        verbose_name_plural = "Work task configuration"
+
+    def save(self, *args, **kwargs):  # pragma: no cover - exercised in services
+        self.singleton_id = 1
+        result = super().save(*args, **kwargs)
+        from api.services.work_task_settings import invalidate_work_task_settings_cache
+
+        invalidate_work_task_settings_cache()
+        return result
+
+    def delete(self, using=None, keep_parents=False):
+        raise ValidationError("WorkTaskConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Work task configuration"
 
 
 class Plan(models.Model):
@@ -1903,19 +1955,262 @@ class BrowserUseAgentTaskStep(models.Model):
             UniqueConstraint(fields=['task', 'step_number'], name='unique_browser_use_agent_task_step_task_step_number')
         ]
 
+
+class WorkTask(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="work_tasks",
+        null=True,
+        blank=True,
+    )
+    eval_run = models.ForeignKey(
+        "EvalRun",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_tasks",
+        help_text="Eval run that spawned this work task, if any.",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="work_tasks",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="work_tasks",
+        null=True,
+        blank=True,
+        help_text="Owning organization, when applicable.",
+    )
+    task_credit = models.ForeignKey(
+        "TaskCredit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_tasks",
+    )
+    tool_call_step = models.OneToOneField(
+        "PersistentAgentStep",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_task",
+        help_text="Tool call step that spawned this work task, for tool result preview updates.",
+    )
+    query = models.TextField(blank=True, null=True)
+
+    class StatusChoices(models.TextChoices):
+        PENDING = "pending", "Pending"
+        IN_PROGRESS = "in_progress", "In Progress"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    status = models.CharField(
+        max_length=50,
+        choices=StatusChoices.choices,
+        default=StatusChoices.PENDING,
+    )
+    result_summary = models.TextField(null=True, blank=True)
+    error_message = models.TextField(null=True, blank=True)
+    prompt_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens used in the prompt for this work task's LLM call(s).",
+    )
+    completion_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of tokens generated in the completion for this work task's LLM call(s).",
+    )
+    total_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Total tokens used (prompt + completion) for this work task's LLM call(s).",
+    )
+    credits_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        help_text="Credits charged for this work task; defaults to configured per-task cost.",
+    )
+    cached_tokens = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Number of cached tokens used (if provider supports caching).",
+    )
+    input_cost_total = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost for prompt tokens (cached + uncached).",
+    )
+    input_cost_uncached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for uncached prompt tokens.",
+    )
+    input_cost_cached = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for cached prompt tokens.",
+    )
+    output_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="USD cost for completion tokens.",
+    )
+    total_cost = models.DecimalField(
+        max_digits=12,
+        decimal_places=6,
+        null=True,
+        blank=True,
+        help_text="Total USD cost (input + output).",
+    )
+    llm_model = models.CharField(
+        max_length=256,
+        null=True,
+        blank=True,
+        help_text="LLM model used for this work task.",
+    )
+    llm_provider = models.CharField(
+        max_length=128,
+        null=True,
+        blank=True,
+        help_text="LLM provider used for this work task.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    metered = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Marked true once included in Stripe metering rollup.",
+    )
+    meter_batch_key = models.CharField(max_length=64, null=True, blank=True, db_index=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["status", "created_at"], name="work_task_status_created_idx"),
+            models.Index(fields=["created_at"], name="work_task_created_idx"),
+            models.Index(fields=["organization", "created_at"], name="work_task_org_created_idx"),
+        ]
+
     def __str__(self):
-        return f"Step {self.step_number} for Task {self.task.id}"
+        agent_part = f"Agent {self.agent.name}" if self.agent else "No Agent"
+        return f"WorkTask {self.id} ({agent_part}) (User: {getattr(self.user, 'email', 'N/A')})"
 
     def clean(self):
         super().clean()
-        if self.is_result and not self.result_value:
-            raise ValidationError({'result_value': 'Result value cannot be empty if this step is marked as the result.'})
-        if not self.is_result and self.result_value:
-            raise ValidationError({'result_value': 'Result value should only be set if this step is marked as the result.'})
+        if self._state.adding:
+            with traced("CHECK Clean WorkTask User Credit") as span:
+                if self.user_id is None:
+                    return
+                span.set_attribute("user.id", str(self.user_id))
+
+                if not self.user.is_active:
+                    raise ValidationError({"subscription": "Inactive user. Cannot create tasks."})
+
+        owner_org = self.organization
+        agent_org = None
+        if self.agent and getattr(self.agent, "organization", None):
+            agent_org = self.agent.organization
+
+        if owner_org is None and agent_org is not None:
+            owner_org = agent_org
+            self.organization = agent_org
+        elif owner_org is not None and agent_org is not None and owner_org != agent_org:
+            raise ValidationError({"organization": "Organization mismatch between task and agent ownership."})
+
+        if self.organization_id is None and owner_org is not None:
+            self.organization = owner_org
+
+        if self._state.adding and self.user_id:
+            if owner_org:
+                task_credits = TaskCredit.objects.filter(
+                    organization=owner_org,
+                    expiration_date__gte=timezone.now(),
+                    voided=False,
+                )
+            else:
+                task_credits = TaskCredit.objects.filter(
+                    user=self.user,
+                    expiration_date__gte=timezone.now(),
+                    voided=False,
+                )
+
+            available_tasks = sum(tc.remaining for tc in task_credits)
+            subscription = get_active_subscription(self.user) if owner_org is None else None
+
+            if available_tasks <= 0 and subscription is None:
+                raise ValidationError({"quota": f"Task quota exceeded. Used: {available_tasks}"})
 
     def save(self, *args, **kwargs):
-        self.full_clean()
+        if self._state.adding:
+            self.full_clean()
+
+        if self._state.adding and self.user_id:
+            with transaction.atomic():
+                owner = None
+                if self.organization_id:
+                    owner = self.organization
+                if owner is None and self.agent and getattr(self.agent, "organization", None):
+                    owner = self.agent.organization
+                if owner is None:
+                    owner = self.user
+
+                default_cost = get_default_task_credit_cost()
+                if self.credits_cost is not None:
+                    amount = self.credits_cost
+                else:
+                    amount = default_cost
+                    if self.agent is not None:
+                        amount = _apply_tier_multiplier(self.agent, amount)
+                    self.credits_cost = amount
+
+                result = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=amount)
+
+                if not result["success"]:
+                    raise ValidationError({"quota": result["error_message"]})
+
+                self.task_credit = result["credit"]
+
         super().save(*args, **kwargs)
+
+
+class WorkTaskStep(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    task = models.ForeignKey(WorkTask, on_delete=models.CASCADE, related_name="steps")
+    step_number = models.PositiveIntegerField()
+    tool_name = models.CharField(max_length=256)
+    tool_params = models.JSONField(null=True, blank=True)
+    tool_result = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["task", "step_number"]
+        constraints = [
+            UniqueConstraint(fields=["task", "step_number"], name="unique_work_task_step_task_step_number")
+        ]
+
+    def __str__(self):
+        return f"Step {self.step_number} for Task {self.task.id}"
 
 
 @receiver(post_save, sender=get_user_model())
@@ -2664,6 +2959,104 @@ class FileHandlerTierEndpoint(models.Model):
     )
     endpoint = models.ForeignKey(
         FileHandlerModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+
+
+class WorkTaskModelEndpoint(models.Model):
+    """Model endpoint configuration used for work task agent loops."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt4o_mini_work_task'")
+    provider = models.ForeignKey(
+        LLMProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="work_task_endpoints",
+        help_text="Optional link to the provider supplying credentials for this endpoint.",
+    )
+    enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
+
+    litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    api_base = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
+    )
+    supports_temperature = models.BooleanField(
+        default=True,
+        help_text="Indicates whether this model accepts a temperature parameter.",
+    )
+    supports_tool_choice = models.BooleanField(
+        default=True,
+        help_text="Indicates whether this model accepts tool_choice.",
+    )
+    use_parallel_tool_calls = models.BooleanField(
+        default=True,
+        help_text="Hint to allow parallel tool calls when supported by the provider.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "litellm_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        provider = self.provider.display_name if self.provider else "no-provider"
+        return f"{self.key} → {self.litellm_model} ({provider})"
+
+
+class WorkTaskLLMTier(models.Model):
+    """Fallback tier ordering for work task endpoints."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.PositiveIntegerField(unique=True, help_text="1-based order across all work task tiers.")
+    description = models.CharField(max_length=256, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"Tier {self.order}"
+
+
+class WorkTaskTierEndpoint(models.Model):
+    """Weighted association between a work task tier and an endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        WorkTaskLLMTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        WorkTaskModelEndpoint,
         on_delete=models.CASCADE,
         related_name="in_tiers",
     )
