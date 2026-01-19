@@ -1933,7 +1933,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1.25rem 1.5rem 0.75rem;
+  padding: 0.85rem 1rem 0.4rem;
 }
 
 .tool-cluster-timeline-title {
@@ -1978,17 +1978,17 @@
 }
 
 .tool-cluster-timeline-body {
-  padding: 0 1.5rem 1.5rem;
+  padding: 0 1rem 1rem;
   overflow-y: auto;
 }
 
 .tool-cluster-timeline-list {
-  --timeline-icon-size: 2.2rem;
-  --timeline-row-padding-x: 0.75rem;
+  --timeline-icon-size: 1.85rem;
+  --timeline-row-padding-x: 0.5rem;
   position: relative;
   display: flex;
   flex-direction: column;
-  gap: 0.85rem;
+  gap: 0.55rem;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -2013,10 +2013,10 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: flex-start;
-  gap: 0.8rem;
+  gap: 0.7rem;
   width: 100%;
-  padding: 0.65rem var(--timeline-row-padding-x);
-  border-radius: 1rem;
+  padding: 0.48rem var(--timeline-row-padding-x);
+  border-radius: 0.8rem;
   border: 1px solid transparent;
   background: transparent;
   text-align: left;
@@ -2043,7 +2043,7 @@
   height: var(--timeline-icon-size);
   border-radius: 0.75rem;
   flex-shrink: 0;
-  margin-top: 0.05rem;
+  align-self: center;
 }
 
 .tool-cluster-timeline-main {
@@ -2054,13 +2054,13 @@
 }
 
 .tool-cluster-timeline-label {
-  font-size: 0.88rem;
+  font-size: 0.82rem;
   font-weight: 600;
   color: #0f172a;
 }
 
 .tool-cluster-timeline-caption {
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   color: #475569;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2068,13 +2068,14 @@
 }
 
 .tool-cluster-timeline-preview {
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   color: #334155;
   line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+}
+
+.tool-cluster-timeline-preview-markdown,
+.tool-cluster-timeline-preview-markdown > p {
+  margin: 0;
 }
 
 .tool-cluster-timeline-item[data-kind="thinking"] .tool-cluster-timeline-preview {
@@ -2083,7 +2084,7 @@
 }
 
 .tool-cluster-timeline-time {
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-weight: 500;
   color: #64748b;
   white-space: nowrap;
@@ -2132,11 +2133,11 @@
   }
 
   .tool-cluster-timeline-header {
-    padding: 1rem 1.25rem 0.5rem;
+    padding: 0.8rem 1rem 0.4rem;
   }
 
   .tool-cluster-timeline-body {
-    padding: 0 1.25rem 1.25rem;
+    padding: 0 1rem 1rem;
   }
 }
 

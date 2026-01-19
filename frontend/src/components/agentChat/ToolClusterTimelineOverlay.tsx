@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Workflow, X } from 'lucide-react'
 
-import { truncate } from '../tooling/toolMetadata'
 import { formatRelativeTimestamp } from '../../util/time'
+import { MarkdownViewer } from '../common/MarkdownViewer'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
@@ -34,15 +34,23 @@ function deriveCaption(entry: ToolEntryDisplay): string | null {
   return null
 }
 
-function derivePreview(entry: ToolEntryDisplay): string | null {
+function deriveThinkingPreview(entry: ToolEntryDisplay): string | null {
   if (entry.toolName !== 'thinking') {
     return null
   }
-  const reasoning = typeof entry.result === 'string' ? entry.result.trim() : ''
-  if (!reasoning) {
+  const reasoning = typeof entry.result === 'string' ? entry.result : ''
+  if (!reasoning.trim()) {
     return null
   }
-  return truncate(reasoning.replace(/\s+/g, ' '), 180)
+  const lines = reasoning.split(/\r?\n/)
+  const firstLineIndex = lines.findIndex((line) => line.trim().length > 0)
+  if (firstLineIndex === -1) {
+    return null
+  }
+  const firstLine = lines[firstLineIndex].trimEnd()
+  const remainder = lines.slice(firstLineIndex + 1).join('\n')
+  const hasMore = remainder.trim().length > 0
+  return hasMore ? `${firstLine}…` : firstLine
 }
 
 export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClusterTimelineOverlayProps) {
@@ -101,7 +109,7 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
               const isOpen = openEntryId === entry.id
               const relativeTime = formatRelativeTimestamp(entry.timestamp)
               const caption = deriveCaption(entry)
-              const preview = derivePreview(entry)
+              const thinkingPreview = deriveThinkingPreview(entry)
               const kind = entry.toolName === 'thinking' ? 'thinking' : entry.toolName === 'kanban' ? 'kanban' : 'tool'
               const DetailComponent = entry.detailComponent
               return (
@@ -120,7 +128,11 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
                     <span className="tool-cluster-timeline-main">
                       <span className="tool-cluster-timeline-label">{entry.label}</span>
                       {caption ? <span className="tool-cluster-timeline-caption">{caption}</span> : null}
-                      {preview ? <span className="tool-cluster-timeline-preview">{preview}</span> : null}
+                      {thinkingPreview ? (
+                        <div className="tool-cluster-timeline-preview">
+                          <MarkdownViewer content={thinkingPreview} className="tool-cluster-timeline-preview-markdown" enableHighlight={false} />
+                        </div>
+                      ) : null}
                     </span>
                     {entry.timestamp ? (
                       <time
