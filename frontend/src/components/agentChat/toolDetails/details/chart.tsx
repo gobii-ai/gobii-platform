@@ -2,10 +2,7 @@ import { MarkdownViewer } from '../../../common/MarkdownViewer'
 import type { ToolDetailProps } from '../../tooling/types'
 import { isPlainObject, parseResultObject } from '../../../../util/objectUtils'
 import { KeyValueList, Section } from '../shared'
-
-function pickString(value: unknown): string | null {
-  return typeof value === 'string' && value.trim().length ? value.trim() : null
-}
+import { toText } from '../brightDataUtils'
 
 function extractDataArray(value: unknown): unknown[] {
   if (Array.isArray(value)) return value
@@ -21,18 +18,18 @@ export function ChartDetail({ entry }: ToolDetailProps) {
   const resultRecord = isPlainObject(resultObject) ? (resultObject as Record<string, unknown>) : null
 
   const title =
-    pickString(parameters?.title) ||
-    pickString(resultRecord?.title) ||
-    pickString(entry.summary) ||
-    pickString(entry.caption)
-  const chartType = pickString(parameters?.type) || pickString(resultRecord?.type)
-  const description = pickString(parameters?.description) || pickString(resultRecord?.description)
-  const chartId = pickString(resultRecord?.chart_id) || pickString(resultRecord?.id)
+    toText(parameters?.title) ||
+    toText(resultRecord?.title) ||
+    toText(entry.summary) ||
+    toText(entry.caption)
+  const chartType = toText(parameters?.type) || toText(resultRecord?.type)
+  const description = toText(parameters?.description) || toText(resultRecord?.description)
+  const chartId = toText(resultRecord?.chart_id) || toText(resultRecord?.id)
   const imageUrl =
-    pickString(resultRecord?.chart_url) ||
-    pickString(resultRecord?.image_url) ||
-    pickString(resultRecord?.url) ||
-    pickString(parameters?.image_url)
+    toText(resultRecord?.chart_url) ||
+    toText(resultRecord?.image_url) ||
+    toText(resultRecord?.url) ||
+    toText(parameters?.image_url)
 
   const parameterData = extractDataArray(parameters?.data)
   const resultData = extractDataArray(resultRecord?.data)

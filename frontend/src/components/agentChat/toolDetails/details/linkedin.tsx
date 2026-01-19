@@ -1,6 +1,7 @@
 import type { ToolDetailProps } from '../../tooling/types'
 import { KeyValueList, Section } from '../shared'
 import { isNonEmptyString } from '../utils'
+import { toNumber } from '../brightDataUtils'
 import { parseResultObject, isPlainObject } from '../../../../util/objectUtils'
 
 type ProfileRecord = Record<string, unknown>
@@ -222,15 +223,6 @@ type JobResult = {
   seniority: string | null
   salary: string | null
   posted: string | null
-}
-
-function toNumber(value: unknown): number | null {
-  if (typeof value === 'number' && Number.isFinite(value)) return value
-  if (typeof value === 'string') {
-    const parsed = Number(value.replace(/[, ]+/g, ''))
-    return Number.isFinite(parsed) ? parsed : null
-  }
-  return null
 }
 
 function normalizeJobListings(result: unknown): JobResult[] {

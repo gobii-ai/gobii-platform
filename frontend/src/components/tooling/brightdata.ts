@@ -127,15 +127,15 @@ export function extractBrightDataResultCount(result: unknown): number | null {
     return null
   }
 
-  const arrayCandidate = extractArrayCandidate(payload)
-  if (arrayCandidate) {
-    return arrayCandidate.length
-  }
-
   const numeric = extractNumericCount(payload)
-  if (numeric !== null) {
-    return numeric
+  const arrayCandidate = extractArrayCandidate(payload)
+  const arrayLength = arrayCandidate?.length ?? null
+
+  if (numeric !== null && arrayLength !== null) {
+    return Math.max(numeric, arrayLength)
   }
+  if (numeric !== null) return numeric
+  if (arrayLength !== null) return arrayLength
 
   return null
 }

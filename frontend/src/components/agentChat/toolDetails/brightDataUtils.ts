@@ -1,7 +1,7 @@
 import { isNonEmptyString } from './utils'
 
 export function toText(value: unknown): string | null {
-  return isNonEmptyString(value) ? (value as string) : null
+  return isNonEmptyString(value) ? (value as string).trim() : null
 }
 
 export function toNumber(value: unknown): number | null {
