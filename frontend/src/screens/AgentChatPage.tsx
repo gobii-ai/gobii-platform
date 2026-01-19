@@ -289,8 +289,6 @@ export function AgentChatPage({
   const processingWebTasks = useAgentChatStore((state) => state.processingWebTasks)
   const streaming = useAgentChatStore((state) => state.streaming)
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
-  const thinkingCollapsedByCursor = useAgentChatStore((state) => state.thinkingCollapsedByCursor)
-  const toggleThinkingCollapsed = useAgentChatStore((state) => state.toggleThinkingCollapsed)
   const streamingThinkingCollapsed = useAgentChatStore((state) => state.streamingThinkingCollapsed)
   const setStreamingThinkingCollapsed = useAgentChatStore((state) => state.setStreamingThinkingCollapsed)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
@@ -862,13 +860,6 @@ export function AgentChatPage({
     scrollToBottom()
   }
 
-  const handleToggleThinking = useCallback(
-    (cursor: string) => {
-      toggleThinkingCollapsed(cursor)
-    },
-    [toggleThinkingCollapsed],
-  )
-
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
   }, [setStreamingThinkingCollapsed, streamingThinkingCollapsed])
@@ -1034,8 +1025,6 @@ export function AgentChatPage({
         awaitingResponse={isNewAgent ? false : awaitingResponse}
         processingWebTasks={isNewAgent ? [] : processingWebTasks}
         streaming={isNewAgent ? null : streaming}
-        thinkingCollapsedByCursor={isNewAgent ? {} : thinkingCollapsedByCursor}
-        onToggleThinking={handleToggleThinking}
         streamingThinkingCollapsed={streamingThinkingCollapsed}
         onToggleStreamingThinking={handleToggleStreamingThinking}
         onLoadOlder={isNewAgent ? undefined : (hasMoreOlder ? loadOlder : undefined)}

@@ -152,3 +152,18 @@ export function McpToolDetail({ entry }: ToolDetailProps) {
     </div>
   )
 }
+
+export function ThinkingDetail({ entry }: ToolDetailProps) {
+  const reasoning = typeof entry.result === 'string' ? entry.result.trim() : ''
+  return (
+    <div className="space-y-3 text-sm text-slate-600">
+      <Section title="Reasoning">
+        {reasoning ? (
+          <MarkdownViewer content={reasoning} className="prose prose-sm max-w-none" />
+        ) : (
+          <p className="text-slate-500">No reasoning recorded.</p>
+        )}
+      </Section>
+    </div>
+  )
+}

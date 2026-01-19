@@ -50,8 +50,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   processingStartedAt?: number | null
   awaitingResponse?: boolean
   streaming?: StreamState | null
-  thinkingCollapsedByCursor?: Record<string, boolean>
-  onToggleThinking?: (cursor: string) => void
   streamingThinkingCollapsed?: boolean
   onToggleStreamingThinking?: () => void
   insights?: InsightEvent[]
@@ -90,8 +88,6 @@ export function AgentChatLayout({
   awaitingResponse = false,
   processingWebTasks = [],
   streaming,
-  thinkingCollapsedByCursor,
-  onToggleThinking,
   streamingThinkingCollapsed = false,
   onToggleStreamingThinking,
   onLoadOlder,
@@ -122,6 +118,7 @@ export function AgentChatLayout({
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
+  const suppressedThinkingCursor = streaming?.cursor ?? null
   // Show streaming reasoning while streaming, or briefly after done to allow collapse animation
   // (streaming is cleared when historical thinking event arrives)
   const showStreamingReasoning = hasStreamingReasoning && (isStreaming || streaming?.done)
@@ -211,8 +208,7 @@ export function AgentChatLayout({
                     events={events}
                     agentColorHex={agentColorHex || undefined}
                     initialLoading={initialLoading}
-                    thinkingCollapsedByCursor={thinkingCollapsedByCursor}
-                    onToggleThinking={onToggleThinking}
+                    suppressedThinkingCursor={suppressedThinkingCursor}
                   />
                 </div>
 

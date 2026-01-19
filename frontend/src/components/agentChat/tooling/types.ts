@@ -23,7 +23,7 @@ export type ToolEntryDisplay = {
   sqlStatements?: string[]
   detailComponent: ToolDetailComponent
   meta?: ToolCallEntry['meta']
-  sourceEntry: ToolCallEntry
+  sourceEntry?: ToolCallEntry
   mcpInfo?: {
     serverSlug: string
     serverLabel: string

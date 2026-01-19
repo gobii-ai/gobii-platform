@@ -4,8 +4,11 @@ import {
   CalendarClock,
   Database,
   DatabaseZap,
+  ShoppingBag,
   ClipboardList,
   BrainCircuit,
+  Linkedin,
+  Home,
   Search,
   Network,
   FileText,
@@ -29,8 +32,10 @@ import { parseResultObject } from '../../util/objectUtils'
 import type { ToolCallEntry } from '../agentChat/types'
 import type { ToolDescriptor, ToolDescriptorTransform } from '../agentChat/tooling/types'
 import { summarizeToolSearchForCaption } from '../agentChat/tooling/searchUtils'
+import type { DetailKind } from '../agentChat/toolDetails'
 import { AgentConfigUpdateDetail } from '../agentChat/toolDetails'
 import { parseAgentConfigUpdates } from './agentConfigSql'
+import { extractBrightDataArray, extractBrightDataResultCount, extractBrightDataSearchQuery } from './brightdata'
 
 const COMMUNICATION_TOOL_NAMES = [
   'send_email',
@@ -51,6 +56,9 @@ export const USAGE_SKIP_TOOL_NAMES = new Set<string | null>(BASE_SKIP_TOOL_NAMES
 
 export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 
+const LINKEDIN_ICON_BG_CLASS = 'bg-sky-100'
+const LINKEDIN_ICON_COLOR_CLASS = 'text-sky-700'
+
 export type ToolMetadataConfig = {
   name: string
   aliases?: string[]
@@ -58,7 +66,7 @@ export type ToolMetadataConfig = {
   icon: LucideIcon
   iconBgClass: string
   iconColorClass: string
-  detailKind: string
+  detailKind: DetailKind
   skip?: boolean
   derive?(entry: ToolCallEntry, parameters: Record<string, unknown> | null): ToolDescriptorTransform | void
 }
@@ -73,6 +81,48 @@ export function coerceString(value: unknown): string | null {
     return value
   }
   return null
+}
+
+function coerceNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/[, ]+/g, ''))
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  return null
+}
+
+function formatCount(value: number | null): string | null {
+  if (value === null) return null
+  return value.toLocaleString()
+}
+
+function pickFirstParameter(
+  parameters: Record<string, unknown> | null | undefined,
+  keys: string[],
+): string | null {
+  if (!parameters) return null
+  for (const key of keys) {
+    const value = coerceString(parameters[key])
+    if (value) {
+      return value
+    }
+  }
+  return null
+}
+
+function deriveLinkedInCaption(
+  parameters: Record<string, unknown> | null | undefined,
+  keys: string[],
+  fallback?: string | null,
+): string | null {
+  const value = pickFirstParameter(parameters, keys)
+  if (value) {
+    return truncate(value, 56)
+  }
+  return fallback ?? null
 }
 
 
@@ -737,12 +787,380 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'mcp_brightdata_search_engine',
+    aliases: ['mcp_brightdata_search_engine_batch', 'search_engine', 'search_engine_batch'],
+    label: 'Web search',
+    icon: Search,
+    iconBgClass: 'bg-blue-100',
+    iconColorClass: 'text-blue-600',
+    detailKind: 'brightDataSearch',
+    derive(entry, parameters) {
+      const query = extractBrightDataSearchQuery(parameters ?? null)
+      const resultCount = extractBrightDataResultCount(entry.result)
+      const captionParts: string[] = []
+
+      if (query) {
+        captionParts.push(`“${truncate(query, 52)}”`)
+      }
+      if (resultCount !== null) {
+        captionParts.push(`${resultCount} result${resultCount === 1 ? '' : 's'}`)
+      }
+
+      const caption = captionParts.length ? captionParts.join(' • ') : entry.caption ?? 'Web search'
+      const summary =
+        entry.summary ??
+        (resultCount !== null ? `${resultCount} result${resultCount === 1 ? '' : 's'}` : null)
+
+      return {
+        caption,
+        summary,
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_person_profile',
+    aliases: ['web_data_linkedin_person_profile'],
+    label: 'LinkedIn profile',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'linkedinPerson',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'profile_url',
+        'profile_id',
+        'public_id',
+        'person_url',
+        'url',
+        'username',
+        'vanity',
+        'name',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn profile',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_company_profile',
+    aliases: ['web_data_linkedin_company_profile'],
+    label: 'LinkedIn company',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'linkedinCompany',
+    derive(entry, parameters) {
+      const caption = deriveLinkedInCaption(parameters, [
+        'company_name',
+        'company',
+        'organization',
+        'company_url',
+        'url',
+        'profile_url',
+        'name',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn company',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_job_listings',
+    aliases: ['web_data_linkedin_job_listings'],
+    label: 'LinkedIn jobs',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'linkedinJobListings',
+    derive(entry, parameters) {
+      const query = deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'company_name',
+        'company',
+        'title',
+        'role',
+        'location',
+      ])
+
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const title = coerceString(first?.['job_title']) || coerceString(first?.['title'])
+      const company = coerceString(first?.['company_name']) || coerceString(first?.['company'])
+      const fallback = [title, company].filter(Boolean).join(' • ') || coerceString(parameters?.['url'])
+      const caption = query || fallback
+
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'LinkedIn jobs',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_posts',
+    aliases: ['web_data_linkedin_posts'],
+    label: 'LinkedIn posts',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'linkedinPosts',
+    derive(entry, parameters) {
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const title = coerceString(first?.['title']) || coerceString(first?.['headline'])
+      const author = coerceString(first?.['user_name']) || coerceString(first?.['user_id'])
+      const url = coerceString(first?.['url']) || coerceString(first?.['post_url'])
+
+      const caption = deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'profile_url',
+        'company_name',
+        'hashtag',
+        'url',
+      ]) || title || author || url
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn posts',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_linkedin_people_search',
+    aliases: ['web_data_linkedin_people_search'],
+    label: 'LinkedIn search',
+    icon: Linkedin,
+    iconBgClass: LINKEDIN_ICON_BG_CLASS,
+    iconColorClass: LINKEDIN_ICON_COLOR_CLASS,
+    detailKind: 'linkedinPeopleSearch',
+    derive(entry, parameters) {
+      const firstName = coerceString(parameters?.['first_name'])
+      const lastName = coerceString(parameters?.['last_name'])
+      const nameCaption = [firstName, lastName].filter(Boolean).join(' ')
+      const caption = nameCaption || deriveLinkedInCaption(parameters, [
+        'query',
+        'keywords',
+        'keyword',
+        'company',
+        'title',
+        'role',
+        'location',
+      ])
+      return {
+        caption: caption ?? entry.caption ?? 'LinkedIn search',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_yahoo_finance_business',
+    aliases: ['web_data_yahoo_finance_business'],
+    label: 'Yahoo Finance',
+    icon: BarChart3,
+    iconBgClass: 'bg-amber-100',
+    iconColorClass: 'text-amber-700',
+    detailKind: 'yahooFinanceBusiness',
+    derive(entry, parameters) {
+      const ticker = coerceString(parameters?.['stock_ticker']) || coerceString(parameters?.['symbol'])
+      const name = coerceString(parameters?.['name'])
+      const captionPieces = [ticker ? ticker.toUpperCase() : null, name ? truncate(name, 44) : null].filter(Boolean)
+      return {
+        caption: captionPieces.length ? captionPieces.join(' • ') : entry.caption ?? 'Yahoo Finance',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_reuter_news',
+    aliases: ['web_data_reuter_news'],
+    label: 'Reuters news',
+    icon: Globe,
+    iconBgClass: 'bg-blue-100',
+    iconColorClass: 'text-blue-700',
+    detailKind: 'reutersNews',
+    derive(entry, parameters) {
+      const articles = extractBrightDataArray(entry.result)
+      const first = articles[0]
+      const headline = coerceString(first?.['headline']) || coerceString(first?.['title'])
+      const keyword = coerceString(first?.['keyword']) || coerceString(parameters?.['keyword'])
+      const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
+      const caption = headline || keyword || url
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reuters news',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_reddit_posts',
+    aliases: ['web_data_reddit_posts'],
+    label: 'Reddit posts',
+    icon: MessageSquareText,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'redditPosts',
+    derive(entry, parameters) {
+      const posts = extractBrightDataArray(entry.result)
+      const first = posts[0]
+      const title = coerceString(first?.['title'])
+      const author = coerceString(first?.['author']) || coerceString(first?.['user_posted'])
+      const community = coerceString(first?.['community_name']) || coerceString(first?.['subreddit'])
+      const url = coerceString(first?.['url']) || coerceString(parameters?.['url'])
+      const caption = title || community || author || url
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Reddit posts',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_zillow_properties_listing',
+    aliases: ['web_data_zillow_properties_listing'],
+    label: 'Zillow listing',
+    icon: Home,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'zillowListing',
+    derive(entry, parameters) {
+      const properties = extractBrightDataArray(entry.result)
+      const first = properties[0]
+      const addressRecord =
+        first && typeof first === 'object' && 'address' in first && first.address && typeof first.address === 'object'
+          ? (first.address as Record<string, unknown>)
+          : null
+      const street = coerceString(first?.['streetAddress']) || coerceString(addressRecord?.['streetAddress'])
+      const city = coerceString(first?.['city']) || coerceString(addressRecord?.['city'])
+      const state = coerceString(first?.['state']) || coerceString(addressRecord?.['state'])
+      const location = [street, city, state].filter(Boolean).join(', ')
+      const price = coerceNumber(first?.['price'])
+      const priceCaption = price !== null ? `$${price.toLocaleString()}` : null
+      const url = coerceString(parameters?.['url'])
+      const baseCaption = location || url
+      const combined = baseCaption && priceCaption ? `${baseCaption} • ${priceCaption}` : baseCaption ?? priceCaption
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Zillow listing',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_crunchbase_company',
+    aliases: ['web_data_crunchbase_company'],
+    label: 'Crunchbase company',
+    icon: Database,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'crunchbaseCompany',
+    derive(entry, parameters) {
+      const caption = pickFirstParameter(parameters, ['company', 'company_id', 'name', 'organization', 'slug', 'url'])
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Crunchbase company',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_amazon_product',
+    aliases: ['web_data_amazon_product'],
+    label: 'Amazon product',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProduct',
+    derive(entry, parameters) {
+      const caption = pickFirstParameter(parameters, ['title', 'asin', 'url', 'product', 'name'])
+      return {
+        caption: caption ? truncate(caption, 56) : entry.caption ?? 'Amazon product',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_amazon_product_search',
+    aliases: ['web_data_amazon_product_search'],
+    label: 'Amazon search',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProductSearch',
+    derive(entry, parameters) {
+      const items = extractBrightDataArray(entry.result)
+      const first = items[0]
+      const queryFromItem = coerceString(first?.['keyword']) ||
+        (first && typeof first === 'object' && 'input' in first && first.input && typeof first.input === 'object'
+          ? coerceString((first.input as Record<string, unknown>)['keyword'])
+          : null)
+      const query = extractBrightDataSearchQuery(parameters) || coerceString(parameters?.['keyword']) || queryFromItem
+      const name = coerceString(first?.['name']) || coerceString(first?.['title']) || coerceString(first?.['asin'])
+      const count = extractBrightDataResultCount(entry.result) ?? (items.length ? items.length : null)
+      const countLabel = count ? `${count} result${count === 1 ? '' : 's'}` : null
+      const caption = query || name
+      const combined = caption && countLabel ? `${caption} • ${countLabel}` : caption ?? countLabel
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon search',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_web_data_amazon_product_reviews',
+    aliases: ['web_data_amazon_product_reviews'],
+    label: 'Amazon reviews',
+    icon: ShoppingBag,
+    iconBgClass: 'bg-orange-100',
+    iconColorClass: 'text-orange-700',
+    detailKind: 'amazonProductReviews',
+    derive(entry, parameters) {
+      const urlCaption = pickFirstParameter(parameters, ['url', 'product_url'])
+      const firstRecord = extractBrightDataArray(entry.result)[0]
+      const productName = coerceString(firstRecord?.['product_name'])
+      const ratingValue = coerceNumber(firstRecord?.['product_rating'])
+      const ratingLabel =
+        ratingValue !== null ? `${Number.isInteger(ratingValue) ? ratingValue : ratingValue.toFixed(1)}/5` : null
+      const ratingCount = formatCount(coerceNumber(firstRecord?.['product_rating_count']))
+      const ratingSummary = ratingLabel
+        ? `${ratingLabel}${ratingCount ? ` (${ratingCount})` : ''}`
+        : ratingCount
+          ? `${ratingCount} ratings`
+          : null
+      const caption = productName || urlCaption
+      const combined = caption && ratingSummary ? `${caption} • ${ratingSummary}` : caption ?? ratingSummary
+      return {
+        caption: combined ? truncate(combined, 56) : entry.caption ?? 'Amazon reviews',
+      }
+    },
+  },
+  {
     name: 'mcp_brightdata_scrape_as_markdown',
+    aliases: ['scrape_as_markdown'],
     label: 'Web snapshot',
     icon: ScanText,
     iconBgClass: 'bg-fuchsia-100',
     iconColorClass: 'text-fuchsia-600',
     detailKind: 'brightDataSnapshot',
+    derive(entry, parameters) {
+      const url =
+        coerceString(parameters?.['url']) ||
+        coerceString(parameters?.['start_url']) ||
+        coerceString(parameters?.['target_url']) ||
+        null
+      const caption = url ? truncate(url, 64) : null
+      return {
+        caption: caption ?? entry.caption ?? 'Web snapshot',
+      }
+    },
+  },
+  {
+    name: 'mcp_brightdata_scrape_as_html',
+    aliases: ['scrape_as_html'],
+    label: 'Web snapshot',
+    icon: ScanText,
+    iconBgClass: 'bg-fuchsia-100',
+    iconColorClass: 'text-fuchsia-600',
+    detailKind: 'brightDataSnapshot',
+    derive(entry, parameters) {
+      const url =
+        coerceString(parameters?.['url']) ||
+        coerceString(parameters?.['start_url']) ||
+        coerceString(parameters?.['target_url']) ||
+        null
+      const caption = url ? truncate(url, 64) : null
+      return {
+        caption: caption ?? entry.caption ?? 'Web snapshot',
+      }
+    },
   },
   {
     name: 'think',
@@ -788,7 +1206,7 @@ export function getSharedToolMetadata(toolName: string | null | undefined): Tool
 }
 
 export function buildToolDescriptorMap(
-  resolveDetailComponent: (detailKind: string) => ToolDescriptor['detailComponent'],
+  resolveDetailComponent: (detailKind: DetailKind) => ToolDescriptor['detailComponent'],
 ): Map<string, ToolDescriptor> {
   const map: Map<string, ToolDescriptor> = new Map()
   const register = (config: ToolMetadataConfig) => {

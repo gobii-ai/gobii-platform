@@ -63,6 +63,8 @@ export type ToolClusterEvent = {
   latestTimestamp?: string | null
   earliestTimestamp?: string | null
   entries: ToolCallEntry[]
+  thinkingEntries?: ThinkingEvent[]
+  kanbanEntries?: KanbanEvent[]
 }
 
 export type ProcessingWebTask = {
@@ -148,4 +150,6 @@ export type StreamState = {
   reasoning: string
   content: string
   done: boolean
+  cursor?: string | null
+  source?: 'stream' | 'timeline'
 }
