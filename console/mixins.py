@@ -39,10 +39,17 @@ class ConsoleContextMixin:
             context['can_manage_org_agents'] = resolved.can_manage_org_agents
 
             # Add user's subscription plan for frontend
+            # Normalize plan IDs to frontend-friendly values: free, startup, scale
             try:
                 plan = get_user_plan(self.request.user)
                 plan_id = str(plan.get("id", "")).lower() if plan else ""
-                context['user_plan'] = plan_id if plan_id in (PlanNames.FREE, PlanNames.STARTUP, PlanNames.SCALE) else ""
+                # Map internal plan IDs to frontend values
+                plan_map = {
+                    PlanNames.FREE: 'free',
+                    PlanNames.STARTUP: 'startup',
+                    PlanNames.SCALE: 'scale',
+                }
+                context['user_plan'] = plan_map.get(plan_id, "")
             except Exception:
                 logger.exception("Error fetching user plan for context")
                 context['user_plan'] = ""
