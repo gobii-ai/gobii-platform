@@ -5,5 +5,5 @@ export type AgentRosterEntry = {
   displayColorHex: string | null
   isActive: boolean
   shortDescription: string
-  isOrgOwned: boolean
+  isOrgOwned?: boolean
 }
