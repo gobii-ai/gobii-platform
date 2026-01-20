@@ -74,9 +74,6 @@ function isPageActive(): boolean {
   if (document.visibilityState !== 'visible') {
     return false
   }
-  if (typeof document.hasFocus === 'function') {
-    return document.hasFocus()
-  }
   return true
 }
 

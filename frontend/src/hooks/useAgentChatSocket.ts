@@ -13,6 +13,7 @@ const BACKGROUND_SYNC_INTERVAL_MS = 30000
 const PING_INTERVAL_MS = 20000
 const PONG_TIMEOUT_MS = 8000
 const SOCKET_IDLE_TIMEOUT_MS = 60000
+const CONNECT_TIMEOUT_MS = 10000
 
 export type AgentChatSocketStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'offline' | 'error'
 
@@ -57,9 +58,6 @@ function isPageActive(): boolean {
   if (document.visibilityState !== 'visible') {
     return false
   }
-  if (typeof document.hasFocus === 'function') {
-    return document.hasFocus()
-  }
   return true
 }
 
@@ -95,6 +93,7 @@ export function useAgentChatSocket(
   const pingIntervalRef = useRef<number | null>(null)
   const pongTimeoutRef = useRef<number | null>(null)
   const idleTimeoutRef = useRef<number | null>(null)
+  const connectTimeoutRef = useRef<number | null>(null)
   const scheduleConnectRef = useRef<(delay: number) => void>(() => undefined)
   const closeSocketRef = useRef<() => void>(() => undefined)
   const closingSocketRef = useRef<WebSocket | null>(null)
@@ -197,6 +196,13 @@ export function useAgentChatSocket(
       idleTimeoutRef.current = null
     }
     idleTriggeredRef.current = false
+  }, [])
+
+  const clearConnectTimeout = useCallback(() => {
+    if (connectTimeoutRef.current !== null) {
+      clearTimeout(connectTimeoutRef.current)
+      connectTimeoutRef.current = null
+    }
   }, [])
 
   const scheduleIdleTimeout = useCallback(() => {
@@ -343,6 +349,7 @@ export function useAgentChatSocket(
     const closeSocket = () => {
       if (socketRef.current) {
         stopPingLoop()
+        clearConnectTimeout()
         closingSocketRef.current = socketRef.current
         try {
           socketRef.current.close()
@@ -372,11 +379,22 @@ export function useAgentChatSocket(
         status: retryRef.current > 0 ? 'reconnecting' : 'connecting',
         lastError: null,
       })
+      clearConnectTimeout()
+      connectTimeoutRef.current = window.setTimeout(() => {
+        if (socketRef.current !== socketInstance) {
+          return
+        }
+        if (socketInstance.readyState === WebSocket.CONNECTING) {
+          updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket connection timed out.' })
+          socketInstance.close()
+        }
+      }, CONNECT_TIMEOUT_MS)
 
       socket.onopen = () => {
         if (socketRef.current !== socketInstance) {
           return
         }
+        clearConnectTimeout()
         retryRef.current = 0
         markActivity()
         updateSnapshot({
@@ -434,6 +452,7 @@ export function useAgentChatSocket(
           }
           return
         }
+        clearConnectTimeout()
         socketRef.current = null
         subscribedAgentIdRef.current = null
         stopPingLoop()
@@ -479,6 +498,7 @@ export function useAgentChatSocket(
         if (socketRef.current !== socketInstance) {
           return
         }
+        clearConnectTimeout()
         updateSnapshot({
           status: 'reconnecting',
           lastError: 'WebSocket connection error.',
@@ -520,10 +540,20 @@ export function useAgentChatSocket(
         syncIntervalRef.current = null
       }
       clearIdleTimeout()
+      clearConnectTimeout()
       stopPingLoop()
       closeSocket()
     }
-  }, [clearIdleTimeout, markActivity, startPingLoop, stopPingLoop, syncNow, updateSnapshot, updateSubscription])
+  }, [
+    clearConnectTimeout,
+    clearIdleTimeout,
+    markActivity,
+    startPingLoop,
+    stopPingLoop,
+    syncNow,
+    updateSnapshot,
+    updateSubscription,
+  ])
 
   return snapshot
 }
