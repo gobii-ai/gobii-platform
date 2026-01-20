@@ -325,7 +325,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
 
     message_text = (
         "I reached my daily task limit and am not able to continue today. "
-        f"Adjust the limit here: {link}\n\n- {agent.name}"
+        f"Adjust the limit here: {link}"
     )
     email_context = {
         "agent": agent,
@@ -515,12 +515,11 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
         subject = f"{agent.name} reached today's task limit"
         text_body = (
             "I reached my daily task limit and am not able to continue today. "
-            f"Adjust the limit here: {link}\n\n- {agent.name}"
+            f"Adjust the limit here: {link}"
         )
         email_lines = [
             "I reached my daily task limit and am not able to continue today.",
             f"[Adjust the limit in agent settings]({link}).",
-            f"- {agent.name}",
         ]
         if upgrade_url:
             email_lines.append(
