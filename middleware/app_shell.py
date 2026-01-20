@@ -217,11 +217,13 @@ def _build_shell_html() -> str:
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
     globals_css = static("css/globals.css")
+    csrf_cookie_name = getattr(settings, "CSRF_COOKIE_NAME", "csrftoken") or "csrftoken"
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content">
+  <meta name="csrf-cookie-name" content="{csrf_cookie_name}">
   <title>Gobii App</title>
   <link rel="icon" type="image/png" href="{icon_url}" />
   <link rel="preload" as="image" href="{icon_url}" />
