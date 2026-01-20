@@ -199,9 +199,12 @@ def serialize_daily_credit_payload(context: dict[str, Any]) -> dict[str, Any]:
 def build_daily_credit_status(context: dict[str, Any]) -> dict[str, bool]:
     soft_remaining = context.get("daily_credit_soft_remaining")
     hard_remaining = context.get("daily_credit_remaining")
+    unlimited = bool(context.get("daily_credit_unlimited"))
     soft_exceeded = soft_remaining is not None and soft_remaining <= Decimal("0")
     hard_reached = hard_remaining is not None and hard_remaining <= Decimal("0")
     hard_blocked = bool(context.get("daily_credit_hard_blocked"))
+    if unlimited or (hard_remaining is not None and hard_remaining > Decimal("0")):
+        hard_blocked = False
     return {
         "softTargetExceeded": soft_exceeded,
         "hardLimitReached": hard_reached,

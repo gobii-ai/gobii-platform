@@ -378,11 +378,13 @@ class ConsoleViewsTest(TestCase):
             name='Daily Credits Blocked Agent',
             charter='Blocked daily credits',
             browser_use_agent=browser_agent,
+            daily_credit_limit=1,
         )
 
         step = PersistentAgentStep.objects.create(
             agent=agent,
             description='Blocked by daily limit',
+            credits_cost=Decimal("2"),
         )
         PersistentAgentSystemStep.objects.create(
             step=step,
@@ -397,6 +399,19 @@ class ConsoleViewsTest(TestCase):
         payload = response.json()
         status = payload.get('status', {}).get('dailyCredits', {})
         self.assertTrue(status.get('hardLimitBlocked'))
+        self.assertTrue(status.get('hardLimitReached'))
+
+        response = self.client.post(
+            url,
+            data=json.dumps({'dailyCredits': {'daily_credit_limit': 3}}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        status = payload.get('status', {}).get('dailyCredits', {})
+        self.assertFalse(status.get('hardLimitBlocked'))
+        self.assertFalse(status.get('hardLimitReached'))
 
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
