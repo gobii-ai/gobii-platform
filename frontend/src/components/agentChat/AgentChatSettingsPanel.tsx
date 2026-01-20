@@ -252,8 +252,6 @@ export function AgentChatSettingsPanel({
       title="Agent settings"
       icon={Settings}
       ariaLabel="Agent settings"
-      bodyClassName="agent-mobile-sheet-body--padded"
-      headerClassName="agent-mobile-sheet-header--padded"
     >
       {body}
     </AgentChatMobileSheet>

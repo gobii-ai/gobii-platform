@@ -14,8 +14,7 @@ type AgentChatMobileSheetProps = {
   children: ReactNode
   ariaLabel?: string
   keepMounted?: boolean
-  bodyClassName?: string
-  headerClassName?: string
+  bodyPadding?: boolean
 }
 
 export function AgentChatMobileSheet({
@@ -28,8 +27,7 @@ export function AgentChatMobileSheet({
   children,
   ariaLabel,
   keepMounted = false,
-  bodyClassName,
-  headerClassName,
+  bodyPadding = true,
 }: AgentChatMobileSheetProps) {
   useEffect(() => {
     if (!open) {
@@ -72,7 +70,7 @@ export function AgentChatMobileSheet({
         aria-label={ariaLabel || title}
         aria-hidden={!open}
       >
-        <div className={['agent-mobile-sheet-header', headerClassName].filter(Boolean).join(' ')}>
+        <div className="agent-mobile-sheet-header">
           <div className="agent-mobile-sheet-heading">
             {Icon ? (
               <div className="agent-mobile-sheet-icon" aria-hidden="true">
@@ -89,7 +87,7 @@ export function AgentChatMobileSheet({
             <X size={18} />
           </button>
         </div>
-        <div className={['agent-mobile-sheet-body', bodyClassName].filter(Boolean).join(' ')}>
+        <div className={`agent-mobile-sheet-body${bodyPadding ? ' agent-mobile-sheet-body--padded' : ''}`}>
           {children}
         </div>
       </div>

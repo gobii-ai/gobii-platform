@@ -123,6 +123,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           onClose={() => setDrawerOpen(false)}
           title="Switch agent"
           icon={PanelLeft}
+          bodyPadding={false}
           headerAccessory={mobileContextSwitcher ? (
             <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
           ) : null}
