@@ -22,7 +22,7 @@ from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
 from django.db import transaction
 from django.template.loader import render_to_string
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
@@ -47,6 +47,7 @@ from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
+from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
 
 tracer = trace.get_tracer("gobii.utils")
@@ -501,11 +502,31 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             return False
 
         link = _build_agent_detail_url(agent)
+        owner = agent.organization or agent.user
+        plan = get_owner_plan(owner) if owner is not None else None
+        plan_id = str(plan.get("id", "")).lower() if plan else ""
+        is_free_plan = plan_id == PlanNamesChoices.FREE.value
+        upgrade_url = None
+        if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse("proprietary:pricing")
+            except NoReverseMatch:
+                upgrade_url = None
         subject = f"{agent.name} reached today's task limit"
         text_body = (
             f"{agent.name} reached its daily task limit and won't continue today. "
             f"Adjust the limit here: {link}"
         )
+        email_lines = [
+            f"{agent.name} reached its daily task limit and won't continue today.",
+            f"[Adjust the limit in agent settings]({link}).",
+        ]
+        if upgrade_url:
+            email_lines.append(
+                "Running out of credits? "
+                f"[Upgrade your plan]({upgrade_url}) to allow your agents to do more work for you."
+            )
+        email_body = "\n\n".join(email_lines)
 
         channel_value = endpoint.channel
         analytics_source = {
@@ -524,7 +545,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 from_endpoint=from_endpoint,
                 to_endpoint=endpoint,
                 is_outbound=True,
-                body=text_body,
+                body=email_body,
                 raw_payload={"subject": subject, "kind": "daily_credit_hard_limit_owner_notice"},
             )
             deliver_agent_email(message)

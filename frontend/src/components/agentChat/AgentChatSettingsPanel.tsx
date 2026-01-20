@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { AlertTriangle, ExternalLink, Settings, X } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Settings } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 
 type AgentChatSettingsPanelProps = {
@@ -75,15 +75,6 @@ export function AgentChatSettingsPanel({
     )
     setSaveError(null)
   }, [open, dailyCredits, sliderEmptyValue])
-
-  useEffect(() => {
-    if (!open || !isMobile) return
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.body.style.overflow = originalOverflow
-    }
-  }, [open, isMobile])
 
   const clampSlider = useCallback(
     (value: number) => {
@@ -254,36 +245,17 @@ export function AgentChatSettingsPanel({
     )
   }
 
-  if (typeof document === 'undefined') {
-    return null
-  }
-
-  return createPortal(
-    <div className="agent-settings-sheet">
-      <div
-        className="agent-settings-sheet-backdrop"
-        role="presentation"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div className="agent-settings-sheet-panel" role="dialog" aria-modal="true">
-        <div className="agent-settings-sheet-header">
-          <div className="agent-settings-sheet-heading">
-            <div className="agent-settings-sheet-icon" aria-hidden="true">
-              <Settings size={18} />
-            </div>
-            <div>
-              <h2 className="agent-settings-sheet-title">Agent settings</h2>
-              <p className="agent-settings-sheet-subtitle">Update daily credits in place.</p>
-            </div>
-          </div>
-          <button type="button" className="agent-settings-sheet-close" onClick={onClose} aria-label="Close settings">
-            <X size={18} />
-          </button>
-        </div>
-        {body}
-      </div>
-    </div>,
-    document.body,
+  return (
+    <AgentChatMobileSheet
+      open={open}
+      onClose={onClose}
+      title="Agent settings"
+      icon={Settings}
+      ariaLabel="Agent settings"
+      bodyClassName="agent-mobile-sheet-body--padded"
+      headerClassName="agent-mobile-sheet-header--padded"
+    >
+      {body}
+    </AgentChatMobileSheet>
   )
 }
