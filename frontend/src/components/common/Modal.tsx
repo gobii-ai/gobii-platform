@@ -15,6 +15,8 @@ type ModalProps = {
   iconBgClass?: string
   iconColorClass?: string
   bodyClassName?: string
+  containerClassName?: string
+  panelClassName?: string
 }
 
 export function Modal({
@@ -28,6 +30,8 @@ export function Modal({
   iconBgClass = 'bg-blue-100',
   iconColorClass = 'text-blue-600',
   bodyClassName = '',
+  containerClassName = '',
+  panelClassName = '',
 }: ModalProps) {
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -56,12 +60,12 @@ export function Modal({
         role="presentation"
         aria-hidden="true"
       />
-      <div className="flex min-h-full items-start justify-center p-4 pb-20 text-center sm:items-center sm:p-6 sm:pb-6 sm:text-left">
+      <div className={`flex min-h-full items-start justify-center p-4 pb-20 text-center sm:items-center sm:p-6 sm:pb-6 sm:text-left ${containerClassName}`}>
         <div
           role="dialog"
           aria-modal="true"
           aria-labelledby="modal-title"
-          className={`relative z-50 w-full transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 ${widthClass}`}
+          className={`relative z-50 w-full transform overflow-hidden rounded-2xl bg-white text-left shadow-2xl transition-all sm:my-8 ${widthClass} ${panelClassName}`}
         >
           <div className="px-6 py-5 sm:px-8">
             <div className="sm:flex sm:items-start sm:gap-4">

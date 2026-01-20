@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
-import { createPortal } from 'react-dom'
-import { Mail, X } from 'lucide-react'
+import { Mail, UserPlus } from 'lucide-react'
 
 import { getCsrfToken } from '../../api/http'
+import { Modal } from '../common/Modal'
 
 type CollaboratorInviteDialogProps = {
   open: boolean
@@ -36,25 +36,7 @@ export function CollaboratorInviteDialog({
     setSuccess(null)
   }, [open])
 
-  useEffect(() => {
-    if (!open || typeof document === 'undefined') {
-      return undefined
-    }
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose()
-      }
-    }
-    document.addEventListener('keydown', handleKey)
-    const originalOverflow = document.body.style.overflow
-    document.body.style.overflow = 'hidden'
-    return () => {
-      document.removeEventListener('keydown', handleKey)
-      document.body.style.overflow = originalOverflow
-    }
-  }, [open, onClose])
-
-  if (!open || typeof document === 'undefined') {
+  if (!open) {
     return null
   }
 
@@ -107,76 +89,53 @@ export function CollaboratorInviteDialog({
     }
   }
 
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-6 pt-8 sm:items-center sm:px-6">
-      <div
-        className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm"
-        onClick={onClose}
-        role="presentation"
-        aria-hidden="true"
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Invite collaborators"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
-      >
-        <div className="flex items-start justify-between gap-4 bg-gradient-to-r from-sky-600 to-emerald-500 px-5 py-4 text-white">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-white/80">Collaborate</p>
-            <h2 className="text-lg font-semibold">Invite someone to {displayName}</h2>
+  return (
+    <Modal
+      title={`Invite someone to ${displayName}`}
+      subtitle="Collaborators can chat and access shared files, but cannot change settings or billing."
+      onClose={onClose}
+      icon={UserPlus}
+      iconBgClass="bg-emerald-100"
+      iconColorClass="text-emerald-600"
+      widthClass="sm:max-w-lg"
+      containerClassName="items-end pb-6 sm:items-center sm:pb-6"
+      panelClassName="rounded-t-3xl rounded-b-none sm:rounded-2xl sm:rounded-b-2xl sm:my-8"
+      bodyClassName="space-y-4"
+    >
+      {!canManage && (
+        <p className="text-sm text-amber-700">
+          Only owners and organization admins can invite collaborators.
+        </p>
+      )}
+      <form className="space-y-3" onSubmit={handleSubmit}>
+        <label className="text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="collaborator-email">
+          Collaborator email
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <div className="relative flex-1">
+            <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true" />
+            <input
+              id="collaborator-email"
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.currentTarget.value)}
+              placeholder="name@company.com"
+              autoComplete="email"
+              disabled={!canManage || !inviteUrl || busy}
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 pl-9 text-sm text-slate-700 focus:border-emerald-500 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:bg-white"
+            />
           </div>
           <button
-            type="button"
-            className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-white/20 text-white transition hover:bg-white/30"
-            onClick={onClose}
-            aria-label="Close"
+            type="submit"
+            disabled={!canInvite || !email.trim() || busy}
+            className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            <X className="h-4 w-4" strokeWidth={2} />
+            {busy ? 'Sending...' : 'Send invite'}
           </button>
         </div>
-        <div className="px-5 py-5">
-          <p className="text-sm text-slate-600">
-            Collaborators can chat with {displayName} and access shared files. They cannot change agent settings or
-            billing.
-          </p>
-          {!canManage && (
-            <p className="mt-3 text-sm text-amber-700">
-              Only owners and organization admins can invite collaborators.
-            </p>
-          )}
-          <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
-            <label className="text-xs font-semibold uppercase tracking-wide text-slate-500" htmlFor="collaborator-email">
-              Collaborator email
-            </label>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <div className="relative flex-1">
-                <Mail className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" aria-hidden="true" />
-                <input
-                  id="collaborator-email"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.currentTarget.value)}
-                  placeholder="name@company.com"
-                  autoComplete="email"
-                  disabled={!canManage || !inviteUrl || busy}
-                  className="w-full rounded-lg border border-slate-200 px-3 py-2 pl-9 text-sm text-slate-700 focus:border-sky-500 focus:ring-sky-500 disabled:cursor-not-allowed disabled:bg-white"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={!canInvite || !email.trim() || busy}
-                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {busy ? 'Sending...' : 'Send invite'}
-              </button>
-            </div>
-            {error ? <p className="text-sm text-rose-600">{error}</p> : null}
-            {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
-          </form>
-        </div>
-      </div>
-    </div>,
-    document.body,
+        {error ? <p className="text-sm text-rose-600">{error}</p> : null}
+        {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
+      </form>
+    </Modal>
   )
 }
