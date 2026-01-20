@@ -1014,7 +1014,9 @@ export function AgentChatPage({
       ? 'Unable to load daily credits.'
       : null
   const handleUpdateDailyCredits = useCallback(
-    (payload: DailyCreditsUpdatePayload) => updateQuickSettings({ dailyCredits: payload }),
+    async (payload: DailyCreditsUpdatePayload) => {
+      await updateQuickSettings({ dailyCredits: payload })
+    },
     [updateQuickSettings],
   )
 
