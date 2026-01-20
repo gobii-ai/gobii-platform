@@ -3,6 +3,7 @@ import { Mail, UserPlus } from 'lucide-react'
 
 import { getCsrfToken } from '../../api/http'
 import { Modal } from '../common/Modal'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 
 type CollaboratorInviteDialogProps = {
   open: boolean
@@ -23,9 +24,11 @@ export function CollaboratorInviteDialog({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
 
   const displayName = useMemo(() => (agentName || '').trim() || 'this agent', [agentName])
   const canInvite = Boolean(inviteUrl && canManage)
+  const subtitle = 'Collaborators can chat and access shared files, but cannot change settings or billing.'
 
   useEffect(() => {
     if (!open) {
@@ -35,6 +38,15 @@ export function CollaboratorInviteDialog({
     setError(null)
     setSuccess(null)
   }, [open])
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   if (!open) {
     return null
@@ -89,19 +101,8 @@ export function CollaboratorInviteDialog({
     }
   }
 
-  return (
-    <Modal
-      title={`Invite someone to ${displayName}`}
-      subtitle="Collaborators can chat and access shared files, but cannot change settings or billing."
-      onClose={onClose}
-      icon={UserPlus}
-      iconBgClass="bg-emerald-100"
-      iconColorClass="text-emerald-600"
-      widthClass="sm:max-w-lg"
-      containerClassName="items-end pb-6 sm:items-center sm:pb-6"
-      panelClassName="rounded-t-3xl rounded-b-none sm:rounded-2xl sm:rounded-b-2xl sm:my-8"
-      bodyClassName="space-y-4"
-    >
+  const body = (
+    <>
       {!canManage && (
         <p className="text-sm text-amber-700">
           Only owners and organization admins can invite collaborators.
@@ -136,6 +137,36 @@ export function CollaboratorInviteDialog({
         {error ? <p className="text-sm text-rose-600">{error}</p> : null}
         {success ? <p className="text-sm text-emerald-600">{success}</p> : null}
       </form>
+    </>
+  )
+
+  if (isMobile) {
+    return (
+      <AgentChatMobileSheet
+        open={open}
+        onClose={onClose}
+        title={`Invite someone to ${displayName}`}
+        subtitle={subtitle}
+        icon={UserPlus}
+        ariaLabel={`Invite someone to ${displayName}`}
+      >
+        <div className="space-y-4">{body}</div>
+      </AgentChatMobileSheet>
+    )
+  }
+
+  return (
+    <Modal
+      title={`Invite someone to ${displayName}`}
+      subtitle={subtitle}
+      onClose={onClose}
+      icon={UserPlus}
+      iconBgClass="bg-emerald-100"
+      iconColorClass="text-emerald-600"
+      widthClass="sm:max-w-lg"
+      bodyClassName="space-y-4"
+    >
+      {body}
     </Modal>
   )
 }
