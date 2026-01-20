@@ -2234,6 +2234,39 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                         invite.to_user = self.request.user
         context['pending_agent_transfer_invites'] = pending_transfers
 
+        pending_collaborator_invites: list[AgentCollaboratorInvite] = []
+        try:
+            from allauth.account.models import EmailAddress
+
+            user_emails = {
+                (self.request.user.email or "").strip().lower()
+            } if (self.request.user.email or "").strip() else set()
+            verified_emails = EmailAddress.objects.filter(user=self.request.user).values_list("email", flat=True)
+            for email in verified_emails:
+                normalized = (email or "").strip().lower()
+                if normalized:
+                    user_emails.add(normalized)
+        except Exception:
+            user_emails = {
+                (self.request.user.email or "").strip().lower()
+            } if (self.request.user.email or "").strip() else set()
+
+        if user_emails:
+            email_filter = Q()
+            for email in user_emails:
+                email_filter |= Q(email__iexact=email)
+            pending_collaborator_invites = list(
+                AgentCollaboratorInvite.objects.filter(
+                    email_filter,
+                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__gt=timezone.now(),
+                )
+                .select_related("agent", "agent__user", "invited_by")
+                .order_by("created_at")
+            )
+
+        context["pending_collaborator_invites"] = pending_collaborator_invites
+
         return context
 
 

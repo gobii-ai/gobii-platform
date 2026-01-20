@@ -10,8 +10,9 @@
 
 {% block console_content %}
 {% include "partials/_pending_agent_transfers.html" %}
+{% include "partials/_pending_collaborator_invites.html" %}
 <div id="gobii-frontend-root"
-     class="space-y-6 pb-6"
+     class="{% if pending_agent_transfer_invites or pending_collaborator_invites %}mt-6 {% endif %}space-y-6 pb-6"
      data-app="persistent-agents"
      data-props-json-id="persistent-agents-props">
 </div>
