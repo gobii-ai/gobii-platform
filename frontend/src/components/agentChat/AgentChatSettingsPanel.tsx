@@ -129,10 +129,11 @@ export function AgentChatSettingsPanel({
     const nextLimit = trimmed ? Math.round(Number(trimmed)) : null
     try {
       await onSave({ daily_credit_limit: nextLimit })
+      onClose()
     } catch (err) {
       setSaveError('Unable to update the daily task limit. Try again.')
     }
-  }, [dailyCreditInput, dailyCredits, onSave])
+  }, [dailyCreditInput, dailyCredits, onClose, onSave])
 
   const statusLabel = buildStatusLabel(status)
   const hasChanges = (() => {
