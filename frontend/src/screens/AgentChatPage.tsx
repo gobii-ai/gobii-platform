@@ -840,7 +840,7 @@ export function AgentChatPage({
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
   const handleUpgrade = useCallback((plan: PlanTier) => {
-    const checkoutUrl = plan === 'startup' || plan === 'pro' ? '/subscribe/startup/' : '/subscribe/scale/'
+    const checkoutUrl = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
     window.location.assign(checkoutUrl)
   }, [])
 
