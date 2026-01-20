@@ -45,7 +45,7 @@ function getInsightTabLabel(insight: InsightEvent): string {
       case 'org_transfer':
         return 'Org'
       case 'template':
-        return 'Public'
+        return 'Share'
       case 'upsell_pro':
         return 'Go Pro'
       case 'upsell_scale':

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Globe, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, AtSign, Brain, Building2, Check, CheckCircle2, Copy, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -270,15 +270,41 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   }, [metadata.agentId])
 
   const handleTemplateCopy = useCallback(async (value: string) => {
-    if (!value || typeof navigator === 'undefined') {
-      return
+    if (!value) return
+
+    let success = false
+
+    // Try modern Clipboard API first (requires HTTPS)
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value)
+        success = true
+      } catch {
+        // Fall through to legacy method
+      }
     }
-    try {
-      await navigator.clipboard.writeText(value)
+
+    // Fallback for HTTP or older browsers
+    if (!success) {
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = value
+        textarea.style.position = 'fixed'
+        textarea.style.left = '-9999px'
+        textarea.style.top = '-9999px'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        success = document.execCommand('copy')
+        document.body.removeChild(textarea)
+      } catch {
+        // Copy failed
+      }
+    }
+
+    if (success) {
       setTemplateCopied(true)
-      window.setTimeout(() => setTemplateCopied(false), 1600)
-    } catch {
-      // Ignore clipboard failures.
+      window.setTimeout(() => setTemplateCopied(false), 1800)
     }
   }, [])
 
@@ -674,105 +700,173 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     const hasTemplate = Boolean(templateUrl)
     const showHandleForm = !hasProfile && templatePanelOpen
 
+    // Extract display URL - show full URL or construct from handle
+    const displayUrl = templateUrl || (handleValue ? `gobii.ai/${handleValue}` : '')
+    const shortDisplayUrl = displayUrl.replace(/^https?:\/\//, '')
+
+
+    const getTitle = () => {
+      if (hasTemplate) return 'Your Agent is Live!'
+      if (showHandleForm) return 'Choose Your Handle'
+      return 'Share Your Agent'
+    }
+
+    const getSubtitle = () => {
+      if (templateError) return templateError
+      if (hasTemplate) return 'Anyone with this link can spawn their own copy of your agent.'
+      if (showHandleForm) return 'This will be your public URL that anyone can visit.'
+      return 'Create a public template that others can clone and customize.'
+    }
+
     return (
       <motion.div
-        className="agent-setup-panel agent-setup-panel--violet"
+        className={`share-hero${hasTemplate ? ' share-hero--live' : ''}`}
         variants={containerVariants}
         initial="hidden"
         animate="visible"
       >
-        <motion.div className="agent-setup-panel__icon agent-setup-panel__icon--accent" variants={visualVariants}>
-          <Globe size={18} strokeWidth={2.2} />
+        {/* Left visual */}
+        <motion.div className="share-hero__visual" variants={visualVariants}>
+          <div className={`share-hero__ring share-hero__ring--1${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+          <div className={`share-hero__ring share-hero__ring--2${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+          <div className={`share-hero__icon${hasTemplate ? ' share-hero__icon--live' : ''}`}>
+            {hasTemplate ? <CheckCircle2 size={20} strokeWidth={2} /> : <Globe size={20} strokeWidth={2} />}
+          </div>
         </motion.div>
 
-        <motion.div className="agent-setup-panel__content" variants={itemVariants}>
-          <div className="agent-setup-panel__row">
-            <span className="agent-setup-panel__title">Public profile</span>
-            {hasTemplate && <span className="agent-setup-panel__badge">LIVE</span>}
+        {/* Center content */}
+        <motion.div className="share-hero__content" variants={itemVariants}>
+          <div className="share-hero__header">
+            <h3 className="share-hero__title">{getTitle()}</h3>
+            {hasTemplate && (
+              <motion.span
+                className="share-hero__badge"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+              >
+                LIVE
+              </motion.span>
+            )}
           </div>
-          <span className="agent-setup-panel__subtitle">
-            Share this agent as a reusable template anyone can spawn.
-          </span>
+          <p className={`share-hero__body${templateError ? ' share-hero__body--error' : ''}`}>
+            {getSubtitle()}
+          </p>
 
-          {hasProfile && !showHandleForm && (
-            <div className="agent-setup-panel__row agent-setup-panel__row--meta">
-              <span className="agent-setup-panel__pill">/{handleValue}</span>
-              {templateUrl && (
+          {showHandleForm ? (
+            <div className="share-hero__form share-hero__form--input">
+              <div className="share-hero__input-wrapper">
+                <div className="share-hero__input-group">
+                  <div className="share-hero__input-icon">
+                    <Link2 size={14} strokeWidth={2.5} />
+                  </div>
+                  <span className="share-hero__input-domain">gobii.ai/</span>
+                  <input
+                    className="share-hero__input"
+                    type="text"
+                    value={templateHandle}
+                    onChange={(event) => {
+                      setTemplateHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                      setTemplateHandleDirty(true)
+                    }}
+                    placeholder="your-handle"
+                    autoFocus
+                  />
+                </div>
+                <span className="share-hero__input-hint">Lowercase letters, numbers, and hyphens</span>
+              </div>
+              <div className="share-hero__form-actions">
                 <button
                   type="button"
-                  className="agent-setup-panel__button agent-setup-panel__button--ghost"
-                  onClick={() => handleTemplateCopy(templateUrl)}
-                >
-                  <Copy size={14} />
-                  {templateCopied ? 'Copied' : 'Copy link'}
-                </button>
-              )}
-            </div>
-          )}
-
-          {showHandleForm && (
-            <>
-              <div className="agent-setup-panel__row">
-                <input
-                  className="agent-setup-panel__input"
-                  type="text"
-                  value={templateHandle}
-                  onChange={(event) => {
-                    setTemplateHandle(event.target.value)
-                    setTemplateHandleDirty(true)
-                  }}
-                  placeholder="bright-compass"
-                />
-                <button
-                  type="button"
-                  className="agent-setup-panel__button agent-setup-panel__button--primary"
+                  className={`share-hero__button share-hero__button--primary${templateBusy ? ' share-hero__button--loading' : ''}`}
                   onClick={handleCreateTemplate}
+                  disabled={templateBusy || !templateHandle.trim()}
+                >
+                  {templateBusy ? (
+                    <>
+                      <Loader2 size={14} className="share-hero__spinner" />
+                      <span>Creating</span>
+                    </>
+                  ) : (
+                    <>
+                      <Globe size={14} />
+                      <span>Go Live</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="share-hero__cancel"
+                  onClick={() => setTemplatePanelOpen(false)}
                   disabled={templateBusy}
                 >
-                  {templateBusy ? 'Creating...' : 'Create template'}
+                  Cancel
                 </button>
+              </div>
+            </div>
+          ) : hasTemplate ? (
+            <motion.div
+              className={`share-hero__live-url${templateCopied ? ' share-hero__live-url--copied' : ''}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="share-hero__url-display">
+                <Link2 size={14} className="share-hero__url-icon" />
+                <span className="share-hero__url-text">{shortDisplayUrl}</span>
               </div>
               <button
                 type="button"
-                className="agent-setup-panel__link"
-                onClick={() => setTemplatePanelOpen(false)}
-                disabled={templateBusy}
+                className={`share-hero__copy-btn${templateCopied ? ' share-hero__copy-btn--copied' : ''}`}
+                onClick={() => handleTemplateCopy(templateUrl ?? '')}
               >
-                Cancel
+                {templateCopied ? (
+                  <>
+                    <CheckCircle2 size={14} />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    <span>Copy</span>
+                  </>
+                )}
               </button>
-            </>
-          )}
-
-          {templateUrl && (
-            <span className="agent-setup-panel__meta">{templateUrl}</span>
-          )}
-          {templateError && (
-            <span className="agent-setup-panel__status agent-setup-panel__status--error">
-              {templateError}
-            </span>
-          )}
+            </motion.div>
+          ) : null}
         </motion.div>
 
+        {/* Right action */}
         {!showHandleForm && (
-          <motion.div variants={badgeVariants}>
+          <motion.div className="share-hero__action" variants={badgeVariants}>
             {hasTemplate && templateUrl ? (
               <a
-                className="agent-setup-panel__cta agent-setup-panel__cta--violet"
+                className="share-hero__cta share-hero__cta--live"
                 href={templateUrl}
                 target="_blank"
                 rel="noreferrer"
               >
-                <span>Open template</span>
-                <ArrowRight size={14} strokeWidth={2.2} />
+                <span>Open</span>
+                <ExternalLink size={14} strokeWidth={2.2} />
               </a>
             ) : (
               <button
                 type="button"
-                className="agent-setup-panel__button agent-setup-panel__button--primary"
+                className={`share-hero__button share-hero__button--primary share-hero__button--large${templateBusy ? ' share-hero__button--loading' : ''}`}
                 onClick={handleCreateTemplate}
                 disabled={templateBusy}
               >
-                {templateBusy ? 'Creating...' : 'Create template'}
+                {templateBusy ? (
+                  <>
+                    <Loader2 size={16} className="share-hero__spinner" />
+                    <span>Creating</span>
+                  </>
+                ) : (
+                  <>
+                    <Globe size={16} />
+                    <span>Share Agent</span>
+                  </>
+                )}
               </button>
             )}
           </motion.div>
