@@ -17,6 +17,10 @@ class PublicProfileHandleTests(TestCase):
     def test_validate_public_handle_rejects_reserved(self):
         with self.assertRaises(ValidationError):
             validate_public_handle("console")
+        with self.assertRaises(ValidationError):
+            validate_public_handle("system")
+        with self.assertRaises(ValidationError):
+            validate_public_handle("gobii")
 
 
 class PublicTemplateViewsTests(TestCase):

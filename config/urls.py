@@ -196,8 +196,6 @@ from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
 
 urlpatterns = [
-    # Pages app includes homepage, health check, and documentation
-    path("", include("pages.urls")),
     path("setup/", include("setup.urls")),
 
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
@@ -439,6 +437,9 @@ urlpatterns = [
 
     # Stripe integration
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
+
+    # Pages app includes homepage, health check, and documentation
+    path("", include("pages.urls")),
 ]
 
 # Proprietary routes (views enforce the feature flag but namespace is always available)
