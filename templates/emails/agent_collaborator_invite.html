@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>You're invited to collaborate on {{ agent.name }}</title>
+</head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #1f2933; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #0ea5e9 0%, #10b981 100%); color: white; padding: 24px; border-radius: 10px 10px 0 0; text-align: center;">
+    <h1 style="margin: 0; font-size: 22px;">You're invited to collaborate on {{ agent.name }}</h1>
+    <p style="margin: 8px 0 0; opacity: 0.9; font-size: 15px;">A Gobii agent shared with you</p>
+  </div>
+  <div style="border: 1px solid #d9e2ec; border-top: none; border-radius: 0 0 10px 10px; padding: 24px;">
+    <p style="margin-top: 0; font-size: 15px;">{{ agent_owner.get_full_name|default:agent_owner.username }} invited you to collaborate with <strong>{{ agent.name }}</strong>.</p>
+    <p style="font-size: 14px; color: #52606d;">Accepting gives you access to web chat and shared files for this agent.</p>
+    <div style="text-align: center; margin: 24px 0;">
+      <a href="{{ accept_url }}" style="display: inline-block; padding: 12px 24px; background: #10b981; color: white; text-decoration: none; border-radius: 6px; font-weight: 600; margin-right: 8px;">Accept Invitation</a>
+      <a href="{{ reject_url }}" style="display: inline-block; padding: 12px 24px; background: #f87171; color: white; text-decoration: none; border-radius: 6px; font-weight: 600;">Decline</a>
+    </div>
+    <p style="font-size: 13px; color: #52606d; text-align: center; margin-bottom: 0;">Once accepted, you'll find this agent under "Shared with you" in Gobii.</p>
+  </div>
+</body>
+</html>

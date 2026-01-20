@@ -34,11 +34,14 @@ type AgentSummary = {
   dailyCreditRemaining: number | null
   dailyCreditLow: boolean
   last24hCreditBurn: number | null
+  isShared: boolean
 }
 
 type AgentListPayload = {
   agents: AgentSummary[]
+  sharedAgents: AgentSummary[]
   hasAgents: boolean
+  hasSharedAgents: boolean
   spawnAgentUrl: string
   upgradeUrl: string | null
   canSpawnAgents: boolean
@@ -80,7 +83,16 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
     }))
   }, [initialData.agents])
 
-  const hasAgents = normalizedAgents.length > 0
+  const normalizedSharedAgents = useMemo<NormalizedAgent[]>(() => {
+    return initialData.sharedAgents.map((agent) => ({
+      ...agent,
+      displayTags: agent.displayTags ?? [],
+      searchBlob: buildSearchBlob(agent),
+      gradientStyle: styleStringToObject(agent.cardGradientStyle),
+    }))
+  }, [initialData.sharedAgents])
+
+  const hasAnyAgents = normalizedAgents.length > 0 || normalizedSharedAgents.length > 0
   const filteredAgents = useMemo(() => {
     if (!query.trim()) {
       return normalizedAgents
@@ -88,8 +100,16 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
     const needle = query.trim().toLowerCase()
     return normalizedAgents.filter((agent) => agent.searchBlob.includes(needle))
   }, [normalizedAgents, query])
+  const filteredSharedAgents = useMemo(() => {
+    if (!query.trim()) {
+      return normalizedSharedAgents
+    }
+    const needle = query.trim().toLowerCase()
+    return normalizedSharedAgents.filter((agent) => agent.searchBlob.includes(needle))
+  }, [normalizedSharedAgents, query])
 
-  const showEmptyState = !hasAgents
+  const showEmptyState = !hasAnyAgents
+  const showEmptySearch = hasAnyAgents && filteredAgents.length === 0 && filteredSharedAgents.length === 0
 
   const handleContactClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -119,17 +139,43 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
             upgradeUrl={initialData.upgradeUrl}
           />
 
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
-            {filteredAgents.map((agent) => (
-              <AgentCard
-                key={agent.id}
-                agent={agent}
-                onContactClick={handleContactClick}
-              />
-            ))}
-          </div>
+          {filteredAgents.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-800">Your agents</h2>
+                <span className="text-xs text-gray-500">{filteredAgents.length} active</span>
+              </div>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+                {filteredAgents.map((agent) => (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onContactClick={handleContactClick}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
-          {hasAgents && filteredAgents.length === 0 && (
+          {filteredSharedAgents.length > 0 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-800">Shared with you</h2>
+                <span className="text-xs text-gray-500">{filteredSharedAgents.length} shared</span>
+              </div>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
+                {filteredSharedAgents.map((agent) => (
+                  <AgentCard
+                    key={agent.id}
+                    agent={agent}
+                    onContactClick={handleContactClick}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {showEmptySearch && (
             <div
               id="agent-search-empty"
               className="text-center py-12 bg-white rounded-xl shadow-inner border border-dashed border-gray-200"
@@ -259,6 +305,10 @@ function AgentCard({ agent, onContactClick }: AgentCardProps) {
     }
   }, [])
   const accentColor = normalizeHexColor(agent.displayColorHex || agent.iconBorderHex || agent.iconBackgroundHex)
+  const creditWarningSuffix = agent.isShared
+    ? 'Ask the owner to adjust the daily limit if you need them to keep working today.'
+    : 'Increase the daily limit on the agent detail page if you want them to keep working today.'
+
   return (
     <div className="gobii-card-hoverable group relative flex h-full flex-col">
       <div className="relative flex h-44 flex-col items-center justify-center overflow-hidden" style={agent.gradientStyle}>
@@ -306,13 +356,15 @@ function AgentCard({ agent, onContactClick }: AgentCardProps) {
           </div>
         )}
 
-        <a
-          href={agent.detailUrl}
-          className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
-        >
-          <Settings className="h-4 w-4" aria-hidden="true" />
-          Configure
-        </a>
+        {!agent.isShared && (
+          <a
+            href={agent.detailUrl}
+            className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm backdrop-blur transition hover:bg-white"
+          >
+            <Settings className="h-4 w-4" aria-hidden="true" />
+            Configure
+          </a>
+        )}
 
         {agent.auditUrl ? (
           <a
@@ -330,7 +382,7 @@ function AgentCard({ agent, onContactClick }: AgentCardProps) {
         {agent.dailyCreditLow && (
           <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
             {agent.name} is almost out of daily task credits
-            {creditsRemaining !== null && ` (${creditsRemaining} left)`}. Increase the daily limit on the agent detail page if you want them to keep working today.
+            {creditsRemaining !== null && ` (${creditsRemaining} left)`}. {creditWarningSuffix}
           </div>
         )}
 

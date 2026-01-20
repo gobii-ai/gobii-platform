@@ -28,6 +28,7 @@ type UseFileDragAndDropProps = {
   parentFolderId: string | null
   onUploadFiles: UploadHandler
   onMoveNode: MoveHandler
+  allowMove?: boolean
 }
 
 export function useFileDragAndDrop({
@@ -35,26 +36,34 @@ export function useFileDragAndDrop({
   parentFolderId,
   onUploadFiles,
   onMoveNode,
+  allowMove = true,
 }: UseFileDragAndDropProps): FileDragAndDropHandlers {
   const dragNodeRef = useRef<AgentFsNode | null>(null)
   const [dragOverNodeId, setDragOverNodeId] = useState<string | null>(null)
   const parentDropKey = currentFolderId ? (parentFolderId ?? 'root') : null
 
   const handleParentDragOver = useCallback((event: DragEvent<HTMLTableRowElement>) => {
-    event.preventDefault()
     const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+    if (!allowMove && !canCopy) {
+      return
+    }
+    event.preventDefault()
     event.dataTransfer.dropEffect = canCopy ? 'copy' : 'move'
-  }, [])
+  }, [allowMove])
 
   const handleParentDragEnter = useCallback(
     (event: DragEvent<HTMLTableRowElement>) => {
       if (!parentDropKey) {
         return
       }
+      const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+      if (!allowMove && !canCopy) {
+        return
+      }
       event.preventDefault()
       setDragOverNodeId(parentDropKey)
     },
-    [parentDropKey],
+    [allowMove, parentDropKey],
   )
 
   const handleParentDragLeave = useCallback(
@@ -86,6 +95,9 @@ export function useFileDragAndDrop({
         }
         return
       }
+      if (!allowMove) {
+        return
+      }
       const draggedNode = dragNodeRef.current
       if (!draggedNode) {
         return
@@ -99,14 +111,17 @@ export function useFileDragAndDrop({
         // Errors are surfaced elsewhere.
       }
     },
-    [onMoveNode, onUploadFiles, parentFolderId],
+    [allowMove, onMoveNode, onUploadFiles, parentFolderId],
   )
 
   const handleRowDragStart = useCallback((node: AgentFsNode, event: DragEvent<HTMLElement>) => {
+    if (!allowMove) {
+      return
+    }
     dragNodeRef.current = node
     event.dataTransfer.setData('text/plain', node.id)
     event.dataTransfer.effectAllowed = 'move'
-  }, [])
+  }, [allowMove])
 
   const handleRowDragEnd = useCallback(() => {
     dragNodeRef.current = null
@@ -117,18 +132,25 @@ export function useFileDragAndDrop({
     if (node.nodeType !== 'dir') {
       return
     }
-    event.preventDefault()
     const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+    if (!allowMove && !canCopy) {
+      return
+    }
+    event.preventDefault()
     event.dataTransfer.dropEffect = canCopy ? 'copy' : 'move'
-  }, [])
+  }, [allowMove])
 
   const handleFolderDragEnter = useCallback((node: AgentFsNode, event: DragEvent<HTMLElement>) => {
     if (node.nodeType !== 'dir') {
       return
     }
+    const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+    if (!allowMove && !canCopy) {
+      return
+    }
     event.preventDefault()
     setDragOverNodeId(node.id)
-  }, [])
+  }, [allowMove])
 
   const handleFolderDragLeave = useCallback((node: AgentFsNode, event: DragEvent<HTMLElement>) => {
     if (node.nodeType !== 'dir') {
@@ -158,6 +180,9 @@ export function useFileDragAndDrop({
         }
         return
       }
+      if (!allowMove) {
+        return
+      }
       const draggedNode = dragNodeRef.current
       if (!draggedNode || draggedNode.id === node.id) {
         return
@@ -171,14 +196,17 @@ export function useFileDragAndDrop({
         // Errors are surfaced elsewhere.
       }
     },
-    [onMoveNode, onUploadFiles],
+    [allowMove, onMoveNode, onUploadFiles],
   )
 
   const handleCurrentFolderDragOver = useCallback((event: DragEvent<HTMLDivElement>) => {
-    event.preventDefault()
     const canCopy = Array.from(event.dataTransfer.types).includes('Files')
+    if (!allowMove && !canCopy) {
+      return
+    }
+    event.preventDefault()
     event.dataTransfer.dropEffect = canCopy ? 'copy' : 'move'
-  }, [])
+  }, [allowMove])
 
   const handleCurrentFolderDrop = useCallback(
     async (event: DragEvent<HTMLDivElement>) => {
@@ -191,6 +219,9 @@ export function useFileDragAndDrop({
         } catch {
           // Errors are surfaced elsewhere.
         }
+        return
+      }
+      if (!allowMove) {
         return
       }
       const draggedNode = dragNodeRef.current
@@ -206,7 +237,7 @@ export function useFileDragAndDrop({
         // Errors are surfaced elsewhere.
       }
     },
-    [currentFolderId, onMoveNode, onUploadFiles],
+    [allowMove, currentFolderId, onMoveNode, onUploadFiles],
   )
 
   return {

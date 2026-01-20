@@ -86,7 +86,13 @@ from api.services.web_sessions import (
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
-from console.agent_chat.access import agent_queryset_for, resolve_agent_for_request
+from console.agent_chat.access import (
+    agent_queryset_for,
+    resolve_agent_for_request,
+    shared_agent_queryset_for,
+    user_can_manage_agent,
+    user_is_collaborator,
+)
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
     TimelineDirection,
@@ -1272,6 +1278,8 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 .first()
             )
             if membership is None:
+                if user_is_collaborator(request.user, agent):
+                    return None, None
                 return None, JsonResponse({"error": "Not permitted"}, status=403)
             return (
                 {
@@ -1283,6 +1291,8 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             )
 
         if agent.user_id != request.user.id:
+            if user_is_collaborator(request.user, agent):
+                return None, None
             return None, JsonResponse({"error": "Not permitted"}, status=403)
 
         return (
@@ -1312,11 +1322,16 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             override=override,
         )
 
-        agents = (
+        agents_qs = (
             agent_queryset_for(request.user, context_info.current_context)
             .select_related("agent_color")
             .order_by("name")
         )
+        shared_qs = shared_agent_queryset_for(request.user).select_related("agent_color")
+        agent_ids = list(agents_qs.values_list("id", flat=True))
+        if agent_ids:
+            shared_qs = shared_qs.exclude(id__in=agent_ids)
+        agents = list(agents_qs) + list(shared_qs.order_by("name"))
         payload = [
             {
                 "id": str(agent.id),
@@ -1644,7 +1659,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
         if direction_raw not in {"initial", "older", "newer"}:
             return HttpResponseBadRequest("Invalid direction parameter")
         direction = direction_raw  # type: ignore[assignment]
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
 
         cursor = request.GET.get("cursor") or None
         try:
@@ -1678,7 +1693,7 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         attachments: list[Any] = []
         message_text = ""
         if request.content_type and request.content_type.startswith("multipart/form-data"):
@@ -1770,17 +1785,9 @@ class AgentFsNodeDownloadAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def _has_access(self, user, agent: PersistentAgent) -> bool:
-        if user.is_staff:
+        if user_can_manage_agent(user, agent):
             return True
-        if agent.user_id == user.id:
-            return True
-        if agent.organization_id:
-            return OrganizationMembership.objects.filter(
-                user=user,
-                org_id=agent.organization_id,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            ).exists()
-        return False
+        return user_is_collaborator(user, agent)
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = get_object_or_404(PersistentAgent.objects.select_related("organization"), pk=agent_id)
@@ -1918,7 +1925,7 @@ class AgentFsNodeListAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         filespace = get_or_create_default_filespace(agent)
         nodes = (
             AgentFsNode.objects
@@ -1970,7 +1977,7 @@ class AgentFsNodeUploadAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         files = list(request.FILES.getlist("files")) or list(request.FILES.getlist("file"))
         if not files:
             Analytics.track_event(
@@ -2094,7 +2101,9 @@ class AgentFsNodeBulkDeleteAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        if not user_can_manage_agent(request.user, agent):
+            return HttpResponseForbidden("Not authorized to delete files.")
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -2143,7 +2152,9 @@ class AgentFsNodeCreateDirAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        if not user_can_manage_agent(request.user, agent):
+            return HttpResponseForbidden("Not authorized to create folders.")
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -2213,7 +2224,9 @@ class AgentFsNodeMoveAPIView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        if not user_can_manage_agent(request.user, agent):
+            return HttpResponseForbidden("Not authorized to move files.")
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -4147,7 +4160,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         snapshot = build_processing_snapshot(agent)
         return JsonResponse(
             {
@@ -5209,7 +5222,7 @@ class AgentWebSessionStartAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -5242,7 +5255,7 @@ class AgentWebSessionHeartbeatAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:
@@ -5268,7 +5281,7 @@ class AgentWebSessionEndAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
         try:
             body = json.loads(request.body or "{}")
         except json.JSONDecodeError:

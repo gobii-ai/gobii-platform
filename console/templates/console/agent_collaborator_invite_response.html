@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Collaboration Invite{% endblock %}
+
+{% block content %}
+<div class="min-h-screen bg-gradient-to-br from-sky-50 via-white to-emerald-50 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+  <div class="max-w-md w-full">
+    <div class="bg-white rounded-2xl shadow-lg border border-sky-100 overflow-hidden">
+      <div class="px-6 py-5 bg-gradient-to-r from-sky-600 to-emerald-500">
+        <h2 class="text-2xl font-semibold text-white text-center">
+          {% if invalid_token %}
+            Invalid Invitation
+          {% elif expired %}
+            Invitation Expired
+          {% elif wrong_account %}
+            Sign In Required
+          {% elif already_responded %}
+            Invitation {% if invite.status == "accepted" %}Accepted{% elif invite.status == "rejected" %}Declined{% else %}{{ status }}{% endif %}
+          {% elif rejecting %}
+            Decline Collaboration?
+          {% else %}
+            Join Collaboration?
+          {% endif %}
+        </h2>
+      </div>
+
+      <div class="px-6 py-6 space-y-4">
+        {% if invalid_token %}
+          <div class="text-center space-y-3">
+            <p class="text-slate-700">This invitation link is invalid or has been removed.</p>
+            <a href="{% url 'account_login' %}" class="inline-flex items-center px-3 py-2 rounded-md bg-sky-600 text-white hover:bg-sky-700">Sign in</a>
+            <p class="text-sm text-slate-600">Ask the agent owner to send a new invite.</p>
+          </div>
+
+        {% elif expired %}
+          <div class="text-center space-y-3">
+            <p class="text-slate-700">This invitation has expired.</p>
+            <p class="text-sm text-slate-600">Please contact {{ agent.user.get_full_name|default:agent.user.username }} to request a new invitation.</p>
+            <a href="{% url 'account_login' %}" class="inline-flex items-center px-3 py-2 rounded-md bg-sky-600 text-white hover:bg-sky-700">Sign in</a>
+          </div>
+
+        {% elif wrong_account %}
+          <div class="text-center space-y-3">
+            <p class="text-slate-700">Please sign in with {{ invite.email }} to respond to this invitation.</p>
+            <a href="{% url 'account_login' %}?next={{ request.path }}" class="inline-flex items-center px-3 py-2 rounded-md bg-sky-600 text-white hover:bg-sky-700">Sign in</a>
+          </div>
+
+        {% elif already_responded %}
+          <div class="text-center space-y-3">
+            {% if invite.status == "accepted" %}
+              <p class="text-emerald-700 font-semibold">You have accepted this invitation.</p>
+              <p class="text-sm text-slate-600">You can now chat and exchange files with {{ agent.name }}.</p>
+              <a href="{% url 'agents' %}" class="inline-flex items-center px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Open Agents</a>
+            {% elif invite.status == "rejected" %}
+              <p class="text-slate-700">You have declined this invitation.</p>
+            {% else %}
+              <p class="text-slate-700">This invitation has already been responded to.</p>
+            {% endif %}
+          </div>
+
+        {% else %}
+          <div class="space-y-4">
+            <div class="rounded-lg border border-sky-100 bg-sky-50/70 p-4">
+              <h3 class="text-lg font-semibold text-slate-800">{{ agent.name }}</h3>
+              <p class="text-sm text-slate-600 italic">{{ agent.charter }}</p>
+              <p class="text-xs text-slate-600 mt-2">Invited by {{ agent.user.get_full_name|default:agent.user.username }}</p>
+            </div>
+
+            {% if messages %}
+              {% for message in messages %}
+                <div class="rounded-lg px-4 py-3 {% if message.tags == 'error' %}bg-rose-50 text-rose-800{% elif message.tags == 'success' %}bg-emerald-50 text-emerald-800{% else %}bg-sky-50 text-sky-800{% endif %}">
+                  {{ message }}
+                </div>
+              {% endfor %}
+            {% endif %}
+
+            {% if can_accept %}
+              <form method="post" class="space-y-3">
+                {% csrf_token %}
+                <button type="submit" class="w-full px-4 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-semibold">
+                  Accept Invitation
+                </button>
+                <a href="{% url 'agent_collaborator_invite_reject' token=invite.token %}" class="block w-full px-4 py-3 bg-rose-100 text-rose-700 rounded-lg hover:bg-rose-200 font-semibold text-center">
+                  Decline Invitation
+                </a>
+              </form>
+            {% elif can_reject %}
+              <form method="post" class="space-y-3">
+                {% csrf_token %}
+                <button type="submit" class="w-full px-4 py-3 bg-rose-600 text-white rounded-lg hover:bg-rose-700 font-semibold">
+                  Confirm Decline
+                </button>
+                <a href="{% url 'agent_collaborator_invite_accept' token=invite.token %}" class="block w-full px-4 py-3 bg-sky-100 text-sky-700 rounded-lg hover:bg-sky-200 font-semibold text-center">
+                  Go Back
+                </a>
+              </form>
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

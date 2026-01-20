@@ -161,6 +161,8 @@ from console.views import (
     AgentTransferInviteRespondView,
     AgentAllowlistInviteAcceptView,
     AgentAllowlistInviteRejectView,
+    AgentCollaboratorInviteAcceptView,
+    AgentCollaboratorInviteRejectView,
     OrganizationListView,
     OrganizationCreateView,
     OrganizationDetailView,
@@ -382,6 +384,8 @@ urlpatterns = [
     path("console/agent-transfer-invites/<uuid:invite_id>/<str:action>/", AgentTransferInviteRespondView.as_view(), name="console-agent-transfer-invite"),
     path("console/agent-allowlist-invite/<str:token>/accept/", AgentAllowlistInviteAcceptView.as_view(), name="agent_allowlist_invite_accept"),
     path("console/agent-allowlist-invite/<str:token>/reject/", AgentAllowlistInviteRejectView.as_view(), name="agent_allowlist_invite_reject"),
+    path("console/agent-collaborator-invite/<str:token>/accept/", AgentCollaboratorInviteAcceptView.as_view(), name="agent_collaborator_invite_accept"),
+    path("console/agent-collaborator-invite/<str:token>/reject/", AgentCollaboratorInviteRejectView.as_view(), name="agent_collaborator_invite_reject"),
 
     path("console/organizations/", OrganizationListView.as_view(), name="organizations"),
     path("console/organizations/add/", OrganizationCreateView.as_view(), name="organization_add"),

@@ -1603,12 +1603,12 @@ def _get_addon_details(owner) -> tuple[int, int, int, int]:
 
 def _get_contact_usage(agent: PersistentAgent) -> int | None:
     try:
-        active_contacts = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).count()
-        pending_contacts = AgentAllowlistInvite.objects.filter(
-            agent=agent,
-            status=AgentAllowlistInvite.InviteStatus.PENDING,
-        ).count()
-        return active_contacts + pending_contacts
+        from api.models import get_agent_contact_counts
+
+        counts = get_agent_contact_counts(agent)
+        if counts is None:
+            return None
+        return counts["total"]
     except DatabaseError:
         logger.warning(
             "Failed to compute contact usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True
@@ -2431,7 +2431,7 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
             allowed_lines.append(f"- sms: {owner_phone.phone_number} (owner - can configure)")
 
     # Add explicitly allowed contacts from CommsAllowlistEntry (only if verified)
-    from api.models import CommsAllowlistEntry
+    from api.models import AgentCollaborator, CommsAllowlistEntry
     if owner_email_verified:
         allowed_contacts = (
             CommsAllowlistEntry.objects.filter(
@@ -2447,6 +2447,13 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 config_marker = " [can configure]" if entry.can_configure else ""
                 perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
                 allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})")
+
+        collaborator_qs = AgentCollaborator.objects.filter(agent=agent).select_related("user").order_by("user__email")
+        collaborators = [c for c in collaborator_qs if c.user and c.user.email]
+        if collaborators:
+            allowed_lines.append("Collaborators with access:")
+            for collaborator in collaborators:
+                allowed_lines.append(f"- email: {collaborator.user.email} (collaborator)")
 
     if owner_email_verified:
         allowed_lines.append("Only contact people listed here or in recent conversations.")

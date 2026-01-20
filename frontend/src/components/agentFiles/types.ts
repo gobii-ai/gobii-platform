@@ -24,8 +24,14 @@ export type AgentFilesPageData = {
     id: string
     name: string
   }
+  backLink: {
+    url: string
+    label: string
+  }
+  permissions: {
+    canManage: boolean
+  }
   urls: {
-    agentDetail: string
     files: string
     upload: string
     delete: string
