@@ -325,7 +325,10 @@ export function AgentChatPage({
 
   const [isNearBottom, setIsNearBottom] = useState(true)
 
-  const socketSnapshot = useAgentChatSocket(liveAgentId)
+  const handleCreditEvent = useCallback(() => {
+    void refetchQuickSettings()
+  }, [refetchQuickSettings])
+  const socketSnapshot = useAgentChatSocket(liveAgentId, { onCreditEvent: handleCreditEvent })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
   const rosterQuery = useAgentRoster({

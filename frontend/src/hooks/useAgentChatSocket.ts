@@ -63,12 +63,16 @@ function isPageActive(): boolean {
   return true
 }
 
-export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnapshot {
+export function useAgentChatSocket(
+  agentId: string | null,
+  options: { onCreditEvent?: (payload: Record<string, unknown>) => void } = {},
+): AgentChatSocketSnapshot {
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
   const refreshLatestRef = useRef(useAgentChatStore.getState().refreshLatest)
   const refreshProcessingRef = useRef(useAgentChatStore.getState().refreshProcessing)
+  const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
 
   useEffect(() =>
     useAgentChatStore.subscribe((state) => {
@@ -79,6 +83,10 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
       refreshProcessingRef.current = state.refreshProcessing
     }),
   [])
+
+  useEffect(() => {
+    creditEventRef.current = options.onCreditEvent ?? null
+  }, [options.onCreditEvent])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -411,6 +419,8 @@ export function useAgentChatSocket(agentId: string | null): AgentChatSocketSnaps
             updateProcessingRef.current(payload.payload as Partial<ProcessingSnapshot>)
           } else if (payload?.type === 'stream.event' && payload.payload) {
             receiveStreamRef.current(payload.payload)
+          } else if (payload?.type === 'credit.event' && payload.payload) {
+            creditEventRef.current?.(payload.payload as Record<string, unknown>)
           }
         } catch (error) {
           console.error('Failed to process websocket message', error)
