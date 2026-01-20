@@ -9,7 +9,9 @@ import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
+import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
+import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
@@ -18,6 +20,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
+import type { ContactCapInfo, ContactCapStatus, ContactPackOption } from '../../types/agentQuickSettings'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentId?: string | null
@@ -49,6 +52,14 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   dailyCreditsUpdating?: boolean
   hardLimitUpgradeUrl?: string | null
   hardLimitShowUpsell?: boolean
+  contactCap?: ContactCapInfo | null
+  contactCapStatus?: ContactCapStatus | null
+  contactPackOptions?: ContactPackOption[]
+  contactPackCanManageBilling?: boolean
+  contactPackUpgradeUrl?: string | null
+  contactPackShowUpgrade?: boolean
+  contactPackUpdating?: boolean
+  onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -108,6 +119,14 @@ export function AgentChatLayout({
   dailyCreditsUpdating = false,
   hardLimitUpgradeUrl = null,
   hardLimitShowUpsell = false,
+  contactCap = null,
+  contactCapStatus = null,
+  contactPackOptions = [],
+  contactPackCanManageBilling = false,
+  contactPackUpgradeUrl = null,
+  contactPackShowUpgrade = false,
+  contactPackUpdating = false,
+  onUpdateContactPacks,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -139,6 +158,7 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [addonsOpen, setAddonsOpen] = useState(false)
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
@@ -153,8 +173,18 @@ export function AgentChatLayout({
     setSettingsOpen(false)
   }, [])
 
+  const handleAddonsOpen = useCallback(() => {
+    setAddonsOpen(true)
+    onRefreshDailyCredits?.()
+  }, [onRefreshDailyCredits])
+
+  const handleAddonsClose = useCallback(() => {
+    setAddonsOpen(false)
+  }, [])
+
   useEffect(() => {
     setSettingsOpen(false)
+    setAddonsOpen(false)
   }, [agentId])
 
   const isStreaming = Boolean(streaming && !streaming.done)
@@ -186,6 +216,7 @@ export function AgentChatLayout({
   const showHardLimitCallout = Boolean(
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
+  const showContactCapCallout = Boolean(contactCapStatus?.limitReached)
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -232,6 +263,14 @@ export function AgentChatLayout({
         updating={dailyCreditsUpdating}
         onSave={onUpdateDailyCredits}
       />
+      <AgentChatAddonsPanel
+        open={addonsOpen}
+        onClose={handleAddonsClose}
+        contactCap={contactCap}
+        contactPackOptions={contactPackOptions}
+        contactPackUpdating={contactPackUpdating}
+        onUpdateContactPacks={onUpdateContactPacks}
+      />
       <main className={mainClassName}>
         <div
           id="agent-workspace-root"
@@ -276,6 +315,13 @@ export function AgentChatLayout({
                     onOpenSettings={handleSettingsOpen}
                     upgradeUrl={hardLimitUpgradeUrl}
                     showUpsell={hardLimitShowUpsell}
+                  />
+                ) : null}
+                {showContactCapCallout ? (
+                  <ContactCapCalloutCard
+                    onOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? handleAddonsOpen : undefined}
+                    showUpgrade={contactPackShowUpgrade}
+                    upgradeUrl={contactPackUpgradeUrl}
                   />
                 ) : null}
 

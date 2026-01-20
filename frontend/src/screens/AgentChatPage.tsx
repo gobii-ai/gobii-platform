@@ -1015,6 +1015,10 @@ export function AgentChatPage({
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
+  const contactCap = quickSettingsPayload?.settings?.contactCap ?? null
+  const contactCapStatus = quickSettingsPayload?.status?.contactCap ?? null
+  const contactPackOptions = quickSettingsPayload?.settings?.contactPacks?.options ?? []
+  const contactPackCanManageBilling = Boolean(quickSettingsPayload?.meta?.contactPacks?.canManageBilling)
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
   const dailyCreditsErrorMessage = quickSettingsError instanceof Error
@@ -1025,6 +1029,12 @@ export function AgentChatPage({
   const handleUpdateDailyCredits = useCallback(
     async (payload: DailyCreditsUpdatePayload) => {
       await updateQuickSettings({ dailyCredits: payload })
+    },
+    [updateQuickSettings],
+  )
+  const handleUpdateContactPacks = useCallback(
+    async (quantities: Record<string, number>) => {
+      await updateQuickSettings({ contactPacks: { quantities } })
     },
     [updateQuickSettings],
   )
@@ -1065,6 +1075,14 @@ export function AgentChatPage({
         dailyCreditsUpdating={canManageDailyCredits ? quickSettingsUpdating : false}
         hardLimitShowUpsell={canManageDailyCredits ? hardLimitUpsell : false}
         hardLimitUpgradeUrl={canManageDailyCredits ? hardLimitUpgradeUrl : null}
+        contactCap={contactCap}
+        contactCapStatus={contactCapStatus}
+        contactPackOptions={contactPackOptions}
+        contactPackCanManageBilling={contactPackCanManageBilling}
+        contactPackUpgradeUrl={hardLimitUpgradeUrl}
+        contactPackShowUpgrade={hardLimitUpsell}
+        contactPackUpdating={quickSettingsUpdating}
+        onUpdateContactPacks={contactPackCanManageBilling ? handleUpdateContactPacks : undefined}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

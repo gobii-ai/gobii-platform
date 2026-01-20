@@ -100,7 +100,7 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
-from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.agent_quick_settings import build_agent_quick_settings_payload, update_contact_pack_quantities
 from console.daily_credit import (
     build_agent_daily_credit_context,
     build_daily_credit_status,
@@ -126,6 +126,9 @@ from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from constants.plans import PlanNamesChoices
+from util.integrations import stripe_status
+from util.subscription_helper import get_active_subscription, get_organization_plan, get_user_plan
 
 
 logger = logging.getLogger(__name__)
@@ -133,6 +136,38 @@ logger = logging.getLogger(__name__)
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
 MANAGED_EMAIL_PROVIDER_KEYS = GOOGLE_PROVIDER_KEYS | MICROSOFT_PROVIDER_KEYS
+
+BILLING_MANAGE_ROLES = {
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.BILLING,
+}
+
+
+def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan_payload: dict | None) -> bool:
+    if not stripe_status().enabled:
+        return False
+    plan_id = str((plan_payload or {}).get("id") or "").lower()
+    if not plan_id or plan_id == PlanNamesChoices.FREE.value:
+        return False
+
+    if not agent.organization_id:
+        return True
+
+    owner = agent.organization or agent.user
+    subscription = get_active_subscription(owner, preferred_plan_id=(plan_payload or {}).get("id"))
+    if not subscription:
+        return False
+
+    if agent.organization_id:
+        membership = OrganizationMembership.objects.filter(
+            user=request.user,
+            org=agent.organization,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).first()
+        if not membership or membership.role not in BILLING_MANAGE_ROLES:
+            return False
+    return True
 
 
 class ApiLoginRequiredMixin(LoginRequiredMixin):
@@ -4165,13 +4200,17 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
-        payload = build_agent_quick_settings_payload(agent)
+        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
+        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
+        payload = build_agent_quick_settings_payload(agent, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
         owner = agent.organization or agent.user
         credit_settings = get_daily_credit_settings_for_owner(owner)
+        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
+        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -4188,7 +4227,25 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
                 agent.daily_credit_limit = new_daily_limit
                 agent.save(update_fields=["daily_credit_limit"])
 
-        payload = build_agent_quick_settings_payload(agent, owner)
+        contact_pack_payload = payload.get("contactPacks")
+        if contact_pack_payload is not None:
+            if not isinstance(contact_pack_payload, dict):
+                return HttpResponseBadRequest("contactPacks must be an object")
+            quantities = contact_pack_payload.get("quantities")
+            if not isinstance(quantities, dict):
+                return HttpResponseBadRequest("contactPacks.quantities must be an object")
+            if not can_manage_billing:
+                return JsonResponse({"error": "You do not have permission to manage contact packs."}, status=403)
+            success, error, status = update_contact_pack_quantities(
+                owner=owner,
+                owner_type="organization" if agent.organization_id else "user",
+                plan_id=(plan_payload or {}).get("id"),
+                quantities=quantities,
+            )
+            if not success:
+                return JsonResponse({"error": error}, status=status)
+
+        payload = build_agent_quick_settings_payload(agent, owner, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)
 
 
