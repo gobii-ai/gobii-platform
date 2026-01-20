@@ -15,6 +15,7 @@ import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 
@@ -71,6 +72,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
+  onUpgrade?: (plan: PlanTier) => void
 }
 
 export function AgentChatLayout({
@@ -131,6 +133,7 @@ export function AgentChatLayout({
   onInsightIndexChange,
   onPauseChange,
   isInsightsPaused,
+  onUpgrade,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -212,6 +215,7 @@ export function AgentChatLayout({
           onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
           onClose={onClose}
           sidebarCollapsed={sidebarCollapsed}
+          onUpgrade={onUpgrade}
         />
       )}
       <AgentChatSettingsPanel

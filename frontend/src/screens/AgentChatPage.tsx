@@ -13,6 +13,7 @@ import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import type { PlanTier } from '../stores/subscriptionStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
@@ -838,6 +839,12 @@ export function AgentChatPage({
     }, 180)
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
+  const handleUpgrade = useCallback((plan: PlanTier) => {
+    const checkoutUrl = plan === 'startup' ? '/checkout/startup/' : '/checkout/scale/'
+    window.location.assign(checkoutUrl)
+  }, [])
+
+
   const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
       return
@@ -1084,6 +1091,7 @@ export function AgentChatPage({
         onInsightIndexChange={setCurrentInsightIndex}
         onPauseChange={setInsightsPaused}
         isInsightsPaused={insightsPaused}
+        onUpgrade={handleUpgrade}
       />
     </div>
   )

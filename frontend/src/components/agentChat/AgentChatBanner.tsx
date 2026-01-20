@@ -1,7 +1,9 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { Check, Settings, X } from 'lucide-react'
+import { Check, Settings, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
+import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
+import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
@@ -21,6 +23,7 @@ type AgentChatBannerProps = {
   onSettingsOpen?: () => void
   onClose?: () => void
   sidebarCollapsed?: boolean
+  onUpgrade?: (plan: PlanTier) => void
 }
 
 function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
@@ -48,6 +51,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onSettingsOpen,
   onClose,
   sidebarCollapsed = true,
+  onUpgrade,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
@@ -56,6 +60,18 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const hasAnimatedRef = useRef(false)
   const prevDoneRef = useRef<number | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
+
+  // Subscription state
+  const { currentPlan, isUpgradeModalOpen, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+
+  // Determine if we should show upgrade button and what it should say
+  const showUpgradeButton = currentPlan === 'free' || currentPlan === 'startup'
+  const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
+
+  const handleUpgrade = (plan: PlanTier) => {
+    closeUpgradeModal()
+    onUpgrade?.(plan)
+  }
 
   useEffect(() => {
     const node = bannerRef.current
@@ -176,36 +192,57 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
         {/* Right: Close button */}
         {onClose || showSettingsButton ? (
+          {/* Right: Upgrade button + Close button */}
           <div className="banner-right">
-            {showSettingsButton ? (
+            {showUpgradeButton && (
               <button
                 type="button"
-                className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
-                onClick={onSettingsOpen}
-                aria-label={settingsLabel}
+                className="banner-upgrade"
+                onClick={openUpgradeModal}
               >
-                <Settings size={16} />
-                {showAttentionDot ? (
-                  <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
-                ) : null}
+                <Zap size={14} strokeWidth={2} />
+                <span>{upgradeButtonLabel}</span>
               </button>
-            ) : null}
-            {onClose ? (
-              <button
-                type="button"
-                className="banner-close"
-                onClick={onClose}
-                aria-label="Close"
-              >
-                <X size={16} strokeWidth={1.75} />
-              </button>
-            ) : null}
-          </div>
-        ) : null}
+            )}
+            {onClose && (
+              {showSettingsButton ? (
+                <button
+                  type="button"
+                  className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
+                  onClick={onSettingsOpen}
+                  aria-label={settingsLabel}
+                >
+                  <Settings size={16} />
+                  {showAttentionDot ? (
+                    <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
+                  ) : null}
+                </button>
+              ) : null}
+              {onClose ? (
+                <button
+                  type="button"
+                  className="banner-close"
+                  onClick={onClose}
+                  aria-label="Close"
+                >
+                  <X size={16} strokeWidth={1.75} />
+                </button>
+              ) : null}
+            )}
+          </div>) : null}
 
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
-      </div>
+
+      {/* Upgrade modal */}
+      {isUpgradeModalOpen && (
+        <SubscriptionUpgradeModal
+          currentPlan={currentPlan}
+          onClose={closeUpgradeModal}
+          onUpgrade={handleUpgrade}
+          dismissible
+        />
+      )}
     </div>
   )
 })
