@@ -319,6 +319,8 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       setTemplateError('Choose a public handle to continue.')
       return
     }
+    // Note: Charter requirement validation should be handled by the backend API.
+    // The backend should return an appropriate error if the agent has no charter set.
     setTemplateBusy(true)
     setTemplateError(null)
     try {

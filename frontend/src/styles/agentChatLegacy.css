@@ -906,8 +906,8 @@
 .composer-working-insight {
   display: flex;
   align-items: center;
-  overflow: hidden;
-  height: 150px;
+  overflow: visible;
+  min-height: 100px;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
@@ -917,14 +917,13 @@
 
 @media (max-width: 640px) {
   .composer-working-insight {
-    height: auto;
-    min-height: 140px;
+    min-height: 100px;
   }
 }
 
 @media (max-width: 420px) {
   .composer-working-insight {
-    min-height: 140px;
+    min-height: 90px;
   }
 }
 
