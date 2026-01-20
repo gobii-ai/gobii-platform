@@ -190,8 +190,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           </div>
         ) : null}
 
-        {/* Right: Close button */}
-        {onClose || showSettingsButton ? (
           {/* Right: Upgrade button + Close button */}
           <div className="banner-right">
             {showUpgradeButton && (
@@ -204,32 +202,30 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span>{upgradeButtonLabel}</span>
               </button>
             )}
-            {onClose && (
-              {showSettingsButton ? (
-                <button
-                  type="button"
-                  className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
-                  onClick={onSettingsOpen}
-                  aria-label={settingsLabel}
-                >
-                  <Settings size={16} />
-                  {showAttentionDot ? (
-                    <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
-                  ) : null}
-                </button>
-              ) : null}
-              {onClose ? (
-                <button
-                  type="button"
-                  className="banner-close"
-                  onClick={onClose}
-                  aria-label="Close"
-                >
-                  <X size={16} strokeWidth={1.75} />
-                </button>
-              ) : null}
-            )}
-          </div>) : null}
+            {showSettingsButton ? (
+              <button
+                type="button"
+                className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
+                onClick={onSettingsOpen}
+                aria-label={settingsLabel}
+              >
+                <Settings size={16} />
+                {showAttentionDot ? (
+                  <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
+                ) : null}
+              </button>
+            ) : null}
+            {onClose ? (
+              <button
+                type="button"
+                className="banner-close"
+                onClick={onClose}
+                aria-label="Close"
+              >
+                <X size={16} strokeWidth={1.75} />
+              </button>
+            ) : null}
+        </div>
 
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
@@ -243,6 +239,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           dismissible
         />
       )}
+    </div>
     </div>
   )
 })
