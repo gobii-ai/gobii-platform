@@ -45,6 +45,9 @@ const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
 const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
 const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
+const viewerUserIdRaw = mountNode.dataset.viewerUserId
+const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
+const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
 const canManageCollaboratorsRaw = mountNode.dataset.canManageCollaborators
 const canManageCollaborators =
   canManageCollaboratorsRaw === 'true'
@@ -91,6 +94,7 @@ switch (appName) {
         agentAvatarUrl={agentAvatarUrl}
         collaboratorInviteUrl={collaboratorInviteUrl}
         canManageCollaborators={canManageCollaborators}
+        viewerUserId={viewerUserId}
         onClose={handleEmbeddedClose}
       />
     )

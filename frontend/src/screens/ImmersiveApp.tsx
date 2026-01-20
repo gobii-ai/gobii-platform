@@ -21,6 +21,10 @@ type LocationSnapshot = {
   hash: string
 }
 
+type ConsoleSessionPayload = {
+  user_id?: string
+}
+
 function readLocation(): LocationSnapshot {
   return {
     pathname: window.location.pathname,
@@ -218,6 +222,7 @@ export function ImmersiveApp() {
     return window.parent !== window
   }, [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
+  const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
@@ -252,6 +257,25 @@ export function ImmersiveApp() {
     return () => controller.abort()
   }, [route.kind])
 
+  useEffect(() => {
+    const controller = new AbortController()
+    const loadViewer = async () => {
+      try {
+        const payload = await jsonFetch<ConsoleSessionPayload>('/console/api/session/', { signal: controller.signal })
+        const raw = payload?.user_id ?? null
+        const numeric = raw ? Number(raw) : null
+        setViewerUserId(Number.isFinite(numeric) ? numeric : null)
+      } catch (err) {
+        if (controller.signal.aborted) {
+          return
+        }
+        setViewerUserId(null)
+      }
+    }
+    void loadViewer()
+    return () => controller.abort()
+  }, [])
+
   const handleClose = useCallback(() => {
     window.location.assign(returnTo)
   }, [returnTo])
@@ -282,6 +306,7 @@ export function ImmersiveApp() {
         {route.kind === 'agent-chat' ? (
           <AgentChatPage
             agentId={route.agentId}
+            viewerUserId={viewerUserId}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
@@ -292,6 +317,7 @@ export function ImmersiveApp() {
         ) : null}
         {route.kind === 'agent-select' ? (
           <AgentChatPage
+            viewerUserId={viewerUserId}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
