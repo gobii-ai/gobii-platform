@@ -51,6 +51,18 @@ export const AnalyticsEvent = {
   // ============================================
   /** User clicked upgrade CTA from agent setup panel */
   AGENT_SETUP_UPGRADE_CLICKED: 'Agent - Upgrade Clicked',
+
+  // ============================================
+  // Subscription Upgrade Flow
+  // ============================================
+  /** User clicked upgrade button in banner */
+  UPGRADE_BANNER_CLICKED: 'Upgrade Banner Clicked',
+  /** Upgrade modal was opened */
+  UPGRADE_MODAL_OPENED: 'Upgrade Modal Opened',
+  /** User dismissed the upgrade modal */
+  UPGRADE_MODAL_DISMISSED: 'Upgrade Modal Dismissed',
+  /** User clicked upgrade CTA for a specific plan in modal */
+  UPGRADE_PLAN_SELECTED: 'Upgrade Plan Selected',
 } as const
 
 export type AnalyticsEventType = typeof AnalyticsEvent[keyof typeof AnalyticsEvent]

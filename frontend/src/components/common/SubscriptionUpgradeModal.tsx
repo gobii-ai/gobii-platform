@@ -2,6 +2,8 @@ import { useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Check, Zap, Rocket } from 'lucide-react'
 import type { PlanTier } from '../../stores/subscriptionStore'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
 type PlanConfig = {
   id: PlanTier
@@ -111,6 +113,14 @@ export function SubscriptionUpgradeModal({
     const order: PlanTier[] = ['free', 'startup', 'scale']
     return order.indexOf(planId) > order.indexOf(currentPlan)
   }
+
+  const handlePlanSelect = useCallback((planId: PlanTier) => {
+    track(AnalyticsEvent.UPGRADE_PLAN_SELECTED, {
+      currentPlan,
+      selectedPlan: planId,
+    })
+    onUpgrade(planId)
+  }, [currentPlan, onUpgrade])
 
   return createPortal(
     <div className="fixed inset-0 z-50 overflow-y-auto">
@@ -230,7 +240,7 @@ export function SubscriptionUpgradeModal({
                     ) : canUpgrade ? (
                       <button
                         type="button"
-                        onClick={() => onUpgrade(plan.id)}
+                        onClick={() => handlePlanSelect(plan.id)}
                         className={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
                           plan.highlight
                             ? 'bg-blue-600 text-white shadow-md hover:bg-blue-700'

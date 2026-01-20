@@ -1,10 +1,12 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Settings, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 
@@ -66,12 +68,32 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   // Determine if we should show upgrade button and what it should say
   const showUpgradeButton = currentPlan === 'free' || currentPlan === 'startup'
+  const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 
-  const handleUpgrade = (plan: PlanTier) => {
+  const handleBannerUpgradeClick = useCallback(() => {
+    track(AnalyticsEvent.UPGRADE_BANNER_CLICKED, {
+      currentPlan,
+      targetPlan,
+    })
+    track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
+      currentPlan,
+      source: 'banner',
+    })
+    openUpgradeModal()
+  }, [currentPlan, targetPlan, openUpgradeModal])
+
+  const handleModalDismiss = useCallback(() => {
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan,
+    })
+    closeUpgradeModal()
+  }, [currentPlan, closeUpgradeModal])
+
+  const handleUpgrade = useCallback((plan: PlanTier) => {
     closeUpgradeModal()
     onUpgrade?.(plan)
-  }
+  }, [closeUpgradeModal, onUpgrade])
 
   useEffect(() => {
     const node = bannerRef.current
@@ -196,7 +218,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <button
                 type="button"
                 className="banner-upgrade"
-                onClick={openUpgradeModal}
+                onClick={handleBannerUpgradeClick}
               >
                 <Zap size={14} strokeWidth={2} />
                 <span>{upgradeButtonLabel}</span>
@@ -234,7 +256,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       {isUpgradeModalOpen && (
         <SubscriptionUpgradeModal
           currentPlan={currentPlan}
-          onClose={closeUpgradeModal}
+          onClose={handleModalDismiss}
           onUpgrade={handleUpgrade}
           dismissible
         />
