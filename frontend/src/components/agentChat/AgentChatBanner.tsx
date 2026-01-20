@@ -3,10 +3,12 @@ import { Check, Settings, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
+import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 
@@ -64,6 +66,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const hasAnimatedRef = useRef(false)
   const prevDoneRef = useRef<number | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 768
+  })
 
   // Subscription state
   const { currentPlan, isUpgradeModalOpen, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
@@ -97,6 +103,15 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     closeUpgradeModal()
     onUpgrade?.(plan)
   }, [closeUpgradeModal, onUpgrade])
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   useEffect(() => {
     const node = bannerRef.current
@@ -255,14 +270,30 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
 
-      {/* Upgrade modal */}
-      {isUpgradeModalOpen && (
+      {/* Upgrade modal / sheet */}
+      {isUpgradeModalOpen && !isMobile && (
         <SubscriptionUpgradeModal
           currentPlan={currentPlan}
           onClose={handleModalDismiss}
           onUpgrade={handleUpgrade}
           dismissible
         />
+      )}
+      {isUpgradeModalOpen && isMobile && (
+        <AgentChatMobileSheet
+          open={isUpgradeModalOpen}
+          onClose={handleModalDismiss}
+          title="Upgrade your plan"
+          subtitle="Choose the plan that fits your needs"
+          icon={Zap}
+          ariaLabel="Upgrade your plan"
+          bodyPadding={false}
+        >
+          <SubscriptionUpgradePlans
+            currentPlan={currentPlan}
+            onUpgrade={handleUpgrade}
+          />
+        </AgentChatMobileSheet>
       )}
     </div>
     </div>
