@@ -3,31 +3,29 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>{{ agent.name }} task limit reached</title>
+  <title>{{ agent.name }} reached today's task limit</title>
 </head>
 <body style="font-family: Arial, sans-serif; color: #0f172a; background-color: #ffffff; line-height: 1.6; padding: 24px;">
   <div style="max-width: 520px; margin: 0 auto;">
-    <h2 style="margin: 0 0 12px; font-size: 20px; color: #111827;">{{ agent.name }} hit today's task limit</h2>
     <p style="margin: 0 0 12px;">
-      {{ agent.name }} has already used today's task allowance and can't reply right now.
+      I reached my daily task limit and am not able to continue today.
     </p>
     <p style="margin: 0 0 20px;">
-      You can increase or remove the limit here:
-      <a href="{{ link }}" title="Manage Your Agent's Task Limit">Manage limit</a>
+      <a href="{{ link }}" title="Manage Your Agent's Task Limit">Adjust the limit in agent settings</a>.
     </p>
     {% if is_proprietary_mode %}
       {% if plan_id == "free" %}
       <p>
-        If you need more tasks, you may upgrade to our <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free">Pro or Scale Plans</a>
+        Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free">Upgrade your plan</a> to allow your agents to do more work for you.
       </p>
       {% elif plan_id == "pro" or plan_id == "startup" %}
         <p>
-          If you need more tasks, you may upgrade to our <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro">Scale Plan</a>
+          Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro">Upgrade your plan</a> to allow your agents to do more work for you.
         </p>
       {% endif %}
     {% endif %}
 
-    <p style="margin: 0;">Thanks,<br>The Gobii Team</p>
+    <p style="margin: 0;">- {{ agent.name }}</p>
   </div>
 </body>
 </html>

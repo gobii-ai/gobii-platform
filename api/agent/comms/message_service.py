@@ -324,8 +324,8 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         plan_id = ""
 
     message_text = (
-        f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
-        f"You can increase or remove the limit here: {link}"
+        "I reached my daily task limit and am not able to continue today. "
+        f"Adjust the limit here: {link}\n\n- {agent.name}"
     )
     email_context = {
         "agent": agent,
@@ -349,7 +349,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
             if not agent.is_sender_whitelisted(CommsChannel.EMAIL, recipient):
                 return False
 
-            subject = f"{agent.name} hit today's task limit"
+            subject = f"{agent.name} reached today's task limit"
             text_body = render_to_string("emails/agent_daily_credit_notice.txt", email_context)
             html_body = render_to_string("emails/agent_daily_credit_notice.html", email_context)
             send_mail(
@@ -514,12 +514,13 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 upgrade_url = None
         subject = f"{agent.name} reached today's task limit"
         text_body = (
-            f"{agent.name} reached its daily task limit and won't continue today. "
-            f"Adjust the limit here: {link}"
+            "I reached my daily task limit and am not able to continue today. "
+            f"Adjust the limit here: {link}\n\n- {agent.name}"
         )
         email_lines = [
-            f"{agent.name} reached its daily task limit and won't continue today.",
+            "I reached my daily task limit and am not able to continue today.",
             f"[Adjust the limit in agent settings]({link}).",
+            f"- {agent.name}",
         ]
         if upgrade_url:
             email_lines.append(
