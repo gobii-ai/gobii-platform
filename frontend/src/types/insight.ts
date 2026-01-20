@@ -31,7 +31,7 @@ export type BurnRateMetadata = {
   percentUsed: number
 }
 
-export type AgentSetupPanel = 'always_on' | 'sms' | 'org_transfer' | 'upsell_pro' | 'upsell_scale'
+export type AgentSetupPanel = 'always_on' | 'sms' | 'org_transfer' | 'upsell_pro' | 'upsell_scale' | 'template'
 
 export type AgentSetupPhone = {
   number: string
@@ -78,6 +78,15 @@ export type AgentSetupMetadata = {
     scaleUrl?: string
   }
   utmQuerystring?: string
+  publicProfile?: {
+    handle?: string | null
+    suggestedHandle?: string | null
+  }
+  template?: {
+    slug?: string | null
+    displayName?: string | null
+    url?: string | null
+  }
 }
 
 export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata | AgentSetupMetadata

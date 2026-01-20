@@ -16,7 +16,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
-from api.models import PaidPlanIntent, PersistentAgent
+from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -605,6 +605,119 @@ class PretrainedWorkerHireView(View):
 
         # Also store charter in a signed cookie for OAuth flows where session
         # data might be lost during the redirect chain
+        charter_data = {
+            "agent_charter": template.charter,
+            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
+            "agent_charter_source": "template",
+        }
+        response.set_cookie(
+            OAUTH_CHARTER_COOKIE,
+            signing.dumps(charter_data, compress=True),
+            max_age=3600,  # 1 hour
+            httponly=True,
+            samesite="Lax",
+            secure=request.is_secure(),
+        )
+
+        return response
+
+
+class PublicTemplateDetailView(TemplateView):
+    template_name = "public_templates/detail.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        handle = kwargs.get("handle")
+        template_slug = kwargs.get("template_slug")
+        self.template = (
+            PersistentAgentTemplate.objects.select_related("public_profile")
+            .filter(public_profile__handle=handle, slug=template_slug, is_active=True)
+            .first()
+        )
+        if not self.template:
+            raise Http404("This template is no longer available.")
+        return super().dispatch(request, *args, **kwargs)
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["template"] = self.template
+        context["public_profile_handle"] = self.template.public_profile.handle
+        context["template_url"] = self.request.build_absolute_uri(
+            f"/{self.template.public_profile.handle}/{self.template.slug}/"
+        )
+        context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
+        context["base_schedule"] = self.template.base_schedule
+        context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.template.base_schedule)
+        display_map = PretrainedWorkerTemplateService.get_tool_display_map(self.template.default_tools or [])
+        context["event_triggers"] = self.template.event_triggers or []
+        context["default_tools"] = PretrainedWorkerTemplateService.get_tool_display_list(
+            self.template.default_tools or [],
+            display_map=display_map,
+        )
+        context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
+            self.template.recommended_contact_channel
+        )
+        return context
+
+
+class PublicTemplateHireView(View):
+    def post(self, request, *args, **kwargs):
+        handle = kwargs.get("handle")
+        template_slug = kwargs.get("template_slug")
+        template = (
+            PersistentAgentTemplate.objects.select_related("public_profile")
+            .filter(public_profile__handle=handle, slug=template_slug, is_active=True)
+            .first()
+        )
+        if not template:
+            raise Http404("This template is no longer available.")
+
+        request.session["agent_charter"] = template.charter
+        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        request.session["agent_charter_source"] = "template"
+        request.session.modified = True
+
+        source_page = request.POST.get("source_page") or "public_template"
+        flow = (request.POST.get("flow") or "").strip().lower()
+        analytics_properties = {
+            "source_page": source_page,
+            "template_code": template.code,
+        }
+        if flow:
+            analytics_properties["flow"] = flow
+
+        if request.user.is_authenticated:
+            Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+                source=AnalyticsSource.WEB,
+                properties=analytics_properties,
+            )
+            return redirect("agent_quick_spawn")
+
+        next_url = reverse("agent_quick_spawn")
+        if flow == "pro":
+            request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = next_url
+            request.session.modified = True
+            next_url = reverse("proprietary:pro_checkout")
+
+        session_key = request.session.session_key
+        if not session_key:
+            request.session.save()
+            session_key = request.session.session_key
+        Analytics.track_event_anonymous(
+            anonymous_id=str(session_key),
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            source=AnalyticsSource.WEB,
+            properties=analytics_properties,
+        )
+
+        from django.contrib.auth.views import redirect_to_login
+
+        response = redirect_to_login(
+            next=next_url,
+            login_url=_login_url_with_utms(request),
+        )
+
         charter_data = {
             "agent_charter": template.charter,
             PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}{{ template.display_name }} – Public Template{% endblock %}
+{% block content %}
+<div class="bg-gradient-to-br from-amber-50 via-white to-sky-50">
+  <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
+    <a href="{% url 'pages:home' %}#pretrained-workers" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
+      &larr; Back to templates
+    </a>
+
+    <div class="mt-6 relative overflow-hidden rounded-3xl border border-indigo-100 bg-white/85 shadow-xl">
+      <div class="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-indigo-200/40 blur-3xl" aria-hidden="true"></div>
+      <div class="absolute -bottom-24 -left-24 h-56 w-56 rounded-full bg-amber-200/40 blur-3xl" aria-hidden="true"></div>
+
+      <div class="relative px-10 py-12">
+        <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
+          <span class="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">Public Template</span>
+          <span class="rounded-full bg-amber-100 px-3 py-1 text-amber-700">@{{ public_profile_handle }}</span>
+          {% if template.category %}
+          <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700">{{ template.category }}</span>
+          {% endif %}
+        </div>
+
+        <h1 class="mt-6 text-4xl sm:text-5xl font-semibold text-slate-900">{{ template.display_name }}</h1>
+        <p class="mt-4 text-lg text-slate-600 max-w-3xl">{{ template.tagline }}</p>
+
+        <div class="mt-8 flex flex-wrap gap-3 text-sm text-slate-700">
+          <span class="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1">
+            Cadence: {{ schedule_description|default:base_schedule }}
+          </span>
+          <span class="inline-flex items-center gap-2 rounded-full bg-emerald-100/70 px-3 py-1">
+            Contact: {{ contact_method_label }}
+          </span>
+          {% if default_tools %}
+          <span class="inline-flex items-center gap-2 rounded-full bg-amber-100/70 px-3 py-1">
+            {{ default_tools|length }} tools enabled
+          </span>
+          {% endif %}
+        </div>
+
+        <form method="post" action="{% url 'pages:public_template_hire' public_profile_handle template.slug %}" class="mt-8">
+          {% csrf_token %}
+          <input type="hidden" name="source_page" value="public_template_detail" />
+          <button type="submit" class="inline-flex items-center gap-2 rounded-full bg-indigo-600 text-white font-semibold px-6 py-3 hover:bg-indigo-500 transition">
+            Spawn this template
+            <span aria-hidden="true">&rarr;</span>
+          </button>
+        </form>
+        <p class="mt-3 text-xs text-slate-500">One click to spawn. You can customize settings during setup.</p>
+      </div>
+
+      <div class="relative px-10 pb-12">
+        <div class="grid gap-8 lg:grid-cols-3">
+          <div class="lg:col-span-2 space-y-6">
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">What this template does</h2>
+              <p class="mt-3 text-base leading-relaxed text-slate-600">{{ template.description }}</p>
+            </section>
+
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">Starter charter</h2>
+              <p class="mt-3 text-base leading-relaxed text-slate-600">A clean, reusable playbook you can adapt for your own workflows.</p>
+              <div class="mt-4 rounded-2xl bg-indigo-50/60 px-5 py-6 text-sm leading-relaxed text-slate-700">
+                {{ template.charter|linebreaksbr }}
+              </div>
+            </section>
+
+            {% if event_triggers %}
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">Event triggers</h2>
+              <ul class="mt-3 space-y-3">
+                {% for trigger in event_triggers %}
+                <li class="rounded-2xl bg-white/70 px-4 py-3 border border-indigo-100">
+                  <p class="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <span class="inline-flex size-2 rounded-full bg-indigo-400"></span>{{ trigger.name|default:trigger.type|capfirst }}
+                  </p>
+                  {% if trigger.description %}
+                  <p class="mt-1 text-sm text-slate-600">{{ trigger.description }}</p>
+                  {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endif %}
+          </div>
+
+          <aside class="space-y-6">
+            <section>
+              <h3 class="text-base font-semibold text-slate-900">Template link</h3>
+              <p class="mt-2 text-sm text-slate-600">Share this URL to let anyone spawn the template.</p>
+              <div class="mt-3 rounded-2xl bg-sky-50 px-4 py-3 text-sm text-slate-700 break-all">{{ template_url }}</div>
+            </section>
+
+            {% if default_tools %}
+            <section>
+              <h3 class="text-base font-semibold text-slate-900">Enabled tools</h3>
+              <p class="mt-2 text-sm text-slate-600">These integrations load automatically on spawn.</p>
+              <ul class="mt-3 flex flex-wrap gap-2">
+                {% for tool in default_tools %}
+                <li class="inline-flex items-center rounded-full bg-amber-100/70 px-3 py-1 text-xs font-semibold text-amber-800">{{ tool }}</li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endif %}
+          </aside>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

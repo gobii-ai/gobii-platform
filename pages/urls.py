@@ -20,6 +20,8 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    PublicTemplateDetailView,
+    PublicTemplateHireView,
     EngineeringProSignupView,
     SolutionView,
     MarketingContactRequestView,
@@ -75,5 +77,8 @@ urlpatterns = [
     path('robots.txt', TemplateView.as_view(template_name='robots.txt', content_type='text/plain')),
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
+
+    path('<slug:handle>/<slug:template_slug>/', PublicTemplateDetailView.as_view(), name='public_template_detail'),
+    path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_hire'),
 
 ]

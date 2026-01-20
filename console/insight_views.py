@@ -25,9 +25,12 @@ from api.models import (
     CommsChannel,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentTemplate,
     PersistentAgentStep,
+    PublicProfile,
 )
 from api.agent.core.prompt_context import get_agent_daily_credit_state
+from api.public_profiles import generate_handle_suggestion
 from billing.services import BillingService
 from console.agent_chat.access import resolve_agent_for_request
 from console.context_helpers import build_console_context
@@ -213,6 +216,18 @@ def _build_agent_setup_metadata(
 
     utm_querystring = request.session.get("utm_querystring") or ""
 
+    public_profile = PublicProfile.objects.filter(user=request.user).first()
+    suggested_handle = None if public_profile else generate_handle_suggestion()
+    template = None
+    template_url = None
+    if public_profile:
+        template = PersistentAgentTemplate.objects.filter(
+            public_profile=public_profile,
+            source_agent=agent,
+        ).first()
+        if template and template.slug:
+            template_url = request.build_absolute_uri(f"/{public_profile.handle}/{template.slug}/")
+
     return {
         "agentId": str(agent.id),
         "alwaysOn": {
@@ -236,6 +251,15 @@ def _build_agent_setup_metadata(
         } if upsell_items else None,
         "checkout": checkout,
         "utmQuerystring": utm_querystring,
+        "publicProfile": {
+            "handle": public_profile.handle if public_profile else None,
+            "suggestedHandle": suggested_handle,
+        },
+        "template": {
+            "slug": template.slug if template else None,
+            "displayName": template.display_name if template else None,
+            "url": template_url,
+        },
     }
 
 
@@ -260,6 +284,14 @@ def _get_agent_setup_insights(
             },
             "dismissible": False,
         })
+
+    if agent.organization_id is None:
+        add_panel(
+            "template",
+            97,
+            "Public profile",
+            "Create a public template anyone can spawn in one click.",
+        )
 
     add_panel(
         "always_on",

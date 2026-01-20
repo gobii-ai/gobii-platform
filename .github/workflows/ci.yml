@@ -56,6 +56,8 @@ jobs:
             tag: batch_email_footer
           - batch: pages
             tag: batch_pages
+          - batch: public_templates
+            tag: batch_public_templates
           - batch: marketing_events
             tag: batch_marketing_events
           - batch: contact_requests

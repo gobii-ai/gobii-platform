@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Globe, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -12,6 +12,7 @@ import {
   resendEmailVerification,
   verifyUserPhone,
 } from '../../../api/agentSetup'
+import { cloneAgentTemplate } from '../../../api/agentTemplates'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import '../../../styles/insights.css'
@@ -144,6 +145,16 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
 
+  const [templateUrl, setTemplateUrl] = useState(metadata.template?.url ?? null)
+  const [templateHandle, setTemplateHandle] = useState(
+    metadata.publicProfile?.handle ?? metadata.publicProfile?.suggestedHandle ?? ''
+  )
+  const [templateHandleDirty, setTemplateHandleDirty] = useState(false)
+  const [templatePanelOpen, setTemplatePanelOpen] = useState(false)
+  const [templateBusy, setTemplateBusy] = useState(false)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [templateCopied, setTemplateCopied] = useState(false)
+
   const [orgCurrent, setOrgCurrent] = useState(metadata.organization.currentOrg ?? null)
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
   const [orgError, setOrgError] = useState<string | null>(null)
@@ -159,6 +170,26 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     setOrgCurrent(metadata.organization.currentOrg ?? null)
     setSelectedOrgId(metadata.organization.currentOrg?.id ?? null)
   }, [metadata.organization.currentOrg])
+
+  useEffect(() => {
+    setTemplateUrl(metadata.template?.url ?? null)
+  }, [metadata.template?.url])
+
+  useEffect(() => {
+    const existingHandle = metadata.publicProfile?.handle ?? ''
+    if (existingHandle) {
+      setTemplateHandle(existingHandle)
+      setTemplateHandleDirty(false)
+      return
+    }
+    if (templateHandleDirty) {
+      return
+    }
+    const suggested = metadata.publicProfile?.suggestedHandle ?? ''
+    if (suggested) {
+      setTemplateHandle(suggested)
+    }
+  }, [metadata.publicProfile?.handle, metadata.publicProfile?.suggestedHandle, templateHandleDirty])
 
   useEffect(() => {
     setCooldown(phone?.cooldownRemaining ?? 0)
@@ -237,6 +268,48 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       // Ignore clipboard failures.
     }
   }, [metadata.agentId])
+
+  const handleTemplateCopy = useCallback(async (value: string) => {
+    if (!value || typeof navigator === 'undefined') {
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(value)
+      setTemplateCopied(true)
+      window.setTimeout(() => setTemplateCopied(false), 1600)
+    } catch {
+      // Ignore clipboard failures.
+    }
+  }, [])
+
+  const handleCreateTemplate = useCallback(async () => {
+    const hasProfile = Boolean(metadata.publicProfile?.handle)
+    if (!hasProfile && !templatePanelOpen) {
+      setTemplatePanelOpen(true)
+      setTemplateError(null)
+      return
+    }
+    if (!hasProfile && !templateHandle.trim()) {
+      setTemplateError('Choose a public handle to continue.')
+      return
+    }
+    setTemplateBusy(true)
+    setTemplateError(null)
+    try {
+      const response = await cloneAgentTemplate(
+        metadata.agentId,
+        hasProfile ? null : templateHandle.trim()
+      )
+      setTemplateUrl(response.templateUrl)
+      setTemplateHandle(response.publicProfileHandle)
+      setTemplateHandleDirty(false)
+      setTemplatePanelOpen(false)
+    } catch (error) {
+      setTemplateError(describeError(error))
+    } finally {
+      setTemplateBusy(false)
+    }
+  }, [metadata.agentId, metadata.publicProfile?.handle, templatePanelOpen, templateHandle])
 
   const handleAddPhone = useCallback(async () => {
     const trimmed = phoneInput.trim()
@@ -595,6 +668,119 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     )
   }
 
+  const renderTemplate = () => {
+    const hasProfile = Boolean(metadata.publicProfile?.handle)
+    const handleValue = metadata.publicProfile?.handle ?? templateHandle
+    const hasTemplate = Boolean(templateUrl)
+    const showHandleForm = !hasProfile && templatePanelOpen
+
+    return (
+      <motion.div
+        className="agent-setup-panel agent-setup-panel--violet"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div className="agent-setup-panel__icon agent-setup-panel__icon--accent" variants={visualVariants}>
+          <Globe size={18} strokeWidth={2.2} />
+        </motion.div>
+
+        <motion.div className="agent-setup-panel__content" variants={itemVariants}>
+          <div className="agent-setup-panel__row">
+            <span className="agent-setup-panel__title">Public profile</span>
+            {hasTemplate && <span className="agent-setup-panel__badge">LIVE</span>}
+          </div>
+          <span className="agent-setup-panel__subtitle">
+            Share this agent as a reusable template anyone can spawn.
+          </span>
+
+          {hasProfile && !showHandleForm && (
+            <div className="agent-setup-panel__row agent-setup-panel__row--meta">
+              <span className="agent-setup-panel__pill">/{handleValue}</span>
+              {templateUrl && (
+                <button
+                  type="button"
+                  className="agent-setup-panel__button agent-setup-panel__button--ghost"
+                  onClick={() => handleTemplateCopy(templateUrl)}
+                >
+                  <Copy size={14} />
+                  {templateCopied ? 'Copied' : 'Copy link'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {showHandleForm && (
+            <>
+              <div className="agent-setup-panel__row">
+                <input
+                  className="agent-setup-panel__input"
+                  type="text"
+                  value={templateHandle}
+                  onChange={(event) => {
+                    setTemplateHandle(event.target.value)
+                    setTemplateHandleDirty(true)
+                  }}
+                  placeholder="bright-compass"
+                />
+                <button
+                  type="button"
+                  className="agent-setup-panel__button agent-setup-panel__button--primary"
+                  onClick={handleCreateTemplate}
+                  disabled={templateBusy}
+                >
+                  {templateBusy ? 'Creating...' : 'Create template'}
+                </button>
+              </div>
+              <button
+                type="button"
+                className="agent-setup-panel__link"
+                onClick={() => setTemplatePanelOpen(false)}
+                disabled={templateBusy}
+              >
+                Cancel
+              </button>
+            </>
+          )}
+
+          {templateUrl && (
+            <span className="agent-setup-panel__meta">{templateUrl}</span>
+          )}
+          {templateError && (
+            <span className="agent-setup-panel__status agent-setup-panel__status--error">
+              {templateError}
+            </span>
+          )}
+        </motion.div>
+
+        {!showHandleForm && (
+          <motion.div variants={badgeVariants}>
+            {hasTemplate && templateUrl ? (
+              <a
+                className="agent-setup-panel__cta agent-setup-panel__cta--violet"
+                href={templateUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Open template</span>
+                <ArrowRight size={14} strokeWidth={2.2} />
+              </a>
+            ) : (
+              <button
+                type="button"
+                className="agent-setup-panel__button agent-setup-panel__button--primary"
+                onClick={handleCreateTemplate}
+                disabled={templateBusy}
+              >
+                {templateBusy ? 'Creating...' : 'Create template'}
+              </button>
+            )}
+          </motion.div>
+        )}
+      </motion.div>
+    )
+  }
+
   const renderUpsell = () => {
     if (!upsellItem) {
       return null
@@ -709,6 +895,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       transition={{ duration: 0.35 }}
     >
       {panel === 'always_on' && renderAlwaysOn()}
+      {panel === 'template' && renderTemplate()}
       {panel === 'sms' && renderSms()}
       {panel === 'org_transfer' && renderOrgTransfer()}
       {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
