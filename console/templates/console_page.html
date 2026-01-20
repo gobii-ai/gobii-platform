@@ -7,7 +7,7 @@
   <script type="text/javascript">
     {% if settings.META_PIXEL_ID %}
     if (typeof fbq !== "undefined") {
-      var payload = {'value': {{ sub_price }}, 'currency': 'USD'};
+      var payload = {'value': {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}), 'currency': 'USD'};
       {% if subscribe_plan %}
       payload.plan = '{{ subscribe_plan|escapejs }}';
       {% endif %}
@@ -20,7 +20,7 @@
     {% endif %}
     {% if settings.REDDIT_PIXEL_ID %}
     if (typeof rdt !== "undefined") {
-      var redditPayload = {value: {{ sub_price }}, currency: 'USD'};
+      var redditPayload = {value: {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}), currency: 'USD'};
       {% if subscribe_plan %}
       redditPayload.plan = '{{ subscribe_plan|escapejs }}';
       {% endif %}
@@ -40,7 +40,7 @@
             "content_name": "{{ subscribe_plan|escapejs }}"
           }
         ],
-        "value": "{{ sub_price }}",
+        "value": {{ sub_price }} * parseFloat({{ settings.CAPI_LTV_MULTIPLE|default:5 }}),
         "currency": "USD"
         {% if subscribe_event_id %}
         ,"event_id": "{{ subscribe_event_id|escapejs }}"
