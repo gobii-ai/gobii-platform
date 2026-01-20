@@ -4266,6 +4266,7 @@
   justify-content: center;
   width: 2.25rem;
   height: 2.25rem;
+  flex-shrink: 0;
   border-radius: 999px;
   background: rgba(251, 191, 36, 0.25);
   color: #b45309;

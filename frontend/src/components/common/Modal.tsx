@@ -70,7 +70,7 @@ export function Modal({
           <div className="px-6 py-5 sm:px-8">
             <div className="sm:flex sm:items-start sm:gap-4">
               {Icon && (
-                <div className={`mx-auto flex h-12 w-12 items-center justify-center rounded-full ${iconBgClass} sm:mx-0 sm:h-10 sm:w-10`}>
+                <div className={`mx-auto flex h-12 w-12 shrink-0 items-center justify-center rounded-full ${iconBgClass} sm:mx-0 sm:h-10 sm:w-10`}>
                   <Icon aria-hidden="true" className={`h-5 w-5 ${iconColorClass}`} strokeWidth={2} />
                 </div>
               )}
