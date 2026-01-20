@@ -130,7 +130,7 @@ class InboundOutOfCreditsReplyTests(TestCase):
         self.assertEqual(set(mail.outbox[0].to), {sender})
         expected_link = f"https://example.com/console/agents/{self.agent.id}/"
         self.assertIn(expected_link, mail.outbox[0].body)
-        self.assertEqual(mail.outbox[0].subject, f"{self.agent.name} hit today's task limit")
+        self.assertEqual(mail.outbox[0].subject, f"{self.agent.name} reached today's task limit")
         mock_calc.assert_called_once()
         mock_delay.assert_not_called()
 

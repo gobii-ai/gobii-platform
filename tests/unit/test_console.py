@@ -310,6 +310,109 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertFalse(response.context['daily_credit_low'])
 
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_get(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Agent',
+            charter='Test daily credits API',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=5,
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        self.assertIn('settings', payload)
+        self.assertIn('status', payload)
+        self.assertIn('dailyCredits', payload['settings'])
+        self.assertIn('dailyCredits', payload['status'])
+        self.assertEqual(payload['settings']['dailyCredits']['limit'], 5.0)
+        self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
+        self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
+
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_updates_limit(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Update Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Update Agent',
+            charter='Update daily credits API',
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.post(
+            url,
+            data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, 7)
+
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_hard_limit_blocked(self):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep, PersistentAgentSystemStep
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Blocked Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Blocked Agent',
+            charter='Blocked daily credits',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=1,
+        )
+
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description='Blocked by daily limit',
+            credits_cost=Decimal("2"),
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes='daily_credit_limit_mid_loop',
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        status = payload.get('status', {}).get('dailyCredits', {})
+        self.assertTrue(status.get('hardLimitBlocked'))
+        self.assertTrue(status.get('hardLimitReached'))
+
+        response = self.client.post(
+            url,
+            data=json.dumps({'dailyCredits': {'daily_credit_limit': 3}}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        status = payload.get('status', {}).get('dailyCredits', {})
+        self.assertFalse(status.get('hardLimitBlocked'))
+        self.assertFalse(status.get('hardLimitReached'))
+
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):
@@ -345,6 +448,7 @@ class ConsoleViewsTest(TestCase):
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_blank_soft_target_sets_unlimited(self):
         from api.models import PersistentAgent, BrowserUseAgent
+        from console.daily_credit import get_daily_credit_slider_bounds
 
         browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Unlimited Browser')
         agent = PersistentAgent.objects.create(
@@ -369,7 +473,8 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertTrue(response.context['daily_credit_unlimited'])
         credit_settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
-        self.assertEqual(response.context['daily_credit_slider_value'], credit_settings.slider_min)
+        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        self.assertEqual(response.context['daily_credit_slider_value'], slider_bounds["slider_unlimited_value"])
 
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_soft_target_clamps_to_bounds(self):

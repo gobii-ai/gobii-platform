@@ -1,9 +1,10 @@
 import { memo, useState, useCallback, useEffect, useMemo } from 'react'
-import { PanelLeft, PanelLeftClose, Menu, X, Plus } from 'lucide-react'
+import { PanelLeft, PanelLeftClose, Menu, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentEmptyState, AgentListItem, AgentSearchInput } from './ChatSidebarParts'
 
 const SEARCH_THRESHOLD = 6
@@ -66,30 +67,6 @@ export const ChatSidebar = memo(function ChatSidebar({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  // Close drawer on escape key
-  useEffect(() => {
-    if (!drawerOpen) return
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setDrawerOpen(false)
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [drawerOpen])
-
-  // Prevent body scroll when drawer is open
-  useEffect(() => {
-    if (drawerOpen) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
-    return () => {
-      document.body.style.overflow = ''
-    }
-  }, [drawerOpen])
-
   const handleToggle = useCallback(() => {
     const next = !collapsed
     setCollapsed(next)
@@ -140,36 +117,18 @@ export const ChatSidebar = memo(function ChatSidebar({
           <Menu className="h-5 w-5" />
         </button>
 
-        {/* Drawer backdrop */}
-        <div
-          className={`agent-drawer-backdrop ${drawerOpen ? 'agent-drawer-backdrop--open' : ''}`}
-          onClick={() => setDrawerOpen(false)}
-          aria-hidden="true"
-        />
-
-        {/* Drawer */}
-        <div
-          className={`agent-drawer ${drawerOpen ? 'agent-drawer--open' : ''}`}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Switch agent"
+        <AgentChatMobileSheet
+          open={drawerOpen}
+          keepMounted={true}
+          onClose={() => setDrawerOpen(false)}
+          title="Switch agent"
+          icon={PanelLeft}
+          bodyPadding={false}
+          headerAccessory={mobileContextSwitcher ? (
+            <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
+          ) : null}
+          ariaLabel="Switch agent"
         >
-          <div className="agent-drawer-header">
-            <div className="agent-drawer-heading">
-              <span className="agent-drawer-title">Switch Agent</span>
-              {mobileContextSwitcher ? (
-                <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
-              ) : null}
-            </div>
-            <button
-              type="button"
-              className="agent-drawer-close"
-              onClick={() => setDrawerOpen(false)}
-              aria-label="Close"
-            >
-              <X className="h-5 w-5" />
-            </button>
-          </div>
           {showSearch ? (
             <AgentSearchInput
               variant="drawer"
@@ -216,7 +175,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               )
             })}
           </div>
-        </div>
+        </AgentChatMobileSheet>
       </>
     )
   }

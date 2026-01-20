@@ -37,6 +37,7 @@ from .timeline import (
 )
 
 logger = logging.getLogger(__name__)
+_DAILY_CREDIT_LIMIT_NOTES = {"daily_credit_limit_mid_loop", "daily_credit_limit_exhausted"}
 
 
 def _group_name(agent_id) -> str:
@@ -182,6 +183,30 @@ def broadcast_run_start(sender, instance: PersistentAgentSystemStep, created: bo
         send_audit_event(str(instance.step.agent_id), payload)
     except Exception:
         logger.debug("Failed to broadcast audit run start %s", getattr(instance, "step_id", None), exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgentSystemStep)
+def broadcast_credit_limit_event(sender, instance: PersistentAgentSystemStep, created: bool, **kwargs):
+    if not created:
+        return
+    if instance.code != PersistentAgentSystemStep.Code.PROCESS_EVENTS:
+        return
+    if instance.notes not in _DAILY_CREDIT_LIMIT_NOTES:
+        return
+    step = instance.step
+    if not step or not step.agent_id:
+        return
+
+    def _on_commit():
+        payload = {
+            "kind": "daily_credit_limit",
+            "status": "hard_limit_blocked",
+            "notes": instance.notes,
+            "timestamp": step.created_at.isoformat() if step.created_at else None,
+        }
+        _send(_group_name(step.agent_id), "credit_event", payload)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentSystemMessage)

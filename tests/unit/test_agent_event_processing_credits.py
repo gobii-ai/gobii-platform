@@ -8,9 +8,11 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     TaskCredit,
+    CommsChannel,
 )
 from django.contrib.auth import get_user_model
 
@@ -180,6 +182,33 @@ class PersistentAgentCreditGateTests(TestCase):
                 notes__icontains="credit_insufficient",
             ).exists()
         )
+
+    @patch("api.agent.comms.message_service.Analytics.track_event")
+    @patch("api.agent.comms.message_service.deliver_agent_email")
+    def test_owner_hard_limit_notice_throttled_daily(self, mock_deliver_email, _mock_track_event):
+        from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
+
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent-limit@example.com",
+            is_primary=True,
+        )
+        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="owner-limit@example.com",
+        )
+        self.agent.preferred_contact_endpoint = owner_endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint"])
+
+        sent_first = send_owner_daily_credit_hard_limit_notice(self.agent)
+        self.assertTrue(sent_first)
+        self.agent.refresh_from_db()
+        self.assertIsNotNone(self.agent.daily_credit_hard_limit_notice_at)
+
+        sent_second = send_owner_daily_credit_hard_limit_notice(self.agent)
+        self.assertFalse(sent_second)
+        self.assertEqual(mock_deliver_email.call_count, 1)
 
     def test_process_agent_events_respects_daily_limit(self):
         """Processing should exit early when the agent hit its daily limit."""

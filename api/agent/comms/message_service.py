@@ -22,7 +22,7 @@ from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
 from django.db import transaction
 from django.template.loader import render_to_string
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
@@ -41,12 +41,13 @@ from ...models import (
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
-from .outbound_delivery import deliver_agent_sms
+from .outbound_delivery import deliver_agent_email, deliver_agent_sms
 from observability import traced
 from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
+from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
 
 tracer = trace.get_tracer("gobii.utils")
@@ -269,15 +270,23 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 filename=filename,
             )
 
-@tracer.start_as_current_span("_build_agent_detail_url")
-def _build_agent_detail_url(agent) -> str:
-    """Return an absolute URL to the agent's detail page."""
-
+def _build_site_url(path: str) -> str:
+    """Return an absolute URL for a site-relative path."""
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
     current_site = Site.objects.get_current()
     protocol = "https://"
     base = f"{protocol}{current_site.domain}"
+    normalized = path if path.startswith("/") else f"/{path}"
+    return f"{base}{normalized}"
+
+@tracer.start_as_current_span("_build_agent_detail_url")
+def _build_agent_detail_url(agent) -> str:
+    """Return an absolute URL to the agent's detail page."""
     path = reverse("agent_detail", kwargs={"pk": agent.id})
-    return f"{base}{path}"
+    return _build_site_url(path)
 
 @tracer.start_as_current_span("_find_agent_endpoint")
 def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
@@ -323,8 +332,8 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         plan_id = ""
 
     message_text = (
-        f"Hi there - {agent.name} has already used today's task allowance and can't reply right now. "
-        f"You can increase or remove the limit here: {link}"
+        "I reached my daily task limit and am not able to continue today. "
+        f"Adjust the limit here: {link}"
     )
     email_context = {
         "agent": agent,
@@ -348,7 +357,7 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
             if not agent.is_sender_whitelisted(CommsChannel.EMAIL, recipient):
                 return False
 
-            subject = f"{agent.name} hit today's task limit"
+            subject = f"{agent.name} reached today's task limit"
             text_body = render_to_string("emails/agent_daily_credit_notice.txt", email_context)
             html_body = render_to_string("emails/agent_daily_credit_notice.html", email_context)
             send_mail(
@@ -481,6 +490,159 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         logging.exception("Failed sending daily credit limit notice for agent %s", agent.id)
 
     return False
+
+
+@tracer.start_as_current_span("send_owner_daily_credit_hard_limit_notice")
+def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
+    """Notify the agent owner that the daily hard limit has been reached."""
+    try:
+        now = timezone.now()
+        last_notice = getattr(agent, "daily_credit_hard_limit_notice_at", None)
+        if last_notice and timezone.localdate(last_notice) == timezone.localdate(now):
+            return False
+
+        endpoint = getattr(agent, "preferred_contact_endpoint", None)
+        if not endpoint:
+            logging.info(
+                "Agent %s has no preferred contact endpoint; skipping hard limit notice.",
+                agent.id,
+            )
+            return False
+
+        link = _build_agent_detail_url(agent)
+        owner = agent.organization or agent.user
+        plan = get_owner_plan(owner) if owner is not None else None
+        plan_id = str(plan.get("id", "")).lower() if plan else ""
+        is_free_plan = plan_id == PlanNamesChoices.FREE.value
+        upgrade_url = None
+        if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = _build_site_url(reverse("proprietary:pricing"))
+            except NoReverseMatch:
+                upgrade_url = None
+        subject = f"{agent.name} reached today's task limit"
+        text_body = (
+            "I reached my daily task limit and am not able to continue today. "
+            f"Adjust the limit here: {link}"
+        )
+        email_lines = [
+            "I reached my daily task limit and am not able to continue today.",
+            f"[Adjust the limit in agent settings]({link}).",
+        ]
+        if upgrade_url:
+            email_lines.append(
+                "Running out of credits? "
+                f"[Upgrade your plan]({upgrade_url}) to allow your agents to do more work for you."
+            )
+        email_body = "\n\n".join(email_lines)
+
+        channel_value = endpoint.channel
+        analytics_source = {
+            CommsChannel.EMAIL: AnalyticsSource.EMAIL,
+            CommsChannel.SMS: AnalyticsSource.SMS,
+            CommsChannel.WEB: AnalyticsSource.WEB,
+        }.get(channel_value, AnalyticsSource.AGENT)
+
+        if channel_value == CommsChannel.EMAIL:
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.EMAIL)
+            if not from_endpoint:
+                logging.info("Agent %s has no email endpoint for hard limit notice.", agent.id)
+                return False
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=endpoint,
+                is_outbound=True,
+                body=email_body,
+                raw_payload={"subject": subject, "kind": "daily_credit_hard_limit_owner_notice"},
+            )
+            deliver_agent_email(message)
+        elif channel_value == CommsChannel.SMS:
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SMS)
+            if not from_endpoint:
+                logging.info("Agent %s has no SMS endpoint for hard limit notice.", agent.id)
+                return False
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=endpoint,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"kind": "daily_credit_hard_limit_owner_notice"},
+            )
+            deliver_agent_sms(message)
+        elif channel_value == CommsChannel.WEB:
+            agent_endpoint = _ensure_agent_web_endpoint(agent)
+            conv = _get_or_create_conversation(
+                CommsChannel.WEB.value,
+                endpoint.address,
+                owner_agent=agent,
+            )
+            _ensure_participant(
+                conv,
+                agent_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+            )
+            _ensure_participant(
+                conv,
+                endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+            )
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=agent_endpoint,
+                conversation=conv,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"source": "daily_credit_hard_limit_owner_notice"},
+            )
+            now = timezone.now()
+            PersistentAgentMessage.objects.filter(pk=message.pk).update(
+                latest_status=DeliveryStatus.DELIVERED,
+                latest_sent_at=now,
+                latest_delivered_at=now,
+                latest_error_code="",
+                latest_error_message="",
+            )
+        else:
+            logging.info(
+                "Agent %s preferred endpoint channel %s not supported for hard limit notice.",
+                agent.id,
+                channel_value,
+            )
+            return False
+
+        try:
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "channel": str(channel_value),
+                        "recipient": endpoint.address,
+                        "notice_type": "owner_hard_limit",
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logging.exception(
+                "Failed to emit analytics for owner hard limit notice (agent %s)",
+                agent.id,
+            )
+
+        agent.daily_credit_hard_limit_notice_at = now
+        agent.save(update_fields=["daily_credit_hard_limit_notice_at"])
+        return True
+    except Exception:
+        logging.exception(
+            "Failed sending owner hard limit notice for agent %s",
+            getattr(agent, "id", None),
+        )
+        return False
 
 
 @transaction.atomic

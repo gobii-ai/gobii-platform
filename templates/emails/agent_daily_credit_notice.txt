@@ -1,17 +1,11 @@
-Hi there,
+I reached my daily task limit and am not able to continue today.
 
-{{ agent.name }} has already used today's task allowance and can't reply right now.
-
-You can increase or remove the limit here: {{ link }}
+Adjust the limit in agent settings: {{ link }}
 
 {% if is_proprietary_mode %}
 {% if plan_id == "free" %}
-Need more task credits? Upgrade to our Pro or Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free
+Running out of credits? Upgrade your plan to allow your agents to do more work for you: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free
 {% elif plan_id == "pro" or plan_id == "startup" %}
-Need more task credits? Upgrade to our Scale Plan: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro
+Running out of credits? Upgrade your plan to allow your agents to do more work for you: https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro
 {% endif %}
 {% endif %}
-
-Thanks,
-
-Gobii

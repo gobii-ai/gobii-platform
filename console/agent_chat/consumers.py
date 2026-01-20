@@ -81,6 +81,9 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
     async def stream_event(self, event):
         await self.send_json({"type": "stream.event", "payload": event.get("payload")})
 
+    async def credit_event(self, event):
+        await self.send_json({"type": "credit.event", "payload": event.get("payload")})
+
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id):
         return resolve_agent(user, session, agent_id)
@@ -147,6 +150,9 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def stream_event(self, event):
         await self.send_json({"type": "stream.event", "payload": event.get("payload")})
+
+    async def credit_event(self, event):
+        await self.send_json({"type": "credit.event", "payload": event.get("payload")})
 
     async def _subscribe(self, agent_id: str, context_override=None) -> None:
         if self.agent_id == agent_id:

@@ -55,6 +55,11 @@ from api.agent.short_description import build_listing_description, build_mini_de
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from console.daily_credit import (
+    build_agent_daily_credit_context,
+    get_daily_credit_slider_bounds,
+    serialize_daily_credit_payload,
+)
 
 from api.models import (
     ApiKey,
@@ -2702,79 +2707,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['personal_mcp_servers'] = personal_servers
         context['show_personal_mcp_form'] = agent.organization_id is None and bool(personal_servers)
 
-        credit_settings = get_daily_credit_settings_for_owner(owner)
-        context["daily_credit_slider_min"] = credit_settings.slider_min
-        context["daily_credit_slider_max"] = credit_settings.slider_max
-        context["daily_credit_slider_step"] = credit_settings.slider_step
-
-        # Daily task credit usage overview for progress UI
-        try:
-            today = timezone.localdate()
-            soft_target = agent.get_daily_credit_soft_target()
-            hard_limit = agent.get_daily_credit_hard_limit()
-            usage = agent.get_daily_credit_usage(usage_date=today)
-            hard_remaining = agent.get_daily_credit_remaining(usage_date=today)
-            soft_remaining = agent.get_daily_credit_soft_target_remaining(usage_date=today)
-            unlimited = soft_target is None
-
-            def _percent(value: Decimal, total: Decimal | None) -> float | None:
-                if total is None or total <= Decimal("0"):
-                    return None
-                try:
-                    pct = float((value / total) * 100)
-                except Exception:
-                    return None
-                return min(pct, 100.0)
-
-            percent_used = _percent(usage, hard_limit)
-            soft_percent_used = _percent(usage, soft_target)
-            next_reset = (
-                timezone.localtime(timezone.now()).replace(
-                    hour=0,
-                    minute=0,
-                    second=0,
-                    microsecond=0,
-                )
-                + timedelta(days=1)
-            )
-
-            context.update(
-                {
-                    "daily_credit_limit": soft_target,
-                    "daily_credit_soft_target": soft_target,
-                    "daily_credit_hard_limit": hard_limit,
-                    "daily_credit_usage": usage,
-                    "daily_credit_remaining": hard_remaining,
-                    "daily_credit_soft_remaining": soft_remaining,
-                    "daily_credit_unlimited": unlimited,
-                    "daily_credit_percent_used": percent_used,
-                    "daily_credit_soft_percent_used": soft_percent_used,
-                    "daily_credit_next_reset": next_reset,
-                    "daily_credit_low": (
-                        not unlimited and hard_remaining is not None and hard_remaining < Decimal("1")
-                    ),
-                    "daily_credit_slider_value": soft_target if soft_target is not None else credit_settings.slider_min,
-                }
-            )
-        except Exception as e:
-            logger.error("Failed to get daily credit usage for agent detail view (agent %s): %s", agent.id, e, exc_info=True)
-            # If anything goes wrong, fall back to safe defaults so UI still renders.
-            context.update(
-                {
-                    "daily_credit_limit": None,
-                    "daily_credit_soft_target": None,
-                    "daily_credit_hard_limit": None,
-                    "daily_credit_usage": Decimal("0"),
-                    "daily_credit_remaining": None,
-                    "daily_credit_soft_remaining": None,
-                    "daily_credit_unlimited": True,
-                    "daily_credit_percent_used": None,
-                    "daily_credit_soft_percent_used": None,
-                    "daily_credit_next_reset": None,
-                    "daily_credit_low": False,
-                    "daily_credit_slider_value": credit_settings.slider_min,
-                }
-            )
+        context.update(build_agent_daily_credit_context(agent, owner))
 
         pending_transfer = AgentTransferInvite.objects.filter(
             agent=agent,
@@ -3034,14 +2967,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 
-        def _decimal_to_float(value: Any) -> float | None:
-            if value is None:
-                return None
-            try:
-                return float(value)
-            except Exception:
-                return None
-
         def _datetime_iso(value):
             if not value:
                 return None
@@ -3054,26 +2979,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             localized = timezone.localtime(value)
             return date_format(localized, fmt)
 
-        daily_credits = {
-            'limit': _decimal_to_float(context.get('daily_credit_limit')),
-            'hardLimit': _decimal_to_float(context.get('daily_credit_hard_limit')),
-            'usage': _decimal_to_float(context.get('daily_credit_usage')) or 0.0,
-            'remaining': _decimal_to_float(context.get('daily_credit_remaining')),
-            'softRemaining': _decimal_to_float(context.get('daily_credit_soft_remaining')),
-            'unlimited': bool(context.get('daily_credit_unlimited')),
-            'percentUsed': _decimal_to_float(context.get('daily_credit_percent_used')),
-            'softPercentUsed': _decimal_to_float(context.get('daily_credit_soft_percent_used')),
-            'nextResetIso': _datetime_iso(context.get('daily_credit_next_reset')),
-            'nextResetLabel': _datetime_display(context.get('daily_credit_next_reset'), "Y-m-d H:i T"),
-            'low': bool(context.get('daily_credit_low')),
-            'sliderMin': _decimal_to_float(context.get('daily_credit_slider_min')) or 0.0,
-            'sliderMax': _decimal_to_float(context.get('daily_credit_slider_max')) or 0.0,
-            'sliderStep': _decimal_to_float(context.get('daily_credit_slider_step')) or 1.0,
-            'sliderValue': _decimal_to_float(context.get('daily_credit_slider_value'))
-            or _decimal_to_float(context.get('daily_credit_slider_min'))
-            or 0.0,
-            'sliderEmptyValue': _decimal_to_float(context.get('daily_credit_slider_min')) or 0.0,
-        }
+        daily_credits = serialize_daily_credit_payload(context)
 
         dedicated_options = [
             {
@@ -3765,7 +3671,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
         slider_value = (request.POST.get('daily_credit_limit_slider') or '').strip()
-        limit_source = raw_limit or slider_value
+        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        limit_source = raw_limit
+
+        if not limit_source and slider_value:
+            try:
+                parsed_slider = Decimal(slider_value)
+            except InvalidOperation:
+                return _general_error("Enter a whole number for the daily credit soft target.")
+            if parsed_slider >= slider_bounds["slider_unlimited_value"]:
+                limit_source = ""
+            else:
+                limit_source = slider_value
 
         if not limit_source:
             new_daily_limit = None
@@ -3782,8 +3699,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             if parsed_limit <= Decimal("0"):
                 new_daily_limit = None
             else:
-                slider_min = credit_settings.slider_min
-                slider_max = credit_settings.slider_max
+                slider_min = slider_bounds["slider_min"]
+                slider_max = slider_bounds["slider_limit_max"]
                 if parsed_limit < slider_min:
                     parsed_limit = slider_min
                 if parsed_limit > slider_max:

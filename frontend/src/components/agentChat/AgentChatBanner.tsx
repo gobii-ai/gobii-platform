@@ -1,9 +1,10 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { Check, X } from 'lucide-react'
+import { Check, Settings, X } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { normalizeHexColor } from '../../util/color'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
+import type { DailyCreditsStatus } from '../../types/dailyCredits'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
@@ -16,6 +17,8 @@ type AgentChatBannerProps = {
   connectionDetail?: string | null
   kanbanSnapshot?: KanbanBoardSnapshot | null
   processingActive?: boolean
+  dailyCreditsStatus?: DailyCreditsStatus | null
+  onSettingsOpen?: () => void
   onClose?: () => void
   sidebarCollapsed?: boolean
 }
@@ -41,6 +44,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   connectionLabel = 'Connecting',
   kanbanSnapshot,
   processingActive = false,
+  dailyCreditsStatus,
+  onSettingsOpen,
   onClose,
   sidebarCollapsed = true,
 }: AgentChatBannerProps) {
@@ -101,6 +106,13 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const currentTask = hasKanban && kanbanSnapshot.doingTitles.length > 0 ? kanbanSnapshot.doingTitles[0] : null
   const isAllComplete = hasKanban && doneTasks === totalTasks
   const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
+  const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
+  const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
+  const showSettingsButton = Boolean(onSettingsOpen)
+  const showAttentionDot = softTargetExceeded || hardLimitReached
+  const settingsLabel = hardLimitReached
+    ? 'Daily task limit reached. Open agent settings'
+    : 'Open agent settings'
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
 
@@ -163,16 +175,31 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         ) : null}
 
         {/* Right: Close button */}
-        {onClose ? (
+        {onClose || showSettingsButton ? (
           <div className="banner-right">
-            <button
-              type="button"
-              className="banner-close"
-              onClick={onClose}
-              aria-label="Close"
-            >
-              <X size={16} strokeWidth={1.75} />
-            </button>
+            {showSettingsButton ? (
+              <button
+                type="button"
+                className={`banner-settings ${hardLimitReached ? 'banner-settings--alert' : ''}`}
+                onClick={onSettingsOpen}
+                aria-label={settingsLabel}
+              >
+                <Settings size={16} />
+                {showAttentionDot ? (
+                  <span className={`banner-settings-dot ${hardLimitReached ? 'banner-settings-dot--alert' : ''}`} />
+                ) : null}
+              </button>
+            ) : null}
+            {onClose ? (
+              <button
+                type="button"
+                className="banner-close"
+                onClick={onClose}
+                aria-label="Close"
+              >
+                <X size={16} strokeWidth={1.75} />
+              </button>
+            ) : null}
           </div>
         ) : null}
 

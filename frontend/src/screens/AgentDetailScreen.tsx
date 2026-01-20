@@ -110,6 +110,7 @@ type DailyCreditsInfo = {
   low: boolean
   sliderMin: number
   sliderMax: number
+  sliderLimitMax: number
   sliderStep: number
   sliderValue: number
   sliderEmptyValue: number
@@ -330,7 +331,8 @@ function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 }
 
 export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
-  const sliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? initialData.dailyCredits.sliderMin
+  const sliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? initialData.dailyCredits.sliderMax
+  const sliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? initialData.dailyCredits.sliderMax
 
   const initialFormState = useMemo<FormState>(
     () => ({
@@ -882,9 +884,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         updateSliderValue(sliderEmptyValue)
         return
       }
-      updateSliderValue(Math.round(numeric))
+      const clamped = Math.min(Math.max(Math.round(numeric), initialData.dailyCredits.sliderMin), sliderLimitMax)
+      updateSliderValue(clamped)
     },
-    [sliderEmptyValue, updateSliderValue],
+    [initialData.dailyCredits.sliderMin, sliderEmptyValue, sliderLimitMax, updateSliderValue],
   )
 
   const formatNumber = useCallback((value: number | null, fractionDigits = 0) => {
@@ -1399,7 +1402,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                           ? 'Unlimited'
                           : `${Math.round(formState.sliderValue).toLocaleString()} credits/day`}
                       </span>
-                      <span>{Math.round(initialData.dailyCredits.sliderMax).toLocaleString()} credits/day max</span>
+                      <span>Unlimited</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <input
@@ -1408,7 +1411,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         type="number"
                         step="1"
                         min={initialData.dailyCredits.sliderMin}
-                        max={initialData.dailyCredits.sliderMax}
+                        max={sliderLimitMax}
                         value={formState.dailyCreditInput}
                         onChange={(event) => handleDailyCreditInputChange(event.target.value)}
                         className="py-2 px-3 block w-full border-gray-200 shadow-sm rounded-lg text-sm focus:border-blue-500 focus:ring-blue-500"
