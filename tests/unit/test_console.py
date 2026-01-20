@@ -448,6 +448,7 @@ class ConsoleViewsTest(TestCase):
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_blank_soft_target_sets_unlimited(self):
         from api.models import PersistentAgent, BrowserUseAgent
+        from console.daily_credit import get_daily_credit_slider_bounds
 
         browser_agent = BrowserUseAgent.objects.create(user=self.user, name='Unlimited Browser')
         agent = PersistentAgent.objects.create(
@@ -472,7 +473,8 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertTrue(response.context['daily_credit_unlimited'])
         credit_settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
-        self.assertEqual(response.context['daily_credit_slider_value'], credit_settings.slider_min)
+        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        self.assertEqual(response.context['daily_credit_slider_value'], slider_bounds["slider_unlimited_value"])
 
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_soft_target_clamps_to_bounds(self):

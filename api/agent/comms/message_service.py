@@ -270,15 +270,23 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
                 filename=filename,
             )
 
-@tracer.start_as_current_span("_build_agent_detail_url")
-def _build_agent_detail_url(agent) -> str:
-    """Return an absolute URL to the agent's detail page."""
-
+def _build_site_url(path: str) -> str:
+    """Return an absolute URL for a site-relative path."""
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
     current_site = Site.objects.get_current()
     protocol = "https://"
     base = f"{protocol}{current_site.domain}"
+    normalized = path if path.startswith("/") else f"/{path}"
+    return f"{base}{normalized}"
+
+@tracer.start_as_current_span("_build_agent_detail_url")
+def _build_agent_detail_url(agent) -> str:
+    """Return an absolute URL to the agent's detail page."""
     path = reverse("agent_detail", kwargs={"pk": agent.id})
-    return f"{base}{path}"
+    return _build_site_url(path)
 
 @tracer.start_as_current_span("_find_agent_endpoint")
 def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
@@ -509,7 +517,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
         upgrade_url = None
         if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
             try:
-                upgrade_url = reverse("proprietary:pricing")
+                upgrade_url = _build_site_url(reverse("proprietary:pricing"))
             except NoReverseMatch:
                 upgrade_url = None
         subject = f"{agent.name} reached today's task limit"
