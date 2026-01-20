@@ -11,6 +11,14 @@ export type AgentQuickSettingsStatus = {
 export type AgentQuickSettingsResponse = {
   settings: AgentQuickSettings
   status: AgentQuickSettingsStatus
+  meta?: {
+    plan?: {
+      id?: string | null
+      name?: string | null
+      isFree?: boolean
+    } | null
+    upgradeUrl?: string | null
+  }
 }
 
 export type AgentQuickSettingsUpdatePayload = {

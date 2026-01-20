@@ -365,6 +365,39 @@ class ConsoleViewsTest(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.daily_credit_limit, 7)
 
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_hard_limit_blocked(self):
+        from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep, PersistentAgentSystemStep
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Blocked Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Blocked Agent',
+            charter='Blocked daily credits',
+            browser_use_agent=browser_agent,
+        )
+
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            description='Blocked by daily limit',
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            notes='daily_credit_limit_mid_loop',
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        status = payload.get('status', {}).get('dailyCredits', {})
+        self.assertTrue(status.get('hardLimitBlocked'))
+
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):

@@ -21,6 +21,7 @@ export type DailyCreditsInfo = {
 export type DailyCreditsStatus = {
   softTargetExceeded: boolean
   hardLimitReached: boolean
+  hardLimitBlocked?: boolean
 }
 
 export type DailyCreditsUpdatePayload = {

@@ -9,6 +9,7 @@ import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
+import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
@@ -44,6 +45,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onRefreshDailyCredits?: () => void
   onUpdateDailyCredits?: (payload: DailyCreditsUpdatePayload) => Promise<void>
   dailyCreditsUpdating?: boolean
+  hardLimitUpgradeUrl?: string | null
+  hardLimitShowUpsell?: boolean
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -99,6 +102,8 @@ export function AgentChatLayout({
   onRefreshDailyCredits,
   onUpdateDailyCredits,
   dailyCreditsUpdating = false,
+  hardLimitUpgradeUrl = null,
+  hardLimitShowUpsell = false,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -173,6 +178,9 @@ export function AgentChatLayout({
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
+  const showHardLimitCallout = Boolean(
+    (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
+  )
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -256,6 +264,13 @@ export function AgentChatLayout({
                     suppressedThinkingCursor={suppressedThinkingCursor}
                   />
                 </div>
+                {showHardLimitCallout ? (
+                  <HardLimitCalloutCard
+                    onOpenSettings={handleSettingsOpen}
+                    upgradeUrl={hardLimitUpgradeUrl}
+                    showUpsell={hardLimitShowUpsell}
+                  />
+                ) : null}
 
                 {showStreamingSlot && !hasMoreNewer ? (
                   <div id="streaming-response-slot" className="streaming-response-slot flex flex-col gap-3">

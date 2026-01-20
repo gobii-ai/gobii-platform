@@ -19,7 +19,7 @@ type AgentChatSettingsPanelProps = {
 
 function buildStatusLabel(status?: DailyCreditsStatus | null): { tone: 'alert' | 'warning' | 'neutral'; label: string } | null {
   if (!status) return null
-  if (status.hardLimitReached) {
+  if (status.hardLimitReached || status.hardLimitBlocked) {
     return { tone: 'alert', label: 'Daily task limit reached' }
   }
   if (status.softTargetExceeded) {

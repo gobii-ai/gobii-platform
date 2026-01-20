@@ -1003,6 +1003,8 @@ export function AgentChatPage({
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
+  const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
+  const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
   const dailyCreditsErrorMessage = quickSettingsError instanceof Error
     ? quickSettingsError.message
     : quickSettingsError
@@ -1046,6 +1048,8 @@ export function AgentChatPage({
         onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}
         onUpdateDailyCredits={canManageDailyCredits ? handleUpdateDailyCredits : undefined}
         dailyCreditsUpdating={canManageDailyCredits ? quickSettingsUpdating : false}
+        hardLimitShowUpsell={canManageDailyCredits ? hardLimitUpsell : false}
+        hardLimitUpgradeUrl={canManageDailyCredits ? hardLimitUpgradeUrl : null}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

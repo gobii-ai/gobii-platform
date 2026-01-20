@@ -1357,6 +1357,104 @@
   scroll-margin-bottom: 1rem;
 }
 
+.hard-limit-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  padding: 1rem 1.2rem;
+  border-radius: 1.25rem;
+  background: linear-gradient(135deg, rgba(254, 243, 199, 0.9), rgba(255, 237, 213, 0.9));
+  border: 1px solid rgba(245, 158, 11, 0.4);
+  color: #7c2d12;
+}
+
+.hard-limit-callout-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.hard-limit-callout-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 999px;
+  background: rgba(251, 191, 36, 0.3);
+  color: #b45309;
+}
+
+.hard-limit-callout-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #7c2d12;
+}
+
+.hard-limit-callout-subtitle {
+  font-size: 0.82rem;
+  color: #92400e;
+  margin-top: 0.1rem;
+}
+
+.hard-limit-callout-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.hard-limit-callout-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: none;
+  border-radius: 999px;
+  padding: 0.45rem 1rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hard-limit-callout-button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.25);
+}
+
+.hard-limit-callout-button:focus-visible {
+  outline: 2px solid rgba(14, 165, 233, 0.4);
+  outline-offset: 2px;
+}
+
+.hard-limit-callout-button:active {
+  transform: scale(0.98);
+}
+
+.hard-limit-callout-upsell {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  color: #7c2d12;
+}
+
+.hard-limit-callout-upsell a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 600;
+  color: #1d4ed8;
+  text-decoration: none;
+}
+
+.hard-limit-callout-upsell a:hover {
+  text-decoration: underline;
+}
+
 .timeline-event--incoming {
   animation: timelineEventIncoming 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }

@@ -106,7 +106,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const currentTask = hasKanban && kanbanSnapshot.doingTitles.length > 0 ? kanbanSnapshot.doingTitles[0] : null
   const isAllComplete = hasKanban && doneTasks === totalTasks
   const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
-  const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached)
+  const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = Boolean(onSettingsOpen)
   const showAttentionDot = softTargetExceeded || hardLimitReached

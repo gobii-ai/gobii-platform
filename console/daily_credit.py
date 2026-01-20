@@ -6,6 +6,7 @@ from typing import Any
 from django.utils import timezone
 from django.utils.formats import date_format
 
+from api.models import PersistentAgentSystemStep
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 
@@ -50,6 +51,7 @@ def build_agent_daily_credit_context(agent, owner=None) -> dict[str, Any]:
         owner = agent.organization or agent.user
     credit_settings = get_daily_credit_settings_for_owner(owner)
     slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+    blocked_today = False
 
     context = {
         "daily_credit_slider_min": slider_bounds["slider_min"],
@@ -60,6 +62,20 @@ def build_agent_daily_credit_context(agent, owner=None) -> dict[str, Any]:
 
     try:
         today = timezone.localdate()
+        try:
+            blocked_today = PersistentAgentSystemStep.objects.filter(
+                step__agent=agent,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                notes__in=["daily_credit_limit_mid_loop", "daily_credit_limit_exhausted"],
+                step__created_at__date=today,
+            ).exists()
+        except Exception as exc:
+            logger.warning(
+                "Failed to check daily credit block status for agent %s: %s",
+                getattr(agent, "id", None),
+                exc,
+                exc_info=True,
+            )
         soft_target = agent.get_daily_credit_soft_target()
         hard_limit = agent.get_daily_credit_hard_limit()
         usage = agent.get_daily_credit_usage(usage_date=today)
@@ -129,6 +145,7 @@ def build_agent_daily_credit_context(agent, owner=None) -> dict[str, Any]:
             }
         )
 
+    context["daily_credit_hard_blocked"] = blocked_today
     return context
 
 
@@ -184,9 +201,11 @@ def build_daily_credit_status(context: dict[str, Any]) -> dict[str, bool]:
     hard_remaining = context.get("daily_credit_remaining")
     soft_exceeded = soft_remaining is not None and soft_remaining <= Decimal("0")
     hard_reached = hard_remaining is not None and hard_remaining <= Decimal("0")
+    hard_blocked = bool(context.get("daily_credit_hard_blocked"))
     return {
         "softTargetExceeded": soft_exceeded,
         "hardLimitReached": hard_reached,
+        "hardLimitBlocked": hard_reached or hard_blocked,
     }
 
 
