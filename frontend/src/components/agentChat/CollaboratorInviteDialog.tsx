@@ -28,7 +28,8 @@ export function CollaboratorInviteDialog({
 
   const displayName = useMemo(() => (agentName || '').trim() || 'this agent', [agentName])
   const canInvite = Boolean(inviteUrl && canManage)
-  const subtitle = 'Collaborators can chat and access shared files, but cannot change settings or billing.'
+  const subtitle = 'Collaborators can view and send messages with this agent.'
+  const title = `Invite someone to collaborate with ${displayName}`
 
   useEffect(() => {
     if (!open) {
@@ -145,10 +146,10 @@ export function CollaboratorInviteDialog({
       <AgentChatMobileSheet
         open={open}
         onClose={onClose}
-        title={`Invite someone to ${displayName}`}
+        title={title}
         subtitle={subtitle}
         icon={UserPlus}
-        ariaLabel={`Invite someone to ${displayName}`}
+        ariaLabel={title}
       >
         <div className="space-y-4">{body}</div>
       </AgentChatMobileSheet>
@@ -157,7 +158,7 @@ export function CollaboratorInviteDialog({
 
   return (
     <Modal
-      title={`Invite someone to ${displayName}`}
+      title={title}
       subtitle={subtitle}
       onClose={onClose}
       icon={UserPlus}
