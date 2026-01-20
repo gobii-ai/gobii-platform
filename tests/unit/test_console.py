@@ -310,6 +310,61 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertFalse(response.context['daily_credit_low'])
 
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_get(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Agent',
+            charter='Test daily credits API',
+            browser_use_agent=browser_agent,
+            daily_credit_limit=5,
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        self.assertIn('settings', payload)
+        self.assertIn('status', payload)
+        self.assertIn('dailyCredits', payload['settings'])
+        self.assertIn('dailyCredits', payload['status'])
+        self.assertEqual(payload['settings']['dailyCredits']['limit'], 5.0)
+        self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
+        self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
+
+    @tag("batch_console_agents")
+    def test_agent_quick_settings_api_updates_limit(self):
+        from api.models import PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Update Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Daily Credits Update Agent',
+            charter='Update daily credits API',
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse('console_agent_quick_settings', kwargs={'agent_id': agent.id})
+        response = self.client.post(
+            url,
+            data=json.dumps({'dailyCredits': {'daily_credit_limit': 7}}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.daily_credit_limit, 7)
+
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):

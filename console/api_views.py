@@ -100,6 +100,13 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
+from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.daily_credit import (
+    build_agent_daily_credit_context,
+    build_daily_credit_status,
+    parse_daily_credit_limit,
+    serialize_daily_credit_payload,
+)
 from console.agent_creation import enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
@@ -118,6 +125,7 @@ from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
+from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 
 logger = logging.getLogger(__name__)
@@ -4110,6 +4118,77 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
             }
         )
+
+
+class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        context = build_agent_daily_credit_context(agent)
+        return JsonResponse(
+            {
+                "dailyCredits": serialize_daily_credit_payload(context),
+                "status": build_daily_credit_status(context),
+            }
+        )
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        owner = agent.organization or agent.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        new_daily_limit, error = parse_daily_credit_limit(payload, credit_settings)
+        if error:
+            return JsonResponse({"error": error}, status=400)
+
+        if agent.daily_credit_limit != new_daily_limit:
+            agent.daily_credit_limit = new_daily_limit
+            agent.save(update_fields=["daily_credit_limit"])
+
+        context = build_agent_daily_credit_context(agent, owner)
+        return JsonResponse(
+            {
+                "dailyCredits": serialize_daily_credit_payload(context),
+                "status": build_daily_credit_status(context),
+            }
+        )
+
+
+class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        payload = build_agent_quick_settings_payload(agent)
+        return JsonResponse(payload)
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        owner = agent.organization or agent.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        daily_payload = payload.get("dailyCredits")
+        if daily_payload is not None:
+            if not isinstance(daily_payload, dict):
+                return HttpResponseBadRequest("dailyCredits must be an object")
+            new_daily_limit, error = parse_daily_credit_limit(daily_payload, credit_settings)
+            if error:
+                return JsonResponse({"error": error}, status=400)
+            if agent.daily_credit_limit != new_daily_limit:
+                agent.daily_credit_limit = new_daily_limit
+                agent.save(update_fields=["daily_credit_limit"])
+
+        payload = build_agent_quick_settings_payload(agent, owner)
+        return JsonResponse(payload)
 
 
 class MCPServerListAPIView(LoginRequiredMixin, View):

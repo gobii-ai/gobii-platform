@@ -10,10 +10,12 @@ import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBann
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
+import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
+import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -210,7 +212,7 @@ export type AgentChatPageProps = {
 }
 
 const STREAMING_STALE_MS = 6000
-const STREAMING_REFRESH_INTERVAL_MS = 6000
+  const STREAMING_REFRESH_INTERVAL_MS = 6000
 // Threshold for detecting intentional scroll-up gesture on touch devices
 const TOUCH_SCROLL_UNPIN_THRESHOLD = 40
 
@@ -226,6 +228,14 @@ export function AgentChatPage({
   persistContextSession = true,
   onContextSwitch,
 }: AgentChatPageProps) {
+  const {
+    data: quickSettingsPayload,
+    isLoading: quickSettingsLoading,
+    error: quickSettingsError,
+    refetch: refetchQuickSettings,
+    updateQuickSettings,
+    updating: quickSettingsUpdating,
+  } = useAgentQuickSettings(agentId)
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
@@ -990,12 +1000,26 @@ export function AgentChatPage({
     )
   }
 
+  const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
+  const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
+  const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
+  const dailyCreditsErrorMessage = quickSettingsError instanceof Error
+    ? quickSettingsError.message
+    : quickSettingsError
+      ? 'Unable to load daily credits.'
+      : null
+  const handleUpdateDailyCredits = useCallback(
+    (payload: DailyCreditsUpdatePayload) => updateQuickSettings({ dailyCredits: payload }),
+    [updateQuickSettings],
+  )
+
   return (
     <div className="agent-chat-page">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
       <AgentChatLayout
+        agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
@@ -1015,6 +1039,13 @@ export function AgentChatPage({
         contextSwitcher={contextSwitcher ?? undefined}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
+        dailyCredits={dailyCreditsInfo}
+        dailyCreditsStatus={dailyCreditsStatus}
+        dailyCreditsLoading={canManageDailyCredits ? quickSettingsLoading : false}
+        dailyCreditsError={canManageDailyCredits ? dailyCreditsErrorMessage : null}
+        onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}
+        onUpdateDailyCredits={canManageDailyCredits ? handleUpdateDailyCredits : undefined}
+        dailyCreditsUpdating={canManageDailyCredits ? quickSettingsUpdating : false}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

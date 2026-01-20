@@ -41,7 +41,7 @@ from ...models import (
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
-from .outbound_delivery import deliver_agent_sms
+from .outbound_delivery import deliver_agent_email, deliver_agent_sms
 from observability import traced
 from opentelemetry import baggage
 from config import settings
@@ -481,6 +481,139 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         logging.exception("Failed sending daily credit limit notice for agent %s", agent.id)
 
     return False
+
+
+@tracer.start_as_current_span("send_owner_daily_credit_hard_limit_notice")
+def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
+    """Notify the agent owner that the daily hard limit has been reached."""
+    try:
+        now = timezone.now()
+        last_notice = getattr(agent, "daily_credit_hard_limit_notice_at", None)
+        if last_notice and timezone.localdate(last_notice) == timezone.localdate(now):
+            return False
+
+        endpoint = getattr(agent, "preferred_contact_endpoint", None)
+        if not endpoint:
+            logging.info(
+                "Agent %s has no preferred contact endpoint; skipping hard limit notice.",
+                agent.id,
+            )
+            return False
+
+        link = _build_agent_detail_url(agent)
+        subject = f"{agent.name} reached today's task limit"
+        text_body = (
+            f"{agent.name} reached its daily task limit and won't continue today. "
+            f"Adjust the limit here: {link}"
+        )
+
+        channel_value = endpoint.channel
+        analytics_source = {
+            CommsChannel.EMAIL: AnalyticsSource.EMAIL,
+            CommsChannel.SMS: AnalyticsSource.SMS,
+            CommsChannel.WEB: AnalyticsSource.WEB,
+        }.get(channel_value, AnalyticsSource.AGENT)
+
+        if channel_value == CommsChannel.EMAIL:
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.EMAIL)
+            if not from_endpoint:
+                logging.info("Agent %s has no email endpoint for hard limit notice.", agent.id)
+                return False
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=endpoint,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"subject": subject, "kind": "daily_credit_hard_limit_owner_notice"},
+            )
+            deliver_agent_email(message)
+        elif channel_value == CommsChannel.SMS:
+            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SMS)
+            if not from_endpoint:
+                logging.info("Agent %s has no SMS endpoint for hard limit notice.", agent.id)
+                return False
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                to_endpoint=endpoint,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"kind": "daily_credit_hard_limit_owner_notice"},
+            )
+            deliver_agent_sms(message)
+        elif channel_value == CommsChannel.WEB:
+            agent_endpoint = _ensure_agent_web_endpoint(agent)
+            conv = _get_or_create_conversation(
+                CommsChannel.WEB.value,
+                endpoint.address,
+                owner_agent=agent,
+            )
+            _ensure_participant(
+                conv,
+                agent_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+            )
+            _ensure_participant(
+                conv,
+                endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+            )
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=agent_endpoint,
+                conversation=conv,
+                is_outbound=True,
+                body=text_body,
+                raw_payload={"source": "daily_credit_hard_limit_owner_notice"},
+            )
+            now = timezone.now()
+            PersistentAgentMessage.objects.filter(pk=message.pk).update(
+                latest_status=DeliveryStatus.DELIVERED,
+                latest_sent_at=now,
+                latest_delivered_at=now,
+                latest_error_code="",
+                latest_error_message="",
+            )
+        else:
+            logging.info(
+                "Agent %s preferred endpoint channel %s not supported for hard limit notice.",
+                agent.id,
+                channel_value,
+            )
+            return False
+
+        try:
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "channel": str(channel_value),
+                        "recipient": endpoint.address,
+                        "notice_type": "owner_hard_limit",
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+        except Exception:
+            logging.exception(
+                "Failed to emit analytics for owner hard limit notice (agent %s)",
+                agent.id,
+            )
+
+        agent.daily_credit_hard_limit_notice_at = now
+        agent.save(update_fields=["daily_credit_hard_limit_notice_at"])
+        return True
+    except Exception:
+        logging.exception(
+            "Failed sending owner hard limit notice for agent %s",
+            getattr(agent, "id", None),
+        )
+        return False
 
 
 @transaction.atomic

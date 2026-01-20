@@ -4615,6 +4615,11 @@ class PersistentAgent(models.Model):
         blank=True,
         help_text="Soft daily credit target; system enforces a hard stop at 2× this value. Null means unlimited.",
     )
+    daily_credit_hard_limit_notice_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Last time the owner was notified that the daily hard limit was reached.",
+    )
     # Soft-expiration state and interaction tracking
     class LifeState(models.TextChoices):
         ACTIVE = "active", "Active"

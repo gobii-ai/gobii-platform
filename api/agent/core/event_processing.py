@@ -87,6 +87,7 @@ from .llm_config import (
     is_llm_bootstrap_required,
 )
 from api.agent.events import publish_agent_event, AgentEventType
+from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
 from api.evals.execution import get_current_eval_routing_profile
 from .prompt_context import (
     INTERNAL_REASONING_PREFIX,
@@ -1912,6 +1913,7 @@ def _ensure_credit_for_tool(
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             notes="daily_credit_limit_mid_loop",
         )
+        send_owner_daily_credit_hard_limit_notice(agent)
         if span is not None:
             try:
                 span.add_event("Tool skipped - daily credit limit reached")
@@ -2542,6 +2544,7 @@ def _process_agent_events_locked(
                         notes="daily_credit_limit_exhausted",
                     )
 
+                    send_owner_daily_credit_hard_limit_notice(agent)
                     span.add_event("Agent processing skipped - daily credit limit reached")
                     span.set_attribute("credit_check.daily_limit_block", True)
                     return agent

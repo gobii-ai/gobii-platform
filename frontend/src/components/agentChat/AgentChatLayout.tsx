@@ -1,5 +1,5 @@
 import type { ReactNode, Ref } from 'react'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import '../../styles/agentChatLegacy.css'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
@@ -8,14 +8,17 @@ import { StreamingReplyCard } from './StreamingReplyCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { buildAgentComposerPalette } from '../../util/color'
+import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
+  agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
   agentName?: string | null
@@ -34,6 +37,13 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
+  dailyCredits?: DailyCreditsInfo | null
+  dailyCreditsStatus?: DailyCreditsStatus | null
+  dailyCreditsLoading?: boolean
+  dailyCreditsError?: string | null
+  onRefreshDailyCredits?: () => void
+  onUpdateDailyCredits?: (payload: DailyCreditsUpdatePayload) => Promise<void>
+  dailyCreditsUpdating?: boolean
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -63,6 +73,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
 export function AgentChatLayout({
   agentFirstName,
   events,
+  agentId,
   agentColorHex,
   agentAvatarUrl,
   agentName,
@@ -81,6 +92,13 @@ export function AgentChatLayout({
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
+  dailyCredits,
+  dailyCreditsStatus,
+  dailyCreditsLoading = false,
+  dailyCreditsError = null,
+  onRefreshDailyCredits,
+  onUpdateDailyCredits,
+  dailyCreditsUpdating = false,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -110,10 +128,24 @@ export function AgentChatLayout({
   isInsightsPaused,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
   }, [])
+
+  const handleSettingsOpen = useCallback(() => {
+    setSettingsOpen(true)
+    onRefreshDailyCredits?.()
+  }, [onRefreshDailyCredits])
+
+  const handleSettingsClose = useCallback(() => {
+    setSettingsOpen(false)
+  }, [])
+
+  useEffect(() => {
+    setSettingsOpen(false)
+  }, [agentId])
 
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
@@ -168,10 +200,23 @@ export function AgentChatLayout({
           connectionDetail={connectionDetail}
           kanbanSnapshot={kanbanSnapshot}
           processingActive={processingActive}
+          dailyCreditsStatus={dailyCreditsStatus}
+          onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
           onClose={onClose}
           sidebarCollapsed={sidebarCollapsed}
         />
       )}
+      <AgentChatSettingsPanel
+        open={settingsOpen}
+        onClose={handleSettingsClose}
+        agentId={agentId}
+        dailyCredits={dailyCredits}
+        status={dailyCreditsStatus}
+        loading={dailyCreditsLoading}
+        error={dailyCreditsError}
+        updating={dailyCreditsUpdating}
+        onSave={onUpdateDailyCredits}
+      />
       <main className={mainClassName}>
         <div
           id="agent-workspace-root"
