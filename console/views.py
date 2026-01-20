@@ -2694,6 +2694,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['collaborator_invites'] = AgentCollaboratorInvite.objects.filter(
             agent=agent,
             status=AgentCollaboratorInvite.InviteStatus.PENDING,
+            expires_at__gt=timezone.now(),
         ).order_by('email')
 
         context['can_manage_collaborators'] = self._can_manage_collaborators(self.request.user, agent)
@@ -2911,6 +2912,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             pending_invites = AgentCollaboratorInvite.objects.filter(
                 agent=agent,
                 status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                expires_at__gt=timezone.now(),
             ).order_by("email")
 
         collab_list = [
@@ -3765,12 +3767,26 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if AgentCollaborator.objects.filter(agent=agent, user__email__iexact=email).exists():
                     return JsonResponse({'success': False, 'error': 'This collaborator already has access'})
 
+                now = timezone.now()
                 if AgentCollaboratorInvite.objects.filter(
                     agent=agent,
                     email__iexact=email,
                     status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__gt=now,
                 ).exists():
                     return JsonResponse({'success': False, 'error': 'An invitation is already pending for this email'})
+
+                AgentCollaboratorInvite.objects.filter(
+                    agent=agent,
+                    email__iexact=email,
+                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__lte=now,
+                ).update(status=AgentCollaboratorInvite.InviteStatus.EXPIRED)
+                AgentCollaboratorInvite.objects.filter(
+                    agent=agent,
+                    email__iexact=email,
+                    status=AgentCollaboratorInvite.InviteStatus.ACCEPTED,
+                ).update(status=AgentCollaboratorInvite.InviteStatus.EXPIRED)
 
                 try:
                     invite = AgentCollaboratorInvite.objects.create(

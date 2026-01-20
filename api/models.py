@@ -6578,6 +6578,18 @@ class AgentCollaborator(models.Model):
             if counts is None:
                 return
             if counts["total"] >= cap:
+                allow_pending_accept = False
+                if counts["total"] == cap:
+                    user_email = (getattr(self.user, "email", "") or "").strip()
+                    if user_email:
+                        allow_pending_accept = AgentCollaboratorInvite.objects.filter(
+                            agent=self.agent,
+                            email__iexact=user_email,
+                            status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                            expires_at__gt=timezone.now(),
+                        ).exists()
+                if allow_pending_accept:
+                    return
                 pending_count = counts["pending_total"]
                 raise ValidationError({
                     "agent": (
@@ -6696,6 +6708,7 @@ class AgentCollaboratorInvite(models.Model):
 
 def get_agent_contact_counts(agent: PersistentAgent) -> dict[str, int] | None:
     try:
+        now = timezone.now()
         allowlist_active = (
             CommsAllowlistEntry.objects
             .filter(agent=agent, is_active=True)
@@ -6703,13 +6716,20 @@ def get_agent_contact_counts(agent: PersistentAgent) -> dict[str, int] | None:
         )
         allowlist_pending = (
             AgentAllowlistInvite.objects
-            .filter(agent=agent, status=AgentAllowlistInvite.InviteStatus.PENDING)
+            .filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING,
+            )
             .count()
         )
         collaborators_active = AgentCollaborator.objects.filter(agent=agent).count()
         collaborators_pending = (
             AgentCollaboratorInvite.objects
-            .filter(agent=agent, status=AgentCollaboratorInvite.InviteStatus.PENDING)
+            .filter(
+                agent=agent,
+                status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                expires_at__gt=now,
+            )
             .count()
         )
         active_total = allowlist_active + collaborators_active
