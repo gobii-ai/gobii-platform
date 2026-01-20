@@ -183,6 +183,7 @@ from console.views import (
     remove_all_dedicated_ip,
     update_billing_settings,
     get_billing_settings,
+    get_user_plan_api,
     cancel_subscription,
     tasks_view,
     task_result_view,
@@ -420,6 +421,7 @@ urlpatterns = [
     path('billing/dedicated-ip/remove-all/', remove_all_dedicated_ip, name='remove_all_dedicated_ip'),
 
     path('api/v1/user/billing-settings/', get_billing_settings, name='get_billing_settings'),
+    path('api/v1/user/plan/', get_user_plan_api, name='get_user_plan'),
 
     # admin & auth
     path("admin/", admin.site.urls),

@@ -15,6 +15,7 @@ import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry } from '../../types/agentRoster'
+import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 
@@ -23,6 +24,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
   agentName?: string | null
+  agentIsOrgOwned?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -71,6 +73,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
+  onUpgrade?: (plan: PlanTier) => void
 }
 
 export function AgentChatLayout({
@@ -80,6 +83,7 @@ export function AgentChatLayout({
   agentColorHex,
   agentAvatarUrl,
   agentName,
+  agentIsOrgOwned = false,
   connectionStatus,
   connectionLabel,
   connectionDetail,
@@ -131,6 +135,7 @@ export function AgentChatLayout({
   onInsightIndexChange,
   onPauseChange,
   isInsightsPaused,
+  onUpgrade,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -203,6 +208,7 @@ export function AgentChatLayout({
           agentName={agentName || 'Agent'}
           agentAvatarUrl={agentAvatarUrl}
           agentColorHex={agentColorHex}
+          isOrgOwned={agentIsOrgOwned}
           connectionStatus={connectionStatus}
           connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
@@ -212,6 +218,7 @@ export function AgentChatLayout({
           onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
           onClose={onClose}
           sidebarCollapsed={sidebarCollapsed}
+          onUpgrade={onUpgrade}
         />
       )}
       <AgentChatSettingsPanel

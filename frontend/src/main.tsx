@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
+import { initializeSubscriptionStore } from './stores/subscriptionStore'
 import './index.css'
 import './styles/consoleShell.css'
 
@@ -32,6 +33,9 @@ const mountNode = document.getElementById('gobii-frontend-root')
 if (!mountNode) {
   throw new Error('Gobii frontend mount element not found')
 }
+
+// Initialize subscription state from data attributes
+initializeSubscriptionStore(mountNode)
 
 const appName = mountNode.dataset.app ?? 'agent-chat'
 const isStaff = mountNode.dataset.isStaff === 'true'

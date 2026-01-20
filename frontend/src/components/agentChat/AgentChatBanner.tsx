@@ -1,8 +1,14 @@
-import { memo, useEffect, useRef, useState } from 'react'
-import { Check, Settings, X } from 'lucide-react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
+import { Check, Settings, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
+import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
+import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
+import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 
@@ -12,6 +18,7 @@ type AgentChatBannerProps = {
   agentName: string
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
+  isOrgOwned?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -21,6 +28,7 @@ type AgentChatBannerProps = {
   onSettingsOpen?: () => void
   onClose?: () => void
   sidebarCollapsed?: boolean
+  onUpgrade?: (plan: PlanTier) => void
 }
 
 function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
@@ -40,6 +48,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentName,
   agentAvatarUrl,
   agentColorHex,
+  isOrgOwned = false,
   connectionStatus = 'connecting',
   connectionLabel = 'Connecting',
   kanbanSnapshot,
@@ -48,6 +57,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onSettingsOpen,
   onClose,
   sidebarCollapsed = true,
+  onUpgrade,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
@@ -56,6 +66,52 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const hasAnimatedRef = useRef(false)
   const prevDoneRef = useRef<number | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 768
+  })
+
+  // Subscription state
+  const { currentPlan, isUpgradeModalOpen, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+
+  // Determine if we should show upgrade button and what it should say
+  // Don't show upgrade button for org-owned agents (billing is handled at org level)
+  const showUpgradeButton = !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
+  const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
+  const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
+
+  const handleBannerUpgradeClick = useCallback(() => {
+    track(AnalyticsEvent.UPGRADE_BANNER_CLICKED, {
+      currentPlan,
+      targetPlan,
+    })
+    track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
+      currentPlan,
+      source: 'banner',
+    })
+    openUpgradeModal()
+  }, [currentPlan, targetPlan, openUpgradeModal])
+
+  const handleModalDismiss = useCallback(() => {
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan,
+    })
+    closeUpgradeModal()
+  }, [currentPlan, closeUpgradeModal])
+
+  const handleUpgrade = useCallback((plan: PlanTier) => {
+    closeUpgradeModal()
+    onUpgrade?.(plan)
+  }, [closeUpgradeModal, onUpgrade])
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
 
   useEffect(() => {
     const node = bannerRef.current
@@ -174,9 +230,18 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           </div>
         ) : null}
 
-        {/* Right: Close button */}
-        {onClose || showSettingsButton ? (
+          {/* Right: Upgrade button + Close button */}
           <div className="banner-right">
+            {showUpgradeButton && (
+              <button
+                type="button"
+                className="banner-upgrade"
+                onClick={handleBannerUpgradeClick}
+              >
+                <Zap size={14} strokeWidth={2} />
+                <span>{upgradeButtonLabel}</span>
+              </button>
+            )}
             {showSettingsButton ? (
               <button
                 type="button"
@@ -200,12 +265,37 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <X size={16} strokeWidth={1.75} />
               </button>
             ) : null}
-          </div>
-        ) : null}
+        </div>
 
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
-      </div>
+
+      {/* Upgrade modal / sheet */}
+      {isUpgradeModalOpen && !isMobile && (
+        <SubscriptionUpgradeModal
+          currentPlan={currentPlan}
+          onClose={handleModalDismiss}
+          onUpgrade={handleUpgrade}
+          dismissible
+        />
+      )}
+      {isUpgradeModalOpen && isMobile && (
+        <AgentChatMobileSheet
+          open={isUpgradeModalOpen}
+          onClose={handleModalDismiss}
+          title="Upgrade your plan"
+          subtitle="Choose the plan that fits your needs"
+          icon={Zap}
+          ariaLabel="Upgrade your plan"
+          bodyPadding={false}
+        >
+          <SubscriptionUpgradePlans
+            currentPlan={currentPlan}
+            onUpgrade={handleUpgrade}
+          />
+        </AgentChatMobileSheet>
+      )}
+    </div>
     </div>
   )
 })

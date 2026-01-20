@@ -20,6 +20,7 @@ type AgentRosterPayload = {
     display_color_hex: string | null
     is_active: boolean
     short_description: string
+    is_org_owned: boolean
   }[]
 }
 
@@ -33,6 +34,7 @@ export async function fetchAgentRoster(options: { forAgentId?: string } = {}): P
     displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
     shortDescription: agent.short_description,
+    isOrgOwned: agent.is_org_owned,
   }))
   return { context: payload.context, agents }
 }

@@ -1289,6 +1289,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "display_color_hex": agent.get_display_color(),
                 "is_active": bool(agent.is_active),
                 "short_description": agent.short_description or "",
+                "is_org_owned": agent.organization_id is not None,
             }
             for agent in agents
         ]
