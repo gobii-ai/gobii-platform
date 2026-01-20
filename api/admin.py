@@ -30,7 +30,7 @@ from .admin_forms import (
 from .models import (
     ApiKey, UserQuota, UserFlags, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
-    PersistentAgent, PersistentAgentTemplate, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
+    PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
@@ -4500,6 +4500,14 @@ class AgentFsNodeAdmin(admin.ModelAdmin):
             return HttpResponseRedirect(reverse('admin:api_agentfsnode_change', args=[object_id]))
 
 
+@admin.register(PublicProfile)
+class PublicProfileAdmin(admin.ModelAdmin):
+    list_display = ("handle", "user", "updated_at")
+    search_fields = ("handle", "user__email")
+    ordering = ("handle",)
+    readonly_fields = ("created_at", "updated_at")
+
+
 @admin.register(PersistentAgentTemplate)
 class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     list_display = (
@@ -4514,6 +4522,9 @@ class PersistentAgentTemplateAdmin(admin.ModelAdmin):
     fieldsets = (
         ('Identity', {
             'fields': ('code', 'display_name', 'tagline', 'category', 'priority', 'is_active')
+        }),
+        ('Public Template', {
+            'fields': ('public_profile', 'slug', 'source_agent', 'created_by')
         }),
         ('Narrative', {
             'fields': ('description', 'charter')

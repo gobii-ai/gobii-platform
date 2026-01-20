@@ -229,8 +229,41 @@ class PretrainedWorkerTemplateService:
         """Return a fresh copy of all pretrained worker template definitions."""
         return [copy.deepcopy(template) for template in TEMPLATE_DEFINITIONS]
 
+    @staticmethod
+    def _template_from_model(template) -> PretrainedWorkerTemplateDefinition:
+        return PretrainedWorkerTemplateDefinition(
+            code=template.code,
+            display_name=template.display_name,
+            tagline=template.tagline,
+            description=template.description,
+            charter=template.charter,
+            base_schedule=template.base_schedule or "",
+            schedule_jitter_minutes=template.schedule_jitter_minutes or 0,
+            event_triggers=list(template.event_triggers or []),
+            default_tools=list(template.default_tools or []),
+            recommended_contact_channel=template.recommended_contact_channel or "email",
+            category=template.category or "",
+            hero_image_path=template.hero_image_path or "",
+            priority=template.priority,
+            is_active=template.is_active,
+            show_on_homepage=template.show_on_homepage,
+        )
+
+    @classmethod
+    def _db_templates(cls, *, include_inactive: bool = False) -> list[PretrainedWorkerTemplateDefinition]:
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        qs = Template.objects.filter(public_profile__isnull=True)
+        if not include_inactive:
+            qs = qs.filter(is_active=True)
+        qs = qs.order_by("priority", "display_name")
+        return [cls._template_from_model(template) for template in qs]
+
     @classmethod
     def get_active_templates(cls) -> list[PretrainedWorkerTemplateDefinition]:
+        db_templates = cls._db_templates()
+        if db_templates:
+            return db_templates
+
         templates = [
             template for template in cls._all_templates() if getattr(template, "is_active", True)
         ]
@@ -243,6 +276,10 @@ class PretrainedWorkerTemplateService:
             return None
         normalized = code.strip().lower()
         normalized = cls.CODE_ALIASES.get(normalized, normalized)
+        Template = apps.get_model("api", "PersistentAgentTemplate")
+        db_template = Template.objects.filter(code=normalized, is_active=True).first()
+        if db_template:
+            return cls._template_from_model(db_template)
         for template in cls._all_templates():
             if template.code == normalized and getattr(template, "is_active", True):
                 return template

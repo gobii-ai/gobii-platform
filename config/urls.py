@@ -20,6 +20,7 @@ from console.api_views import (
     AgentQuickCreateAPIView,
     AgentProcessingStatusAPIView,
     AgentReassignAPIView,
+    AgentTemplateCloneAPIView,
     AgentSmsEnableAPIView,
     AgentTimelineAPIView,
     UserPhoneAPIView,
@@ -195,8 +196,6 @@ from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
 
 urlpatterns = [
-    # Pages app includes homepage, health check, and documentation
-    path("", include("pages.urls")),
     path("setup/", include("setup.urls")),
 
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
@@ -250,6 +249,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/insights/", AgentInsightsAPIView.as_view(), name="console_agent_insights"),
     path("console/api/agents/<uuid:agent_id>/sms/enable/", AgentSmsEnableAPIView.as_view(), name="console_agent_sms_enable"),
     path("console/api/agents/<uuid:agent_id>/reassign/", AgentReassignAPIView.as_view(), name="console_agent_reassign"),
+    path("console/api/agents/<uuid:agent_id>/templates/clone/", AgentTemplateCloneAPIView.as_view(), name="console_agent_template_clone"),
     path("console/api/user/phone/", UserPhoneAPIView.as_view(), name="console_user_phone"),
     path("console/api/user/phone/verify/", UserPhoneVerifyAPIView.as_view(), name="console_user_phone_verify"),
     path("console/api/user/phone/resend/", UserPhoneResendAPIView.as_view(), name="console_user_phone_resend"),
@@ -437,6 +437,9 @@ urlpatterns = [
 
     # Stripe integration
     path("stripe/", include("djstripe.urls", namespace="djstripe")),
+
+    # Pages app includes homepage, health check, and documentation
+    path("", include("pages.urls")),
 ]
 
 # Proprietary routes (views enforce the feature flag but namespace is always available)

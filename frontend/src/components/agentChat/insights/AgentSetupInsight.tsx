@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -12,6 +12,7 @@ import {
   resendEmailVerification,
   verifyUserPhone,
 } from '../../../api/agentSetup'
+import { cloneAgentTemplate } from '../../../api/agentTemplates'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import '../../../styles/insights.css'
@@ -144,6 +145,16 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
   const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
 
+  const [templateUrl, setTemplateUrl] = useState(metadata.template?.url ?? null)
+  const [templateHandle, setTemplateHandle] = useState(
+    metadata.publicProfile?.handle ?? metadata.publicProfile?.suggestedHandle ?? ''
+  )
+  const [templateHandleDirty, setTemplateHandleDirty] = useState(false)
+  const [templatePanelOpen, setTemplatePanelOpen] = useState(false)
+  const [templateBusy, setTemplateBusy] = useState(false)
+  const [templateError, setTemplateError] = useState<string | null>(null)
+  const [templateCopied, setTemplateCopied] = useState(false)
+
   const [orgCurrent, setOrgCurrent] = useState(metadata.organization.currentOrg ?? null)
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
   const [orgError, setOrgError] = useState<string | null>(null)
@@ -159,6 +170,26 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     setOrgCurrent(metadata.organization.currentOrg ?? null)
     setSelectedOrgId(metadata.organization.currentOrg?.id ?? null)
   }, [metadata.organization.currentOrg])
+
+  useEffect(() => {
+    setTemplateUrl(metadata.template?.url ?? null)
+  }, [metadata.template?.url])
+
+  useEffect(() => {
+    const existingHandle = metadata.publicProfile?.handle ?? ''
+    if (existingHandle) {
+      setTemplateHandle(existingHandle)
+      setTemplateHandleDirty(false)
+      return
+    }
+    if (templateHandleDirty) {
+      return
+    }
+    const suggested = metadata.publicProfile?.suggestedHandle ?? ''
+    if (suggested) {
+      setTemplateHandle(suggested)
+    }
+  }, [metadata.publicProfile?.handle, metadata.publicProfile?.suggestedHandle, templateHandleDirty])
 
   useEffect(() => {
     setCooldown(phone?.cooldownRemaining ?? 0)
@@ -237,6 +268,76 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       // Ignore clipboard failures.
     }
   }, [metadata.agentId])
+
+  const handleTemplateCopy = useCallback(async (value: string) => {
+    if (!value) return
+
+    let success = false
+
+    // Try modern Clipboard API first (requires HTTPS)
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(value)
+        success = true
+      } catch {
+        // Fall through to legacy method
+      }
+    }
+
+    // Fallback for HTTP or older browsers
+    if (!success) {
+      try {
+        const textarea = document.createElement('textarea')
+        textarea.value = value
+        textarea.style.position = 'fixed'
+        textarea.style.left = '-9999px'
+        textarea.style.top = '-9999px'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        success = document.execCommand('copy')
+        document.body.removeChild(textarea)
+      } catch {
+        // Copy failed
+      }
+    }
+
+    if (success) {
+      setTemplateCopied(true)
+      window.setTimeout(() => setTemplateCopied(false), 1800)
+    }
+  }, [])
+
+  const handleCreateTemplate = useCallback(async () => {
+    const hasProfile = Boolean(metadata.publicProfile?.handle)
+    if (!hasProfile && !templatePanelOpen) {
+      setTemplatePanelOpen(true)
+      setTemplateError(null)
+      return
+    }
+    if (!hasProfile && !templateHandle.trim()) {
+      setTemplateError('Choose a public handle to continue.')
+      return
+    }
+    // Note: Charter requirement validation should be handled by the backend API.
+    // The backend should return an appropriate error if the agent has no charter set.
+    setTemplateBusy(true)
+    setTemplateError(null)
+    try {
+      const response = await cloneAgentTemplate(
+        metadata.agentId,
+        hasProfile ? null : templateHandle.trim()
+      )
+      setTemplateUrl(response.templateUrl)
+      setTemplateHandle(response.publicProfileHandle)
+      setTemplateHandleDirty(false)
+      setTemplatePanelOpen(false)
+    } catch (error) {
+      setTemplateError(describeError(error))
+    } finally {
+      setTemplateBusy(false)
+    }
+  }, [metadata.agentId, metadata.publicProfile?.handle, templatePanelOpen, templateHandle])
 
   const handleAddPhone = useCallback(async () => {
     const trimmed = phoneInput.trim()
@@ -595,6 +696,187 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
     )
   }
 
+  const renderTemplate = () => {
+    const hasProfile = Boolean(metadata.publicProfile?.handle)
+    const handleValue = metadata.publicProfile?.handle ?? templateHandle
+    const hasTemplate = Boolean(templateUrl)
+    const showHandleForm = !hasProfile && templatePanelOpen
+
+    // Extract display URL - show full URL or construct from handle
+    const displayUrl = templateUrl || (handleValue ? `gobii.ai/${handleValue}` : '')
+    const shortDisplayUrl = displayUrl.replace(/^https?:\/\//, '')
+
+
+    const getTitle = () => {
+      if (hasTemplate) return 'Your Agent is Live!'
+      if (showHandleForm) return 'Choose Your Handle'
+      return 'Share Your Agent'
+    }
+
+    const getSubtitle = () => {
+      if (templateError) return templateError
+      if (hasTemplate) return 'Anyone with this link can spawn their own copy of your agent.'
+      if (showHandleForm) return 'This will be your public URL that anyone can visit.'
+      return 'Create a public template that others can clone and customize.'
+    }
+
+    return (
+      <motion.div
+        className={`share-hero${hasTemplate ? ' share-hero--live' : ''}`}
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Left visual */}
+        <motion.div className="share-hero__visual" variants={visualVariants}>
+          <div className={`share-hero__ring share-hero__ring--1${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+          <div className={`share-hero__ring share-hero__ring--2${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+          <div className={`share-hero__icon${hasTemplate ? ' share-hero__icon--live' : ''}`}>
+            {hasTemplate ? <CheckCircle2 size={20} strokeWidth={2} /> : <Globe size={20} strokeWidth={2} />}
+          </div>
+        </motion.div>
+
+        {/* Center content */}
+        <motion.div className="share-hero__content" variants={itemVariants}>
+          <div className="share-hero__header">
+            <h3 className="share-hero__title">{getTitle()}</h3>
+            {hasTemplate && (
+              <motion.span
+                className="share-hero__badge"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+              >
+                LIVE
+              </motion.span>
+            )}
+          </div>
+          <p className={`share-hero__body${templateError ? ' share-hero__body--error' : ''}`}>
+            {getSubtitle()}
+          </p>
+
+          {showHandleForm ? (
+            <div className="share-hero__form share-hero__form--input">
+              <div className="share-hero__input-wrapper">
+                <div className="share-hero__input-group">
+                  <div className="share-hero__input-icon">
+                    <Link2 size={14} strokeWidth={2.5} />
+                  </div>
+                  <span className="share-hero__input-domain">gobii.ai/</span>
+                  <input
+                    className="share-hero__input"
+                    type="text"
+                    value={templateHandle}
+                    onChange={(event) => {
+                      setTemplateHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                      setTemplateHandleDirty(true)
+                    }}
+                    placeholder="your-handle"
+                    autoFocus
+                  />
+                </div>
+                <span className="share-hero__input-hint">Lowercase letters, numbers, and hyphens</span>
+              </div>
+              <div className="share-hero__form-actions">
+                <button
+                  type="button"
+                  className={`share-hero__button share-hero__button--primary${templateBusy ? ' share-hero__button--loading' : ''}`}
+                  onClick={handleCreateTemplate}
+                  disabled={templateBusy || !templateHandle.trim()}
+                >
+                  {templateBusy ? (
+                    <>
+                      <Loader2 size={14} className="share-hero__spinner" />
+                      <span>Creating</span>
+                    </>
+                  ) : (
+                    <>
+                      <Globe size={14} />
+                      <span>Go Live</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="share-hero__cancel"
+                  onClick={() => setTemplatePanelOpen(false)}
+                  disabled={templateBusy}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : hasTemplate ? (
+            <motion.div
+              className={`share-hero__live-url${templateCopied ? ' share-hero__live-url--copied' : ''}`}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.1 }}
+            >
+              <div className="share-hero__url-display">
+                <Link2 size={14} className="share-hero__url-icon" />
+                <span className="share-hero__url-text">{shortDisplayUrl}</span>
+              </div>
+              <button
+                type="button"
+                className={`share-hero__copy-btn${templateCopied ? ' share-hero__copy-btn--copied' : ''}`}
+                onClick={() => handleTemplateCopy(templateUrl ?? '')}
+              >
+                {templateCopied ? (
+                  <>
+                    <CheckCircle2 size={14} />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    <span>Copy</span>
+                  </>
+                )}
+              </button>
+            </motion.div>
+          ) : null}
+        </motion.div>
+
+        {/* Right action */}
+        {!showHandleForm && (
+          <motion.div className="share-hero__action" variants={badgeVariants}>
+            {hasTemplate && templateUrl ? (
+              <a
+                className="share-hero__cta share-hero__cta--live"
+                href={templateUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <span>Open</span>
+                <ExternalLink size={14} strokeWidth={2.2} />
+              </a>
+            ) : (
+              <button
+                type="button"
+                className={`share-hero__button share-hero__button--primary share-hero__button--large${templateBusy ? ' share-hero__button--loading' : ''}`}
+                onClick={handleCreateTemplate}
+                disabled={templateBusy}
+              >
+                {templateBusy ? (
+                  <>
+                    <Loader2 size={16} className="share-hero__spinner" />
+                    <span>Creating</span>
+                  </>
+                ) : (
+                  <>
+                    <Globe size={16} />
+                    <span>Share Agent</span>
+                  </>
+                )}
+              </button>
+            )}
+          </motion.div>
+        )}
+      </motion.div>
+    )
+  }
+
   const renderUpsell = () => {
     if (!upsellItem) {
       return null
@@ -709,6 +991,7 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       transition={{ duration: 0.35 }}
     >
       {panel === 'always_on' && renderAlwaysOn()}
+      {panel === 'template' && renderTemplate()}
       {panel === 'sms' && renderSms()}
       {panel === 'org_transfer' && renderOrgTransfer()}
       {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}

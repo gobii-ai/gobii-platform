@@ -4338,6 +4338,36 @@ class ProxyHealthCheckResult(models.Model):
 
 # Persistent Agents Models
 
+class PublicProfile(models.Model):
+    """Public profile handle for sharing templates."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="public_profile",
+    )
+    handle = models.SlugField(
+        max_length=32,
+        unique=True,
+        help_text="Public profile handle (lowercase letters, numbers, and hyphens).",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["handle"]
+
+    def clean(self):
+        super().clean()
+        from api.public_profiles import validate_public_handle
+
+        self.handle = validate_public_handle(self.handle)
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"PublicProfile<{self.handle}>"
+
+
 class PersistentAgentTemplate(models.Model):
     """Curated template for pre-configured always-on pretrained workers."""
 
@@ -4346,6 +4376,35 @@ class PersistentAgentTemplate(models.Model):
         max_length=64,
         unique=True,
         help_text="Internal identifier for referencing this template in code and analytics.",
+    )
+    public_profile = models.ForeignKey(
+        PublicProfile,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="templates",
+        help_text="Public profile that owns this template when shared publicly.",
+    )
+    slug = models.SlugField(
+        max_length=80,
+        blank=True,
+        help_text="Public-facing slug used in template URLs.",
+    )
+    source_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="generated_templates",
+        help_text="Agent this template was cloned from, when applicable.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_templates",
+        help_text="User who created this template, if applicable.",
     )
     display_name = models.CharField(max_length=255)
     tagline = models.CharField(max_length=255)
@@ -4399,6 +4458,13 @@ class PersistentAgentTemplate(models.Model):
 
     class Meta:
         ordering = ["priority", "display_name"]
+        constraints = [
+            UniqueConstraint(
+                fields=["public_profile", "slug"],
+                condition=Q(public_profile__isnull=False),
+                name="unique_public_profile_template_slug",
+            ),
+        ]
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return f"PretrainedWorkerTemplate<{self.display_name}>"
@@ -7636,6 +7702,7 @@ class PersistentAgentCompletion(models.Model):
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
         TOOL_SEARCH = ("tool_search", "Tool Search")
+        TEMPLATE_CLONE = ("template_clone", "Template Clone")
         OTHER = ("other", "Other")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

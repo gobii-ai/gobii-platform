@@ -117,6 +117,7 @@ from api.evals.realtime import broadcast_run_update, broadcast_suite_update
 from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
+from api.services.template_clone import TemplateCloneError, TemplateCloneService
 
 
 logger = logging.getLogger(__name__)
@@ -1543,6 +1544,48 @@ class AgentReassignAPIView(ApiLoginRequiredMixin, View):
         return JsonResponse({
             "success": True,
             **result,
+        })
+
+
+class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+
+        try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        handle = (body.get("handle") or "").strip() or None
+
+        try:
+            result = TemplateCloneService.clone_agent_to_template(
+                agent=agent,
+                user=request.user,
+                requested_handle=handle,
+            )
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Invalid handle."
+            return JsonResponse({"error": message_text}, status=400)
+        except TemplateCloneError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        except Exception:
+            logger.exception("Failed to clone template for agent %s", agent.id)
+            return JsonResponse({"error": "An unexpected error occurred."}, status=500)
+
+        template = result.template
+        if not template.slug or not result.public_profile.handle:
+            return JsonResponse({"error": "Template URL could not be generated."}, status=500)
+
+        template_url = request.build_absolute_uri(f"/{result.public_profile.handle}/{template.slug}/")
+        return JsonResponse({
+            "created": result.created,
+            "templateUrl": template_url,
+            "templateSlug": template.slug,
+            "publicProfileHandle": result.public_profile.handle,
+            "displayName": template.display_name,
         })
 
 

@@ -239,14 +239,16 @@
 }
 
 /* ==========================================================================
-   Insight Card: Agent Setup (fixed-height panels)
+   Insight Card: Agent Setup (flexible panels)
    ========================================================================== */
 
 .insight-card-v2--agent-setup {
   display: flex;
   align-items: stretch;
-  height: 100%;
+  height: auto;
+  min-height: 0;
   padding: 0;
+  overflow: visible;
 }
 
 /* ==========================================================================
@@ -258,7 +260,7 @@
   align-items: center;
   gap: 1.5rem;
   width: 100%;
-  height: 100%;
+  min-height: 80px;
   padding: 0.75rem 1.5rem;
   position: relative;
   box-sizing: border-box;
@@ -477,8 +479,8 @@
   align-items: center;
   gap: 1.5rem;
   width: 100%;
-  height: 100%;
-  padding: 1.25rem 1.5rem;
+  min-height: 80px;
+  padding: 1rem 1.5rem;
   position: relative;
   box-sizing: border-box;
 }
@@ -782,6 +784,828 @@
 }
 
 /* ==========================================================================
+   Share Hero Panel - Public sharing template styling
+   ========================================================================== */
+
+.share-hero {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  width: 100%;
+  min-height: 80px;
+  padding: 1rem 1.5rem;
+  position: relative;
+  box-sizing: border-box;
+}
+
+/* Live state - subtle green tint */
+.share-hero--live {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.03) 0%, transparent 100%);
+}
+
+.share-hero__visual {
+  position: relative;
+  width: 68px;
+  height: 68px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.share-hero__ring {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.share-hero__ring--1 {
+  width: 100%;
+  height: 100%;
+  animation: share-ring 3s ease-in-out infinite;
+}
+
+.share-hero__ring--2 {
+  width: 72%;
+  height: 72%;
+  background: rgba(139, 92, 246, 0.12);
+  animation: share-ring 3s ease-in-out infinite 0.5s;
+}
+
+.share-hero__ring--active {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+.share-hero__ring--active.share-hero__ring--2 {
+  background: rgba(34, 197, 94, 0.22);
+}
+
+@keyframes share-ring {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+
+.share-hero__icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #8b5cf6 0%, #7c3aed 100%);
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+  z-index: 1;
+  transition: all 0.3s ease;
+}
+
+.share-hero__icon--live {
+  background: linear-gradient(145deg, #22c55e 0%, #16a34a 100%);
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);
+}
+
+.share-hero__content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.share-hero__header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.share-hero__title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  color: #0f172a;
+  letter-spacing: -0.01em;
+}
+
+.share-hero__badge {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.25rem 0.625rem;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(34, 197, 94, 0.35);
+  animation: badge-glow 2s ease-in-out infinite;
+}
+
+@keyframes badge-glow {
+  0%, 100% {
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.35);
+  }
+  50% {
+    box-shadow: 0 2px 16px rgba(34, 197, 94, 0.5);
+  }
+}
+
+.share-hero__body {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: #64748b;
+  line-height: 1.45;
+}
+
+.share-hero__body--error {
+  color: #dc2626;
+  font-weight: 500;
+}
+
+/* Form container */
+.share-hero__form {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.625rem;
+}
+
+.share-hero__form--input {
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+/* Input wrapper and group */
+.share-hero__input-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.share-hero__input-group {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  border-radius: 12px;
+  border: 2px solid rgba(139, 92, 246, 0.25);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(245, 243, 255, 0.95) 100%);
+  overflow: hidden;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.08);
+}
+
+.share-hero__input-group:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.12);
+}
+
+.share-hero__input-group:focus-within {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.12), 0 4px 16px rgba(139, 92, 246, 0.15);
+  background: #ffffff;
+}
+
+.share-hero__input-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 100%;
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.1) 0%, rgba(139, 92, 246, 0.06) 100%);
+  color: #7c3aed;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+}
+
+.share-hero__input-group:focus-within .share-hero__input-icon {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.18) 0%, rgba(139, 92, 246, 0.1) 100%);
+  color: #6d28d9;
+}
+
+.share-hero__input-domain {
+  padding: 0 0.125rem 0 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #64748b;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+}
+
+.share-hero__input-group:focus-within .share-hero__input-domain {
+  color: #475569;
+}
+
+.share-hero__input {
+  flex: 1;
+  height: 100%;
+  padding: 0 0.875rem 0 0;
+  border: none;
+  background: transparent;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: #7c3aed;
+  letter-spacing: -0.01em;
+  min-width: 0;
+}
+
+.share-hero__input:focus {
+  outline: none;
+}
+
+.share-hero__input::placeholder {
+  color: #c4b5fd;
+  font-weight: 400;
+}
+
+.share-hero__input-hint {
+  font-size: 0.6875rem;
+  color: #94a3b8;
+  padding-left: 0.5rem;
+}
+
+.share-hero__form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+/* Live URL display */
+.share-hero__live-url {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  margin-top: 0.25rem;
+}
+
+.share-hero__url-display {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.875rem;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.04) 100%);
+  border: 1.5px solid rgba(34, 197, 94, 0.2);
+  max-width: 280px;
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.share-hero__live-url--copied .share-hero__url-display {
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.22) 0%, rgba(34, 197, 94, 0.12) 100%);
+  border-color: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15), 0 4px 20px rgba(34, 197, 94, 0.25);
+  animation: url-copied-flash 0.6s ease-out;
+}
+
+@keyframes url-copied-flash {
+  0% {
+    box-shadow: 0 0 0 0 rgba(34, 197, 94, 0);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.08) 0%, rgba(34, 197, 94, 0.04) 100%);
+  }
+  30% {
+    box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.2), 0 4px 30px rgba(34, 197, 94, 0.4);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.3) 0%, rgba(34, 197, 94, 0.15) 100%);
+  }
+  100% {
+    box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.15), 0 4px 20px rgba(34, 197, 94, 0.25);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.22) 0%, rgba(34, 197, 94, 0.12) 100%);
+  }
+}
+
+.share-hero__url-icon {
+  color: #16a34a;
+  flex-shrink: 0;
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.share-hero__live-url--copied .share-hero__url-icon {
+  color: #15803d;
+  transform: scale(1.3);
+  animation: icon-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes icon-pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.5);
+  }
+  70% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1.3);
+  }
+}
+
+.share-hero__url-text {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #15803d;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: all 0.3s;
+}
+
+.share-hero__live-url--copied .share-hero__url-text {
+  color: #14532d;
+  font-weight: 700;
+}
+
+/* Copy button with satisfying animation */
+.share-hero__copy-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  height: 36px;
+  padding: 0 0.875rem;
+  border: 1.5px solid rgba(34, 197, 94, 0.3);
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #15803d;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.share-hero__copy-btn::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(34, 197, 94, 0.4) 0%, transparent 70%);
+  opacity: 0;
+  transform: scale(0);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+}
+
+.share-hero__copy-btn:hover:not(.share-hero__copy-btn--copied) {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: rgba(34, 197, 94, 0.4);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(34, 197, 94, 0.2);
+}
+
+.share-hero__copy-btn--copied:hover {
+  background: #15803d;
+  border-color: #15803d;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(22, 163, 74, 0.5);
+}
+
+.share-hero__copy-btn:active {
+  transform: scale(0.95);
+}
+
+.share-hero__copy-btn--copied {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #ffffff;
+  box-shadow: 0 4px 16px rgba(22, 163, 74, 0.4);
+  animation: copy-success-bounce 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.share-hero__copy-btn--copied::before {
+  display: none;
+}
+
+.share-hero__copy-btn--copied svg {
+  animation: copy-checkmark 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  color: #ffffff;
+}
+
+.share-hero__copy-btn--copied span {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+@keyframes copy-success-bounce {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.1);
+  }
+  60% {
+    transform: scale(0.95);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes copy-checkmark {
+  0% {
+    transform: scale(0);
+  }
+  60% {
+    transform: scale(1.2);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Cancel link button */
+.share-hero__cancel {
+  padding: 0.5rem 0.75rem;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s;
+  border-radius: 8px;
+}
+
+.share-hero__cancel:hover:not(:disabled) {
+  color: #64748b;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.share-hero__cancel:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Action area */
+.share-hero__action {
+  flex-shrink: 0;
+}
+
+/* Buttons */
+.share-hero__button {
+  height: 38px;
+  padding: 0 1.125rem;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #ffffff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(139, 92, 246, 0.3);
+  white-space: nowrap;
+}
+
+.share-hero__button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+}
+
+.share-hero__button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.share-hero__button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.share-hero__button--primary {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #ffffff;
+}
+
+.share-hero__button--large {
+  height: 42px;
+  padding: 0 1.375rem;
+  font-size: 0.875rem;
+  border-radius: 12px;
+  gap: 0.5rem;
+}
+
+.share-hero__button--loading {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
+  pointer-events: none;
+  animation: share-button-pulse 2s ease-in-out infinite;
+  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+}
+
+.share-hero__button--loading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.4) 50%,
+    transparent 100%
+  );
+  animation: share-shimmer 1.2s ease-in-out infinite;
+}
+
+@keyframes share-button-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 6px 28px rgba(139, 92, 246, 0.55);
+    transform: scale(1.02);
+  }
+}
+
+@keyframes share-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.share-hero__spinner {
+  animation: share-spin 0.7s linear infinite;
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
+}
+
+@keyframes share-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* CTA button (View Live / Open) */
+.share-hero__cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  height: 42px;
+  padding: 0 1.375rem;
+  border-radius: 999px;
+  text-decoration: none;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: #ffffff;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  box-shadow: 0 4px 14px rgba(139, 92, 246, 0.35);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.share-hero__cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(139, 92, 246, 0.45);
+}
+
+.share-hero__cta:active {
+  transform: scale(0.98);
+}
+
+.share-hero__cta--live {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.35);
+}
+
+.share-hero__cta--live:hover {
+  box-shadow: 0 6px 20px rgba(34, 197, 94, 0.45);
+}
+
+/* ========== RESPONSIVE: Tablet (max-width: 640px) ========== */
+@media (max-width: 640px) {
+  .share-hero {
+    padding: 1rem;
+    gap: 1rem;
+  }
+
+  .share-hero__visual {
+    width: 56px;
+    height: 56px;
+  }
+
+  .share-hero__icon {
+    width: 36px;
+    height: 36px;
+  }
+
+  .share-hero__icon svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .share-hero__title {
+    font-size: 0.9375rem;
+  }
+
+  .share-hero__body {
+    font-size: 0.75rem;
+  }
+
+  .share-hero__input-wrapper {
+    max-width: 100%;
+  }
+
+  .share-hero__input-group {
+    height: 40px;
+  }
+
+  .share-hero__input-icon {
+    width: 36px;
+  }
+
+  .share-hero__input-icon svg {
+    width: 13px;
+    height: 13px;
+  }
+
+  .share-hero__input-domain {
+    font-size: 0.8125rem;
+  }
+
+  .share-hero__input {
+    font-size: 0.875rem;
+  }
+
+  .share-hero__input-hint {
+    font-size: 0.625rem;
+  }
+
+  .share-hero__live-url {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .share-hero__url-display {
+    max-width: 100%;
+    padding: 0.4375rem 0.75rem;
+  }
+
+  .share-hero__url-text {
+    font-size: 0.8125rem;
+  }
+
+  .share-hero__copy-btn {
+    height: 34px;
+    font-size: 0.75rem;
+  }
+
+  .share-hero__button {
+    height: 36px;
+    font-size: 0.8125rem;
+    padding: 0 1rem;
+  }
+
+  .share-hero__button--large {
+    height: 38px;
+    padding: 0 1.125rem;
+  }
+
+  .share-hero__cta {
+    height: 38px;
+    padding: 0 1.125rem;
+    font-size: 0.8125rem;
+  }
+}
+
+/* ========== RESPONSIVE: Mobile (max-width: 480px) ========== */
+@media (max-width: 480px) {
+  .share-hero {
+    padding: 0.875rem;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+  }
+
+  .share-hero__visual {
+    width: 48px;
+    height: 48px;
+  }
+
+  .share-hero__icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .share-hero__icon svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .share-hero__content {
+    flex: 1 1 calc(100% - 60px);
+    min-width: 0;
+  }
+
+  .share-hero__title {
+    font-size: 0.875rem;
+  }
+
+  .share-hero__badge {
+    font-size: 0.5625rem;
+    padding: 0.1875rem 0.5rem;
+  }
+
+  .share-hero__body {
+    font-size: 0.6875rem;
+    line-height: 1.4;
+  }
+
+  .share-hero__form {
+    margin-top: 0.5rem;
+    width: 100%;
+  }
+
+  .share-hero__form--input {
+    gap: 0.5rem;
+  }
+
+  .share-hero__input-group {
+    height: 38px;
+  }
+
+  .share-hero__input-icon {
+    width: 32px;
+  }
+
+  .share-hero__input-domain {
+    font-size: 0.75rem;
+  }
+
+  .share-hero__input {
+    font-size: 0.8125rem;
+  }
+
+  .share-hero__input-hint {
+    display: none;
+  }
+
+  .share-hero__form-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .share-hero__live-url {
+    width: 100%;
+  }
+
+  .share-hero__url-display {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .share-hero__copy-btn {
+    height: 32px;
+    padding: 0 0.75rem;
+    font-size: 0.6875rem;
+  }
+
+  .share-hero__button {
+    height: 34px;
+    padding: 0 0.875rem;
+    font-size: 0.75rem;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .share-hero__button--large {
+    height: 36px;
+    padding: 0 1rem;
+    font-size: 0.8125rem;
+  }
+
+  .share-hero__cancel {
+    font-size: 0.75rem;
+    padding: 0.375rem 0.625rem;
+  }
+
+  .share-hero__action {
+    width: 100%;
+    margin-top: 0.25rem;
+  }
+
+  .share-hero__cta {
+    width: 100%;
+    justify-content: center;
+    height: 40px;
+    font-size: 0.8125rem;
+  }
+}
+
+/* ==========================================================================
    Org Hero Panel - Organization transfer styling
    ========================================================================== */
 
@@ -790,7 +1614,7 @@
   align-items: center;
   gap: 1.25rem;
   width: 100%;
-  height: 100%;
+  min-height: 70px;
   padding: 0.625rem 1.5rem;
   position: relative;
   box-sizing: border-box;
