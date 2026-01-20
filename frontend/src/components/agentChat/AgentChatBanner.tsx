@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Settings, X, Zap } from 'lucide-react'
+import { Check, Settings, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -27,6 +27,7 @@ type AgentChatBannerProps = {
   dailyCreditsStatus?: DailyCreditsStatus | null
   onSettingsOpen?: () => void
   onClose?: () => void
+  onShare?: () => void
   sidebarCollapsed?: boolean
   onUpgrade?: (plan: PlanTier) => void
 }
@@ -56,6 +57,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   dailyCreditsStatus,
   onSettingsOpen,
   onClose,
+  onShare,
   sidebarCollapsed = true,
   onUpgrade,
 }: AgentChatBannerProps) {
@@ -172,6 +174,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
 
+  const showActions = Boolean(onShare || onClose || showSettingsButton)
+
   return (
     <div className={shellClass} ref={bannerRef}>
       <div
@@ -242,6 +246,17 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span>{upgradeButtonLabel}</span>
               </button>
             )}
+            {onShare ? (
+              <button
+                type="button"
+                className="banner-share"
+                onClick={onShare}
+                aria-label="Invite collaborators"
+              >
+                <UserPlus size={14} strokeWidth={2} />
+                <span className="banner-share-label">Collaborate</span>
+              </button>
+            ) : null}
             {showSettingsButton ? (
               <button
                 type="button"

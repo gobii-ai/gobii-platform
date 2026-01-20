@@ -44,6 +44,14 @@ const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
 const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
+const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
+const canManageCollaboratorsRaw = mountNode.dataset.canManageCollaborators
+const canManageCollaborators =
+  canManageCollaboratorsRaw === 'true'
+    ? true
+    : canManageCollaboratorsRaw === 'false'
+      ? false
+      : null
 
 let screen: ReactElement
 
@@ -81,6 +89,8 @@ switch (appName) {
         agentName={agentName}
         agentColor={agentColor}
         agentAvatarUrl={agentAvatarUrl}
+        collaboratorInviteUrl={collaboratorInviteUrl}
+        canManageCollaborators={canManageCollaborators}
         onClose={handleEmbeddedClose}
       />
     )

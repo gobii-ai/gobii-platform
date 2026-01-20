@@ -65,6 +65,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
+  onShare?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   onComposerFocus?: () => void
   isNearBottom?: boolean
@@ -142,6 +143,7 @@ export function AgentChatLayout({
   onLoadNewer,
   onJumpToLatest,
   onClose,
+  onShare,
   onSendMessage,
   onComposerFocus,
   isNearBottom = true,
@@ -287,6 +289,7 @@ export function AgentChatLayout({
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
           onClose={onClose}
+          onShare={onShare}
           sidebarCollapsed={sidebarCollapsed}
           onUpgrade={onUpgrade}
         />

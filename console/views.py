@@ -4872,6 +4872,19 @@ class SharedAgentAccessMixin:
         agent = resolve_agent_for_request(self.request, agent_id, allow_shared=True)
         self._can_manage_agent = user_can_manage_agent(self.request.user, agent)
         self._is_collaborator = user_is_collaborator(self.request.user, agent)
+        self._can_manage_collaborators = False
+        if agent.user_id == self.request.user.id:
+            self._can_manage_collaborators = True
+        elif agent.organization_id:
+            self._can_manage_collaborators = OrganizationMembership.objects.filter(
+                org=agent.organization,
+                user=self.request.user,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                ],
+            ).exists()
         return agent
 
     @property
@@ -4881,6 +4894,10 @@ class SharedAgentAccessMixin:
     @property
     def is_collaborator(self) -> bool:
         return bool(getattr(self, "_is_collaborator", False))
+
+    @property
+    def can_manage_collaborators(self) -> bool:
+        return bool(getattr(self, "_can_manage_collaborators", False))
 
 
 class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
@@ -4893,6 +4910,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         context = super().get_context_data(**kwargs)
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
+        context["can_manage_collaborators"] = self.can_manage_collaborators
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
         return context
