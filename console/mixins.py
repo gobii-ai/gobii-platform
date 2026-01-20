@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import Http404
 
@@ -5,6 +7,10 @@ from api.models import OrganizationMembership
 
 from .context_helpers import build_console_context
 from util.integrations import stripe_status
+from util.subscription_helper import get_user_plan
+from constants.plans import PlanNames
+
+logger = logging.getLogger(__name__)
 
 
 class ConsoleContextMixin:
@@ -31,6 +37,15 @@ class ConsoleContextMixin:
                 context['current_membership'] = resolved.current_membership
 
             context['can_manage_org_agents'] = resolved.can_manage_org_agents
+
+            # Add user's subscription plan for frontend
+            try:
+                plan = get_user_plan(self.request.user)
+                plan_id = str(plan.get("id", "")).lower() if plan else ""
+                context['user_plan'] = plan_id if plan_id in (PlanNames.FREE, PlanNames.STARTUP, PlanNames.SCALE) else ""
+            except Exception:
+                logger.exception("Error fetching user plan for context")
+                context['user_plan'] = ""
 
         context['stripe_enabled'] = stripe_status().enabled
 
