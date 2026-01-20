@@ -1662,6 +1662,33 @@ def get_billing_settings(request):
             'error': str(e)
         }, status=400)
 
+
+@login_required
+@tracer.start_as_current_span("Get User Plan")
+def get_user_plan_api(request):
+    """Return the user's current subscription plan for frontend use."""
+    from util.subscription_helper import get_user_plan
+    from constants.plans import PlanNames
+
+    try:
+        plan = get_user_plan(request.user)
+        plan_id = str(plan.get("id", "")).lower() if plan else ""
+        # Map internal plan IDs to frontend-friendly values
+        plan_map = {
+            PlanNames.FREE: 'free',
+            PlanNames.STARTUP: 'startup',
+            PlanNames.SCALE: 'scale',
+        }
+        return JsonResponse({
+            'plan': plan_map.get(plan_id, 'free'),
+        })
+    except Exception as e:
+        return JsonResponse({
+            'plan': 'free',
+            'error': str(e),
+        })
+
+
 @login_required
 @require_POST
 @tracer.start_as_current_span("BILLING Cancel Subscription")
