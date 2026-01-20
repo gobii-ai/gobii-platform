@@ -680,6 +680,7 @@ export function AgentChatPage({
   const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
+  const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -740,6 +741,7 @@ export function AgentChatPage({
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
       shortDescription: '',
+      isOrgOwned: false,
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
   const sidebarAgents = useMemo(() => {
@@ -1038,6 +1040,7 @@ export function AgentChatPage({
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
+        agentIsOrgOwned={resolvedIsOrgOwned}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}

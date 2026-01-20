@@ -16,6 +16,7 @@ type AgentChatBannerProps = {
   agentName: string
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
+  isOrgOwned?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -45,6 +46,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentName,
   agentAvatarUrl,
   agentColorHex,
+  isOrgOwned = false,
   connectionStatus = 'connecting',
   connectionLabel = 'Connecting',
   kanbanSnapshot,
@@ -67,7 +69,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const { currentPlan, isUpgradeModalOpen, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
 
   // Determine if we should show upgrade button and what it should say
-  const showUpgradeButton = currentPlan === 'free' || currentPlan === 'startup'
+  // Don't show upgrade button for org-owned agents (billing is handled at org level)
+  const showUpgradeButton = !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
   const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 

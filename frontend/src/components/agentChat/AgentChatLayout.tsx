@@ -24,6 +24,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
   agentName?: string | null
+  agentIsOrgOwned?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -82,6 +83,7 @@ export function AgentChatLayout({
   agentColorHex,
   agentAvatarUrl,
   agentName,
+  agentIsOrgOwned = false,
   connectionStatus,
   connectionLabel,
   connectionDetail,
@@ -206,6 +208,7 @@ export function AgentChatLayout({
           agentName={agentName || 'Agent'}
           agentAvatarUrl={agentAvatarUrl}
           agentColorHex={agentColorHex}
+          isOrgOwned={agentIsOrgOwned}
           connectionStatus={connectionStatus}
           connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
