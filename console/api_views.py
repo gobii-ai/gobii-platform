@@ -101,7 +101,11 @@ from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
-from console.agent_addons import build_agent_addons_payload, update_contact_pack_quantities
+from console.agent_addons import (
+    build_agent_addons_payload,
+    update_contact_pack_quantities,
+    update_task_pack_quantities,
+)
 from console.daily_credit import (
     build_agent_daily_credit_context,
     build_daily_credit_status,
@@ -4252,23 +4256,45 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         contact_pack_payload = payload.get("contactPacks")
-        if contact_pack_payload is None:
-            return HttpResponseBadRequest("contactPacks payload is required")
-        if not isinstance(contact_pack_payload, dict):
-            return HttpResponseBadRequest("contactPacks must be an object")
-        quantities = contact_pack_payload.get("quantities")
-        if not isinstance(quantities, dict):
-            return HttpResponseBadRequest("contactPacks.quantities must be an object")
+        task_pack_payload = payload.get("taskPacks")
+        if contact_pack_payload is None and task_pack_payload is None:
+            return HttpResponseBadRequest("contactPacks or taskPacks payload is required")
         if not can_manage_billing:
-            return JsonResponse({"error": "You do not have permission to manage contact packs."}, status=403)
-        success, error, status = update_contact_pack_quantities(
-            owner=owner,
-            owner_type="organization" if agent.organization_id else "user",
-            plan_id=(plan_payload or {}).get("id"),
-            quantities=quantities,
-        )
-        if not success:
-            return JsonResponse({"error": error}, status=status)
+            return JsonResponse({"error": "You do not have permission to manage add-on packs."}, status=403)
+
+        def _validate_pack_payload(pack_payload: object, label: str) -> dict | HttpResponseBadRequest:
+            if not isinstance(pack_payload, dict):
+                return HttpResponseBadRequest(f"{label} must be an object")
+            quantities = pack_payload.get("quantities")
+            if not isinstance(quantities, dict):
+                return HttpResponseBadRequest(f"{label}.quantities must be an object")
+            return quantities
+
+        if contact_pack_payload is not None:
+            quantities = _validate_pack_payload(contact_pack_payload, "contactPacks")
+            if isinstance(quantities, HttpResponseBadRequest):
+                return quantities
+            success, error, status = update_contact_pack_quantities(
+                owner=owner,
+                owner_type="organization" if agent.organization_id else "user",
+                plan_id=(plan_payload or {}).get("id"),
+                quantities=quantities,
+            )
+            if not success:
+                return JsonResponse({"error": error}, status=status)
+
+        if task_pack_payload is not None:
+            quantities = _validate_pack_payload(task_pack_payload, "taskPacks")
+            if isinstance(quantities, HttpResponseBadRequest):
+                return quantities
+            success, error, status = update_task_pack_quantities(
+                owner=owner,
+                owner_type="organization" if agent.organization_id else "user",
+                plan_id=(plan_payload or {}).get("id"),
+                quantities=quantities,
+            )
+            if not success:
+                return JsonResponse({"error": error}, status=status)
 
         payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)

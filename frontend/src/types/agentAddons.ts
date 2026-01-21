@@ -20,8 +20,22 @@ export type ContactPackOption = {
   priceDisplay?: string | null
 }
 
+export type TaskPackOption = {
+  priceId: string
+  delta: number
+  quantity: number
+  unitAmount?: number | null
+  currency?: string | null
+  priceDisplay?: string | null
+}
+
 export type ContactPackSettings = {
   options: ContactPackOption[]
+  canManageBilling?: boolean
+}
+
+export type TaskPackSettings = {
+  options: TaskPackOption[]
   canManageBilling?: boolean
 }
 
@@ -31,6 +45,7 @@ export type AgentAddonsResponse = {
     contactCap?: ContactCapStatus | null
   }
   contactPacks?: ContactPackSettings | null
+  taskPacks?: TaskPackSettings | null
   plan?: {
     id?: string | null
     name?: string | null
@@ -43,7 +58,10 @@ export type AgentAddonsResponse = {
 }
 
 export type AgentAddonsUpdatePayload = {
-  contactPacks: {
+  contactPacks?: {
+    quantities: Record<string, number>
+  }
+  taskPacks?: {
     quantities: Record<string, number>
   }
 }
