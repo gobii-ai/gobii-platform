@@ -1,6 +1,7 @@
 from django.urls import path, include
 from django.http import HttpResponse
 
+from config import settings
 from config.settings import GOBII_PROPRIETARY_MODE
 from proprietary.views import BlogSitemap
 from .views import (
@@ -88,7 +89,7 @@ urlpatterns = [
 if GOBII_PROPRIETARY_MODE:
     urlpatterns.append(
         path('.well-known/security.txt', lambda r: HttpResponse(
-            "Contact: mailto:security@gobii.ai\nExpires: 2027-01-01T17:00:00.000Z\n",
+            f"Contact: mailto:{settings.SECURITY_TXT_EMAIL}\nExpires: {settings.SECURITY_TXT_EXPIRY}\n",
             content_type='text/plain',
         ))
     )
