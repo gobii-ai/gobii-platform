@@ -208,6 +208,7 @@ export type AgentChatPageProps = {
   agentAvatarUrl?: string | null
   collaboratorInviteUrl?: string | null
   viewerUserId?: number | null
+  viewerEmail?: string | null
   canManageCollaborators?: boolean | null
   onClose?: () => void
   onCreateAgent?: () => void
@@ -229,6 +230,7 @@ export function AgentChatPage({
   agentAvatarUrl,
   collaboratorInviteUrl,
   viewerUserId,
+  viewerEmail,
   canManageCollaborators,
   onClose,
   onCreateAgent,
@@ -1105,6 +1107,7 @@ export function AgentChatPage({
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         agentIsOrgOwned={resolvedIsOrgOwned}
         viewerUserId={viewerUserId ?? null}
+        viewerEmail={viewerEmail ?? null}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}

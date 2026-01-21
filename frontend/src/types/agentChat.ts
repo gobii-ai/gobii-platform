@@ -32,6 +32,7 @@ export type AgentMessage = {
   selfAgentName?: string | null
   senderUserId?: number | null
   senderName?: string | null
+  senderAddress?: string | null
 }
 
 export type ToolMeta = {

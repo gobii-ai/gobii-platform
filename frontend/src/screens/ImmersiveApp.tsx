@@ -23,6 +23,7 @@ type LocationSnapshot = {
 
 type ConsoleSessionPayload = {
   user_id?: string
+  email?: string
 }
 
 function readLocation(): LocationSnapshot {
@@ -223,6 +224,7 @@ export function ImmersiveApp() {
   }, [location.search])
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
+  const [viewerEmail, setViewerEmail] = useState<string | null>(null)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
@@ -265,11 +267,13 @@ export function ImmersiveApp() {
         const raw = payload?.user_id ?? null
         const numeric = raw ? Number(raw) : null
         setViewerUserId(Number.isFinite(numeric) ? numeric : null)
+        setViewerEmail(payload?.email ? payload.email : null)
       } catch (err) {
         if (controller.signal.aborted) {
           return
         }
         setViewerUserId(null)
+        setViewerEmail(null)
       }
     }
     void loadViewer()
@@ -307,6 +311,7 @@ export function ImmersiveApp() {
           <AgentChatPage
             agentId={route.agentId}
             viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}
@@ -318,6 +323,7 @@ export function ImmersiveApp() {
         {route.kind === 'agent-select' ? (
           <AgentChatPage
             viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
             onClose={embed ? handleEmbeddedClose : handleClose}
             onCreateAgent={handleNavigateToNewAgent}
             onAgentCreated={handleAgentCreated}

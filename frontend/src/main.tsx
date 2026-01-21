@@ -48,6 +48,7 @@ const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
 const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
 const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
+const viewerEmail = mountNode.dataset.viewerEmail || null
 const canManageCollaboratorsRaw = mountNode.dataset.canManageCollaborators
 const canManageCollaborators =
   canManageCollaboratorsRaw === 'true'
@@ -95,6 +96,7 @@ switch (appName) {
         collaboratorInviteUrl={collaboratorInviteUrl}
         canManageCollaborators={canManageCollaborators}
         viewerUserId={viewerUserId}
+        viewerEmail={viewerEmail}
         onClose={handleEmbeddedClose}
       />
     )

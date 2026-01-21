@@ -29,6 +29,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentName?: string | null
   agentIsOrgOwned?: boolean
   viewerUserId?: number | null
+  viewerEmail?: string | null
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -99,6 +100,7 @@ export function AgentChatLayout({
   agentName,
   agentIsOrgOwned = false,
   viewerUserId,
+  viewerEmail,
   connectionStatus,
   connectionLabel,
   connectionDetail,
@@ -352,6 +354,7 @@ export function AgentChatLayout({
                     events={events}
                     agentColorHex={agentColorHex || undefined}
                     viewerUserId={viewerUserId ?? null}
+                    viewerEmail={viewerEmail ?? null}
                     initialLoading={initialLoading}
                     suppressedThinkingCursor={suppressedThinkingCursor}
                   />

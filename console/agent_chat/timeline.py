@@ -458,6 +458,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
             "selfAgentName": self_agent_name,
             "senderUserId": sender_user_id,
             "senderName": sender_name,
+            "senderAddress": sender_address,
         },
     }
 

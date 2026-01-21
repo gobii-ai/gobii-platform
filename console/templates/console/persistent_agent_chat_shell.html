@@ -16,6 +16,7 @@
        data-user-plan="{{ user_plan|default:'' }}"
        data-is-proprietary-mode="{% if settings.GOBII_PROPRIETARY_MODE %}true{% else %}false{% endif %}">
        data-viewer-user-id="{{ request.user.id }}"
+       data-viewer-email="{{ request.user.email|default_if_none:'' }}"
        data-collaborator-invite-url="{% url 'agent_detail' pk=agent.id %}"
        data-can-manage-collaborators="{% if can_manage_collaborators %}true{% else %}false{% endif %}">
   </div>

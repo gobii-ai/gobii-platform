@@ -114,6 +114,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message_event["message"]["bodyText"], "Hello from the owner")
         self.assertEqual(message_event["message"]["senderUserId"], self.user.id)
         self.assertEqual(message_event["message"]["senderName"], self.user.email)
+        self.assertEqual(message_event["message"]["senderAddress"], self.user_address)
 
         tool_cluster = next(event for event in events if event["kind"] == "steps")
         self.assertEqual(tool_cluster["entries"][0]["toolName"], "send_email")

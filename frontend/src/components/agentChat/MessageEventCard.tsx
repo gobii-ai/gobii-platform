@@ -25,6 +25,7 @@ type MessageEventCardProps = {
   agentFirstName: string
   agentColorHex?: string
   viewerUserId?: number | null
+  viewerEmail?: string | null
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -35,7 +36,7 @@ function isRecentMessage(timestamp?: string | null): boolean {
   return Date.now() - messageTime < 3000
 }
 
-export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex, viewerUserId }: MessageEventCardProps) {
+export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex, viewerUserId, viewerEmail }: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
@@ -60,9 +61,17 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
       ? 'chat-author--agent'
       : 'chat-author--user'
 
+  const normalizedViewerEmail = viewerEmail?.trim().toLowerCase()
+  const normalizedSenderAddress = message.senderAddress?.trim().toLowerCase()
+  const isViewerEmailSender = channel === 'email'
+    && Boolean(normalizedViewerEmail)
+    && Boolean(normalizedSenderAddress)
+    && normalizedViewerEmail === normalizedSenderAddress
   const isViewerSender = !isAgent
     && !isPeer
-    && (Boolean(message.clientId) || (message.senderUserId !== null && message.senderUserId !== undefined && message.senderUserId === viewerUserId))
+    && (Boolean(message.clientId)
+      || (message.senderUserId !== null && message.senderUserId !== undefined && message.senderUserId === viewerUserId)
+      || isViewerEmailSender)
 
   let authorLabel = isAgent ? agentFirstName || 'Agent' : (isViewerSender ? 'You' : (message.senderName?.trim() || 'User'))
   if (isPeer) {
