@@ -5,7 +5,7 @@ from typing import Any, Iterable, Mapping
 
 from django.apps import apps
 from django.db import transaction, DatabaseError
-from django.db.models import F, IntegerField, Sum
+from django.db.models import F, IntegerField, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 
@@ -542,12 +542,15 @@ class AddonEntitlementService:
         credits = entitlement.task_credits_delta * entitlement.quantity
         if credits <= 0:
             return
+        credits_value = Decimal(credits)
 
         obj = TaskCredit.objects.filter(**filters).first()
         update_fields: list[str] = []
         if obj:
-            if obj.credits != credits:
-                obj.credits = credits
+            if obj.credits_used and credits_value < obj.credits_used:
+                credits_value = obj.credits_used
+            if obj.credits != credits_value:
+                obj.credits = credits_value
                 update_fields.append("credits")
             if obj.expiration_date != expiration:
                 obj.expiration_date = expiration
@@ -560,7 +563,7 @@ class AddonEntitlementService:
             return
 
         create_kwargs = dict(
-            credits=credits,
+            credits=credits_value,
             credits_used=0,
             granted_date=grant_date,
             expiration_date=expiration,
@@ -575,6 +578,36 @@ class AddonEntitlementService:
             create_kwargs["user"] = owner
 
         TaskCredit.objects.create(**create_kwargs)
+
+    @staticmethod
+    def _revoke_task_pack_credits(owner, owner_type: str, price_ids: Iterable[str]) -> None:
+        if not price_ids:
+            return
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        now = timezone.now()
+        owner_filters: dict[str, Any] = {
+            "voided": False,
+            "grant_type": GrantTypeChoices.TASK_PACK,
+            "expiration_date__gte": now,
+        }
+        if owner_type == "organization":
+            owner_filters["organization"] = owner
+        else:
+            owner_filters["user"] = owner
+
+        price_filter = Q()
+        for price_id in set(price_ids):
+            if price_id:
+                price_filter |= Q(stripe_invoice_id__startswith=f"addon:{price_id}:")
+        if not price_filter:
+            return
+
+        (
+            TaskCredit.objects
+            .filter(price_filter, **owner_filters)
+            .filter(credits__gt=F("credits_used"))
+            .update(credits=F("credits_used"))
+        )
 
     @staticmethod
     @transaction.atomic
@@ -606,8 +639,12 @@ class AddonEntitlementService:
         now = timezone.now()
         active_for_owner = model.objects.for_owner(owner).filter(is_recurring=True)
         misconfigured = active_for_owner.exclude(price_id__in=price_map.keys())
+        misconfigured_task_price_ids = list(
+            misconfigured.filter(task_credits_delta__gt=0).values_list("price_id", flat=True).distinct()
+        )
         if misconfigured.exists():
             misconfigured.update(expires_at=now)
+            AddonEntitlementService._revoke_task_pack_credits(owner, owner_type, misconfigured_task_price_ids)
 
         active_now = active_for_owner.filter(price_id__in=price_map.keys())
 
@@ -705,5 +742,9 @@ class AddonEntitlementService:
             if seen_price_ids
             else active_now
         )
+        stale_task_price_ids = list(
+            stale.filter(task_credits_delta__gt=0).values_list("price_id", flat=True).distinct()
+        )
         if stale.exists():
             stale.update(expires_at=now)
+            AddonEntitlementService._revoke_task_pack_credits(owner, owner_type, stale_task_price_ids)
