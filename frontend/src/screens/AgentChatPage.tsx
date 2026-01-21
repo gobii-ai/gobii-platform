@@ -1027,7 +1027,6 @@ export function AgentChatPage({
   const contactPackOptions = addonsPayload?.contactPacks?.options ?? []
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
   const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
-  const contactPackUpgradeUrl = addonsPayload?.upgradeUrl ?? null
   const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
@@ -1089,7 +1088,6 @@ export function AgentChatPage({
         contactCapStatus={contactCapStatus}
         contactPackOptions={contactPackOptions}
         contactPackCanManageBilling={contactPackCanManageBilling}
-        contactPackUpgradeUrl={contactPackUpgradeUrl}
         contactPackShowUpgrade={contactPackShowUpgrade}
         contactPackUpdating={addonsUpdating}
         onUpdateContactPacks={contactPackCanManageBilling ? handleUpdateContactPacks : undefined}
