@@ -1,8 +1,10 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import { X } from 'lucide-react'
+
+const DRAG_CLOSE_THRESHOLD = 120
 
 type AgentChatMobileSheetProps = {
   open: boolean
@@ -29,6 +31,17 @@ export function AgentChatMobileSheet({
   keepMounted = false,
   bodyPadding = true,
 }: AgentChatMobileSheetProps) {
+  const [dragOffset, setDragOffset] = useState(0)
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartYRef = useRef(0)
+  const dragOffsetRef = useRef(0)
+  const draggingRef = useRef(false)
+
+  const setDragOffsetValue = useCallback((value: number) => {
+    dragOffsetRef.current = value
+    setDragOffset(value)
+  }, [])
+
   useEffect(() => {
     if (!open) {
       return
@@ -47,6 +60,58 @@ export function AgentChatMobileSheet({
     }
   }, [onClose, open])
 
+  useEffect(() => {
+    if (open) {
+      return
+    }
+    setIsDragging(false)
+    draggingRef.current = false
+    setDragOffsetValue(0)
+  }, [open, setDragOffsetValue])
+
+  const handleGrabberPointerDown = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!open) {
+        return
+      }
+      if (event.pointerType === 'mouse' && event.button !== 0) {
+        return
+      }
+      dragStartYRef.current = event.clientY
+      draggingRef.current = true
+      setIsDragging(true)
+      setDragOffsetValue(0)
+      event.currentTarget.setPointerCapture(event.pointerId)
+    },
+    [open, setDragOffsetValue],
+  )
+
+  const handleGrabberPointerMove = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!draggingRef.current) {
+        return
+      }
+      const delta = event.clientY - dragStartYRef.current
+      const nextOffset = Math.max(0, delta)
+      setDragOffsetValue(nextOffset)
+    },
+    [setDragOffsetValue],
+  )
+
+  const handleGrabberPointerUp = useCallback(() => {
+    if (!draggingRef.current) {
+      return
+    }
+    draggingRef.current = false
+    setIsDragging(false)
+    const offset = dragOffsetRef.current
+    setDragOffsetValue(0)
+    if (offset > DRAG_CLOSE_THRESHOLD) {
+      onClose()
+      return
+    }
+  }, [isDragging, onClose, setDragOffsetValue])
+
   if (typeof document === 'undefined') {
     return null
   }
@@ -54,6 +119,8 @@ export function AgentChatMobileSheet({
   if (!open && !keepMounted) {
     return null
   }
+
+  const panelStyle = isDragging ? { transform: `translateY(${dragOffset}px)` } : undefined
 
   return createPortal(
     <div className={`agent-mobile-sheet ${open ? 'agent-mobile-sheet--open' : ''}`}>
@@ -64,12 +131,28 @@ export function AgentChatMobileSheet({
         aria-hidden="true"
       />
       <div
-        className={`agent-mobile-sheet-panel ${open ? 'agent-mobile-sheet-panel--open' : ''}`}
+        className={[
+          'agent-mobile-sheet-panel',
+          open ? 'agent-mobile-sheet-panel--open' : '',
+          isDragging ? 'agent-mobile-sheet-panel--dragging' : '',
+        ].join(' ')}
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel || title}
         aria-hidden={!open}
+        style={panelStyle}
       >
+        <div
+          className="agent-mobile-sheet-grabber"
+          role="presentation"
+          aria-hidden="true"
+          onPointerDown={handleGrabberPointerDown}
+          onPointerMove={handleGrabberPointerMove}
+          onPointerUp={handleGrabberPointerUp}
+          onPointerCancel={handleGrabberPointerUp}
+        >
+          <div className="agent-mobile-sheet-grabber-bar" />
+        </div>
         <div className="agent-mobile-sheet-header">
           <div className="agent-mobile-sheet-heading">
             {Icon ? (
