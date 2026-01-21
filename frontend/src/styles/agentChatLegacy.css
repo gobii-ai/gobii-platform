@@ -465,6 +465,14 @@
   .banner-upgrade {
     padding: 0.375rem;
   }
+
+  .banner-upgrade--text span {
+    display: inline;
+  }
+
+  .banner-upgrade--text {
+    padding: 0.375rem 0.75rem;
+  }
 }
 
 .banner-progress-wrapper {

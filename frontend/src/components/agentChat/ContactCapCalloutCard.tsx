@@ -53,7 +53,7 @@ export function ContactCapCalloutCard({
           {canShowUpgrade ? (
             <div className="hard-limit-callout-upsell">
               <span>Need more contacts? Upgrade your plan to expand the contact cap.</span>
-              <button type="button" className="banner-upgrade" onClick={handleUpgradeClick}>
+              <button type="button" className="banner-upgrade banner-upgrade--text" onClick={handleUpgradeClick}>
                 <Zap size={14} strokeWidth={2} />
                 <span>Upgrade</span>
               </button>
