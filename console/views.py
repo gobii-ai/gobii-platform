@@ -5973,10 +5973,13 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         ).count()
         
         context['max_contacts'] = max_contacts
+        context['contact_cap_unlimited'] = max_contacts <= 0
         context['active_count'] = active_count
         context['pending_invites'] = pending_invites
         context['total_count'] = active_count + pending_invites
-        context['remaining_slots'] = max(0, max_contacts - (active_count + pending_invites))
+        context['remaining_slots'] = (
+            None if max_contacts <= 0 else max(0, max_contacts - (active_count + pending_invites))
+        )
         
         # Create form
         from console.forms import ContactRequestApprovalForm

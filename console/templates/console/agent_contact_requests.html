@@ -30,19 +30,26 @@
         <div>
           <h3 class="text-sm font-semibold text-gray-800 mb-1">Contact Limit Status</h3>
           <p class="text-sm text-gray-700">
-            Currently using <span class="font-semibold">{{ total_count }}</span> of <span class="font-semibold">{{ max_contacts }}</span> allowed contacts
+            Currently using <span class="font-semibold">{{ total_count }}</span>
+            {% if contact_cap_unlimited %}
+              contacts (unlimited)
+            {% else %}
+              of <span class="font-semibold">{{ max_contacts }}</span> allowed contacts
+            {% endif %}
             {% if pending_invites > 0 %}
               (includes {{ pending_invites }} pending invitation{{ pending_invites|pluralize }})
             {% endif %}
           </p>
-          {% if remaining_slots <= 0 %}
-            <p class="text-sm text-orange-700 mt-1 font-semibold">
-              ⚠️ Contact limit reached. You must remove existing contacts before sending new invitations.
-            </p>
-          {% elif remaining_slots <= 3 %}
-            <p class="text-sm text-orange-700 mt-1">
-              Only {{ remaining_slots }} slot{{ remaining_slots|pluralize }} remaining.
-            </p>
+          {% if not contact_cap_unlimited %}
+            {% if remaining_slots <= 0 %}
+              <p class="text-sm text-orange-700 mt-1 font-semibold">
+                ⚠️ Contact limit reached. You must remove existing contacts before sending new invitations.
+              </p>
+            {% elif remaining_slots <= 3 %}
+              <p class="text-sm text-orange-700 mt-1">
+                Only {{ remaining_slots }} slot{{ remaining_slots|pluralize }} remaining.
+              </p>
+            {% endif %}
           {% endif %}
         </div>
       </div>
