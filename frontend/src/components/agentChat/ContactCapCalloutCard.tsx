@@ -1,17 +1,33 @@
-import { AlertTriangle, ExternalLink, Users } from 'lucide-react'
+import { AlertTriangle, ExternalLink, Users, X } from 'lucide-react'
 
 type ContactCapCalloutCardProps = {
   onOpenPacks?: () => void
   showUpgrade?: boolean
   upgradeUrl?: string | null
+  onDismiss?: () => void
 }
 
-export function ContactCapCalloutCard({ onOpenPacks, showUpgrade = false, upgradeUrl }: ContactCapCalloutCardProps) {
+export function ContactCapCalloutCard({
+  onOpenPacks,
+  showUpgrade = false,
+  upgradeUrl,
+  onDismiss,
+}: ContactCapCalloutCardProps) {
   const canShowUpgrade = Boolean(showUpgrade && upgradeUrl)
   const showActions = Boolean(onOpenPacks || canShowUpgrade)
 
   return (
     <div className="timeline-event hard-limit-callout">
+      {onDismiss ? (
+        <button
+          type="button"
+          className="hard-limit-callout-dismiss"
+          onClick={onDismiss}
+          aria-label="Dismiss contact limit warning"
+        >
+          <X size={16} />
+        </button>
+      ) : null}
       <div className="hard-limit-callout-header">
         <span className="hard-limit-callout-icon" aria-hidden="true">
           <AlertTriangle size={16} />

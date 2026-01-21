@@ -1426,6 +1426,7 @@
 }
 
 .hard-limit-callout {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
@@ -1434,6 +1435,30 @@
   background: linear-gradient(135deg, rgba(254, 243, 199, 0.9), rgba(255, 237, 213, 0.9));
   border: 1px solid rgba(245, 158, 11, 0.4);
   color: #7c2d12;
+}
+
+.hard-limit-callout-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #92400e;
+  cursor: pointer;
+  padding: 0.15rem;
+  border-radius: 0.5rem;
+}
+
+.hard-limit-callout-dismiss:hover {
+  background: rgba(251, 191, 36, 0.25);
+}
+
+.hard-limit-callout-dismiss:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.6);
+  outline-offset: 2px;
 }
 
 .hard-limit-callout-header {
@@ -1500,6 +1525,7 @@
 .hard-limit-callout-button:active {
   transform: scale(0.98);
 }
+
 
 .hard-limit-callout-upsell {
   display: inline-flex;
