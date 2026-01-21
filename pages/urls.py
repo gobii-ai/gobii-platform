@@ -1,5 +1,7 @@
 from django.urls import path, include
+from django.http import HttpResponse
 
+from config import settings
 from config.settings import GOBII_PROPRIETARY_MODE
 from proprietary.views import BlogSitemap
 from .views import (
@@ -82,3 +84,12 @@ urlpatterns = [
     path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_hire'),
 
 ]
+
+# Security.txt for vulnerability disclosure (RFC 9116) - proprietary mode only
+if GOBII_PROPRIETARY_MODE:
+    urlpatterns.append(
+        path('.well-known/security.txt', lambda r: HttpResponse(
+            f"Contact: mailto:{settings.SECURITY_TXT_EMAIL}\nExpires: {settings.SECURITY_TXT_EXPIRY}\n",
+            content_type='text/plain',
+        ))
+    )
