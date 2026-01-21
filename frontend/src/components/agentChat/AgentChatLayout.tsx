@@ -30,6 +30,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentIsOrgOwned?: boolean
   canManageAgent?: boolean
   isCollaborator?: boolean
+  hideInsightsPanel?: boolean
   viewerUserId?: number | null
   viewerEmail?: string | null
   connectionStatus?: ConnectionStatusTone
@@ -103,6 +104,7 @@ export function AgentChatLayout({
   agentIsOrgOwned = false,
   canManageAgent = true,
   isCollaborator = false,
+  hideInsightsPanel = false,
   viewerUserId,
   viewerEmail,
   connectionStatus,
@@ -464,6 +466,7 @@ export function AgentChatLayout({
             onPauseChange={onPauseChange}
             isInsightsPaused={isInsightsPaused}
             onCollaborate={onShare}
+            hideInsightsPanel={hideInsightsPanel}
           />
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}

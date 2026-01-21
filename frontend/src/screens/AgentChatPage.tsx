@@ -1115,6 +1115,7 @@ export function AgentChatPage({
         agentIsOrgOwned={resolvedIsOrgOwned}
         isCollaborator={isCollaboratorOnly}
         canManageAgent={activeCanManageAgent}
+        hideInsightsPanel={isCollaboratorOnly}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
         connectionStatus={connectionIndicator.status}

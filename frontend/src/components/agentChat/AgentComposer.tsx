@@ -108,6 +108,7 @@ type AgentComposerProps = {
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
   onCollaborate?: () => void
+  hideInsightsPanel?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -127,6 +128,7 @@ export const AgentComposer = memo(function AgentComposer({
   onPauseChange,
   isInsightsPaused = false,
   onCollaborate,
+  hideInsightsPanel = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -492,7 +494,7 @@ export const AgentComposer = memo(function AgentComposer({
   }, [addAttachments, disabled, isSending])
 
   // Show the panel when processing OR when there are insights to display
-  const showWorkingPanel = isProcessing || hasInsights
+  const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
   const taskCount = processingTasks.length
 
   return (
