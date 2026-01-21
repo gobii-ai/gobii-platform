@@ -38,6 +38,9 @@ export type UsageSummaryResponse = {
       used_pct: number
     }
   }
+  extra_tasks?: {
+    enabled: boolean
+  }
 }
 
 export type MetricDefinition = {

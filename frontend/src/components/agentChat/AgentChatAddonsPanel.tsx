@@ -1,34 +1,54 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { ExternalLink, PlusSquare } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import type { ContactCapInfo, ContactPackOption } from '../../types/agentAddons'
+import type { AddonPackOption, ContactCapInfo } from '../../types/agentAddons'
 
-const MAX_CONTACT_PACK_QUANTITY = 999
+const MAX_ADDON_PACK_QUANTITY = 999
+
+type AddonsMode = 'contacts' | 'tasks'
+type TaskQuotaInfo = {
+  available: number
+  total: number
+  used: number
+  used_pct: number
+}
 
 type AgentChatAddonsPanelProps = {
   open: boolean
+  mode?: AddonsMode | null
   contactCap?: ContactCapInfo | null
-  contactPackOptions?: ContactPackOption[]
+  contactPackOptions?: AddonPackOption[]
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
+  taskPackOptions?: AddonPackOption[]
+  taskPackUpdating?: boolean
+  onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
+  taskQuota?: TaskQuotaInfo | null
   manageBillingUrl?: string | null
   onClose: () => void
 }
 
 export function AgentChatAddonsPanel({
   open,
+  mode = 'contacts',
   contactCap,
   contactPackOptions = [],
   contactPackUpdating = false,
   onUpdateContactPacks,
+  taskPackOptions = [],
+  taskPackUpdating = false,
+  onUpdateTaskPacks,
+  taskQuota,
   manageBillingUrl = null,
   onClose,
 }: AgentChatAddonsPanelProps) {
   const [isMobile, setIsMobile] = useState(false)
-  const [contactPackQuantities, setContactPackQuantities] = useState<Record<string, number>>({})
-  const [contactPackError, setContactPackError] = useState<string | null>(null)
+  const [packQuantities, setPackQuantities] = useState<Record<string, number>>({})
+  const [packError, setPackError] = useState<string | null>(null)
+  const resolvedMode = mode ?? 'contacts'
+  const isTaskMode = resolvedMode === 'tasks'
 
   useEffect(() => {
     const checkMobile = () => {
@@ -42,17 +62,18 @@ export function AgentChatAddonsPanel({
   useEffect(() => {
     if (!open) return
     const nextQuantities: Record<string, number> = {}
-    contactPackOptions.forEach((option) => {
+    const activeOptions = isTaskMode ? taskPackOptions : contactPackOptions
+    activeOptions.forEach((option) => {
       nextQuantities[option.priceId] = option.quantity ?? 0
     })
-    setContactPackQuantities(nextQuantities)
-    setContactPackError(null)
-  }, [open, contactPackOptions])
+    setPackQuantities(nextQuantities)
+    setPackError(null)
+  }, [contactPackOptions, isTaskMode, open, taskPackOptions])
 
   const handlePackAdjust = useCallback((priceId: string, delta: number) => {
-    setContactPackQuantities((prev) => {
+    setPackQuantities((prev) => {
       const current = prev[priceId] ?? 0
-      const next = Math.max(0, Math.min(MAX_CONTACT_PACK_QUANTITY, current + delta))
+      const next = Math.max(0, Math.min(MAX_ADDON_PACK_QUANTITY, current + delta))
       if (next === current) {
         return prev
       }
@@ -63,36 +84,51 @@ export function AgentChatAddonsPanel({
     })
   }, [])
 
-  const handleContactPackSave = useCallback(async () => {
-    if (!onUpdateContactPacks) return
-    setContactPackError(null)
+  const handlePackSave = useCallback(async () => {
+    const update = isTaskMode ? onUpdateTaskPacks : onUpdateContactPacks
+    if (!update) return
+    setPackError(null)
     try {
-      await onUpdateContactPacks(contactPackQuantities)
+      await update(packQuantities)
       onClose()
     } catch (err) {
-      setContactPackError('Unable to update contact packs. Try again.')
+      setPackError(`Unable to update ${isTaskMode ? 'task' : 'contact'} packs. Try again.`)
     }
-  }, [contactPackQuantities, onClose, onUpdateContactPacks])
+  }, [isTaskMode, onClose, onUpdateContactPacks, onUpdateTaskPacks, packQuantities])
 
-  const contactPackHasChanges = contactPackOptions.some((option) => {
-    const nextQty = contactPackQuantities[option.priceId] ?? 0
+  const activeOptions = isTaskMode ? taskPackOptions : contactPackOptions
+  const packUpdating = isTaskMode ? taskPackUpdating : contactPackUpdating
+  const canUpdatePacks = isTaskMode ? Boolean(onUpdateTaskPacks) : Boolean(onUpdateContactPacks)
+  const packHasChanges = activeOptions.some((option) => {
+    const nextQty = packQuantities[option.priceId] ?? 0
     return nextQty !== option.quantity
   })
-  const contactPackDelta = contactPackOptions.reduce((total, option) => {
-    const qty = contactPackQuantities[option.priceId] ?? 0
+  const packDelta = activeOptions.reduce((total, option) => {
+    const qty = packQuantities[option.priceId] ?? 0
     return total + option.delta * qty
   }, 0)
-  const contactPackCostCents = contactPackOptions.reduce((total, option) => {
-    const qty = contactPackQuantities[option.priceId] ?? 0
+  const packCostCents = activeOptions.reduce((total, option) => {
+    const qty = packQuantities[option.priceId] ?? 0
     const unitAmount = typeof option.unitAmount === 'number' ? option.unitAmount : 0
     return total + unitAmount * qty
   }, 0)
-  const hasPricing = contactPackOptions.some((option) => typeof option.unitAmount === 'number')
+  const hasPricing = activeOptions.some((option) => typeof option.unitAmount === 'number')
   const contactCapLimitLabel = contactCap?.unlimited
     ? 'Unlimited'
     : contactCap?.limit ?? 'Unlimited'
+  const taskQuotaLabel = useMemo(() => {
+    if (!taskQuota) {
+      return '—'
+    }
+    if (taskQuota.total < 0 || taskQuota.available < 0) {
+      return 'Unlimited'
+    }
+    const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 })
+    const remaining = Math.max(0, taskQuota.available)
+    return formatter.format(remaining)
+  }, [taskQuota])
   const inferredCurrency = (
-    contactPackOptions.find((option) => option.currency)?.currency
+    activeOptions.find((option) => option.currency)?.currency
     || 'USD'
   ).toUpperCase()
   const formatCents = (amountCents: number | null) => {
@@ -115,7 +151,7 @@ export function AgentChatAddonsPanel({
   const body = (
     <div className="agent-settings-panel">
       <div className="agent-settings-section">
-        {contactCap ? (
+        {!isTaskMode && contactCap ? (
           <div className="agent-settings-metrics">
             <div>
               <span className="agent-settings-metric-label">Used contacts</span>
@@ -125,14 +161,28 @@ export function AgentChatAddonsPanel({
             </div>
             <div>
               <span className="agent-settings-metric-label">Pack uplift</span>
-              <span className="agent-settings-metric-value">+{contactPackDelta}</span>
+              <span className="agent-settings-metric-value">+{packDelta}</span>
+            </div>
+          </div>
+        ) : null}
+        {isTaskMode ? (
+          <div className="agent-settings-metrics">
+            <div>
+              <span className="agent-settings-metric-label">Remaining credits</span>
+              <span className="agent-settings-metric-value">{taskQuotaLabel}</span>
+            </div>
+            <div>
+              <span className="agent-settings-metric-label">Pack uplift</span>
+              <span className="agent-settings-metric-value">+{packDelta}</span>
             </div>
           </div>
         ) : null}
         <div className="agent-settings-pack-list">
-          {contactPackOptions.map((option) => {
-            const label = contactPackOptions.length > 1 ? `${option.delta} contacts` : 'Contact pack'
-            const quantity = contactPackQuantities[option.priceId] ?? 0
+          {activeOptions.map((option) => {
+            const label = activeOptions.length > 1
+              ? `${option.delta} ${isTaskMode ? 'credits' : 'contacts'}`
+              : `${isTaskMode ? 'Task' : 'Contact'} pack`
+            const quantity = packQuantities[option.priceId] ?? 0
             return (
               <div key={option.priceId} className="agent-settings-pack-item">
                 <div className="agent-settings-pack-details">
@@ -146,8 +196,8 @@ export function AgentChatAddonsPanel({
                     type="button"
                     className="agent-settings-pack-button"
                     onClick={() => handlePackAdjust(option.priceId, -1)}
-                    disabled={contactPackUpdating || quantity <= 0}
-                    aria-label="Decrease contact pack quantity"
+                    disabled={packUpdating || quantity <= 0}
+                    aria-label={`Decrease ${isTaskMode ? 'task' : 'contact'} pack quantity`}
                   >
                     -
                   </button>
@@ -158,8 +208,8 @@ export function AgentChatAddonsPanel({
                     type="button"
                     className="agent-settings-pack-button"
                     onClick={() => handlePackAdjust(option.priceId, 1)}
-                    disabled={contactPackUpdating || quantity >= MAX_CONTACT_PACK_QUANTITY}
-                    aria-label="Increase contact pack quantity"
+                    disabled={packUpdating || quantity >= MAX_ADDON_PACK_QUANTITY}
+                    aria-label={`Increase ${isTaskMode ? 'task' : 'contact'} pack quantity`}
                   >
                     +
                   </button>
@@ -168,12 +218,12 @@ export function AgentChatAddonsPanel({
             )
           })}
         </div>
-        {contactPackError ? <p className="agent-settings-error">{contactPackError}</p> : null}
+        {packError ? <p className="agent-settings-error">{packError}</p> : null}
         <div className="agent-settings-metrics">
           <div>
-            <span className="agent-settings-metric-label">Contact pack price</span>
+            <span className="agent-settings-metric-label">Pack price</span>
             <span className="agent-settings-metric-value">
-              {hasPricing ? formatCents(contactPackCostCents) : '—'}
+              {hasPricing ? formatCents(packCostCents) : '—'}
             </span>
           </div>
         </div>
@@ -181,10 +231,10 @@ export function AgentChatAddonsPanel({
           <button
             type="button"
             className="agent-settings-save"
-            onClick={handleContactPackSave}
-            disabled={!onUpdateContactPacks || !contactPackHasChanges || contactPackUpdating}
+            onClick={handlePackSave}
+            disabled={!canUpdatePacks || !packHasChanges || packUpdating}
           >
-            {contactPackUpdating ? 'Updating...' : 'Update Subscription'}
+            {packUpdating ? 'Updating...' : 'Update Subscription'}
           </button>
           {manageBillingUrl ? (
             <a
@@ -206,11 +256,15 @@ export function AgentChatAddonsPanel({
     return null
   }
 
+  const subtitle = isTaskMode
+    ? 'Add task credits for this billing period.'
+    : 'Increase contact limits for all agents.'
+
   if (!isMobile) {
     return (
       <Modal
         title="Add-ons"
-        subtitle="Increase contact limits for all agents."
+        subtitle={subtitle}
         onClose={onClose}
         icon={PlusSquare}
         iconBgClass="bg-blue-100"
@@ -227,7 +281,7 @@ export function AgentChatAddonsPanel({
       open={open}
       onClose={onClose}
       title="Add-ons"
-      subtitle="Increase contact limits for all agents."
+      subtitle={subtitle}
       icon={PlusSquare}
       ariaLabel="Add-ons"
     >

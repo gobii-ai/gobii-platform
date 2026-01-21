@@ -11,7 +11,7 @@ export type ContactCapStatus = {
   limitReached: boolean
 }
 
-export type ContactPackOption = {
+export type AddonPackOption = {
   priceId: string
   delta: number
   quantity: number
@@ -21,7 +21,12 @@ export type ContactPackOption = {
 }
 
 export type ContactPackSettings = {
-  options: ContactPackOption[]
+  options: AddonPackOption[]
+  canManageBilling?: boolean
+}
+
+export type TaskPackSettings = {
+  options: AddonPackOption[]
   canManageBilling?: boolean
 }
 
@@ -31,6 +36,7 @@ export type AgentAddonsResponse = {
     contactCap?: ContactCapStatus | null
   }
   contactPacks?: ContactPackSettings | null
+  taskPacks?: TaskPackSettings | null
   plan?: {
     id?: string | null
     name?: string | null
@@ -43,7 +49,10 @@ export type AgentAddonsResponse = {
 }
 
 export type AgentAddonsUpdatePayload = {
-  contactPacks: {
+  contactPacks?: {
+    quantities: Record<string, number>
+  }
+  taskPacks?: {
     quantities: Record<string, number>
   }
 }

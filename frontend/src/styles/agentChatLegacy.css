@@ -1445,6 +1445,37 @@
   color: #7c2d12;
 }
 
+.hard-limit-callout--critical {
+  background: linear-gradient(135deg, rgba(254, 226, 226, 0.95), rgba(254, 202, 202, 0.9));
+  border-color: rgba(225, 29, 72, 0.4);
+  color: #7f1d1d;
+}
+
+.hard-limit-callout--critical .hard-limit-callout-dismiss {
+  color: #b91c1c;
+}
+
+.hard-limit-callout--critical .hard-limit-callout-dismiss:hover {
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.hard-limit-callout--critical .hard-limit-callout-dismiss:focus-visible {
+  outline: 2px solid rgba(248, 113, 113, 0.55);
+}
+
+.hard-limit-callout--critical .hard-limit-callout-icon {
+  background: rgba(248, 113, 113, 0.2);
+  color: #be123c;
+}
+
+.hard-limit-callout--critical .hard-limit-callout-title {
+  color: #7f1d1d;
+}
+
+.hard-limit-callout--critical .hard-limit-callout-subtitle {
+  color: #991b1b;
+}
+
 .hard-limit-callout-dismiss {
   position: absolute;
   top: 0.6rem;

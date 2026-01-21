@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
+import { fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
@@ -18,6 +19,7 @@ import type { PlanTier } from '../stores/subscriptionStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
+import type { UsageSummaryResponse } from '../components/usage'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -1026,7 +1028,10 @@ export function AgentChatPage({
   const contactCapStatus = addonsPayload?.status?.contactCap ?? null
   const contactPackOptions = addonsPayload?.contactPacks?.options ?? []
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
+  const taskPackOptions = addonsPayload?.taskPacks?.options ?? []
+  const taskPackCanManageBilling = Boolean(addonsPayload?.taskPacks?.canManageBilling)
   const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
+  const taskPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
   const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
@@ -1047,6 +1052,46 @@ export function AgentChatPage({
     },
     [updateAddons],
   )
+  const handleUpdateTaskPacks = useCallback(
+    async (quantities: Record<string, number>) => {
+      await updateAddons({ taskPacks: { quantities } })
+      await queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
+    },
+    [queryClient, updateAddons],
+  )
+
+  const shouldFetchUsageSummary = Boolean(activeAgentId && !isNewAgent && !isSelectionView)
+  const usageContextKey = effectiveContext
+    ? `${effectiveContext.type}:${effectiveContext.id}`
+    : null
+  const {
+    data: usageSummary,
+  } = useQuery<UsageSummaryResponse, Error>({
+    queryKey: ['usage-summary', 'agent-chat', usageContextKey],
+    queryFn: ({ signal }) => fetchUsageSummary({}, signal),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    enabled: shouldFetchUsageSummary,
+  })
+  const taskQuota = usageSummary?.metrics.quota ?? null
+  const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
+  const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
+  const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available <= 0)
+  const showTaskCreditsWarning = Boolean(
+    taskQuota
+    && !hasUnlimitedQuota
+    && !extraTasksEnabled
+    && (
+      isOutOfTaskCredits
+      || (taskQuota.available <= 100 && taskQuota.used_pct > 90)
+    ),
+  )
+  const taskCreditsWarningVariant = showTaskCreditsWarning
+    ? (isOutOfTaskCredits ? 'out' : 'low')
+    : null
+  const taskCreditsDismissKey = effectiveContext
+    ? `${effectiveContext.type}:${effectiveContext.id}`
+    : null
 
   return (
     <div className="agent-chat-page">
@@ -1091,6 +1136,15 @@ export function AgentChatPage({
         contactPackShowUpgrade={contactPackShowUpgrade}
         contactPackUpdating={addonsUpdating}
         onUpdateContactPacks={contactPackCanManageBilling ? handleUpdateContactPacks : undefined}
+        taskPackOptions={taskPackOptions}
+        taskPackCanManageBilling={taskPackCanManageBilling}
+        taskPackUpdating={addonsUpdating}
+        onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
+        taskQuota={taskQuota}
+        showTaskCreditsWarning={showTaskCreditsWarning}
+        taskCreditsWarningVariant={taskCreditsWarningVariant}
+        showTaskCreditsUpgrade={taskPackShowUpgrade}
+        taskCreditsDismissKey={taskCreditsDismissKey}
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         events={isNewAgent ? [] : events}

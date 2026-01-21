@@ -12,6 +12,7 @@ import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
+import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
@@ -20,7 +21,14 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { ContactCapInfo, ContactCapStatus, ContactPackOption } from '../../types/agentAddons'
+import type { AddonPackOption, ContactCapInfo, ContactCapStatus } from '../../types/agentAddons'
+
+type TaskQuotaInfo = {
+  available: number
+  total: number
+  used: number
+  used_pct: number
+}
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentId?: string | null
@@ -54,13 +62,22 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   hardLimitShowUpsell?: boolean
   contactCap?: ContactCapInfo | null
   contactCapStatus?: ContactCapStatus | null
-  contactPackOptions?: ContactPackOption[]
+  contactPackOptions?: AddonPackOption[]
   contactPackCanManageBilling?: boolean
   contactPackShowUpgrade?: boolean
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
   onRefreshAddons?: () => void
   contactPackManageUrl?: string | null
+  taskPackOptions?: AddonPackOption[]
+  taskPackCanManageBilling?: boolean
+  taskPackUpdating?: boolean
+  onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
+  taskQuota?: TaskQuotaInfo | null
+  showTaskCreditsWarning?: boolean
+  taskCreditsWarningVariant?: 'low' | 'out' | null
+  showTaskCreditsUpgrade?: boolean
+  taskCreditsDismissKey?: string | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -129,6 +146,15 @@ export function AgentChatLayout({
   onUpdateContactPacks,
   onRefreshAddons,
   contactPackManageUrl = null,
+  taskPackOptions = [],
+  taskPackCanManageBilling = false,
+  taskPackUpdating = false,
+  onUpdateTaskPacks,
+  taskQuota = null,
+  showTaskCreditsWarning = false,
+  taskCreditsWarningVariant = null,
+  showTaskCreditsUpgrade = false,
+  taskCreditsDismissKey = null,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -160,13 +186,22 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [addonsOpen, setAddonsOpen] = useState(false)
+  const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
+  const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
+  const taskCreditsStorageKeyRef = useRef<string | null>(null)
+  const addonsOpen = addonsMode !== null
 
   const contactCapDismissKey = useMemo(() => {
     return agentId ? `agent-chat-contact-cap-dismissed:${agentId}` : null
   }, [agentId])
+  const taskCreditsStorageKey = useMemo(() => {
+    if (!taskCreditsDismissKey || !taskCreditsWarningVariant) {
+      return null
+    }
+    return `agent-chat-task-credits-dismissed:${taskCreditsDismissKey}:${taskCreditsWarningVariant}`
+  }, [taskCreditsDismissKey, taskCreditsWarningVariant])
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
@@ -181,18 +216,18 @@ export function AgentChatLayout({
     setSettingsOpen(false)
   }, [])
 
-  const handleAddonsOpen = useCallback(() => {
-    setAddonsOpen(true)
+  const handleAddonsOpen = useCallback((mode: 'contacts' | 'tasks') => {
+    setAddonsMode(mode)
     onRefreshAddons?.()
   }, [onRefreshAddons])
 
   const handleAddonsClose = useCallback(() => {
-    setAddonsOpen(false)
+    setAddonsMode(null)
   }, [])
 
   useEffect(() => {
     setSettingsOpen(false)
-    setAddonsOpen(false)
+    setAddonsMode(null)
     setContactCapDismissed(false)
   }, [agentId])
 
@@ -203,6 +238,15 @@ export function AgentChatLayout({
     const stored = window.localStorage.getItem(contactCapDismissKey)
     setContactCapDismissed(stored === 'true')
   }, [contactCapDismissKey])
+
+  useEffect(() => {
+    if (!taskCreditsStorageKey || typeof window === 'undefined') {
+      setTaskCreditsDismissed(false)
+      return
+    }
+    const stored = window.localStorage.getItem(taskCreditsStorageKey)
+    setTaskCreditsDismissed(stored === 'true')
+  }, [taskCreditsStorageKey])
 
   useEffect(() => {
     if (!contactCapDismissKey || typeof window === 'undefined') {
@@ -216,6 +260,25 @@ export function AgentChatLayout({
       setContactCapDismissed(false)
     }
   }, [contactCapDismissKey, contactCapStatus?.limitReached])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      taskCreditsStorageKeyRef.current = taskCreditsStorageKey
+      if (!showTaskCreditsWarning) {
+        setTaskCreditsDismissed(false)
+      }
+      return
+    }
+    if (!showTaskCreditsWarning) {
+      if (taskCreditsStorageKeyRef.current) {
+        window.localStorage.removeItem(taskCreditsStorageKeyRef.current)
+      }
+      taskCreditsStorageKeyRef.current = taskCreditsStorageKey
+      setTaskCreditsDismissed(false)
+      return
+    }
+    taskCreditsStorageKeyRef.current = taskCreditsStorageKey
+  }, [showTaskCreditsWarning, taskCreditsStorageKey])
 
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
@@ -247,6 +310,7 @@ export function AgentChatLayout({
     (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
   )
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
+  const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
 
   const handleContactCapDismiss = useCallback(() => {
     if (!contactCapDismissKey || typeof window === 'undefined') {
@@ -256,6 +320,14 @@ export function AgentChatLayout({
     window.localStorage.setItem(contactCapDismissKey, 'true')
     setContactCapDismissed(true)
   }, [contactCapDismissKey])
+  const handleTaskCreditsDismiss = useCallback(() => {
+    if (!taskCreditsStorageKey || typeof window === 'undefined') {
+      setTaskCreditsDismissed(true)
+      return
+    }
+    window.localStorage.setItem(taskCreditsStorageKey, 'true')
+    setTaskCreditsDismissed(true)
+  }, [taskCreditsStorageKey])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -304,11 +376,16 @@ export function AgentChatLayout({
       />
       <AgentChatAddonsPanel
         open={addonsOpen}
+        mode={addonsMode ?? 'contacts'}
         onClose={handleAddonsClose}
         contactCap={contactCap}
         contactPackOptions={contactPackOptions}
         contactPackUpdating={contactPackUpdating}
         onUpdateContactPacks={onUpdateContactPacks}
+        taskPackOptions={taskPackOptions}
+        taskPackUpdating={taskPackUpdating}
+        onUpdateTaskPacks={onUpdateTaskPacks}
+        taskQuota={taskQuota}
         manageBillingUrl={contactPackManageUrl}
       />
       <main className={mainClassName}>
@@ -357,9 +434,21 @@ export function AgentChatLayout({
                     showUpsell={hardLimitShowUpsell}
                   />
                 ) : null}
+                {showTaskCreditsCallout ? (
+                  <TaskCreditsCalloutCard
+                    onOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0
+                      ? () => handleAddonsOpen('tasks')
+                      : undefined}
+                    showUpgrade={showTaskCreditsUpgrade}
+                    onDismiss={handleTaskCreditsDismiss}
+                    variant={taskCreditsWarningVariant === 'out' ? 'out' : 'low'}
+                  />
+                ) : null}
                 {showContactCapCallout ? (
                   <ContactCapCalloutCard
-                    onOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? handleAddonsOpen : undefined}
+                    onOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0
+                      ? () => handleAddonsOpen('contacts')
+                      : undefined}
                     showUpgrade={contactPackShowUpgrade}
                     onDismiss={handleContactCapDismiss}
                   />
