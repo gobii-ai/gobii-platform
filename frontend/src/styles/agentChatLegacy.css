@@ -262,6 +262,17 @@
   100% { opacity: 1; transform: scale(1); }
 }
 
+@media (max-width: 767px) {
+  .banner-connection {
+    padding: 0.125rem 0.3rem;
+  }
+
+  .banner-connection-label,
+  .banner-connection-check {
+    display: none;
+  }
+}
+
 /* Current task row */
 .banner-task {
   display: flex;
