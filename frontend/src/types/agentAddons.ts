@@ -39,6 +39,7 @@ export type AgentAddonsResponse = {
     currency?: string | null
   } | null
   upgradeUrl?: string | null
+  manageBillingUrl?: string | null
 }
 
 export type AgentAddonsUpdatePayload = {

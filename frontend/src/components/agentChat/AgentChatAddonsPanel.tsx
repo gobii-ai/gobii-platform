@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { PlusSquare } from 'lucide-react'
+import { ExternalLink, PlusSquare } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
@@ -11,8 +11,7 @@ type AgentChatAddonsPanelProps = {
   contactPackOptions?: ContactPackOption[]
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
-  subscriptionPrice?: number | null
-  subscriptionCurrency?: string | null
+  manageBillingUrl?: string | null
   onClose: () => void
 }
 
@@ -22,8 +21,7 @@ export function AgentChatAddonsPanel({
   contactPackOptions = [],
   contactPackUpdating = false,
   onUpdateContactPacks,
-  subscriptionPrice = null,
-  subscriptionCurrency = null,
+  manageBillingUrl = null,
   onClose,
 }: AgentChatAddonsPanelProps) {
   const [isMobile, setIsMobile] = useState(false)
@@ -87,20 +85,14 @@ export function AgentChatAddonsPanel({
     const unitAmount = typeof option.unitAmount === 'number' ? option.unitAmount : 0
     return total + unitAmount * qty
   }, 0)
+  const hasPricing = contactPackOptions.some((option) => typeof option.unitAmount === 'number')
   const contactCapLimitLabel = contactCap?.unlimited
     ? 'Unlimited'
     : contactCap?.limit ?? 'Unlimited'
-  const subscriptionCents = typeof subscriptionPrice === 'number'
-    ? Math.round(subscriptionPrice * 100)
-    : null
   const inferredCurrency = (
     contactPackOptions.find((option) => option.currency)?.currency
-    || subscriptionCurrency
     || 'USD'
   ).toUpperCase()
-  const totalSubscriptionCents = subscriptionCents !== null
-    ? subscriptionCents + contactPackCostCents
-    : null
   const formatCents = (amountCents: number | null) => {
     if (amountCents === null) {
       return '—'
@@ -177,16 +169,10 @@ export function AgentChatAddonsPanel({
         {contactPackError ? <p className="agent-settings-error">{contactPackError}</p> : null}
         <div className="agent-settings-metrics">
           <div>
-            <span className="agent-settings-metric-label">Current subscription</span>
-            <span className="agent-settings-metric-value">{formatCents(subscriptionCents)}</span>
-          </div>
-          <div>
-            <span className="agent-settings-metric-label">Contact packs</span>
-            <span className="agent-settings-metric-value">{formatCents(contactPackCostCents)}</span>
-          </div>
-          <div>
-            <span className="agent-settings-metric-label">Total subscription</span>
-            <span className="agent-settings-metric-value">{formatCents(totalSubscriptionCents)}</span>
+            <span className="agent-settings-metric-label">Contact pack price</span>
+            <span className="agent-settings-metric-value">
+              {hasPricing ? formatCents(contactPackCostCents) : '—'}
+            </span>
           </div>
         </div>
         <div className="agent-settings-actions">
@@ -198,6 +184,17 @@ export function AgentChatAddonsPanel({
           >
             {contactPackUpdating ? 'Updating...' : 'Update Subscription'}
           </button>
+          {manageBillingUrl ? (
+            <a
+              className="agent-settings-link"
+              href={manageBillingUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Manage
+              <ExternalLink size={14} />
+            </a>
+          ) : null}
         </div>
       </div>
     </div>

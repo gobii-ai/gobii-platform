@@ -207,6 +207,7 @@ def update_contact_pack_quantities(
 def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = False) -> dict:
     plan_payload = None
     upgrade_url = None
+    manage_billing_url = None
     if agent.organization_id:
         plan_payload = get_organization_plan(agent.organization)
     else:
@@ -230,6 +231,14 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
             upgrade_url = reverse("proprietary:pricing")
         except NoReverseMatch:
             upgrade_url = None
+
+    if can_manage_billing:
+        try:
+            manage_billing_url = reverse("billing")
+            if agent.organization_id:
+                manage_billing_url = f"{manage_billing_url}?org_id={agent.organization_id}"
+        except NoReverseMatch:
+            manage_billing_url = None
 
     contact_cap_payload, contact_cap_reached = _build_contact_cap_payload(agent)
     contact_pack_options = (
@@ -257,4 +266,5 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
             "currency": plan_currency,
         },
         "upgradeUrl": upgrade_url,
+        "manageBillingUrl": manage_billing_url,
     }
