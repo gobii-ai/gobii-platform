@@ -72,11 +72,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   })
 
   // Subscription state
-  const { currentPlan, isUpgradeModalOpen, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+  const { currentPlan, isUpgradeModalOpen, isProprietaryMode, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
 
   // Determine if we should show upgrade button and what it should say
-  // Don't show upgrade button for org-owned agents (billing is handled at org level)
-  const showUpgradeButton = !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
+  // Only show in proprietary mode, and not for org-owned agents (billing is handled at org level)
+  const showUpgradeButton = isProprietaryMode && !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
   const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 

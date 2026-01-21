@@ -6,7 +6,9 @@ type SubscriptionState = {
   currentPlan: PlanTier | null
   isLoading: boolean
   isUpgradeModalOpen: boolean
+  isProprietaryMode: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
+  setProprietaryMode: (isProprietary: boolean) => void
   openUpgradeModal: () => void
   closeUpgradeModal: () => void
 }
@@ -15,7 +17,9 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   currentPlan: null,
   isLoading: false,
   isUpgradeModalOpen: false,
+  isProprietaryMode: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
+  setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
   openUpgradeModal: () => set({ isUpgradeModalOpen: true }),
   closeUpgradeModal: () => set({ isUpgradeModalOpen: false }),
 }))
@@ -45,6 +49,10 @@ async function fetchUserPlan(): Promise<PlanTier | null> {
  * Call this once on app startup with the mount element.
  */
 export function initializeSubscriptionStore(mountElement: HTMLElement): void {
+  // Initialize proprietary mode from data attribute
+  const proprietaryAttr = mountElement.dataset.isProprietaryMode
+  useSubscriptionStore.getState().setProprietaryMode(proprietaryAttr === 'true')
+
   const planAttr = mountElement.dataset.userPlan
   if (planAttr && ['free', 'startup', 'scale'].includes(planAttr)) {
     useSubscriptionStore.getState().setCurrentPlan(planAttr as PlanTier)
