@@ -23,6 +23,7 @@ from api.models import (
 )
 from console.context_helpers import build_console_context
 from util.constants.task_constants import TASKS_UNLIMITED
+from util.subscription_helper import allow_organization_extra_tasks, allow_user_extra_tasks
 
 
 API_AGENT_ID = "api"
@@ -315,10 +316,12 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                 TaskCreditService.calculate_available_tasks_for_owner(owner, task_credits=task_credit_qs),
                 DECIMAL_ZERO,
             )
+            extra_tasks_enabled = allow_user_extra_tasks(request.user)
         else:
             quota_total = ledger_total
             quota_used = ledger_used
             available_credits = ledger_available
+            extra_tasks_enabled = allow_organization_extra_tasks(organization)
 
         unlimited_quota = quota_total == Decimal(TASKS_UNLIMITED)
         if not unlimited_quota:
@@ -360,6 +363,9 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                     "used": float(quota_used),
                     "used_pct": quota_used_pct,
                 },
+            },
+            "extra_tasks": {
+                "enabled": extra_tasks_enabled,
             },
         }
 

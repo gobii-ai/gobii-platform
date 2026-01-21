@@ -1070,10 +1070,12 @@ export function AgentChatPage({
     enabled: shouldFetchUsageSummary,
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
+  const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
   const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
   const showTaskCreditsWarning = Boolean(
     taskQuota
     && !hasUnlimitedQuota
+    && !extraTasksEnabled
     && taskQuota.available <= 100
     && taskQuota.used_pct > 90,
   )
