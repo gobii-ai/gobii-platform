@@ -6,21 +6,24 @@ type TaskCreditsCalloutCardProps = {
   onOpenPacks?: () => void
   showUpgrade?: boolean
   onDismiss?: () => void
+  variant?: 'low' | 'out'
 }
 
 export function TaskCreditsCalloutCard({
   onOpenPacks,
   showUpgrade = false,
   onDismiss,
+  variant = 'low',
 }: TaskCreditsCalloutCardProps) {
   const { openUpgradeModal } = useSubscriptionStore()
   const showActions = Boolean(onOpenPacks || showUpgrade)
+  const isOutOfCredits = variant === 'out'
   const handleUpgradeClick = useCallback(() => {
     openUpgradeModal()
   }, [openUpgradeModal])
 
   return (
-    <div className="timeline-event hard-limit-callout">
+    <div className={`timeline-event hard-limit-callout${isOutOfCredits ? ' hard-limit-callout--critical' : ''}`}>
       {onDismiss ? (
         <button
           type="button"
@@ -36,9 +39,13 @@ export function TaskCreditsCalloutCard({
           <AlertTriangle size={16} />
         </span>
         <div>
-          <p className="hard-limit-callout-title">Task credits running low</p>
+          <p className="hard-limit-callout-title">
+            {isOutOfCredits ? 'Out of task credits' : 'Task credits running low'}
+          </p>
           <p className="hard-limit-callout-subtitle">
-            Your account is almost out of task credits{showUpgrade ? "." : " for this billing period."}
+            {isOutOfCredits
+              ? `Your account is out of task credits${showUpgrade ? '.' : ' for this billing period.'}`
+              : `Your account is almost out of task credits${showUpgrade ? '.' : ' for this billing period.'}`}
           </p>
         </div>
       </div>

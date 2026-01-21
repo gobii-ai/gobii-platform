@@ -1076,13 +1076,19 @@ export function AgentChatPage({
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
   const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
+  const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available <= 0)
   const showTaskCreditsWarning = Boolean(
     taskQuota
     && !hasUnlimitedQuota
     && !extraTasksEnabled
-    && taskQuota.available <= 100
-    && taskQuota.used_pct > 90,
+    && (
+      isOutOfTaskCredits
+      || (taskQuota.available <= 100 && taskQuota.used_pct > 90)
+    ),
   )
+  const taskCreditsWarningVariant = showTaskCreditsWarning
+    ? (isOutOfTaskCredits ? 'out' : 'low')
+    : null
   const taskCreditsDismissKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
@@ -1136,6 +1142,7 @@ export function AgentChatPage({
         onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
         taskQuota={taskQuota}
         showTaskCreditsWarning={showTaskCreditsWarning}
+        taskCreditsWarningVariant={taskCreditsWarningVariant}
         showTaskCreditsUpgrade={taskPackShowUpgrade}
         taskCreditsDismissKey={taskCreditsDismissKey}
         onRefreshAddons={refetchAddons}

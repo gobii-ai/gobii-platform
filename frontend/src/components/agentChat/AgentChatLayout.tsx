@@ -75,6 +75,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   taskQuota?: TaskQuotaInfo | null
   showTaskCreditsWarning?: boolean
+  taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
   taskCreditsDismissKey?: string | null
   onLoadOlder?: () => void
@@ -151,6 +152,7 @@ export function AgentChatLayout({
   onUpdateTaskPacks,
   taskQuota = null,
   showTaskCreditsWarning = false,
+  taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
   taskCreditsDismissKey = null,
   hasMoreOlder,
@@ -188,15 +190,18 @@ export function AgentChatLayout({
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
-  const taskCreditsWarningRef = useRef<boolean | null>(null)
+  const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
 
   const contactCapDismissKey = useMemo(() => {
     return agentId ? `agent-chat-contact-cap-dismissed:${agentId}` : null
   }, [agentId])
   const taskCreditsStorageKey = useMemo(() => {
-    return taskCreditsDismissKey ? `agent-chat-task-credits-dismissed:${taskCreditsDismissKey}` : null
-  }, [taskCreditsDismissKey])
+    if (!taskCreditsDismissKey || !taskCreditsWarningVariant) {
+      return null
+    }
+    return `agent-chat-task-credits-dismissed:${taskCreditsDismissKey}:${taskCreditsWarningVariant}`
+  }, [taskCreditsDismissKey, taskCreditsWarningVariant])
 
   const handleSidebarToggle = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed)
@@ -257,19 +262,22 @@ export function AgentChatLayout({
   }, [contactCapDismissKey, contactCapStatus?.limitReached])
 
   useEffect(() => {
-    if (!taskCreditsStorageKey || typeof window === 'undefined') {
-      taskCreditsWarningRef.current = showTaskCreditsWarning ?? null
+    if (typeof window === 'undefined') {
+      taskCreditsStorageKeyRef.current = taskCreditsStorageKey
       if (!showTaskCreditsWarning) {
         setTaskCreditsDismissed(false)
       }
       return
     }
-    const previousWarning = taskCreditsWarningRef.current
-    taskCreditsWarningRef.current = showTaskCreditsWarning ?? null
-    if (previousWarning && !showTaskCreditsWarning) {
-      window.localStorage.removeItem(taskCreditsStorageKey)
+    if (!showTaskCreditsWarning) {
+      if (taskCreditsStorageKeyRef.current) {
+        window.localStorage.removeItem(taskCreditsStorageKeyRef.current)
+      }
+      taskCreditsStorageKeyRef.current = taskCreditsStorageKey
       setTaskCreditsDismissed(false)
+      return
     }
+    taskCreditsStorageKeyRef.current = taskCreditsStorageKey
   }, [showTaskCreditsWarning, taskCreditsStorageKey])
 
   const isStreaming = Boolean(streaming && !streaming.done)
@@ -433,6 +441,7 @@ export function AgentChatLayout({
                       : undefined}
                     showUpgrade={showTaskCreditsUpgrade}
                     onDismiss={handleTaskCreditsDismiss}
+                    variant={taskCreditsWarningVariant === 'out' ? 'out' : 'low'}
                   />
                 ) : null}
                 {showContactCapCallout ? (
