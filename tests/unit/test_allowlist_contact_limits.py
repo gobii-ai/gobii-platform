@@ -5,7 +5,7 @@ from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.models import (
@@ -26,6 +26,7 @@ User = get_user_model()
 
 
 @tag("batch_allowlist_rules")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class ContactLimitEnforcementTests(TestCase):
     """Test that contact limits are enforced based on user's plan."""
     
@@ -513,6 +514,7 @@ class ContactLimitEnforcementTests(TestCase):
 
 
 @tag("batch_allowlist_rules")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class OrganizationContactLimitTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -574,6 +576,7 @@ class OrganizationContactLimitTests(TestCase):
 
 
 @tag("batch_allowlist_rules")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class ContactLimitContextProcessorTests(TestCase):
     """Test that contact limits are properly exposed in template context."""
     
