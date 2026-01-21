@@ -1055,8 +1055,9 @@ export function AgentChatPage({
   const handleUpdateTaskPacks = useCallback(
     async (quantities: Record<string, number>) => {
       await updateAddons({ taskPacks: { quantities } })
+      await queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
     },
-    [updateAddons],
+    [queryClient, updateAddons],
   )
 
   const shouldFetchUsageSummary = Boolean(activeAgentId && !isNewAgent && !isSelectionView)
