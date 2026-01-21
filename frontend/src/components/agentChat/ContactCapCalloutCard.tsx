@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { AlertTriangle, Users, X } from 'lucide-react'
+import { AlertTriangle, Users, X, Zap } from 'lucide-react'
 
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 
@@ -53,8 +53,9 @@ export function ContactCapCalloutCard({
           {canShowUpgrade ? (
             <div className="hard-limit-callout-upsell">
               <span>Need more contacts? Upgrade your plan to expand the contact cap.</span>
-              <button type="button" onClick={handleUpgradeClick}>
-                Upgrade
+              <button type="button" className="banner-upgrade" onClick={handleUpgradeClick}>
+                <Zap size={14} strokeWidth={2} />
+                <span>Upgrade</span>
               </button>
             </div>
           ) : null}
