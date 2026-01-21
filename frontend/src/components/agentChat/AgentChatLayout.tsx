@@ -56,7 +56,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   contactCapStatus?: ContactCapStatus | null
   contactPackOptions?: ContactPackOption[]
   contactPackCanManageBilling?: boolean
-  contactPackUpgradeUrl?: string | null
   contactPackShowUpgrade?: boolean
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
@@ -125,7 +124,6 @@ export function AgentChatLayout({
   contactCapStatus = null,
   contactPackOptions = [],
   contactPackCanManageBilling = false,
-  contactPackUpgradeUrl = null,
   contactPackShowUpgrade = false,
   contactPackUpdating = false,
   onUpdateContactPacks,
@@ -363,7 +361,6 @@ export function AgentChatLayout({
                   <ContactCapCalloutCard
                     onOpenPacks={contactPackCanManageBilling && contactPackOptions.length > 0 ? handleAddonsOpen : undefined}
                     showUpgrade={contactPackShowUpgrade}
-                    upgradeUrl={contactPackUpgradeUrl}
                     onDismiss={handleContactCapDismiss}
                   />
                 ) : null}

@@ -1,20 +1,25 @@
-import { AlertTriangle, ExternalLink, Users, X } from 'lucide-react'
+import { useCallback } from 'react'
+import { AlertTriangle, Users, X, Zap } from 'lucide-react'
+
+import { useSubscriptionStore } from '../../stores/subscriptionStore'
 
 type ContactCapCalloutCardProps = {
   onOpenPacks?: () => void
   showUpgrade?: boolean
-  upgradeUrl?: string | null
   onDismiss?: () => void
 }
 
 export function ContactCapCalloutCard({
   onOpenPacks,
   showUpgrade = false,
-  upgradeUrl,
   onDismiss,
 }: ContactCapCalloutCardProps) {
-  const canShowUpgrade = Boolean(showUpgrade && upgradeUrl)
+  const { openUpgradeModal } = useSubscriptionStore()
+  const canShowUpgrade = Boolean(showUpgrade)
   const showActions = Boolean(onOpenPacks || canShowUpgrade)
+  const handleUpgradeClick = useCallback(() => {
+    openUpgradeModal()
+  }, [openUpgradeModal])
 
   return (
     <div className="timeline-event hard-limit-callout">
@@ -48,10 +53,10 @@ export function ContactCapCalloutCard({
           {canShowUpgrade ? (
             <div className="hard-limit-callout-upsell">
               <span>Need more contacts? Upgrade your plan to expand the contact cap.</span>
-              <a href={upgradeUrl ?? undefined} target="_blank" rel="noreferrer">
-                Upgrade
-                <ExternalLink size={12} />
-              </a>
+              <button type="button" className="banner-upgrade banner-upgrade--text" onClick={handleUpgradeClick}>
+                <Zap size={14} strokeWidth={2} />
+                <span>Upgrade</span>
+              </button>
             </div>
           ) : null}
         </div>
