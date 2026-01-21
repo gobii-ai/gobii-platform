@@ -162,6 +162,7 @@ CSRF_TRUSTED_ORIGINS = env.list(
     else _COMMUNITY_DEFAULT_TRUSTED_ORIGINS,
 )
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+X_FRAME_OPTIONS = env("X_FRAME_OPTIONS", default="SAMEORIGIN")
 USE_X_FORWARDED_HOST = True
 SITE_ID = 1
 
@@ -291,7 +292,8 @@ MIDDLEWARE = [
     "django_htmx.middleware.HtmxMiddleware",
     "middleware.user_id_baggage.UserIdBaggageMiddleware",
     "middleware.fbp_middleware.FbpMiddleware",
-    "middleware.utm_capture.UTMTrackingMiddleware"
+    "middleware.utm_capture.UTMTrackingMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
 TEMPLATES = [
