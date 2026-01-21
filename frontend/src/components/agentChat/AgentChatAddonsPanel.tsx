@@ -5,6 +5,8 @@ import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import type { ContactCapInfo, ContactPackOption } from '../../types/agentAddons'
 
+const MAX_CONTACT_PACK_QUANTITY = 999
+
 type AgentChatAddonsPanelProps = {
   open: boolean
   contactCap?: ContactCapInfo | null
@@ -50,7 +52,7 @@ export function AgentChatAddonsPanel({
   const handlePackAdjust = useCallback((priceId: string, delta: number) => {
     setContactPackQuantities((prev) => {
       const current = prev[priceId] ?? 0
-      const next = Math.max(0, Math.min(999, current + delta))
+      const next = Math.max(0, Math.min(MAX_CONTACT_PACK_QUANTITY, current + delta))
       if (next === current) {
         return prev
       }
@@ -156,7 +158,7 @@ export function AgentChatAddonsPanel({
                     type="button"
                     className="agent-settings-pack-button"
                     onClick={() => handlePackAdjust(option.priceId, 1)}
-                    disabled={contactPackUpdating || quantity >= 999}
+                    disabled={contactPackUpdating || quantity >= MAX_CONTACT_PACK_QUANTITY}
                     aria-label="Increase contact pack quantity"
                   >
                     +

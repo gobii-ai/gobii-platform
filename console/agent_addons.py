@@ -25,6 +25,8 @@ except Exception:  # pragma: no cover - optional dependency
 
 logger = logging.getLogger(__name__)
 
+MAX_CONTACT_PACK_QUANTITY = 999
+
 
 def _build_contact_cap_payload(agent) -> tuple[dict, bool]:
     from api.models import CommsAllowlistEntry, AgentAllowlistInvite
@@ -113,8 +115,8 @@ def update_contact_pack_quantities(
             qty = int(raw_value)
         except (TypeError, ValueError):
             return False, "Quantities must be whole numbers.", 400
-        if qty < 0 or qty > 999:
-            return False, "Quantities must be between 0 and 999.", 400
+        if qty < 0 or qty > MAX_CONTACT_PACK_QUANTITY:
+            return False, f"Quantities must be between 0 and {MAX_CONTACT_PACK_QUANTITY}.", 400
         desired_quantities[price_id] = qty
 
     if not desired_quantities:

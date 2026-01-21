@@ -4231,19 +4231,21 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
 class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
-    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+    @staticmethod
+    def _resolve_agent_addons_context(request: HttpRequest, agent_id: str):
         agent = resolve_agent_for_request(request, agent_id)
         owner = agent.organization or agent.user
         plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
         can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
+        return agent, owner, plan_payload, can_manage_billing
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent, owner, _, can_manage_billing = self._resolve_agent_addons_context(request, agent_id)
         payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(request, agent_id)
-        owner = agent.organization or agent.user
-        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
-        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
+        agent, owner, plan_payload, can_manage_billing = self._resolve_agent_addons_context(request, agent_id)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
