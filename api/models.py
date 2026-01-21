@@ -8330,6 +8330,7 @@ class PersistentAgentSystemStep(models.Model):
         SNAPSHOT = "SNAPSHOT", "Snapshot"
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
+        COLLABORATOR_ADDED = "COLLABORATOR_ADDED", "Collaborator Added"
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"

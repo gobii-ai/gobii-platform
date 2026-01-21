@@ -1,4 +1,5 @@
 from datetime import timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -13,6 +14,7 @@ from api.models import (
     CommsAllowlistEntry,
     CommsChannel,
     PersistentAgent,
+    PersistentAgentSystemStep,
     UserBilling,
     build_web_user_address,
 )
@@ -103,6 +105,28 @@ class AgentCollaboratorInviteViewTests(TestCase):
         )
         self.invite.refresh_from_db()
         self.assertEqual(self.invite.status, AgentCollaboratorInvite.InviteStatus.ACCEPTED)
+
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    def test_accept_view_records_system_step_and_triggers_processing(self, mock_delay):
+        user = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("agent_collaborator_invite_accept", kwargs={"token": self.invite.token})
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 302)
+        system_step = PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.COLLABORATOR_ADDED,
+        ).first()
+        self.assertIsNotNone(system_step)
+        self.assertIn("collab@example.com", system_step.step.description)
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
 
 @tag("batch_agent_collaborators")

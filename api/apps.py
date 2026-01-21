@@ -28,3 +28,10 @@ class ApiConfig(AppConfig):
             import logging
             logger = logging.getLogger(__name__)
             logger.error(f"Failed to import peer_link_signals: {e}")
+
+        try:
+            from .agent import collaborator_signals  # noqa: F401  # pragma: no cover
+        except Exception as e:  # pragma: no cover - optional dependency
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Failed to import collaborator_signals: {e}")
