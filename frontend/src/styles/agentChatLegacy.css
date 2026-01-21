@@ -1426,6 +1426,7 @@
 }
 
 .hard-limit-callout {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0.85rem;
@@ -1434,6 +1435,30 @@
   background: linear-gradient(135deg, rgba(254, 243, 199, 0.9), rgba(255, 237, 213, 0.9));
   border: 1px solid rgba(245, 158, 11, 0.4);
   color: #7c2d12;
+}
+
+.hard-limit-callout-dismiss {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.6rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #92400e;
+  cursor: pointer;
+  padding: 0.15rem;
+  border-radius: 0.5rem;
+}
+
+.hard-limit-callout-dismiss:hover {
+  background: rgba(251, 191, 36, 0.25);
+}
+
+.hard-limit-callout-dismiss:focus-visible {
+  outline: 2px solid rgba(251, 191, 36, 0.6);
+  outline-offset: 2px;
 }
 
 .hard-limit-callout-header {
@@ -1500,6 +1525,7 @@
 .hard-limit-callout-button:active {
   transform: scale(0.98);
 }
+
 
 .hard-limit-callout-upsell {
   display: inline-flex;
@@ -4619,4 +4645,76 @@
 
 .agent-settings-link:hover {
   text-decoration: underline;
+}
+
+.agent-settings-pack-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.agent-settings-pack-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(37, 99, 235, 0.2);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.agent-settings-pack-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.agent-settings-pack-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.agent-settings-pack-price {
+  font-size: 0.72rem;
+  color: #475569;
+}
+
+.agent-settings-pack-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.agent-settings-pack-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.7rem;
+  border: 1px solid rgba(37, 99, 235, 0.35);
+  background: #ffffff;
+  color: #1d4ed8;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+
+.agent-settings-pack-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.agent-settings-pack-button:not(:disabled):hover {
+  background: rgba(37, 99, 235, 0.12);
+}
+
+.agent-settings-pack-qty {
+  min-width: 2rem;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #0f172a;
 }
