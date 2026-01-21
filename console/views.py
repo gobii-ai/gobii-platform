@@ -1681,10 +1681,12 @@ def get_user_plan_api(request):
         }
         return JsonResponse({
             'plan': plan_map.get(plan_id, 'free'),
+            'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
         })
     except Exception as e:
         return JsonResponse({
             'plan': 'free',
+            'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
             'error': str(e),
         })
 
