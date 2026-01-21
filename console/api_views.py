@@ -4270,27 +4270,23 @@ class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
                 return HttpResponseBadRequest(f"{label}.quantities must be an object")
             return quantities
 
-        if contact_pack_payload is not None:
-            quantities = _validate_pack_payload(contact_pack_payload, "contactPacks")
-            if isinstance(quantities, HttpResponseBadRequest):
-                return quantities
-            success, error, status = update_contact_pack_quantities(
-                owner=owner,
-                owner_type="organization" if agent.organization_id else "user",
-                plan_id=(plan_payload or {}).get("id"),
-                quantities=quantities,
-            )
-            if not success:
-                return JsonResponse({"error": error}, status=status)
+        packs_to_process = [
+            ("contactPacks", contact_pack_payload, update_contact_pack_quantities),
+            ("taskPacks", task_pack_payload, update_task_pack_quantities),
+        ]
+        owner_type = "organization" if agent.organization_id else "user"
+        plan_id = (plan_payload or {}).get("id")
 
-        if task_pack_payload is not None:
-            quantities = _validate_pack_payload(task_pack_payload, "taskPacks")
+        for label, pack_payload, update_func in packs_to_process:
+            if pack_payload is None:
+                continue
+            quantities = _validate_pack_payload(pack_payload, label)
             if isinstance(quantities, HttpResponseBadRequest):
                 return quantities
-            success, error, status = update_task_pack_quantities(
+            success, error, status = update_func(
                 owner=owner,
-                owner_type="organization" if agent.organization_id else "user",
-                plan_id=(plan_payload or {}).get("id"),
+                owner_type=owner_type,
+                plan_id=plan_id,
                 quantities=quantities,
             )
             if not success:
