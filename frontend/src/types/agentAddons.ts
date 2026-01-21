@@ -35,6 +35,8 @@ export type AgentAddonsResponse = {
     id?: string | null
     name?: string | null
     isFree?: boolean
+    price?: number | null
+    currency?: string | null
   } | null
   upgradeUrl?: string | null
 }

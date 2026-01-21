@@ -213,6 +213,14 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
         plan_payload = get_user_plan(agent.user)
     plan_id = str(plan_payload.get("id", "")).lower() if plan_payload else ""
     plan_name = plan_payload.get("name") if plan_payload else ""
+    plan_price = None
+    if plan_payload:
+        try:
+            raw_price = plan_payload.get("price")
+            plan_price = float(raw_price) if raw_price is not None else None
+        except (TypeError, ValueError):
+            plan_price = None
+    plan_currency = plan_payload.get("currency") if plan_payload else None
     is_free_plan = plan_id == PlanNamesChoices.FREE.value
     owner = owner or agent.organization or agent.user
     owner_type = "organization" if agent.organization_id else "user"
@@ -245,6 +253,8 @@ def build_agent_addons_payload(agent, owner=None, *, can_manage_billing: bool = 
             "id": plan_id,
             "name": plan_name,
             "isFree": is_free_plan,
+            "price": plan_price,
+            "currency": plan_currency,
         },
         "upgradeUrl": upgrade_url,
     }

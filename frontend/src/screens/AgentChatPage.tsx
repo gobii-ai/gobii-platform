@@ -1028,6 +1028,8 @@ export function AgentChatPage({
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
   const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
   const contactPackUpgradeUrl = addonsPayload?.upgradeUrl ?? null
+  const contactPackSubscriptionPrice = addonsPayload?.plan?.price ?? null
+  const contactPackSubscriptionCurrency = addonsPayload?.plan?.currency ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
   const dailyCreditsErrorMessage = quickSettingsError instanceof Error
@@ -1093,6 +1095,8 @@ export function AgentChatPage({
         contactPackUpdating={addonsUpdating}
         onUpdateContactPacks={contactPackCanManageBilling ? handleUpdateContactPacks : undefined}
         onRefreshAddons={refetchAddons}
+        contactPackSubscriptionPrice={contactPackSubscriptionPrice}
+        contactPackSubscriptionCurrency={contactPackSubscriptionCurrency}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

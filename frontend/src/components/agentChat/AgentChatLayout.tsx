@@ -61,6 +61,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
   onRefreshAddons?: () => void
+  contactPackSubscriptionPrice?: number | null
+  contactPackSubscriptionCurrency?: string | null
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -129,6 +131,8 @@ export function AgentChatLayout({
   contactPackUpdating = false,
   onUpdateContactPacks,
   onRefreshAddons,
+  contactPackSubscriptionPrice = null,
+  contactPackSubscriptionCurrency = null,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -272,6 +276,8 @@ export function AgentChatLayout({
         contactPackOptions={contactPackOptions}
         contactPackUpdating={contactPackUpdating}
         onUpdateContactPacks={onUpdateContactPacks}
+        subscriptionPrice={contactPackSubscriptionPrice}
+        subscriptionCurrency={contactPackSubscriptionCurrency}
       />
       <main className={mainClassName}>
         <div

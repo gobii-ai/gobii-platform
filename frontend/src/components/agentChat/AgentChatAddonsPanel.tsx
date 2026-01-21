@@ -11,6 +11,8 @@ type AgentChatAddonsPanelProps = {
   contactPackOptions?: ContactPackOption[]
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
+  subscriptionPrice?: number | null
+  subscriptionCurrency?: string | null
   onClose: () => void
 }
 
@@ -20,6 +22,8 @@ export function AgentChatAddonsPanel({
   contactPackOptions = [],
   contactPackUpdating = false,
   onUpdateContactPacks,
+  subscriptionPrice = null,
+  subscriptionCurrency = null,
   onClose,
 }: AgentChatAddonsPanelProps) {
   const [isMobile, setIsMobile] = useState(false)
@@ -64,10 +68,11 @@ export function AgentChatAddonsPanel({
     setContactPackError(null)
     try {
       await onUpdateContactPacks(contactPackQuantities)
+      onClose()
     } catch (err) {
       setContactPackError('Unable to update contact packs. Try again.')
     }
-  }, [contactPackQuantities, onUpdateContactPacks])
+  }, [contactPackQuantities, onClose, onUpdateContactPacks])
 
   const contactPackHasChanges = contactPackOptions.some((option) => {
     const nextQty = contactPackQuantities[option.priceId] ?? 0
@@ -77,19 +82,45 @@ export function AgentChatAddonsPanel({
     const qty = contactPackQuantities[option.priceId] ?? 0
     return total + option.delta * qty
   }, 0)
+  const contactPackCostCents = contactPackOptions.reduce((total, option) => {
+    const qty = contactPackQuantities[option.priceId] ?? 0
+    const unitAmount = typeof option.unitAmount === 'number' ? option.unitAmount : 0
+    return total + unitAmount * qty
+  }, 0)
   const contactCapLimitLabel = contactCap?.unlimited
     ? 'Unlimited'
     : contactCap?.limit ?? 'Unlimited'
+  const subscriptionCents = typeof subscriptionPrice === 'number'
+    ? Math.round(subscriptionPrice * 100)
+    : null
+  const inferredCurrency = (
+    contactPackOptions.find((option) => option.currency)?.currency
+    || subscriptionCurrency
+    || 'USD'
+  ).toUpperCase()
+  const totalSubscriptionCents = subscriptionCents !== null
+    ? subscriptionCents + contactPackCostCents
+    : null
+  const formatCents = (amountCents: number | null) => {
+    if (amountCents === null) {
+      return '—'
+    }
+    const amount = amountCents / 100
+    try {
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: inferredCurrency,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(amount)
+    } catch {
+      return `${inferredCurrency} ${amount.toFixed(2)}`
+    }
+  }
 
   const body = (
     <div className="agent-settings-panel">
       <div className="agent-settings-section">
-        <div className="agent-settings-section-header">
-          <div>
-            <h3 className="agent-settings-title">Add-ons</h3>
-            <p className="agent-settings-helper">Increase per-agent contacts for this cycle.</p>
-          </div>
-        </div>
         {contactCap ? (
           <div className="agent-settings-metrics">
             <div>
@@ -98,12 +129,6 @@ export function AgentChatAddonsPanel({
                 {contactCap.used} / {contactCapLimitLabel}
               </span>
             </div>
-            {contactCap.remaining !== null ? (
-              <div>
-                <span className="agent-settings-metric-label">Remaining</span>
-                <span className="agent-settings-metric-value">{contactCap.remaining}</span>
-              </div>
-            ) : null}
             <div>
               <span className="agent-settings-metric-label">Pack uplift</span>
               <span className="agent-settings-metric-value">+{contactPackDelta}</span>
@@ -150,6 +175,20 @@ export function AgentChatAddonsPanel({
           })}
         </div>
         {contactPackError ? <p className="agent-settings-error">{contactPackError}</p> : null}
+        <div className="agent-settings-metrics">
+          <div>
+            <span className="agent-settings-metric-label">Current subscription</span>
+            <span className="agent-settings-metric-value">{formatCents(subscriptionCents)}</span>
+          </div>
+          <div>
+            <span className="agent-settings-metric-label">Contact packs</span>
+            <span className="agent-settings-metric-value">{formatCents(contactPackCostCents)}</span>
+          </div>
+          <div>
+            <span className="agent-settings-metric-label">Total subscription</span>
+            <span className="agent-settings-metric-value">{formatCents(totalSubscriptionCents)}</span>
+          </div>
+        </div>
         <div className="agent-settings-actions">
           <button
             type="button"
@@ -157,7 +196,7 @@ export function AgentChatAddonsPanel({
             onClick={handleContactPackSave}
             disabled={!onUpdateContactPacks || !contactPackHasChanges || contactPackUpdating}
           >
-            {contactPackUpdating ? 'Updating...' : 'Update packs'}
+            {contactPackUpdating ? 'Updating...' : 'Update Subscription'}
           </button>
         </div>
       </div>
@@ -172,6 +211,7 @@ export function AgentChatAddonsPanel({
     return (
       <Modal
         title="Add-ons"
+        subtitle="Increase contact limits for all agents."
         onClose={onClose}
         icon={PlusSquare}
         iconBgClass="bg-blue-100"
@@ -188,6 +228,7 @@ export function AgentChatAddonsPanel({
       open={open}
       onClose={onClose}
       title="Add-ons"
+      subtitle="Increase contact limits for all agents."
       icon={PlusSquare}
       ariaLabel="Add-ons"
     >
