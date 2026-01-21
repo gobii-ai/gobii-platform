@@ -6333,6 +6333,8 @@ class CommsAllowlistEntry(models.Model):
                 self.agent.user,
                 organization=self.agent.organization,
             )
+            if cap <= 0:
+                return
             
             try:
                 # Count both active entries and pending invitations
@@ -6439,6 +6441,8 @@ class AgentAllowlistInvite(models.Model):
                 self.agent.user,
                 organization=self.agent.organization,
             )
+            if cap <= 0:
+                return
             
             try:
                 # Count both active entries and pending invitations
