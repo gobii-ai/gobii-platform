@@ -1,4 +1,5 @@
 from django.urls import path, include
+from django.http import HttpResponse
 
 from config.settings import GOBII_PROPRIETARY_MODE
 from proprietary.views import BlogSitemap
@@ -75,6 +76,12 @@ urlpatterns = [
 
     # Make robots.txt available through Django
     path('robots.txt', TemplateView.as_view(template_name='robots.txt', content_type='text/plain')),
+
+    # Security.txt for vulnerability disclosure (RFC 9116)
+    path('.well-known/security.txt', lambda r: HttpResponse(
+        "Contact: mailto:security@gobii.ai\nExpires: 2027-01-01T17:00:00.000Z\n",
+        content_type='text/plain',
+    )),
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 
