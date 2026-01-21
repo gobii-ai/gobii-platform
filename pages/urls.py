@@ -77,15 +77,18 @@ urlpatterns = [
     # Make robots.txt available through Django
     path('robots.txt', TemplateView.as_view(template_name='robots.txt', content_type='text/plain')),
 
-    # Security.txt for vulnerability disclosure (RFC 9116)
-    path('.well-known/security.txt', lambda r: HttpResponse(
-        "Contact: mailto:security@gobii.ai\nExpires: 2027-01-01T17:00:00.000Z\n",
-        content_type='text/plain',
-    )),
-
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 
     path('<slug:handle>/<slug:template_slug>/', PublicTemplateDetailView.as_view(), name='public_template_detail'),
     path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_hire'),
 
 ]
+
+# Security.txt for vulnerability disclosure (RFC 9116) - proprietary mode only
+if GOBII_PROPRIETARY_MODE:
+    urlpatterns.append(
+        path('.well-known/security.txt', lambda r: HttpResponse(
+            "Contact: mailto:security@gobii.ai\nExpires: 2027-01-01T17:00:00.000Z\n",
+            content_type='text/plain',
+        ))
+    )
