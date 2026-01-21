@@ -56,6 +56,13 @@ const canManageCollaborators =
     : canManageCollaboratorsRaw === 'false'
       ? false
       : null
+const isCollaboratorRaw = mountNode.dataset.isCollaborator
+const isCollaborator =
+  isCollaboratorRaw === 'true'
+    ? true
+    : isCollaboratorRaw === 'false'
+      ? false
+      : null
 
 let screen: ReactElement
 
@@ -95,6 +102,7 @@ switch (appName) {
         agentAvatarUrl={agentAvatarUrl}
         collaboratorInviteUrl={collaboratorInviteUrl}
         canManageCollaborators={canManageCollaborators}
+        isCollaborator={isCollaborator}
         viewerUserId={viewerUserId}
         viewerEmail={viewerEmail}
         onClose={handleEmbeddedClose}

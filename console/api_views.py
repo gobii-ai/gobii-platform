@@ -1331,7 +1331,25 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         agent_ids = list(agents_qs.values_list("id", flat=True))
         if agent_ids:
             shared_qs = shared_qs.exclude(id__in=agent_ids)
-        agents = list(agents_qs) + list(shared_qs.order_by("name"))
+        agents = list(agents_qs)
+        shared_agents = list(shared_qs.order_by("name"))
+        collaborators_by_agent_id = {agent.id for agent in shared_agents}
+        agents += shared_agents
+        user = request.user
+        org_memberships = OrganizationMembership.objects.filter(
+            user=user,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        org_ids = set(org_memberships.values_list("org_id", flat=True))
+        admin_org_ids = set(
+            org_memberships.filter(
+                role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                ]
+            ).values_list("org_id", flat=True)
+        )
+        is_staff = bool(user.is_staff)
         payload = [
             {
                 "id": str(agent.id),
@@ -1341,6 +1359,17 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "is_active": bool(agent.is_active),
                 "short_description": agent.short_description or "",
                 "is_org_owned": agent.organization_id is not None,
+                "is_collaborator": agent.id in collaborators_by_agent_id,
+                "can_manage_agent": (
+                    is_staff
+                    or agent.user_id == user.id
+                    or (agent.organization_id and agent.organization_id in org_ids)
+                ),
+                "can_manage_collaborators": (
+                    is_staff
+                    or agent.user_id == user.id
+                    or (agent.organization_id and agent.organization_id in admin_org_ids)
+                ),
             }
             for agent in agents
         ]

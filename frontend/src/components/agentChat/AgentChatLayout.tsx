@@ -28,6 +28,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentAvatarUrl?: string | null
   agentName?: string | null
   agentIsOrgOwned?: boolean
+  canManageAgent?: boolean
+  isCollaborator?: boolean
   viewerUserId?: number | null
   viewerEmail?: string | null
   connectionStatus?: ConnectionStatusTone
@@ -99,6 +101,8 @@ export function AgentChatLayout({
   agentAvatarUrl,
   agentName,
   agentIsOrgOwned = false,
+  canManageAgent = true,
+  isCollaborator = false,
   viewerUserId,
   viewerEmail,
   connectionStatus,
@@ -285,6 +289,8 @@ export function AgentChatLayout({
           agentAvatarUrl={agentAvatarUrl}
           agentColorHex={agentColorHex}
           isOrgOwned={agentIsOrgOwned}
+          canManageAgent={canManageAgent}
+          isCollaborator={isCollaborator}
           connectionStatus={connectionStatus}
           connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}

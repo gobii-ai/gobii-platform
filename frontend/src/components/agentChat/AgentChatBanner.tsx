@@ -19,6 +19,8 @@ type AgentChatBannerProps = {
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
   isOrgOwned?: boolean
+  canManageAgent?: boolean
+  isCollaborator?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -50,6 +52,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentAvatarUrl,
   agentColorHex,
   isOrgOwned = false,
+  canManageAgent = true,
+  isCollaborator = false,
   connectionStatus = 'connecting',
   connectionLabel = 'Connecting',
   kanbanSnapshot,
@@ -75,10 +79,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   // Subscription state
   const { currentPlan, isUpgradeModalOpen, isProprietaryMode, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+  const canShowBannerActions = canManageAgent !== false && !isCollaborator
 
   // Determine if we should show upgrade button and what it should say
   // Only show in proprietary mode, and not for org-owned agents (billing is handled at org level)
-  const showUpgradeButton = isProprietaryMode && !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
+  const showUpgradeButton = canShowBannerActions
+    && isProprietaryMode
+    && !isOrgOwned
+    && (currentPlan === 'free' || currentPlan === 'startup')
   const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 
@@ -166,15 +174,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
   const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
-  const showSettingsButton = Boolean(onSettingsOpen)
+  const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
+  const showShareButton = canShowBannerActions && Boolean(onShare)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
     : 'Open agent settings'
 
   const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
-
-  const showActions = Boolean(onShare || onClose || showSettingsButton)
 
   return (
     <div className={shellClass} ref={bannerRef}>
@@ -246,7 +253,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span>{upgradeButtonLabel}</span>
               </button>
             )}
-            {onShare ? (
+            {showShareButton ? (
               <button
                 type="button"
                 className="banner-share"

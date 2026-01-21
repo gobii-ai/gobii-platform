@@ -6,4 +6,7 @@ export type AgentRosterEntry = {
   isActive: boolean
   shortDescription: string
   isOrgOwned?: boolean
+  isCollaborator?: boolean
+  canManageAgent?: boolean
+  canManageCollaborators?: boolean
 }

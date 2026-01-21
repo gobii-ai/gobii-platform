@@ -210,6 +210,7 @@ export type AgentChatPageProps = {
   viewerUserId?: number | null
   viewerEmail?: string | null
   canManageCollaborators?: boolean | null
+  isCollaborator?: boolean | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -232,6 +233,7 @@ export function AgentChatPage({
   viewerUserId,
   viewerEmail,
   canManageCollaborators,
+  isCollaborator,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -702,6 +704,9 @@ export function AgentChatPage({
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
+  const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
+  const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
+  const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -789,11 +794,13 @@ export function AgentChatPage({
     return null
   }, [collaboratorInviteUrl, activeAgentId])
 
+  const isCollaboratorOnly = Boolean(activeIsCollaborator && !activeCanManageAgent)
   const canShareCollaborators = Boolean(
     resolvedInviteUrl
       && !isSelectionView
       && !isNewAgent
-      && (canManageCollaborators ?? true),
+      && activeCanManageCollaborators
+      && !isCollaboratorOnly,
   )
 
   const handleOpenCollaboratorInvite = useCallback(() => {
@@ -1096,7 +1103,7 @@ export function AgentChatPage({
         open={collaboratorInviteOpen}
         agentName={resolvedAgentName || agentName}
         inviteUrl={resolvedInviteUrl}
-        canManage={canManageCollaborators ?? true}
+        canManage={activeCanManageCollaborators}
         onClose={handleCloseCollaboratorInvite}
       />
       <AgentChatLayout
@@ -1106,6 +1113,8 @@ export function AgentChatPage({
         agentAvatarUrl={resolvedAvatarUrl}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         agentIsOrgOwned={resolvedIsOrgOwned}
+        isCollaborator={isCollaboratorOnly}
+        canManageAgent={activeCanManageAgent}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
         connectionStatus={connectionIndicator.status}

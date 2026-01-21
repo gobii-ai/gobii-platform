@@ -21,6 +21,9 @@ type AgentRosterPayload = {
     is_active: boolean
     short_description: string
     is_org_owned: boolean
+    is_collaborator: boolean
+    can_manage_agent: boolean
+    can_manage_collaborators: boolean
   }[]
 }
 
@@ -35,6 +38,9 @@ export async function fetchAgentRoster(options: { forAgentId?: string } = {}): P
     isActive: agent.is_active,
     shortDescription: agent.short_description,
     isOrgOwned: agent.is_org_owned,
+    isCollaborator: agent.is_collaborator,
+    canManageAgent: agent.can_manage_agent,
+    canManageCollaborators: agent.can_manage_collaborators,
   }))
   return { context: payload.context, agents }
 }

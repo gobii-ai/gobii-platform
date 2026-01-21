@@ -4944,6 +4944,7 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
         context["can_manage_collaborators"] = self.can_manage_collaborators
+        context["is_collaborator"] = self.is_collaborator
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
         return context
