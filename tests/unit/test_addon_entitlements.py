@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 from unittest.mock import patch
 
@@ -267,6 +267,7 @@ class AddonEntitlementSyncTests(TestCase):
 
 
 @tag("batch_billing")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AddonContactCapTests(TestCase):
     def setUp(self):
         User = get_user_model()
