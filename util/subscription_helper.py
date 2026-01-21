@@ -1451,6 +1451,8 @@ def has_unlimited_agents(user) -> bool:
 def get_user_max_contacts_per_agent(user, organization=None) -> int:
     """Return the per-agent contact cap for a user or organization-owned agent.
 
+    In community mode (non-proprietary), disable contact caps.
+
     Priority when ``organization`` is provided:
     1) Use the organization's plan ``max_contacts_per_agent`` value.
     2) Fall back to the free-plan default when unavailable.
@@ -1460,6 +1462,9 @@ def get_user_max_contacts_per_agent(user, organization=None) -> int:
     2) Otherwise, if ``UserQuota.max_agent_contacts`` is set (>0), use that legacy override.
     3) When neither is set, fall back to the user's plan ``max_contacts_per_agent`` (defaulting to the free plan).
     """
+    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
+        return 0
+
     default_limit = PLAN_CONFIG[PlanNames.FREE].get("max_contacts_per_agent", 3)
 
     addon_uplift = AddonEntitlementService.get_contact_cap_uplift(organization or user)
