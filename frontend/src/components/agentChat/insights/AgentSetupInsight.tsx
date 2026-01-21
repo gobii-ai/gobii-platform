@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -67,6 +67,7 @@ declare global {
 
 type AgentSetupInsightProps = {
   insight: InsightEvent
+  onCollaborate?: () => void
 }
 
 function describeError(error: unknown): string {
@@ -128,7 +129,7 @@ function formatPhoneE164(raw: string, region: string): string {
   }
 }
 
-export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
+export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
   const region = useMemo(() => getDefaultRegion(), [])
@@ -720,160 +721,207 @@ export function AgentSetupInsight({ insight }: AgentSetupInsightProps) {
       return 'Create a public template that others can clone and customize.'
     }
 
-    return (
-      <motion.div
-        className={`share-hero${hasTemplate ? ' share-hero--live' : ''}`}
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Left visual */}
-        <motion.div className="share-hero__visual" variants={visualVariants}>
-          <div className={`share-hero__ring share-hero__ring--1${hasTemplate ? ' share-hero__ring--active' : ''}`} />
-          <div className={`share-hero__ring share-hero__ring--2${hasTemplate ? ' share-hero__ring--active' : ''}`} />
-          <div className={`share-hero__icon${hasTemplate ? ' share-hero__icon--live' : ''}`}>
-            {hasTemplate ? <CheckCircle2 size={20} strokeWidth={2} /> : <Globe size={20} strokeWidth={2} />}
-          </div>
+    const renderCollaborate = () => {
+      if (!onCollaborate) {
+        return null
+      }
+
+      return (
+        <motion.div
+          className="share-hero"
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <motion.div className="share-hero__visual" variants={visualVariants}>
+            <div className="share-hero__ring share-hero__ring--1" />
+            <div className="share-hero__ring share-hero__ring--2" />
+            <div className="share-hero__icon share-hero__icon--collab">
+              <UserPlus size={20} strokeWidth={2} />
+            </div>
+          </motion.div>
+
+          <motion.div className="share-hero__content" variants={itemVariants}>
+            <div className="share-hero__header">
+              <h3 className="share-hero__title">Collaborate</h3>
+            </div>
+            <p className="share-hero__body">
+              Invite teammates to view and message with this agent.
+            </p>
+          </motion.div>
+
+          <motion.div className="share-hero__action" variants={badgeVariants}>
+            <button
+              type="button"
+              className="share-hero__button share-hero__button--collab"
+              onClick={onCollaborate}
+              aria-label="Invite collaborators"
+            >
+              <UserPlus size={16} />
+              <span>Invite</span>
+            </button>
+          </motion.div>
         </motion.div>
+      )
+    }
 
-        {/* Center content */}
-        <motion.div className="share-hero__content" variants={itemVariants}>
-          <div className="share-hero__header">
-            <h3 className="share-hero__title">{getTitle()}</h3>
-            {hasTemplate && (
-              <motion.span
-                className="share-hero__badge"
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-              >
-                LIVE
-              </motion.span>
-            )}
-          </div>
-          <p className={`share-hero__body${templateError ? ' share-hero__body--error' : ''}`}>
-            {getSubtitle()}
-          </p>
+    return (
+      <div className="share-hero-grid">
+        <motion.div
+          className={`share-hero${hasTemplate ? ' share-hero--live' : ''}`}
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          {/* Left visual */}
+          <motion.div className="share-hero__visual" variants={visualVariants}>
+            <div className={`share-hero__ring share-hero__ring--1${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+            <div className={`share-hero__ring share-hero__ring--2${hasTemplate ? ' share-hero__ring--active' : ''}`} />
+            <div className={`share-hero__icon${hasTemplate ? ' share-hero__icon--live' : ''}`}>
+              {hasTemplate ? <CheckCircle2 size={20} strokeWidth={2} /> : <Globe size={20} strokeWidth={2} />}
+            </div>
+          </motion.div>
 
-          {showHandleForm ? (
-            <div className="share-hero__form share-hero__form--input">
-              <div className="share-hero__input-wrapper">
-                <div className="share-hero__input-group">
-                  <div className="share-hero__input-icon">
-                    <Link2 size={14} strokeWidth={2.5} />
+          {/* Center content */}
+          <motion.div className="share-hero__content" variants={itemVariants}>
+            <div className="share-hero__header">
+              <h3 className="share-hero__title">{getTitle()}</h3>
+              {hasTemplate && (
+                <motion.span
+                  className="share-hero__badge"
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 25 }}
+                >
+                  LIVE
+                </motion.span>
+              )}
+            </div>
+            <p className={`share-hero__body${templateError ? ' share-hero__body--error' : ''}`}>
+              {getSubtitle()}
+            </p>
+
+            {showHandleForm ? (
+              <div className="share-hero__form share-hero__form--input">
+                <div className="share-hero__input-wrapper">
+                  <div className="share-hero__input-group">
+                    <div className="share-hero__input-icon">
+                      <Link2 size={14} strokeWidth={2.5} />
+                    </div>
+                    <span className="share-hero__input-domain">gobii.ai/</span>
+                    <input
+                      className="share-hero__input"
+                      type="text"
+                      value={templateHandle}
+                      onChange={(event) => {
+                        setTemplateHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                        setTemplateHandleDirty(true)
+                      }}
+                      placeholder="your-handle"
+                      autoFocus
+                    />
                   </div>
-                  <span className="share-hero__input-domain">gobii.ai/</span>
-                  <input
-                    className="share-hero__input"
-                    type="text"
-                    value={templateHandle}
-                    onChange={(event) => {
-                      setTemplateHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
-                      setTemplateHandleDirty(true)
-                    }}
-                    placeholder="your-handle"
-                    autoFocus
-                  />
+                  <span className="share-hero__input-hint">Lowercase letters, numbers, and hyphens</span>
                 </div>
-                <span className="share-hero__input-hint">Lowercase letters, numbers, and hyphens</span>
+                <div className="share-hero__form-actions">
+                  <button
+                    type="button"
+                    className={`share-hero__button share-hero__button--primary${templateBusy ? ' share-hero__button--loading' : ''}`}
+                    onClick={handleCreateTemplate}
+                    disabled={templateBusy || !templateHandle.trim()}
+                  >
+                    {templateBusy ? (
+                      <>
+                        <Loader2 size={14} className="share-hero__spinner" />
+                        <span>Creating</span>
+                      </>
+                    ) : (
+                      <>
+                        <Globe size={14} />
+                        <span>Go Live</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    className="share-hero__cancel"
+                    onClick={() => setTemplatePanelOpen(false)}
+                    disabled={templateBusy}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
-              <div className="share-hero__form-actions">
+            ) : hasTemplate ? (
+              <motion.div
+                className={`share-hero__live-url${templateCopied ? ' share-hero__live-url--copied' : ''}`}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+              >
+                <div className="share-hero__url-display">
+                  <Link2 size={14} className="share-hero__url-icon" />
+                  <span className="share-hero__url-text">{shortDisplayUrl}</span>
+                </div>
                 <button
                   type="button"
-                  className={`share-hero__button share-hero__button--primary${templateBusy ? ' share-hero__button--loading' : ''}`}
+                  className={`share-hero__copy-btn${templateCopied ? ' share-hero__copy-btn--copied' : ''}`}
+                  onClick={() => handleTemplateCopy(templateUrl ?? '')}
+                >
+                  {templateCopied ? (
+                    <>
+                      <CheckCircle2 size={14} />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy size={14} />
+                      <span>Copy</span>
+                    </>
+                  )}
+                </button>
+              </motion.div>
+            ) : null}
+          </motion.div>
+
+          {/* Right action */}
+          {!showHandleForm && (
+            <motion.div className="share-hero__action" variants={badgeVariants}>
+              {hasTemplate && templateUrl ? (
+                <a
+                  className="share-hero__cta share-hero__cta--live"
+                  href={templateUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <span>Open</span>
+                  <ExternalLink size={14} strokeWidth={2.2} />
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  className={`share-hero__button share-hero__button--primary share-hero__button--large${templateBusy ? ' share-hero__button--loading' : ''}`}
                   onClick={handleCreateTemplate}
-                  disabled={templateBusy || !templateHandle.trim()}
+                  disabled={templateBusy}
                 >
                   {templateBusy ? (
                     <>
-                      <Loader2 size={14} className="share-hero__spinner" />
+                      <Loader2 size={16} className="share-hero__spinner" />
                       <span>Creating</span>
                     </>
                   ) : (
                     <>
-                      <Globe size={14} />
-                      <span>Go Live</span>
+                      <Globe size={16} />
+                      <span>Share Agent</span>
                     </>
                   )}
                 </button>
-                <button
-                  type="button"
-                  className="share-hero__cancel"
-                  onClick={() => setTemplatePanelOpen(false)}
-                  disabled={templateBusy}
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : hasTemplate ? (
-            <motion.div
-              className={`share-hero__live-url${templateCopied ? ' share-hero__live-url--copied' : ''}`}
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-            >
-              <div className="share-hero__url-display">
-                <Link2 size={14} className="share-hero__url-icon" />
-                <span className="share-hero__url-text">{shortDisplayUrl}</span>
-              </div>
-              <button
-                type="button"
-                className={`share-hero__copy-btn${templateCopied ? ' share-hero__copy-btn--copied' : ''}`}
-                onClick={() => handleTemplateCopy(templateUrl ?? '')}
-              >
-                {templateCopied ? (
-                  <>
-                    <CheckCircle2 size={14} />
-                    <span>Copied!</span>
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} />
-                    <span>Copy</span>
-                  </>
-                )}
-              </button>
+              )}
             </motion.div>
-          ) : null}
+          )}
         </motion.div>
-
-        {/* Right action */}
-        {!showHandleForm && (
-          <motion.div className="share-hero__action" variants={badgeVariants}>
-            {hasTemplate && templateUrl ? (
-              <a
-                className="share-hero__cta share-hero__cta--live"
-                href={templateUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <span>Open</span>
-                <ExternalLink size={14} strokeWidth={2.2} />
-              </a>
-            ) : (
-              <button
-                type="button"
-                className={`share-hero__button share-hero__button--primary share-hero__button--large${templateBusy ? ' share-hero__button--loading' : ''}`}
-                onClick={handleCreateTemplate}
-                disabled={templateBusy}
-              >
-                {templateBusy ? (
-                  <>
-                    <Loader2 size={16} className="share-hero__spinner" />
-                    <span>Creating</span>
-                  </>
-                ) : (
-                  <>
-                    <Globe size={16} />
-                    <span>Share Agent</span>
-                  </>
-                )}
-              </button>
-            )}
-          </motion.div>
-        )}
-      </motion.div>
+        {renderCollaborate()}
+      </div>
     )
   }
 

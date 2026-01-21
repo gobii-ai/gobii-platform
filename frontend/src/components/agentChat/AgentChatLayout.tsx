@@ -457,6 +457,7 @@ export function AgentChatLayout({
             onInsightIndexChange={onInsightIndexChange}
             onPauseChange={onPauseChange}
             isInsightsPaused={isInsightsPaused}
+            onCollaborate={onShare}
           />
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
