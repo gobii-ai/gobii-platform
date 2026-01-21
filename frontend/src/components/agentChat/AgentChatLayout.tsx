@@ -21,7 +21,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { ContactCapInfo, ContactCapStatus, ContactPackOption, TaskPackOption } from '../../types/agentAddons'
+import type { AddonPackOption, ContactCapInfo, ContactCapStatus } from '../../types/agentAddons'
 
 type TaskQuotaInfo = {
   available: number
@@ -62,14 +62,14 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   hardLimitShowUpsell?: boolean
   contactCap?: ContactCapInfo | null
   contactCapStatus?: ContactCapStatus | null
-  contactPackOptions?: ContactPackOption[]
+  contactPackOptions?: AddonPackOption[]
   contactPackCanManageBilling?: boolean
   contactPackShowUpgrade?: boolean
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
   onRefreshAddons?: () => void
   contactPackManageUrl?: string | null
-  taskPackOptions?: TaskPackOption[]
+  taskPackOptions?: AddonPackOption[]
   taskPackCanManageBilling?: boolean
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>

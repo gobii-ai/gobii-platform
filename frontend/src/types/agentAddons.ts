@@ -11,16 +11,7 @@ export type ContactCapStatus = {
   limitReached: boolean
 }
 
-export type ContactPackOption = {
-  priceId: string
-  delta: number
-  quantity: number
-  unitAmount?: number | null
-  currency?: string | null
-  priceDisplay?: string | null
-}
-
-export type TaskPackOption = {
+export type AddonPackOption = {
   priceId: string
   delta: number
   quantity: number
@@ -30,12 +21,12 @@ export type TaskPackOption = {
 }
 
 export type ContactPackSettings = {
-  options: ContactPackOption[]
+  options: AddonPackOption[]
   canManageBilling?: boolean
 }
 
 export type TaskPackSettings = {
-  options: TaskPackOption[]
+  options: AddonPackOption[]
   canManageBilling?: boolean
 }
 

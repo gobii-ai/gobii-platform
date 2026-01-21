@@ -3,7 +3,7 @@ import { ExternalLink, PlusSquare } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import type { ContactCapInfo, ContactPackOption, TaskPackOption } from '../../types/agentAddons'
+import type { AddonPackOption, ContactCapInfo } from '../../types/agentAddons'
 
 const MAX_ADDON_PACK_QUANTITY = 999
 
@@ -19,10 +19,10 @@ type AgentChatAddonsPanelProps = {
   open: boolean
   mode?: AddonsMode | null
   contactCap?: ContactCapInfo | null
-  contactPackOptions?: ContactPackOption[]
+  contactPackOptions?: AddonPackOption[]
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
-  taskPackOptions?: TaskPackOption[]
+  taskPackOptions?: AddonPackOption[]
   taskPackUpdating?: boolean
   onUpdateTaskPacks?: (quantities: Record<string, number>) => Promise<void>
   taskQuota?: TaskQuotaInfo | null

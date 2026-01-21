@@ -1060,10 +1060,13 @@ export function AgentChatPage({
   )
 
   const shouldFetchUsageSummary = Boolean(activeAgentId && !isNewAgent && !isSelectionView)
+  const usageContextKey = effectiveContext
+    ? `${effectiveContext.type}:${effectiveContext.id}`
+    : null
   const {
     data: usageSummary,
   } = useQuery<UsageSummaryResponse, Error>({
-    queryKey: ['usage-summary', 'agent-chat'],
+    queryKey: ['usage-summary', 'agent-chat', usageContextKey],
     queryFn: ({ signal }) => fetchUsageSummary({}, signal),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
