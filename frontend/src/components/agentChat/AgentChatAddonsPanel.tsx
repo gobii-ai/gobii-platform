@@ -3,7 +3,7 @@ import { PlusSquare } from 'lucide-react'
 
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
-import type { ContactCapInfo, ContactPackOption } from '../../types/agentQuickSettings'
+import type { ContactCapInfo, ContactPackOption } from '../../types/agentAddons'
 
 type AgentChatAddonsPanelProps = {
   open: boolean

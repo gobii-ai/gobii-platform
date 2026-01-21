@@ -20,7 +20,7 @@ import type { AgentRosterEntry } from '../../types/agentRoster'
 import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
-import type { ContactCapInfo, ContactCapStatus, ContactPackOption } from '../../types/agentQuickSettings'
+import type { ContactCapInfo, ContactCapStatus, ContactPackOption } from '../../types/agentAddons'
 
 type AgentChatLayoutProps = AgentTimelineProps & {
   agentId?: string | null
@@ -60,6 +60,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   contactPackShowUpgrade?: boolean
   contactPackUpdating?: boolean
   onUpdateContactPacks?: (quantities: Record<string, number>) => Promise<void>
+  onRefreshAddons?: () => void
   onLoadOlder?: () => void
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
@@ -127,6 +128,7 @@ export function AgentChatLayout({
   contactPackShowUpgrade = false,
   contactPackUpdating = false,
   onUpdateContactPacks,
+  onRefreshAddons,
   hasMoreOlder,
   hasMoreNewer,
   processingActive,
@@ -175,8 +177,8 @@ export function AgentChatLayout({
 
   const handleAddonsOpen = useCallback(() => {
     setAddonsOpen(true)
-    onRefreshDailyCredits?.()
-  }, [onRefreshDailyCredits])
+    onRefreshAddons?.()
+  }, [onRefreshAddons])
 
   const handleAddonsClose = useCallback(() => {
     setAddonsOpen(false)

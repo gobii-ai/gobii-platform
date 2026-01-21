@@ -100,7 +100,8 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
-from console.agent_quick_settings import build_agent_quick_settings_payload, update_contact_pack_quantities
+from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.agent_addons import build_agent_addons_payload, update_contact_pack_quantities
 from console.daily_credit import (
     build_agent_daily_credit_context,
     build_daily_credit_status,
@@ -4200,17 +4201,13 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
-        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
-        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
-        payload = build_agent_quick_settings_payload(agent, can_manage_billing=can_manage_billing)
+        payload = build_agent_quick_settings_payload(agent)
         return JsonResponse(payload)
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
         owner = agent.organization or agent.user
         credit_settings = get_daily_credit_settings_for_owner(owner)
-        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
-        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
         try:
             payload = _parse_json_body(request)
         except ValueError as exc:
@@ -4227,25 +4224,51 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
                 agent.daily_credit_limit = new_daily_limit
                 agent.save(update_fields=["daily_credit_limit"])
 
-        contact_pack_payload = payload.get("contactPacks")
-        if contact_pack_payload is not None:
-            if not isinstance(contact_pack_payload, dict):
-                return HttpResponseBadRequest("contactPacks must be an object")
-            quantities = contact_pack_payload.get("quantities")
-            if not isinstance(quantities, dict):
-                return HttpResponseBadRequest("contactPacks.quantities must be an object")
-            if not can_manage_billing:
-                return JsonResponse({"error": "You do not have permission to manage contact packs."}, status=403)
-            success, error, status = update_contact_pack_quantities(
-                owner=owner,
-                owner_type="organization" if agent.organization_id else "user",
-                plan_id=(plan_payload or {}).get("id"),
-                quantities=quantities,
-            )
-            if not success:
-                return JsonResponse({"error": error}, status=status)
+        payload = build_agent_quick_settings_payload(agent, owner)
+        return JsonResponse(payload)
 
-        payload = build_agent_quick_settings_payload(agent, owner, can_manage_billing=can_manage_billing)
+
+class AgentAddonsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        owner = agent.organization or agent.user
+        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
+        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
+        payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
+        return JsonResponse(payload)
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        owner = agent.organization or agent.user
+        plan_payload = get_organization_plan(agent.organization) if agent.organization_id else get_user_plan(agent.user)
+        can_manage_billing = _can_manage_contact_packs(request, agent, plan_payload)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        contact_pack_payload = payload.get("contactPacks")
+        if contact_pack_payload is None:
+            return HttpResponseBadRequest("contactPacks payload is required")
+        if not isinstance(contact_pack_payload, dict):
+            return HttpResponseBadRequest("contactPacks must be an object")
+        quantities = contact_pack_payload.get("quantities")
+        if not isinstance(quantities, dict):
+            return HttpResponseBadRequest("contactPacks.quantities must be an object")
+        if not can_manage_billing:
+            return JsonResponse({"error": "You do not have permission to manage contact packs."}, status=403)
+        success, error, status = update_contact_pack_quantities(
+            owner=owner,
+            owner_type="organization" if agent.organization_id else "user",
+            plan_id=(plan_payload or {}).get("id"),
+            quantities=quantities,
+        )
+        if not success:
+            return JsonResponse({"error": error}, status=status)
+
+        payload = build_agent_addons_payload(agent, owner, can_manage_billing=can_manage_billing)
         return JsonResponse(payload)
 
 

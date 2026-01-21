@@ -11,6 +11,7 @@ import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
+import { useAgentAddons } from '../hooks/useAgentAddons'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import type { PlanTier } from '../stores/subscriptionStore'
@@ -237,6 +238,12 @@ export function AgentChatPage({
     updateQuickSettings,
     updating: quickSettingsUpdating,
   } = useAgentQuickSettings(agentId)
+  const {
+    data: addonsPayload,
+    refetch: refetchAddons,
+    updateAddons,
+    updating: addonsUpdating,
+  } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
@@ -1015,10 +1022,12 @@ export function AgentChatPage({
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
-  const contactCap = quickSettingsPayload?.settings?.contactCap ?? null
-  const contactCapStatus = quickSettingsPayload?.status?.contactCap ?? null
-  const contactPackOptions = quickSettingsPayload?.settings?.contactPacks?.options ?? []
-  const contactPackCanManageBilling = Boolean(quickSettingsPayload?.meta?.contactPacks?.canManageBilling)
+  const contactCap = addonsPayload?.contactCap ?? null
+  const contactCapStatus = addonsPayload?.status?.contactCap ?? null
+  const contactPackOptions = addonsPayload?.contactPacks?.options ?? []
+  const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
+  const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
+  const contactPackUpgradeUrl = addonsPayload?.upgradeUrl ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
   const dailyCreditsErrorMessage = quickSettingsError instanceof Error
@@ -1034,9 +1043,9 @@ export function AgentChatPage({
   )
   const handleUpdateContactPacks = useCallback(
     async (quantities: Record<string, number>) => {
-      await updateQuickSettings({ contactPacks: { quantities } })
+      await updateAddons({ contactPacks: { quantities } })
     },
-    [updateQuickSettings],
+    [updateAddons],
   )
 
   return (
@@ -1079,10 +1088,11 @@ export function AgentChatPage({
         contactCapStatus={contactCapStatus}
         contactPackOptions={contactPackOptions}
         contactPackCanManageBilling={contactPackCanManageBilling}
-        contactPackUpgradeUrl={hardLimitUpgradeUrl}
-        contactPackShowUpgrade={hardLimitUpsell}
-        contactPackUpdating={quickSettingsUpdating}
+        contactPackUpgradeUrl={contactPackUpgradeUrl}
+        contactPackShowUpgrade={contactPackShowUpgrade}
+        contactPackUpdating={addonsUpdating}
         onUpdateContactPacks={contactPackCanManageBilling ? handleUpdateContactPacks : undefined}
+        onRefreshAddons={refetchAddons}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}
