@@ -1,19 +1,20 @@
 {% if pending_collaborator_invites %}
 <div class="space-y-4">
   {% for invite in pending_collaborator_invites %}
-  <div class="bg-white/90 backdrop-blur-sm border border-white/70 shadow-lg rounded-xl p-6">
-    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-      <div>
-        <h2 class="text-lg font-semibold text-slate-900">Collaboration invite for {{ invite.agent.name }}</h2>
-        <p class="text-sm text-slate-600 mt-1">
+  <div class="gobii-card-base p-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div class="space-y-1">
+        <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Collaboration invite</p>
+        <h2 class="text-lg font-semibold text-slate-900">{{ invite.agent.name }}</h2>
+        <p class="text-sm text-slate-600">
           {{ invite.invited_by.get_full_name|default:invite.invited_by.email }} invited you to collaborate on this agent.
         </p>
-        <p class="text-xs text-slate-500 mt-1">Sent to {{ invite.email }}</p>
+        <p class="text-xs text-slate-500">Sent to {{ invite.email }}</p>
       </div>
       <div class="flex">
         <a
           href="{% url 'agent_collaborator_invite_accept' token=invite.token %}"
-          class="inline-flex items-center justify-center px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition"
+          class="inline-flex items-center justify-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700"
         >
           Review invite
         </a>
