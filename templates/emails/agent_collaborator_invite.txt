@@ -1,4 +1,4 @@
-You're invited to collaborate on {{ agent.name }}
+You're invited to collaborate with {{ agent.name }}
 
 {{ agent_owner.get_full_name|default:agent_owner.username }} has invited you to collaborate with {{ agent.name }} on Gobii.
 

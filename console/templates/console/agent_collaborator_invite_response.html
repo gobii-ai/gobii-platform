@@ -50,7 +50,7 @@
             {% if invite.status == "accepted" %}
               <p class="text-emerald-700 font-semibold">You have accepted this invitation.</p>
               <p class="text-sm text-slate-600">You can now chat and exchange files with {{ agent.name }}.</p>
-              <a href="{% url 'agents' %}" class="inline-flex items-center px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Open Agents</a>
+              <a href="{% url 'agent_chat_shell' pk=agent.id %}" class="inline-flex items-center px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Chat</a>
             {% elif invite.status == "rejected" %}
               <p class="text-slate-700">You have declined this invitation.</p>
             {% else %}
