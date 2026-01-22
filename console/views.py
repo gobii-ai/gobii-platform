@@ -3831,6 +3831,24 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 except ValidationError as exc:
                     return JsonResponse({'success': False, 'error': _format_validation_error(exc)})
 
+                invite_props = Analytics.with_org_properties(
+                    {
+                        'agent_id': str(agent.id),
+                        'agent_name': agent.name,
+                        'invite_id': str(invite.id),
+                        'invite_email': invite.email,
+                        'invited_by_id': str(request.user.id),
+                        'actor_id': str(request.user.id),
+                    },
+                    organization=getattr(agent, "organization", None),
+                )
+                transaction.on_commit(lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_SENT,
+                    source=AnalyticsSource.WEB,
+                    properties=invite_props.copy(),
+                ))
+
                 accept_url = request.build_absolute_uri(
                     reverse('agent_collaborator_invite_accept', kwargs={'token': invite.token})
                 )
@@ -3884,7 +3902,33 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if not collaborator_id:
                     return JsonResponse({'success': False, 'error': 'Collaborator id is required'})
 
-                AgentCollaborator.objects.filter(agent=agent, id=collaborator_id).delete()
+                collaborator = (
+                    AgentCollaborator.objects
+                    .filter(agent=agent, id=collaborator_id)
+                    .select_related("user")
+                    .first()
+                )
+                if collaborator:
+                    collaborator_props = Analytics.with_org_properties(
+                        {
+                            'agent_id': str(agent.id),
+                            'agent_name': agent.name,
+                            'collaborator_id': str(collaborator.id),
+                            'collaborator_user_id': str(collaborator.user_id),
+                            'collaborator_email': (
+                                collaborator.user.email if collaborator.user else ''
+                            ),
+                            'actor_id': str(request.user.id),
+                        },
+                        organization=getattr(agent, "organization", None),
+                    )
+                    collaborator.delete()
+                    transaction.on_commit(lambda: Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.AGENT_COLLABORATOR_REMOVED,
+                        source=AnalyticsSource.WEB,
+                        properties=collaborator_props.copy(),
+                    ))
 
                 contact_counts = get_agent_contact_counts(agent)
                 total_count = contact_counts["total"] if contact_counts is not None else None
@@ -3910,7 +3954,28 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if not invite_id:
                     return JsonResponse({'success': False, 'error': 'Invite id is required'})
 
-                AgentCollaboratorInvite.objects.filter(agent=agent, id=invite_id).delete()
+                invite = AgentCollaboratorInvite.objects.filter(agent=agent, id=invite_id).first()
+                if invite:
+                    invite_props = Analytics.with_org_properties(
+                        {
+                            'agent_id': str(agent.id),
+                            'agent_name': agent.name,
+                            'invite_id': str(invite.id),
+                            'invite_email': invite.email,
+                            'invited_by_id': str(invite.invited_by_id),
+                            'actor_id': str(request.user.id),
+                        },
+                        organization=getattr(agent, "organization", None),
+                    )
+                    invite.delete()
+                    transaction.on_commit(lambda: Analytics.track_event(
+                        user_id=request.user.id,
+                        event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_CANCELLED,
+                        source=AnalyticsSource.WEB,
+                        properties=invite_props.copy(),
+                    ))
+                else:
+                    AgentCollaboratorInvite.objects.filter(agent=agent, id=invite_id).delete()
 
                 contact_counts = get_agent_contact_counts(agent)
                 total_count = contact_counts["total"] if contact_counts is not None else None
@@ -8760,6 +8825,24 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
 
         try:
             invite.accept(request.user)
+            accept_props = Analytics.with_org_properties(
+                {
+                    'agent_id': str(invite.agent_id),
+                    'agent_name': invite.agent.name,
+                    'invite_id': str(invite.id),
+                    'invite_email': invite.email,
+                    'invited_by_id': str(invite.invited_by_id),
+                    'collaborator_user_id': str(request.user.id),
+                    'actor_id': str(request.user.id),
+                },
+                organization=getattr(invite.agent, "organization", None),
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_ACCEPTED,
+                source=AnalyticsSource.WEB,
+                properties=accept_props.copy(),
+            ))
             return redirect(
                 build_immersive_chat_url(
                     request,
@@ -8834,6 +8917,24 @@ class AgentCollaboratorInviteRejectView(LoginRequiredMixin, TemplateView):
 
         try:
             invite.reject()
+            decline_props = Analytics.with_org_properties(
+                {
+                    'agent_id': str(invite.agent_id),
+                    'agent_name': invite.agent.name,
+                    'invite_id': str(invite.id),
+                    'invite_email': invite.email,
+                    'invited_by_id': str(invite.invited_by_id),
+                    'collaborator_user_id': str(request.user.id),
+                    'actor_id': str(request.user.id),
+                },
+                organization=getattr(invite.agent, "organization", None),
+            )
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_DECLINED,
+                source=AnalyticsSource.WEB,
+                properties=decline_props.copy(),
+            ))
         except Exception as exc:
             messages.error(request, f"Error rejecting invitation: {exc}")
 
