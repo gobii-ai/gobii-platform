@@ -50,6 +50,12 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
+from ...services.mcp_tool_cache import (
+    build_mcp_tool_cache_fingerprint,
+    get_cached_mcp_tool_definitions,
+    invalidate_mcp_tool_cache,
+    set_cached_mcp_tool_definitions,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -482,6 +488,7 @@ class MCPToolManager:
         self._discard_client(config_id)
         self._server_cache.pop(config_id, None)
         self._pd_agent_clients.clear()
+        invalidate_mcp_tool_cache(config_id)
 
         try:
             cfg = (
@@ -515,6 +522,7 @@ class MCPToolManager:
         self._discard_client(config_id)
         self._server_cache.pop(config_id, None)
         self._pd_agent_clients.clear()
+        invalidate_mcp_tool_cache(config_id)
 
     def _build_runtime_from_config(self, cfg: MCPServerConfig) -> MCPServerRuntime:
         env = dict(cfg.environment or {})
@@ -785,6 +793,84 @@ class MCPToolManager:
             return None, "No proxy server available"
 
         return (proxy.proxy_url if proxy else None, None)
+
+    def _effective_prefetch_apps(self, server: MCPServerRuntime) -> List[str]:
+        if server.prefetch_apps:
+            return [s.strip() for s in server.prefetch_apps if s.strip()]
+        if server.name == "pipedream":
+            app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
+            return [s.strip() for s in app_csv.split(",") if s.strip()]
+        return []
+
+    def _tool_cache_fingerprint_payload(self, server: MCPServerRuntime) -> Dict[str, Any]:
+        def _normalize_mapping(values: Dict[str, str]) -> Dict[str, str]:
+            return {
+                str(key): str(values[key])
+                for key in sorted(values)
+            }
+
+        updated_at = server.updated_at.isoformat() if server.updated_at else ""
+        oauth_updated_at = server.oauth_updated_at.isoformat() if server.oauth_updated_at else ""
+        prefetch_apps = self._effective_prefetch_apps(server)
+
+        return {
+            "config_id": server.config_id,
+            "name": server.name,
+            "scope": server.scope,
+            "url": server.url or "",
+            "command": server.command or "",
+            "args": [str(arg) for arg in (server.args or [])],
+            "auth_method": server.auth_method,
+            "updated_at": updated_at,
+            "oauth_updated_at": oauth_updated_at,
+            "prefetch_apps": prefetch_apps,
+            "headers": _normalize_mapping(server.headers or {}),
+            "env": _normalize_mapping(server.env or {}),
+        }
+
+    def _build_tool_cache_fingerprint(self, server: MCPServerRuntime) -> str:
+        payload = self._tool_cache_fingerprint_payload(server)
+        return build_mcp_tool_cache_fingerprint(payload)
+
+    def _serialize_tools_for_cache(self, tools: List["MCPToolInfo"]) -> List[Dict[str, Any]]:
+        serialized: List[Dict[str, Any]] = []
+        for tool in tools:
+            serialized.append(
+                {
+                    "full_name": tool.full_name,
+                    "server_name": tool.server_name,
+                    "tool_name": tool.tool_name,
+                    "description": tool.description,
+                    "parameters": tool.parameters,
+                }
+            )
+        return serialized
+
+    def _deserialize_tools_from_cache(
+        self,
+        server: MCPServerRuntime,
+        cached: List[Dict[str, Any]],
+    ) -> List["MCPToolInfo"]:
+        tools: List[MCPToolInfo] = []
+        for entry in cached:
+            if not isinstance(entry, dict):
+                continue
+            full_name = entry.get("full_name")
+            tool_name = entry.get("tool_name")
+            server_name = entry.get("server_name")
+            if not full_name or not tool_name or not server_name:
+                continue
+            tools.append(
+                MCPToolInfo(
+                    config_id=server.config_id,
+                    full_name=full_name,
+                    server_name=server_name,
+                    tool_name=tool_name,
+                    description=entry.get("description", ""),
+                    parameters=entry.get("parameters") or {"type": "object", "properties": {}},
+                )
+            )
+        return tools
     
     def _register_server(self, server: MCPServerRuntime):
         """Register an MCP server and cache its tools."""
@@ -812,11 +898,8 @@ class MCPToolManager:
 
             headers: Dict[str, str] = dict(server.headers or {})
             if server.name == "pipedream" and server.scope == MCPServerConfig.Scope.PLATFORM:
-                prefetch_csv = ",".join(server.prefetch_apps) if server.prefetch_apps else getattr(
-                    settings,
-                    "PIPEDREAM_PREFETCH_APPS",
-                    "google_sheets,greenhouse",
-                )
+                prefetch_apps = self._effective_prefetch_apps(server)
+                prefetch_csv = ",".join(prefetch_apps)
                 headers = self._pd_build_headers(
                     mode="sub-agent",
                     app_slug=prefetch_csv,
@@ -850,11 +933,31 @@ class MCPToolManager:
         client = Client(transport)
         self._clients[server.config_id] = client
 
+        cache_fingerprint = self._build_tool_cache_fingerprint(server)
+        cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
+        if cached_payload:
+            cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
+            if cached_tools:
+                self._tools_cache[server.config_id] = cached_tools
+                logger.info(
+                    "Loaded %d MCP tools for '%s' (%s) from cache",
+                    len(cached_tools),
+                    server.name,
+                    server.config_id,
+                )
+                return
+
         loop = self._ensure_event_loop()
         proxy_url = self._select_discovery_proxy_url(server)
         with _use_mcp_proxy(proxy_url):
             tools = loop.run_until_complete(self._fetch_server_tools(client, server))
         self._tools_cache[server.config_id] = tools
+        if tools:
+            set_cached_mcp_tool_definitions(
+                server.config_id,
+                cache_fingerprint,
+                self._serialize_tools_for_cache(tools),
+            )
 
         logger.info(
             "Registered MCP server '%s' (%s) with %d tools",
@@ -890,11 +993,7 @@ class MCPToolManager:
                 mcp_tools = await client.list_tools()
                 tools.extend(self._convert_tools(server, mcp_tools))
             else:
-                if server.prefetch_apps:
-                    prefetch = [s.strip() for s in server.prefetch_apps if s.strip()]
-                else:
-                    app_csv = getattr(settings, "PIPEDREAM_PREFETCH_APPS", "google_sheets,greenhouse")
-                    prefetch = [s.strip() for s in app_csv.split(",") if s.strip()]
+                prefetch = self._effective_prefetch_apps(server)
                 for app_slug in prefetch:
                     try:
                         if hasattr(client, "transport") and getattr(client.transport, "headers", None) is not None:

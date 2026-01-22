@@ -62,6 +62,7 @@ from api.services.browser_settings import (
     DEFAULT_MAX_BROWSER_TASKS,
     DEFAULT_VISION_DETAIL_LEVEL,
 )
+from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
     DEFAULT_SEARCH_WEB_RESULT_COUNT,
@@ -9543,3 +9544,19 @@ def touch_profile_on_embeddings_tier_change(sender, instance, **kwargs):
 def touch_profile_on_embeddings_tier_endpoint_change(sender, instance, **kwargs):
     profile = instance.tier.profile if instance.tier else None
     _touch_routing_profile(profile)
+
+
+@receiver(post_save, sender=MCPServerConfig)
+@receiver(post_delete, sender=MCPServerConfig)
+def invalidate_mcp_tool_cache_for_server(sender, instance, **kwargs):
+    server_id = getattr(instance, "id", None)
+    if server_id:
+        invalidate_mcp_tool_cache(str(server_id))
+
+
+@receiver(post_save, sender=MCPServerOAuthCredential)
+@receiver(post_delete, sender=MCPServerOAuthCredential)
+def invalidate_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
+    server_id = getattr(instance, "server_config_id", None)
+    if server_id:
+        invalidate_mcp_tool_cache(str(server_id))
