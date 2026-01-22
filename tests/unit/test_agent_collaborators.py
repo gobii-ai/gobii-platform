@@ -18,6 +18,7 @@ from api.models import (
     UserBilling,
     build_web_user_address,
 )
+from util.urls import build_immersive_chat_url
 
 User = get_user_model()
 
@@ -100,6 +101,14 @@ class AgentCollaboratorInviteViewTests(TestCase):
         response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            build_immersive_chat_url(
+                response.wsgi_request,
+                self.agent.id,
+                return_to=reverse("agents"),
+            ),
+        )
         self.assertTrue(
             AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
         )
@@ -120,6 +129,14 @@ class AgentCollaboratorInviteViewTests(TestCase):
             response = self.client.post(url)
 
         self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            build_immersive_chat_url(
+                response.wsgi_request,
+                self.agent.id,
+                return_to=reverse("agents"),
+            ),
+        )
         system_step = PersistentAgentSystemStep.objects.filter(
             step__agent=self.agent,
             code=PersistentAgentSystemStep.Code.COLLABORATOR_ADDED,

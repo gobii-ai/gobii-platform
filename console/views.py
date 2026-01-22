@@ -8694,7 +8694,6 @@ class AgentAllowlistInviteRejectView(TemplateView):
             
             # Reject the invitation
             invite.reject()
-            messages.success(request, "You have declined the invitation.")
             
         except AgentAllowlistInvite.DoesNotExist:
             messages.error(request, "Invalid invitation token.")
@@ -8761,6 +8760,13 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
 
         try:
             invite.accept(request.user)
+            return redirect(
+                build_immersive_chat_url(
+                    request,
+                    invite.agent_id,
+                    return_to=reverse("agents"),
+                )
+            )
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to accept invitation."
             messages.error(request, message_text)
@@ -8828,7 +8834,6 @@ class AgentCollaboratorInviteRejectView(LoginRequiredMixin, TemplateView):
 
         try:
             invite.reject()
-            messages.success(request, "You have declined the invitation.")
         except Exception as exc:
             messages.error(request, f"Error rejecting invitation: {exc}")
 
