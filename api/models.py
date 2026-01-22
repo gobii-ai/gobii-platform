@@ -6574,6 +6574,8 @@ class AgentCollaborator(models.Model):
                 self.agent.user,
                 organization=self.agent.organization,
             )
+            if cap <= 0:
+                return
             counts = get_agent_contact_counts(self.agent)
             if counts is None:
                 return
@@ -6656,6 +6658,8 @@ class AgentCollaboratorInvite(models.Model):
                 self.agent.user,
                 organization=self.agent.organization,
             )
+            if cap <= 0:
+                return
             counts = get_agent_contact_counts(self.agent)
             if counts is None:
                 return
