@@ -109,6 +109,7 @@ async function moveNode(url: string, payload: MovePayload): Promise<AgentFsNode>
 
 export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const queryClient = useQueryClient()
+  const canManage = initialData.permissions.canManage
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
   const [actionError, setActionError] = useState<string | null>(null)
@@ -239,6 +240,9 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   const selectedRows = selectedNodes.length
 
   const handleBulkDelete = useCallback(async () => {
+    if (!canManage) {
+      return
+    }
     if (!selectedNodes.length) {
       return
     }
@@ -251,9 +255,12 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     } catch {
       // Errors are surfaced via mutation callbacks.
     }
-  }, [deleteMutation, selectedNodes])
+  }, [canManage, deleteMutation, selectedNodes])
 
   const handleSingleDelete = useCallback(async (node: AgentFsNode) => {
+    if (!canManage) {
+      return
+    }
     const confirmed = window.confirm(`Delete ${node.name}?`)
     if (!confirmed) {
       return
@@ -263,11 +270,14 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     } catch {
       // Errors are surfaced via mutation callbacks.
     }
-  }, [deleteMutation])
+  }, [canManage, deleteMutation])
 
   const handleCreateFolderSubmit = useCallback(
     async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault()
+      if (!canManage) {
+        return
+      }
       const trimmed = newFolderName.trim()
       if (!trimmed) {
         setActionError('Folder name is required.')
@@ -282,7 +292,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
         // Errors are surfaced via mutation callbacks.
       }
     },
-    [createFolderMutation, currentFolderId, newFolderName],
+    [canManage, createFolderMutation, currentFolderId, newFolderName],
   )
 
   const handleOpenFolder = useCallback((node: AgentFsNode) => {
@@ -302,6 +312,9 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
   }, [])
 
   const handleToggleCreateFolder = useCallback(() => {
+    if (!canManage) {
+      return
+    }
     setIsCreatingFolder((current) => {
       const next = !current
       if (!next) {
@@ -310,7 +323,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
       return next
     })
     setActionError(null)
-  }, [])
+  }, [canManage])
 
   const handleFolderNameChange = useCallback((value: string) => {
     setNewFolderName(value)
@@ -348,13 +361,16 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
 
   const handleMove = useCallback(
     async (nodeId: string, parentId: string | null) => {
+      if (!canManage) {
+        return
+      }
       try {
         await moveMutation.mutateAsync({ nodeId, parentId })
       } catch {
         // Errors are surfaced via mutation callbacks.
       }
     },
-    [moveMutation],
+    [canManage, moveMutation],
   )
 
   const triggerUploadInput = useCallback(() => {
@@ -366,6 +382,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
     parentFolderId,
     onUploadFiles: handleUpload,
     onMoveNode: handleMove,
+    allowMove: canManage,
   })
 
   const isBusy = uploadMutation.isPending || deleteMutation.isPending || createFolderMutation.isPending || moveMutation.isPending
@@ -387,7 +404,8 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
       <div className="gobii-card-base overflow-hidden">
         <FileManagerHeader
           agentName={initialData.agent.name}
-          agentDetailUrl={initialData.urls.agentDetail}
+          backLink={initialData.backLink}
+          canManage={canManage}
           uploadInputId={uploadInputId}
           isBusy={isBusy}
           isCreatingFolder={isCreatingFolder}
@@ -401,6 +419,11 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
         />
 
         <div className="flex flex-col gap-3 px-6 py-4">
+          {!canManage && (
+            <div className="rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs text-slate-700">
+              Collaborators can upload and download files. Folder changes are disabled.
+            </div>
+          )}
           {uploadMutation.isPending && uploadInfo ? (
             <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">
               <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
@@ -413,7 +436,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
             </div>
           ) : null}
           <FileManagerBreadcrumbs breadcrumbs={breadcrumbs} onNavigate={handleNavigateTo} />
-          {isCreatingFolder ? (
+          {canManage && isCreatingFolder ? (
             <CreateFolderForm
               folderName={newFolderName}
               isBusy={isBusy}
@@ -429,6 +452,7 @@ export function AgentFilesScreen({ initialData }: AgentFilesScreenProps) {
           isBusy={isBusy}
           isLoading={filesQuery.isPending}
           errorMessage={errorMessage}
+          canManage={canManage}
           currentFolderId={currentFolderId}
           parentFolderPath={parentFolderPath}
           rowSelection={rowSelection}

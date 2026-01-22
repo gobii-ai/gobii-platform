@@ -126,6 +126,8 @@ jobs:
             tag: batch_redis_budget_cleanup
           - batch: agent_invite
             tag: batch_agent_invite
+          - batch: agent_collaborators
+            tag: batch_agent_collaborators
           - batch: agent_filesystem
             tag: batch_agent_filesystem
           - batch: agent_secrets_ctx

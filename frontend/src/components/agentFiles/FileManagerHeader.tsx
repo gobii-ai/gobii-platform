@@ -4,7 +4,11 @@ import { ArrowLeft, FolderPlus, RefreshCw, Trash2, UploadCloud } from 'lucide-re
 
 type FileManagerHeaderProps = {
   agentName: string
-  agentDetailUrl: string
+  backLink: {
+    url: string
+    label: string
+  }
+  canManage: boolean
   uploadInputId: string
   isBusy: boolean
   isCreatingFolder: boolean
@@ -19,7 +23,8 @@ type FileManagerHeaderProps = {
 
 export function FileManagerHeader({
   agentName,
-  agentDetailUrl,
+  backLink,
+  canManage,
   uploadInputId,
   isBusy,
   isCreatingFolder,
@@ -47,9 +52,9 @@ export function FileManagerHeader({
       <div>
         <h1 className="text-2xl font-semibold text-slate-900">Agent Files</h1>
         <p className="mt-1 text-sm text-slate-600">Browse and manage files for {agentName}.</p>
-        <a href={agentDetailUrl} className="mt-3 inline-flex items-center gap-2 text-sm text-blue-700 hover:text-blue-900">
+        <a href={backLink.url} className="mt-3 inline-flex items-center gap-2 text-sm text-blue-700 hover:text-blue-900">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Back to Agent Settings
+          {backLink.label}
         </a>
       </div>
       <div className="flex flex-wrap items-center gap-2">
@@ -71,24 +76,28 @@ export function FileManagerHeader({
           <UploadCloud className="h-4 w-4" aria-hidden="true" />
           Upload Files
         </label>
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
-          onClick={onToggleCreateFolder}
-          disabled={isBusy}
-        >
-          <FolderPlus className="h-4 w-4" aria-hidden="true" />
-          {isCreatingFolder ? 'Cancel' : 'New Folder'}
-        </button>
-        <button
-          type="button"
-          className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
-          onClick={onBulkDelete}
-          disabled={isBusy || selectedRows === 0}
-        >
-          <Trash2 className="h-4 w-4" aria-hidden="true" />
-          Delete Selected
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60"
+            onClick={onToggleCreateFolder}
+            disabled={isBusy}
+          >
+            <FolderPlus className="h-4 w-4" aria-hidden="true" />
+            {isCreatingFolder ? 'Cancel' : 'New Folder'}
+          </button>
+        )}
+        {canManage && (
+          <button
+            type="button"
+            className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60"
+            onClick={onBulkDelete}
+            disabled={isBusy || selectedRows === 0}
+          >
+            <Trash2 className="h-4 w-4" aria-hidden="true" />
+            Delete Selected
+          </button>
+        )}
         <button
           type="button"
           className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-blue-50 disabled:opacity-60"

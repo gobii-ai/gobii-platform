@@ -8,6 +8,7 @@ import uuid
 from typing import Iterable, Literal, Sequence, Mapping
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.db.models import Q
 from django.utils import timezone
@@ -32,6 +33,7 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
     ToolFriendlyName,
+    parse_web_user_address,
 )
 
 from .kanban_events import ensure_kanban_baseline_event
@@ -176,6 +178,55 @@ def _humanize_body(body: str, channel: str | None = None) -> str:
         return HTML_CLEANER.clean(html_snippet) if html_snippet else ""
     # Non-email channels: Let frontend render markdown (handles <br> naturally)
     return ""
+
+
+def _build_user_display_name(user) -> str | None:
+    full_name = ""
+    if hasattr(user, "get_full_name"):
+        full_name = (user.get_full_name() or "").strip()
+    if full_name:
+        return full_name
+    email = (getattr(user, "email", "") or "").strip()
+    if email:
+        return email
+    username = (getattr(user, "username", "") or "").strip()
+    if username:
+        return username
+    return None
+
+
+def _build_web_user_lookup(messages: Iterable[PersistentAgentMessage]) -> dict[int, str | None]:
+    user_ids: set[int] = set()
+    for message in messages:
+        channel = "web"
+        if message.conversation_id:
+            channel = message.conversation.channel
+        elif message.from_endpoint_id:
+            channel = message.from_endpoint.channel
+        if channel.lower() != "web":
+            continue
+        from_endpoint = message.from_endpoint
+        if not from_endpoint:
+            continue
+        user_id, agent_id = parse_web_user_address(from_endpoint.address)
+        if user_id is None:
+            continue
+        if agent_id and message.owner_agent_id and str(message.owner_agent_id) != agent_id:
+            continue
+        user_ids.add(user_id)
+
+    if not user_ids:
+        return {}
+
+    user_model = get_user_model()
+    users = user_model.objects.filter(id__in=user_ids).only(
+        "id",
+        "email",
+        "username",
+        "first_name",
+        "last_name",
+    )
+    return {user.id: _build_user_display_name(user) for user in users}
 
 
 def _format_timestamp(dt: datetime | None) -> str | None:
@@ -334,7 +385,7 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
     }
 
 
-def _serialize_message(env: MessageEnvelope) -> dict:
+def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
     message = env.message
     timestamp = message.timestamp
     channel = "web"
@@ -362,6 +413,30 @@ def _serialize_message(env: MessageEnvelope) -> dict:
 
     self_agent = getattr(message, "owner_agent", None)
     self_agent_name = getattr(self_agent, "name", None)
+    sender_user_id: int | None = None
+    sender_name: str | None = None
+    sender_address = message.from_endpoint.address if message.from_endpoint_id else None
+    if channel.lower() == "web" and sender_address:
+        user_id, agent_id = parse_web_user_address(sender_address)
+        if user_id is not None and (not agent_id or not message.owner_agent_id or str(message.owner_agent_id) == agent_id):
+            sender_user_id = user_id
+            if user_lookup is not None and user_id in user_lookup:
+                sender_name = user_lookup[user_id]
+            else:
+                user_model = get_user_model()
+                user = user_model.objects.filter(id=user_id).only(
+                    "id",
+                    "email",
+                    "username",
+                    "first_name",
+                    "last_name",
+                ).first()
+                if user:
+                    sender_name = _build_user_display_name(user)
+    if not sender_name:
+        sender_name = (conversation.display_name or "").strip() if conversation else ""
+        if not sender_name:
+            sender_name = sender_address
 
     return {
         "kind": "message",
@@ -381,6 +456,9 @@ def _serialize_message(env: MessageEnvelope) -> dict:
             "peerAgent": peer_payload,
             "peerLinkId": peer_link_id,
             "selfAgentName": self_agent_name,
+            "senderUserId": sender_user_id,
+            "senderName": sender_name,
+            "senderAddress": sender_address,
         },
     }
 
@@ -924,6 +1002,7 @@ def fetch_timeline_window(
     agent_name = getattr(agent, "name", None) or "Agent"
     if " " in agent_name:
         agent_name = agent_name.split()[0]
+    user_lookup = _build_web_user_lookup(env.message for env in message_envelopes)
     for env in truncated:
         if isinstance(env, StepEnvelope):
             cluster_buffer.append(env)
@@ -936,7 +1015,7 @@ def fetch_timeline_window(
         elif isinstance(env, KanbanEnvelope):
             timeline_events.append(serialize_persisted_kanban_event(env, agent_name))
         else:
-            timeline_events.append(_serialize_message(env))
+            timeline_events.append(_serialize_message(env, user_lookup))
     if cluster_buffer:
         timeline_events.append(_build_cluster(cluster_buffer, tool_label_map))
 

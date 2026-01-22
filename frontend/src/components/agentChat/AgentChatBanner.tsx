@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Settings, X, Zap } from 'lucide-react'
+import { Check, Settings, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -19,6 +19,8 @@ type AgentChatBannerProps = {
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
   isOrgOwned?: boolean
+  canManageAgent?: boolean
+  isCollaborator?: boolean
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -27,6 +29,7 @@ type AgentChatBannerProps = {
   dailyCreditsStatus?: DailyCreditsStatus | null
   onSettingsOpen?: () => void
   onClose?: () => void
+  onShare?: () => void
   sidebarCollapsed?: boolean
   onUpgrade?: (plan: PlanTier) => void
 }
@@ -49,6 +52,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentAvatarUrl,
   agentColorHex,
   isOrgOwned = false,
+  canManageAgent = true,
+  isCollaborator = false,
   connectionStatus = 'connecting',
   connectionLabel = 'Connecting',
   kanbanSnapshot,
@@ -56,6 +61,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   dailyCreditsStatus,
   onSettingsOpen,
   onClose,
+  onShare,
   sidebarCollapsed = true,
   onUpgrade,
 }: AgentChatBannerProps) {
@@ -73,10 +79,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   // Subscription state
   const { currentPlan, isUpgradeModalOpen, isProprietaryMode, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+  const canShowBannerActions = canManageAgent !== false && !isCollaborator
 
   // Determine if we should show upgrade button and what it should say
   // Only show in proprietary mode, and not for org-owned agents (billing is handled at org level)
-  const showUpgradeButton = isProprietaryMode && !isOrgOwned && (currentPlan === 'free' || currentPlan === 'startup')
+  const showUpgradeButton = canShowBannerActions
+    && isProprietaryMode
+    && !isOrgOwned
+    && (currentPlan === 'free' || currentPlan === 'startup')
   const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 
@@ -164,7 +174,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
   const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
-  const showSettingsButton = Boolean(onSettingsOpen)
+  const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
+  const showShareButton = canShowBannerActions && Boolean(onShare)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
@@ -242,6 +253,17 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span>{upgradeButtonLabel}</span>
               </button>
             )}
+            {showShareButton ? (
+              <button
+                type="button"
+                className="banner-share"
+                onClick={onShare}
+                aria-label="Invite collaborators"
+              >
+                <UserPlus size={14} strokeWidth={2} />
+                <span className="banner-share-label">Collaborate</span>
+              </button>
+            ) : null}
             {showSettingsButton ? (
               <button
                 type="button"

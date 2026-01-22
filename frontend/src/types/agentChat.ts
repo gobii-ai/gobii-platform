@@ -30,6 +30,9 @@ export type AgentMessage = {
   peerAgent?: PeerAgentRef | null
   peerLinkId?: string | null
   selfAgentName?: string | null
+  senderUserId?: number | null
+  senderName?: string | null
+  senderAddress?: string | null
 }
 
 export type ToolMeta = {

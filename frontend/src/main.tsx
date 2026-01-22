@@ -44,6 +44,25 @@ const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
 const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
+const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
+const viewerUserIdRaw = mountNode.dataset.viewerUserId
+const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
+const viewerUserId = Number.isFinite(viewerUserIdValue) ? viewerUserIdValue : null
+const viewerEmail = mountNode.dataset.viewerEmail || null
+const canManageCollaboratorsRaw = mountNode.dataset.canManageCollaborators
+const canManageCollaborators =
+  canManageCollaboratorsRaw === 'true'
+    ? true
+    : canManageCollaboratorsRaw === 'false'
+      ? false
+      : null
+const isCollaboratorRaw = mountNode.dataset.isCollaborator
+const isCollaborator =
+  isCollaboratorRaw === 'true'
+    ? true
+    : isCollaboratorRaw === 'false'
+      ? false
+      : null
 
 let screen: ReactElement
 
@@ -81,6 +100,11 @@ switch (appName) {
         agentName={agentName}
         agentColor={agentColor}
         agentAvatarUrl={agentAvatarUrl}
+        collaboratorInviteUrl={collaboratorInviteUrl}
+        canManageCollaborators={canManageCollaborators}
+        isCollaborator={isCollaborator}
+        viewerUserId={viewerUserId}
+        viewerEmail={viewerEmail}
         onClose={handleEmbeddedClose}
       />
     )

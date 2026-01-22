@@ -36,6 +36,11 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   agentAvatarUrl?: string | null
   agentName?: string | null
   agentIsOrgOwned?: boolean
+  canManageAgent?: boolean
+  isCollaborator?: boolean
+  hideInsightsPanel?: boolean
+  viewerUserId?: number | null
+  viewerEmail?: string | null
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
@@ -82,6 +87,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onLoadNewer?: () => void
   onJumpToLatest?: () => void
   onClose?: () => void
+  onShare?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   onComposerFocus?: () => void
   isNearBottom?: boolean
@@ -113,6 +119,11 @@ export function AgentChatLayout({
   agentAvatarUrl,
   agentName,
   agentIsOrgOwned = false,
+  canManageAgent = true,
+  isCollaborator = false,
+  hideInsightsPanel = false,
+  viewerUserId,
+  viewerEmail,
   connectionStatus,
   connectionLabel,
   connectionDetail,
@@ -168,6 +179,7 @@ export function AgentChatLayout({
   onLoadNewer,
   onJumpToLatest,
   onClose,
+  onShare,
   onSendMessage,
   onComposerFocus,
   isNearBottom = true,
@@ -351,6 +363,8 @@ export function AgentChatLayout({
           agentAvatarUrl={agentAvatarUrl}
           agentColorHex={agentColorHex}
           isOrgOwned={agentIsOrgOwned}
+          canManageAgent={canManageAgent}
+          isCollaborator={isCollaborator}
           connectionStatus={connectionStatus}
           connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
@@ -359,6 +373,7 @@ export function AgentChatLayout({
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
           onClose={onClose}
+          onShare={onShare}
           sidebarCollapsed={sidebarCollapsed}
           onUpgrade={onUpgrade}
         />
@@ -423,6 +438,8 @@ export function AgentChatLayout({
                     agentFirstName={agentFirstName}
                     events={events}
                     agentColorHex={agentColorHex || undefined}
+                    viewerUserId={viewerUserId ?? null}
+                    viewerEmail={viewerEmail ?? null}
                     initialLoading={initialLoading}
                     suppressedThinkingCursor={suppressedThinkingCursor}
                   />
@@ -537,6 +554,8 @@ export function AgentChatLayout({
             onInsightIndexChange={onInsightIndexChange}
             onPauseChange={onPauseChange}
             isInsightsPaused={isInsightsPaused}
+            onCollaborate={onShare}
+            hideInsightsPanel={hideInsightsPanel}
           />
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}

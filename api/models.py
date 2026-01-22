@@ -4967,6 +4967,12 @@ class PersistentAgent(models.Model):
                     user__email__iexact=addr,
                 ).exists():
                     return True
+
+            if AgentCollaborator.objects.filter(
+                agent=self,
+                user__email__iexact=addr,
+            ).exists():
+                return True
                 
         elif channel_val == CommsChannel.SMS:
             # Owner's verified phone is always allowed
@@ -5003,6 +5009,9 @@ class PersistentAgent(models.Model):
                     user_id=user_id,
                 ).exists():
                     return True
+
+            if AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists():
+                return True
 
         # Check manual allowlist entries with direction
         try:
@@ -5055,6 +5064,9 @@ class PersistentAgent(models.Model):
             ).exists():
                 return True
 
+        if AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists():
+            return True
+
         # Manual allowlist entries can extend access beyond owner/org members
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             try:
@@ -5101,6 +5113,11 @@ class PersistentAgent(models.Model):
                 ).exists()
             # User-owned: owner email
             owner_email = (self.user.email or "").lower()
+            if AgentCollaborator.objects.filter(
+                agent=self,
+                user__email__iexact=email_only,
+            ).exists():
+                return True
             whitelisted = email_only == owner_email
             logger.info("Whitelist default EMAIL check: %s === %s -> %s", email_only, owner_email, whitelisted)
             return whitelisted
@@ -6337,21 +6354,12 @@ class CommsAllowlistEntry(models.Model):
                 return
             
             try:
-                # Count both active entries and pending invitations
-                active_count = (
-                    CommsAllowlistEntry.objects
-                    .filter(agent=self.agent, is_active=True)
-                    .count()
-                )
-                
-                # Also count pending invitations since they'll become active entries
-                pending_count = (
-                    AgentAllowlistInvite.objects
-                    .filter(agent=self.agent, status=AgentAllowlistInvite.InviteStatus.PENDING)
-                    .count()
-                )
-                
-                total_count = active_count + pending_count
+                counts = get_agent_contact_counts(self.agent)
+                if counts is None:
+                    return
+                active_count = counts["active_total"]
+                pending_count = counts["pending_total"]
+                total_count = counts["total"]
             except Exception as e:
                 logger.error(
                     "Skipping allowlist cap check for agent %s due to error: %s",
@@ -6445,21 +6453,12 @@ class AgentAllowlistInvite(models.Model):
                 return
             
             try:
-                # Count both active entries and pending invitations
-                active_count = (
-                    CommsAllowlistEntry.objects
-                    .filter(agent=self.agent, is_active=True)
-                    .count()
-                )
-                
-                # Count existing pending invitations (not including this one since it's being added)
-                pending_count = (
-                    AgentAllowlistInvite.objects
-                    .filter(agent=self.agent, status=self.InviteStatus.PENDING)
-                    .count()
-                )
-                
-                total_count = active_count + pending_count
+                counts = get_agent_contact_counts(self.agent)
+                if counts is None:
+                    return
+                active_count = counts["active_total"]
+                pending_count = counts["pending_total"]
+                total_count = counts["total"]
             except Exception as e:
                 logger.error(
                     "Skipping invitation cap check for agent %s due to error: %s",
@@ -6529,6 +6528,233 @@ class AgentAllowlistInvite(models.Model):
     
     def __str__(self):
         return f"Invite<{self.channel}:{self.address}> for {self.agent.name} ({self.status})"
+
+
+def _generate_collaborator_invite_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+class AgentCollaborator(models.Model):
+    """User collaborators who can chat with an agent and access shared files."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="collaborators",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="agent_collaborations",
+    )
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        related_name="agent_collaborators_invited",
+        null=True,
+        blank=True,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["agent", "user"], name="uniq_agent_collaborator"),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "user"], name="collab_agent_user_idx"),
+        ]
+        ordering = ["-created_at"]
+
+    def clean(self):
+        super().clean()
+        if self._state.adding:
+            from util.subscription_helper import get_user_max_contacts_per_agent
+            cap = get_user_max_contacts_per_agent(
+                self.agent.user,
+                organization=self.agent.organization,
+            )
+            if cap <= 0:
+                return
+            counts = get_agent_contact_counts(self.agent)
+            if counts is None:
+                return
+            if counts["total"] >= cap:
+                allow_pending_accept = False
+                if counts["total"] == cap:
+                    user_email = (getattr(self.user, "email", "") or "").strip()
+                    if user_email:
+                        allow_pending_accept = AgentCollaboratorInvite.objects.filter(
+                            agent=self.agent,
+                            email__iexact=user_email,
+                            status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                            expires_at__gt=timezone.now(),
+                        ).exists()
+                if allow_pending_accept:
+                    return
+                pending_count = counts["pending_total"]
+                raise ValidationError({
+                    "agent": (
+                        f"Cannot add more contacts. Maximum {cap} contacts "
+                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
+                    )
+                })
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"AgentCollaborator<{self.agent_id}:{self.user_id}>"
+
+
+class AgentCollaboratorInvite(models.Model):
+    """Invitation for a user to collaborate on an agent."""
+
+    class InviteStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        ACCEPTED = "accepted", "Accepted"
+        REJECTED = "rejected", "Rejected"
+        EXPIRED = "expired", "Expired"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="collaborator_invites",
+    )
+    email = models.EmailField()
+    token = models.CharField(max_length=64, unique=True, default=_generate_collaborator_invite_token)
+    status = models.CharField(max_length=16, choices=InviteStatus.choices, default=InviteStatus.PENDING)
+    invited_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="sent_collaborator_invites",
+    )
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    responded_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "email"],
+                condition=models.Q(status__in=["pending", "accepted"]),
+                name="uniq_active_collaborator_invite",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["token"], name="collab_invite_token_idx"),
+            models.Index(fields=["agent", "status"], name="collab_invite_agent_status_idx"),
+        ]
+        ordering = ["-created_at"]
+
+    def clean(self):
+        super().clean()
+        self.email = (self.email or "").strip().lower()
+        if self._state.adding and self.status == self.InviteStatus.PENDING:
+            from util.subscription_helper import get_user_max_contacts_per_agent
+            cap = get_user_max_contacts_per_agent(
+                self.agent.user,
+                organization=self.agent.organization,
+            )
+            if cap <= 0:
+                return
+            counts = get_agent_contact_counts(self.agent)
+            if counts is None:
+                return
+            if counts["total"] >= cap:
+                pending_count = counts["pending_total"]
+                raise ValidationError({
+                    "agent": (
+                        f"Cannot send more invitations. Maximum {cap} contacts "
+                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
+                    )
+                })
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
+
+    def is_expired(self):
+        return timezone.now() > self.expires_at
+
+    def can_be_accepted(self):
+        return self.status == self.InviteStatus.PENDING and not self.is_expired()
+
+    def accept(self, user):
+        if not self.can_be_accepted():
+            raise ValueError("This invitation cannot be accepted")
+
+        collaborator, _ = AgentCollaborator.objects.get_or_create(
+            agent=self.agent,
+            user=user,
+            defaults={"invited_by": self.invited_by},
+        )
+
+        self.status = self.InviteStatus.ACCEPTED
+        self.responded_at = timezone.now()
+        self.save(update_fields=["status", "responded_at"])
+
+        return collaborator
+
+    def reject(self):
+        if self.status != self.InviteStatus.PENDING:
+            raise ValueError("This invitation has already been responded to")
+
+        self.status = self.InviteStatus.REJECTED
+        self.responded_at = timezone.now()
+        self.save(update_fields=["status", "responded_at"])
+
+    def __str__(self):
+        return f"CollaboratorInvite<{self.email}> for {self.agent_id} ({self.status})"
+
+
+def get_agent_contact_counts(agent: PersistentAgent) -> dict[str, int] | None:
+    try:
+        now = timezone.now()
+        allowlist_active = (
+            CommsAllowlistEntry.objects
+            .filter(agent=agent, is_active=True)
+            .count()
+        )
+        allowlist_pending = (
+            AgentAllowlistInvite.objects
+            .filter(
+                agent=agent,
+                status=AgentAllowlistInvite.InviteStatus.PENDING,
+                expires_at__gt=now,
+            )
+            .count()
+        )
+        collaborators_active = AgentCollaborator.objects.filter(agent=agent).count()
+        collaborators_pending = (
+            AgentCollaboratorInvite.objects
+            .filter(
+                agent=agent,
+                status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                expires_at__gt=now,
+            )
+            .count()
+        )
+        active_total = allowlist_active + collaborators_active
+        pending_total = allowlist_pending + collaborators_pending
+        return {
+            "allowlist_active": allowlist_active,
+            "allowlist_pending": allowlist_pending,
+            "collaborators_active": collaborators_active,
+            "collaborators_pending": collaborators_pending,
+            "active_total": active_total,
+            "pending_total": pending_total,
+            "total": active_total + pending_total,
+        }
+    except Exception:
+        logger.error(
+            "Error checking contact counts for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return None
 
 
 def _generate_transfer_token() -> str:
@@ -8109,6 +8335,7 @@ class PersistentAgentSystemStep(models.Model):
         SNAPSHOT = "SNAPSHOT", "Snapshot"
         CREDENTIALS_PROVIDED = "CREDENTIALS_PROVIDED", "Credentials Provided"
         CONTACTS_APPROVED = "CONTACTS_APPROVED", "Contacts Approved"
+        COLLABORATOR_ADDED = "COLLABORATOR_ADDED", "Collaborator Added"
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"

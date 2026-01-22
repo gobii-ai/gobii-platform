@@ -20,6 +20,7 @@ type FileTableProps = {
   isBusy: boolean
   isLoading: boolean
   errorMessage: string | null
+  canManage: boolean
   currentFolderId: string | null
   parentFolderPath: string
   rowSelection: RowSelectionState
@@ -39,6 +40,7 @@ export function FileTable({
   isBusy,
   isLoading,
   errorMessage,
+  canManage,
   currentFolderId,
   parentFolderPath,
   rowSelection,
@@ -93,9 +95,11 @@ export function FileTable({
     [isBusy, onRequestUpload, onTriggerUploadInput],
   )
 
+  const showSelection = canManage
   const columns = useMemo<ColumnDef<AgentFsNode>[]>(() => {
-    return [
-      {
+    const baseColumns: ColumnDef<AgentFsNode>[] = []
+    if (showSelection) {
+      baseColumns.push({
         id: 'select',
         header: ({ table }) => (
           <input
@@ -122,8 +126,10 @@ export function FileTable({
           />
         ),
         size: 48,
-      },
-      {
+      })
+    }
+
+    baseColumns.push({
         id: 'name',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>,
         cell: ({ row }) => {
@@ -148,15 +154,15 @@ export function FileTable({
             </div>
           )
         },
-      },
-      {
+      })
+    baseColumns.push({
         id: 'type',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Type</span>,
         cell: ({ row }) => (
           <span className="text-sm text-slate-600">{row.original.nodeType === 'dir' ? 'Folder' : 'File'}</span>
         ),
-      },
-      {
+      })
+    baseColumns.push({
         id: 'size',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Size</span>,
         cell: ({ row }) => (
@@ -164,13 +170,13 @@ export function FileTable({
             {row.original.nodeType === 'dir' ? '-' : formatBytes(row.original.sizeBytes)}
           </span>
         ),
-      },
-      {
+      })
+    baseColumns.push({
         id: 'updated',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated</span>,
         cell: ({ row }) => <span className="text-sm text-slate-600">{formatTimestamp(row.original.updatedAt)}</span>,
-      },
-      {
+      })
+    baseColumns.push({
         id: 'actions',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</span>,
         cell: ({ row }) => {
@@ -208,20 +214,23 @@ export function FileTable({
                 <ArrowDownToLine className="h-3.5 w-3.5" />
                 Download
               </a>
-              <button
-                type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
-                onClick={() => onDeleteNode(node)}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-                Delete
-              </button>
+              {canManage && (
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  onClick={() => onDeleteNode(node)}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Delete
+                </button>
+              )}
             </div>
           )
         },
-      },
-    ]
-  }, [downloadBaseUrl, handleFolderKeyDown, handleUploadKeyDown, isBusy, onDeleteNode, onOpenFolder, onRequestUpload, uploadInputId])
+      })
+
+    return baseColumns
+  }, [canManage, downloadBaseUrl, handleFolderKeyDown, handleUploadKeyDown, isBusy, onDeleteNode, onOpenFolder, onRequestUpload, showSelection, uploadInputId])
 
   const table = useReactTable({
     data: rows,
@@ -230,7 +239,7 @@ export function FileTable({
     onRowSelectionChange,
     getCoreRowModel: getCoreRowModel(),
     getRowId: (row) => row.id,
-    enableRowSelection: (row) => row.original.nodeType === 'file',
+    enableRowSelection: canManage ? (row) => row.original.nodeType === 'file' : false,
   })
 
   return (
@@ -274,15 +283,17 @@ export function FileTable({
                   onDragLeave={dragAndDrop.onParentDragLeave}
                   onDrop={dragAndDrop.onParentDrop}
                 >
-                  <td className="px-4 py-3 align-middle">
-                    <input
-                      type="checkbox"
-                      disabled
-                      className="h-4 w-4 rounded border-slate-300 text-blue-600 opacity-50"
-                      aria-label="Parent folder selection disabled"
-                    />
-                  </td>
-                  <td colSpan={columns.length - 1} className="px-4 py-3">
+                  {showSelection && (
+                    <td className="px-4 py-3 align-middle">
+                      <input
+                        type="checkbox"
+                        disabled
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600 opacity-50"
+                        aria-label="Parent folder selection disabled"
+                      />
+                    </td>
+                  )}
+                  <td colSpan={columns.length - (showSelection ? 1 : 0)} className="px-4 py-3">
                     <div className="flex items-center gap-3 text-sm text-slate-700">
                       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
                         <ArrowUp className="h-4 w-4" aria-hidden="true" />
@@ -309,7 +320,7 @@ export function FileTable({
                       row.getIsSelected() ? 'bg-blue-50/50' : '',
                       dragAndDrop.dragOverNodeId === row.original.id ? 'bg-blue-100/70' : '',
                     ].join(' ')}
-                    draggable={!isBusy}
+                    draggable={canManage && !isBusy}
                     onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}
                     onDragStart={(event) => dragAndDrop.onRowDragStart(row.original, event)}
                     onDragEnd={dragAndDrop.onRowDragEnd}

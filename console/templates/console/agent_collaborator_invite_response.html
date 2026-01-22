@@ -1,38 +1,30 @@
-{% extends "base.html" %}
+{% extends "console_page.html" %}
 
-{% block title %}Agent Invitation{% endblock %}
+{% block title %}Agent Collaboration Invite{% endblock %}
 
-{% block content %}
-<div class="min-h-screen bg-white px-4 py-12 sm:px-6 lg:px-8">
+{% block console_content %}
+<div class="space-y-6 pb-6">
   <div class="mx-auto w-full max-w-2xl">
     <div class="gobii-card-base overflow-hidden">
       <div class="px-6 py-6 space-y-5">
         <div class="space-y-2">
-          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Agent invitation</p>
+          <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Collaboration invite</p>
           <h1 class="text-2xl font-semibold text-slate-900">
             {% if invalid_token %}
               Invalid Invitation
             {% elif expired %}
               Invitation Expired
+            {% elif wrong_account %}
+              Sign In Required
             {% elif already_responded %}
               Invitation {% if invite.status == "accepted" %}Accepted{% elif invite.status == "rejected" %}Declined{% else %}{{ status }}{% endif %}
             {% elif rejecting %}
-              Decline Invitation?
+              Decline Collaboration?
             {% else %}
-              Accept Invitation?
+              Join Collaboration?
             {% endif %}
           </h1>
         </div>
-
-        {% if messages %}
-          <div class="space-y-2">
-            {% for message in messages %}
-              <div class="rounded-lg border px-4 py-3 text-sm {% if message.tags == 'error' %}border-rose-200 bg-rose-50 text-rose-800{% elif message.tags == 'success' %}border-emerald-200 bg-emerald-50 text-emerald-800{% else %}border-blue-200 bg-blue-50 text-blue-800{% endif %}">
-                {{ message }}
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
 
         {% if invalid_token %}
           <div class="space-y-3">
@@ -52,18 +44,20 @@
             </div>
           </div>
 
+        {% elif wrong_account %}
+          <div class="space-y-3">
+            <p class="text-sm text-slate-600">Please sign in with {{ invite.email }} to respond to this invitation.</p>
+            <div class="flex flex-wrap gap-3">
+              <a href="{% url 'account_login' %}?next={{ request.path }}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Sign in</a>
+            </div>
+          </div>
+
         {% elif already_responded %}
           <div class="space-y-3">
             {% if invite.status == "accepted" %}
               <p class="text-emerald-700 font-semibold">You have accepted this invitation.</p>
-              <p class="text-sm text-slate-600">You can now communicate with {{ agent.name }} by email.</p>
-              <div class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-                <p>Send messages to:</p>
-                {% for endpoint in agent.comms_endpoints.all %}
-                  {% if endpoint.channel == "email" and endpoint.is_primary %}
-                    <p class="mt-2 text-base font-mono text-emerald-900">{{ endpoint.address }}</p>
-                  {% endif %}
-                {% endfor %}
+              <div class="flex flex-wrap gap-3">
+                <a href="{% url 'agent_chat_shell' pk=agent.id %}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Chat</a>
               </div>
             {% elif invite.status == "rejected" %}
               <p class="text-sm text-slate-600">You have declined this invitation.</p>
@@ -86,18 +80,17 @@
                 <button type="submit" class="w-full rounded-lg bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700">
                   Accept Invitation
                 </button>
-                <a href="{% url 'agent_allowlist_invite_reject' token=invite.token %}" class="block w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-semibold text-rose-700 hover:bg-rose-100">
+                <a href="{% url 'agent_collaborator_invite_reject' token=invite.token %}" class="block w-full rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-center text-sm font-semibold text-rose-700 hover:bg-rose-100">
                   Decline Invitation
                 </a>
               </form>
-
             {% elif can_reject %}
               <form method="post" class="space-y-3">
                 {% csrf_token %}
                 <button type="submit" class="w-full rounded-lg bg-rose-600 px-4 py-3 text-sm font-semibold text-white hover:bg-rose-700">
                   Confirm Decline
                 </button>
-                <a href="{% url 'agent_allowlist_invite_accept' token=invite.token %}" class="block w-full rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-semibold text-blue-700 hover:bg-blue-100">
+                <a href="{% url 'agent_collaborator_invite_accept' token=invite.token %}" class="block w-full rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-center text-sm font-semibold text-blue-700 hover:bg-blue-100">
                   Go Back
                 </a>
               </form>

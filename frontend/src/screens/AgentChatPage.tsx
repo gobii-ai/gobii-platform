@@ -6,6 +6,7 @@ import { createAgent } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
@@ -207,6 +208,11 @@ export type AgentChatPageProps = {
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
+  collaboratorInviteUrl?: string | null
+  viewerUserId?: number | null
+  viewerEmail?: string | null
+  canManageCollaborators?: boolean | null
+  isCollaborator?: boolean | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -225,6 +231,11 @@ export function AgentChatPage({
   agentName,
   agentColor,
   agentAvatarUrl,
+  collaboratorInviteUrl,
+  viewerUserId,
+  viewerEmail,
+  canManageCollaborators,
+  isCollaborator,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -334,6 +345,7 @@ export function AgentChatPage({
   const initialLoading = !isNewAgent && loading && events.length === 0
 
   const [isNearBottom, setIsNearBottom] = useState(true)
+  const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
 
   const handleCreditEvent = useCallback(() => {
     void refetchQuickSettings()
@@ -390,6 +402,10 @@ export function AgentChatPage({
 
   useEffect(() => {
     didInitialScrollRef.current = false
+  }, [activeAgentId])
+
+  useEffect(() => {
+    setCollaboratorInviteOpen(false)
   }, [activeAgentId])
 
   useEffect(() => {
@@ -690,6 +706,9 @@ export function AgentChatPage({
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
+  const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
+  const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
+  const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -766,6 +785,33 @@ export function AgentChatPage({
     }
     return [fallbackAgent, ...rosterAgents]
   }, [activeAgentId, contextReady, fallbackAgent, rosterAgents])
+
+  const resolvedInviteUrl = useMemo(() => {
+    if (collaboratorInviteUrl) {
+      return collaboratorInviteUrl
+    }
+    if (activeAgentId) {
+      return `/console/agents/${activeAgentId}/`
+    }
+    return null
+  }, [collaboratorInviteUrl, activeAgentId])
+
+  const isCollaboratorOnly = Boolean(activeIsCollaborator && !activeCanManageAgent)
+  const canShareCollaborators = Boolean(
+    resolvedInviteUrl
+      && !isSelectionView
+      && !isNewAgent
+      && activeCanManageCollaborators
+      && !isCollaboratorOnly,
+  )
+
+  const handleOpenCollaboratorInvite = useCallback(() => {
+    setCollaboratorInviteOpen(true)
+  }, [])
+
+  const handleCloseCollaboratorInvite = useCallback(() => {
+    setCollaboratorInviteOpen(false)
+  }, [])
 
   // Detect if the requested agent doesn't exist (deleted or never existed)
   const agentNotFound = useMemo(() => {
@@ -1098,6 +1144,13 @@ export function AgentChatPage({
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
       ) : null}
+      <CollaboratorInviteDialog
+        open={collaboratorInviteOpen}
+        agentName={resolvedAgentName || agentName}
+        inviteUrl={resolvedInviteUrl}
+        canManage={activeCanManageCollaborators}
+        onClose={handleCloseCollaboratorInvite}
+      />
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
@@ -1105,6 +1158,11 @@ export function AgentChatPage({
         agentAvatarUrl={resolvedAvatarUrl}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         agentIsOrgOwned={resolvedIsOrgOwned}
+        isCollaborator={isCollaboratorOnly}
+        canManageAgent={activeCanManageAgent}
+        hideInsightsPanel={isCollaboratorOnly}
+        viewerUserId={viewerUserId ?? null}
+        viewerEmail={viewerEmail ?? null}
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
@@ -1147,6 +1205,7 @@ export function AgentChatPage({
         taskCreditsDismissKey={taskCreditsDismissKey}
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
+        onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
         events={isNewAgent ? [] : events}
         hasMoreOlder={isNewAgent ? false : hasMoreOlder}
         hasMoreNewer={isNewAgent ? false : hasMoreNewer}

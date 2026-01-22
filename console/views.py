@@ -87,6 +87,9 @@ from api.models import (
     OrganizationMembership,
     OrganizationInvite,
     TaskCredit,
+    AgentCollaborator,
+    AgentCollaboratorInvite,
+    get_agent_contact_counts,
 )
 from console.mixins import ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
@@ -114,6 +117,7 @@ from util.subscription_helper import (
     get_subscription_base_price,
 )
 from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url
+from console.agent_chat.access import resolve_agent_for_request, user_can_manage_agent, user_is_collaborator
 from config import settings
 from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
@@ -1982,12 +1986,22 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'can_spawn_agents': bool(can_spawn_agents),
         }
 
-    def _serialize_agent_for_frontend(self, agent: PersistentAgent, *, is_staff: bool = False) -> dict[str, Any]:
+    def _serialize_agent_for_frontend(
+        self,
+        agent: PersistentAgent,
+        *,
+        is_staff: bool = False,
+        is_shared: bool = False,
+    ) -> dict[str, Any]:
         display_tags = agent.display_tags if isinstance(agent.display_tags, list) else []
         primary_email = _first_endpoint_address(getattr(agent, 'primary_email_endpoints', None))
         primary_sms = _first_endpoint_address(getattr(agent, 'primary_sms_endpoints', None))
         remaining = _coerce_decimal_to_float(getattr(agent, 'daily_credit_remaining', None))
         recent_burn = _coerce_decimal_to_float(getattr(agent, 'daily_credit_last_24h_usage', None))
+
+        detail_url = reverse('agent_detail', kwargs={'pk': agent.id})
+        if is_shared:
+            detail_url = build_immersive_chat_url(self.request, agent.id, return_to=self.request.get_full_path())
 
         return {
             'id': str(agent.id),
@@ -2002,7 +2016,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'pendingTransfer': bool(getattr(agent, 'pending_transfer_invite', None)),
             'primaryEmail': primary_email,
             'primarySms': primary_sms,
-            'detailUrl': reverse('agent_detail', kwargs={'pk': agent.id}),
+            'detailUrl': detail_url,
             'chatUrl': build_immersive_chat_url(self.request, agent.id, return_to=self.request.get_full_path()),
             'cardGradientStyle': getattr(agent, 'card_gradient_style', '') or '',
             'iconBackgroundHex': getattr(agent, 'icon_background_hex', '') or '',
@@ -2018,9 +2032,15 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'dailyCreditLow': bool(getattr(agent, 'daily_credit_low', False)),
             'last24hCreditBurn': recent_burn,
             'auditUrl': reverse('console-agent-audit', kwargs={'agent_id': agent.id}) if is_staff else None,
+            'isShared': bool(is_shared),
         }
 
-    def _build_agent_list_props(self, context: dict[str, Any], agents: list[PersistentAgent]) -> dict[str, Any]:
+    def _build_agent_list_props(
+        self,
+        context: dict[str, Any],
+        agents: list[PersistentAgent],
+        shared_agents: list[PersistentAgent] | None = None,
+    ) -> dict[str, Any]:
         capacity = self._resolve_agent_capacity(context)
         can_spawn_agents = capacity['can_spawn_agents']
         spawn_url = f"{reverse('pages:home')}?spawn=1"
@@ -2036,10 +2056,16 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
         is_staff = bool(self.request.user and (self.request.user.is_staff or self.request.user.is_superuser))
+        shared_agents = shared_agents or []
 
         return {
             'agents': [self._serialize_agent_for_frontend(agent, is_staff=is_staff) for agent in agents],
-            'hasAgents': bool(agents),
+            'sharedAgents': [
+                self._serialize_agent_for_frontend(agent, is_staff=is_staff, is_shared=True)
+                for agent in shared_agents
+            ],
+            'hasAgents': bool(agents or shared_agents),
+            'hasSharedAgents': bool(shared_agents),
             'spawnAgentUrl': spawn_url,
             'upgradeUrl': upgrade_url,
             'canSpawnAgents': can_spawn_agents,
@@ -2085,6 +2111,21 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             ).select_related('browser_use_agent', 'agent_color').prefetch_related(primary_email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
         
         persistent_agents = list(persistent_agents)
+        shared_agents_qs = (
+            PersistentAgent.objects
+            .non_eval()
+            .filter(collaborators__user=self.request.user)
+            .select_related('browser_use_agent', 'agent_color')
+            .prefetch_related(primary_email_prefetch)
+            .prefetch_related(primary_sms_prefetch)
+            .order_by('-created_at')
+        )
+        if persistent_agents:
+            shared_agents_qs = shared_agents_qs.exclude(
+                id__in=[agent.id for agent in persistent_agents]
+            )
+        shared_agents = list(shared_agents_qs)
+        all_agents = persistent_agents + shared_agents
         today = timezone.localdate()
         next_reset = (
             timezone.localtime(timezone.now()).replace(
@@ -2097,7 +2138,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         )
         lookback_end = timezone.now()
         lookback_start = lookback_end - timedelta(hours=24)
-        agent_ids = [agent.id for agent in persistent_agents]
+        agent_ids = [agent.id for agent in all_agents]
         recent_usage_map: dict[Any, Decimal] = {}
         if agent_ids:
             usage_rows = (
@@ -2115,7 +2156,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 for row in usage_rows
             }
 
-        for agent in persistent_agents:
+        for agent in all_agents:
             description, source = build_listing_description(agent, max_length=200)
             agent.listing_description = description
             agent.listing_description_source = source
@@ -2169,8 +2210,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.daily_credit_hard_limit = hard_limit
 
         context['persistent_agents'] = persistent_agents
-        context['has_agents'] = bool(persistent_agents)
-        context['agent_list_props'] = self._build_agent_list_props(context, persistent_agents)
+        context['shared_agents'] = shared_agents
+        context['has_agents'] = bool(all_agents)
+        context['agent_list_props'] = self._build_agent_list_props(
+            context,
+            persistent_agents,
+            shared_agents,
+        )
 
         pending_transfers_qs = AgentTransferInvite.objects.filter(
             status=AgentTransferInvite.Status.PENDING,
@@ -2187,6 +2233,39 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                     if invite.id in unsassigned_ids:
                         invite.to_user = self.request.user
         context['pending_agent_transfer_invites'] = pending_transfers
+
+        pending_collaborator_invites: list[AgentCollaboratorInvite] = []
+        try:
+            from allauth.account.models import EmailAddress
+
+            user_emails = {
+                (self.request.user.email or "").strip().lower()
+            } if (self.request.user.email or "").strip() else set()
+            verified_emails = EmailAddress.objects.filter(user=self.request.user).values_list("email", flat=True)
+            for email in verified_emails:
+                normalized = (email or "").strip().lower()
+                if normalized:
+                    user_emails.add(normalized)
+        except Exception:
+            user_emails = {
+                (self.request.user.email or "").strip().lower()
+            } if (self.request.user.email or "").strip() else set()
+
+        if user_emails:
+            email_filter = Q()
+            for email in user_emails:
+                email_filter |= Q(email__iexact=email)
+            pending_collaborator_invites = list(
+                AgentCollaboratorInvite.objects.filter(
+                    email_filter,
+                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__gt=timezone.now(),
+                )
+                .select_related("agent", "agent__user", "invited_by")
+                .order_by("created_at")
+            )
+
+        context["pending_collaborator_invites"] = pending_collaborator_invites
 
         return context
 
@@ -2604,15 +2683,19 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         ).order_by('channel', 'address')
 
         # Count active allowlist entries AND pending invitations for display
-        active_count = CommsAllowlistEntry.objects.filter(
+        allowlist_active_count = CommsAllowlistEntry.objects.filter(
             agent=agent,
             is_active=True
         ).count()
-        pending_count = AgentAllowlistInvite.objects.filter(
+        allowlist_pending_count = AgentAllowlistInvite.objects.filter(
             agent=agent,
             status=AgentAllowlistInvite.InviteStatus.PENDING
         ).count()
-        total_contacts = active_count + pending_count
+        total_contacts = allowlist_active_count + allowlist_pending_count
+        contact_counts = get_agent_contact_counts(agent)
+        if contact_counts is not None:
+            total_contacts = contact_counts["total"]
+        context['contact_counts'] = contact_counts
         context['active_allowlist_count'] = total_contacts
         max_contacts_limit = get_user_max_contacts_per_agent(
             agent.user,
@@ -2637,6 +2720,17 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         context['allowlist_limit_reached'] = (
             max_contacts_limit > 0 and total_contacts >= max_contacts_limit
         )
+
+        context['collaborators'] = AgentCollaborator.objects.filter(
+            agent=agent,
+        ).select_related('user').order_by('user__email')
+        context['collaborator_invites'] = AgentCollaboratorInvite.objects.filter(
+            agent=agent,
+            status=AgentCollaboratorInvite.InviteStatus.PENDING,
+            expires_at__gt=timezone.now(),
+        ).order_by('email')
+
+        context['can_manage_collaborators'] = self._can_manage_collaborators(self.request.user, agent)
 
         # Add pending contact requests count
         from api.models import CommsAllowlistRequest
@@ -2758,6 +2852,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         owner_phone: str | None = None,
         active_count: int | None = None,
         pending_count: int | None = None,
+        total_count: int | None = None,
         max_contacts: int | None = None,
         pending_contact_requests: int | None = None,
         email_verified: bool | None = None,
@@ -2795,6 +2890,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         if email_verified is None:
             email_verified = has_verified_email(agent.user)
 
+        display_total = total_count
+        if display_total is None:
+            display_total = (active_count or 0) + (pending_count or 0)
+
         return {
             'show': True,
             'ownerEmail': owner_email,
@@ -2819,11 +2918,89 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 }
                 for invite in pending_list
             ],
-            'activeCount': (active_count or 0) + (pending_count or 0),
+            'activeCount': display_total,
             'maxContacts': max_contacts,
             'pendingContactRequests': pending_contact_requests,
             'emailVerified': email_verified,
         }
+
+    def _serialize_collaborator_state(
+        self,
+        agent: PersistentAgent,
+        *,
+        collaborators=None,
+        pending_invites=None,
+        counts: dict[str, int] | None = None,
+        max_contacts: int | None = None,
+        can_manage: bool | None = None,
+    ) -> dict[str, object]:
+        if collaborators is None:
+            collaborators = (
+                AgentCollaborator.objects
+                .filter(agent=agent)
+                .select_related("user")
+                .order_by("user__email")
+            )
+        if pending_invites is None:
+            pending_invites = AgentCollaboratorInvite.objects.filter(
+                agent=agent,
+                status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                expires_at__gt=timezone.now(),
+            ).order_by("email")
+
+        collab_list = [
+            {
+                "id": str(collab.id),
+                "userId": str(collab.user_id),
+                "email": collab.user.email if collab.user else "",
+                "name": (
+                    collab.user.get_full_name()
+                    or collab.user.username
+                    or collab.user.email
+                )
+                if collab.user
+                else "",
+            }
+            for collab in list(collaborators)
+        ]
+
+        pending_list = [
+            {
+                "id": str(invite.id),
+                "email": invite.email,
+                "invitedAtIso": invite.created_at.isoformat() if invite.created_at else None,
+                "expiresAtIso": invite.expires_at.isoformat() if invite.expires_at else None,
+            }
+            for invite in list(pending_invites)
+        ]
+
+        if counts is None:
+            counts = get_agent_contact_counts(agent) or {}
+
+        return {
+            "entries": collab_list,
+            "pendingInvites": pending_list,
+            "activeCount": int(counts.get("collaborators_active", 0) or 0),
+            "pendingCount": int(counts.get("collaborators_pending", 0) or 0),
+            "totalCount": int(counts.get("total", 0) or 0),
+            "maxContacts": max_contacts,
+            "canManage": bool(can_manage),
+        }
+
+    def _can_manage_collaborators(self, user, agent: PersistentAgent) -> bool:
+        if agent.user_id == user.id:
+            return True
+        if agent.organization_id:
+            return OrganizationMembership.objects.filter(
+                org=agent.organization,
+                user=user,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                ],
+            ).exists()
+        return False
 
     def _build_mcp_servers_payload(
         self,
@@ -3030,11 +3207,20 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             pending_invites=context.get('pending_invites'),
             owner_email=context.get('owner_email'),
             owner_phone=context.get('owner_phone'),
-            active_count=context.get('active_allowlist_count'),
+            total_count=context.get('active_allowlist_count'),
             max_contacts=max_contacts,
             pending_contact_requests=context.get('pending_contact_requests'),
         )
         allowlist['show'] = bool(context.get('show_allowlist'))
+
+        collaborators = self._serialize_collaborator_state(
+            agent,
+            collaborators=context.get('collaborators'),
+            pending_invites=context.get('collaborator_invites'),
+            counts=context.get('contact_counts'),
+            max_contacts=max_contacts,
+            can_manage=context.get('can_manage_collaborators'),
+        )
 
         inherited_servers = [
             {
@@ -3217,6 +3403,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'organizationName': agent.organization.name if agent.organization_id else None,
             },
             'allowlist': allowlist,
+            'collaborators': collaborators,
             'mcpServers': {
                 'inherited': inherited_servers,
                 'organization': organization_servers,
@@ -3268,7 +3455,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Handle AJAX allowlist / reassignment operations
         # Check both modern header and legacy header for AJAX detection
         action = request.POST.get('action')
-        ajax_actions = {'add_allowlist', 'remove_allowlist', 'cancel_invite', 'reassign_org'}
+        ajax_actions = {
+            'add_allowlist',
+            'remove_allowlist',
+            'cancel_invite',
+            'add_collaborator',
+            'remove_collaborator',
+            'cancel_collaborator_invite',
+            'reassign_org',
+        }
         if is_ajax and action in ajax_actions:
             from api.models import CommsAllowlistEntry
             from django.db import IntegrityError
@@ -3384,6 +3579,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
+                    contact_counts = get_agent_contact_counts(agent)
+                    if contact_counts is not None:
+                        total_count = contact_counts["total"]
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3392,10 +3590,23 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         owner_phone=owner_phone,
                         active_count=active_count,
                         pending_count=pending_count,
+                        total_count=total_count,
                         max_contacts=max_contacts_per_agent,
                     )
+                    collaborators_payload = self._serialize_collaborator_state(
+                        agent,
+                        counts=contact_counts,
+                        max_contacts=max_contacts_per_agent,
+                        can_manage=self._can_manage_collaborators(request.user, agent),
+                    )
 
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
+                    return JsonResponse({
+                        'success': True,
+                        'html': html,
+                        'active_count': total_count,
+                        'allowlist': allowlist_payload,
+                        'collaborators': collaborators_payload,
+                    })
                     
                 except ValidationError as e:
                     existing_entry = locals().get('existing_entry')
@@ -3450,6 +3661,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
+                    contact_counts = get_agent_contact_counts(agent)
+                    if contact_counts is not None:
+                        total_count = contact_counts["total"]
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3458,10 +3672,24 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         owner_phone=owner_phone,
                         active_count=active_count,
                         pending_count=pending_count,
+                        total_count=total_count,
                         max_contacts=max_contacts_per_agent,
                     )
 
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
+                    collaborators_payload = self._serialize_collaborator_state(
+                        agent,
+                        counts=contact_counts,
+                        max_contacts=max_contacts_per_agent,
+                        can_manage=self._can_manage_collaborators(request.user, agent),
+                    )
+
+                    return JsonResponse({
+                        'success': True,
+                        'html': html,
+                        'active_count': total_count,
+                        'allowlist': allowlist_payload,
+                        'collaborators': collaborators_payload,
+                    })
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
@@ -3510,6 +3738,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         status=AgentAllowlistInvite.InviteStatus.PENDING
                     ).count()
                     total_count = active_count + pending_count
+                    contact_counts = get_agent_contact_counts(agent)
+                    if contact_counts is not None:
+                        total_count = contact_counts["total"]
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3518,13 +3749,184 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         owner_phone=owner_phone,
                         active_count=active_count,
                         pending_count=pending_count,
+                        total_count=total_count,
                         max_contacts=max_contacts_per_agent,
                     )
 
-                    return JsonResponse({'success': True, 'html': html, 'active_count': total_count, 'allowlist': allowlist_payload})
+                    collaborators_payload = self._serialize_collaborator_state(
+                        agent,
+                        counts=contact_counts,
+                        max_contacts=max_contacts_per_agent,
+                        can_manage=self._can_manage_collaborators(request.user, agent),
+                    )
+
+                    return JsonResponse({
+                        'success': True,
+                        'html': html,
+                        'active_count': total_count,
+                        'allowlist': allowlist_payload,
+                        'collaborators': collaborators_payload,
+                    })
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
+
+            elif action == 'add_collaborator':
+                if not self._can_manage_collaborators(request.user, agent):
+                    return JsonResponse({'success': False, 'error': 'Not authorized to invite collaborators.'}, status=403)
+
+                email = (request.POST.get('email') or '').strip().lower()
+                if not email:
+                    return JsonResponse({'success': False, 'error': 'Email is required'})
+
+                try:
+                    from django.core.validators import validate_email
+                    validate_email(email)
+                except ValidationError:
+                    return JsonResponse({'success': False, 'error': 'Enter a valid email address'})
+
+                owner_email = (agent.user.email or '').strip().lower()
+                if owner_email and email == owner_email:
+                    return JsonResponse({'success': False, 'error': 'Owner already has access to this agent'})
+
+                if agent.organization_id:
+                    if OrganizationMembership.objects.filter(
+                        org=agent.organization,
+                        status=OrganizationMembership.OrgStatus.ACTIVE,
+                        user__email__iexact=email,
+                    ).exists():
+                        return JsonResponse({'success': False, 'error': 'Organization members already have access'})
+
+                if AgentCollaborator.objects.filter(agent=agent, user__email__iexact=email).exists():
+                    return JsonResponse({'success': False, 'error': 'This collaborator already has access'})
+
+                now = timezone.now()
+                if AgentCollaboratorInvite.objects.filter(
+                    agent=agent,
+                    email__iexact=email,
+                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__gt=now,
+                ).exists():
+                    return JsonResponse({'success': False, 'error': 'An invitation is already pending for this email'})
+
+                AgentCollaboratorInvite.objects.filter(
+                    agent=agent,
+                    email__iexact=email,
+                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
+                    expires_at__lte=now,
+                ).update(status=AgentCollaboratorInvite.InviteStatus.EXPIRED)
+                AgentCollaboratorInvite.objects.filter(
+                    agent=agent,
+                    email__iexact=email,
+                    status=AgentCollaboratorInvite.InviteStatus.ACCEPTED,
+                ).update(status=AgentCollaboratorInvite.InviteStatus.EXPIRED)
+
+                try:
+                    invite = AgentCollaboratorInvite.objects.create(
+                        agent=agent,
+                        email=email,
+                        invited_by=request.user,
+                        expires_at=timezone.now() + timedelta(days=7),
+                    )
+                except ValidationError as exc:
+                    return JsonResponse({'success': False, 'error': _format_validation_error(exc)})
+
+                accept_url = request.build_absolute_uri(
+                    reverse('agent_collaborator_invite_accept', kwargs={'token': invite.token})
+                )
+                reject_url = request.build_absolute_uri(
+                    reverse('agent_collaborator_invite_reject', kwargs={'token': invite.token})
+                )
+                context = {
+                    'agent': agent,
+                    'agent_owner': agent.user,
+                    'collaborator_email': email,
+                    'accept_url': accept_url,
+                    'reject_url': reject_url,
+                    'invite': invite,
+                }
+                subject = f"You've been invited to collaborate with {agent.name} on Gobii"
+                text_body = render_to_string('emails/agent_collaborator_invite.txt', context)
+                html_body = render_to_string('emails/agent_collaborator_invite.html', context)
+                try:
+                    send_mail(
+                        subject,
+                        text_body,
+                        None,
+                        [email],
+                        html_message=html_body,
+                        fail_silently=True,
+                    )
+                except Exception:
+                    logger.warning("Failed to send collaborator invitation email to %s", email, exc_info=True)
+
+                contact_counts = get_agent_contact_counts(agent)
+                total_count = contact_counts["total"] if contact_counts is not None else None
+                allowlist_payload = self._serialize_allowlist_state(
+                    agent,
+                    total_count=total_count,
+                    max_contacts=max_contacts_per_agent,
+                )
+                collaborators_payload = self._serialize_collaborator_state(
+                    agent,
+                    counts=contact_counts,
+                    max_contacts=max_contacts_per_agent,
+                    can_manage=True,
+                )
+
+                return JsonResponse({'success': True, 'allowlist': allowlist_payload, 'collaborators': collaborators_payload})
+
+            elif action == 'remove_collaborator':
+                if not self._can_manage_collaborators(request.user, agent):
+                    return JsonResponse({'success': False, 'error': 'Not authorized to remove collaborators.'}, status=403)
+
+                collaborator_id = request.POST.get('collaborator_id')
+                if not collaborator_id:
+                    return JsonResponse({'success': False, 'error': 'Collaborator id is required'})
+
+                AgentCollaborator.objects.filter(agent=agent, id=collaborator_id).delete()
+
+                contact_counts = get_agent_contact_counts(agent)
+                total_count = contact_counts["total"] if contact_counts is not None else None
+                allowlist_payload = self._serialize_allowlist_state(
+                    agent,
+                    total_count=total_count,
+                    max_contacts=max_contacts_per_agent,
+                )
+                collaborators_payload = self._serialize_collaborator_state(
+                    agent,
+                    counts=contact_counts,
+                    max_contacts=max_contacts_per_agent,
+                    can_manage=self._can_manage_collaborators(request.user, agent),
+                )
+
+                return JsonResponse({'success': True, 'allowlist': allowlist_payload, 'collaborators': collaborators_payload})
+
+            elif action == 'cancel_collaborator_invite':
+                if not self._can_manage_collaborators(request.user, agent):
+                    return JsonResponse({'success': False, 'error': 'Not authorized to cancel invites.'}, status=403)
+
+                invite_id = request.POST.get('invite_id')
+                if not invite_id:
+                    return JsonResponse({'success': False, 'error': 'Invite id is required'})
+
+                AgentCollaboratorInvite.objects.filter(agent=agent, id=invite_id).delete()
+
+                contact_counts = get_agent_contact_counts(agent)
+                total_count = contact_counts["total"] if contact_counts is not None else None
+                allowlist_payload = self._serialize_allowlist_state(
+                    agent,
+                    total_count=total_count,
+                    max_contacts=max_contacts_per_agent,
+                )
+                collaborators_payload = self._serialize_collaborator_state(
+                    agent,
+                    counts=contact_counts,
+                    max_contacts=max_contacts_per_agent,
+                    can_manage=self._can_manage_collaborators(request.user, agent),
+                )
+
+                return JsonResponse({'success': True, 'allowlist': allowlist_payload, 'collaborators': collaborators_payload})
 
             elif action == 'reassign_org':
                 # Reassign a user-owned agent to an organization, or move org-owned back to personal
@@ -3550,11 +3952,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Handle regular form submission
         # Check if this is an allowlist action that shouldn't have gotten here
         action = action or ''
-        if action in ['add_allowlist', 'remove_allowlist']:
+        if action in ['add_allowlist', 'remove_allowlist', 'cancel_invite', 'add_collaborator', 'remove_collaborator', 'cancel_collaborator_invite']:
             # This shouldn't happen, but if JavaScript failed, redirect back
             # Import messages here if needed
             from django.contrib import messages as django_messages
-            django_messages.error(request, "Please enable JavaScript to manage the allowlist.")
+            django_messages.error(request, "Please enable JavaScript to manage contacts.")
             return redirect('agent_detail', pk=agent.pk)
 
         if action == 'transfer_agent':
@@ -4495,13 +4897,54 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     template_name = "console/agent_email_oauth_callback.html"
 
 
-class PersistentAgentChatShellView(AgentDetailView):
+class SharedAgentAccessMixin:
+    def get_object(self, queryset=None):
+        agent_id = self.kwargs.get(self.pk_url_kwarg)
+        if not agent_id:
+            raise Http404
+        agent = resolve_agent_for_request(self.request, agent_id, allow_shared=True)
+        self._can_manage_agent = user_can_manage_agent(self.request.user, agent)
+        self._is_collaborator = user_is_collaborator(self.request.user, agent)
+        self._can_manage_collaborators = False
+        if agent.user_id == self.request.user.id:
+            self._can_manage_collaborators = True
+        elif agent.organization_id:
+            self._can_manage_collaborators = OrganizationMembership.objects.filter(
+                org=agent.organization,
+                user=self.request.user,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                ],
+            ).exists()
+        return agent
+
+    @property
+    def can_manage_agent(self) -> bool:
+        return bool(getattr(self, "_can_manage_agent", False))
+
+    @property
+    def is_collaborator(self) -> bool:
+        return bool(getattr(self, "_is_collaborator", False))
+
+    @property
+    def can_manage_collaborators(self) -> bool:
+        return bool(getattr(self, "_can_manage_collaborators", False))
+
+
+class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
+    model = PersistentAgent
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
     template_name = "console/persistent_agent_chat_shell.html"
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
+        context["can_manage_collaborators"] = self.can_manage_collaborators
+        context["is_collaborator"] = self.is_collaborator
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
         return context
@@ -4510,7 +4953,10 @@ class PersistentAgentChatShellView(AgentDetailView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class AgentAvatarProxyView(AgentDetailView):
+class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
+    model = PersistentAgent
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
     http_method_names = ["get"]
 
     def get(self, request, *args, **kwargs):
@@ -4636,7 +5082,7 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
         return redirect('agent_allowlist', pk=agent.pk)
 
 
-class AgentFilesView(ConsoleViewMixin, DetailView):
+class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     """File browser page for a single agent."""
     model = PersistentAgent
     template_name = "console/agent_files.html"
@@ -4662,6 +5108,7 @@ class AgentFilesView(ConsoleViewMixin, DetailView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         agent = self.get_object()
+        can_manage = self.can_manage_agent
         context["agent"] = agent
         context["agent_files_props"] = {
             "csrfToken": get_token(self.request),
@@ -4669,8 +5116,14 @@ class AgentFilesView(ConsoleViewMixin, DetailView):
                 "id": str(agent.id),
                 "name": agent.name,
             },
+            "backLink": {
+                "url": reverse("agent_detail", args=[agent.id]) if can_manage else reverse("agents"),
+                "label": "Back to Agent Settings" if can_manage else "Back to Agents",
+            },
+            "permissions": {
+                "canManage": can_manage,
+            },
             "urls": {
-                "agentDetail": reverse("agent_detail", args=[agent.id]),
                 "files": reverse("console_agent_fs_list", kwargs={"agent_id": agent.id}),
                 "upload": reverse("console_agent_fs_upload", kwargs={"agent_id": agent.id}),
                 "delete": reverse("console_agent_fs_delete", kwargs={"agent_id": agent.id}),
@@ -5971,7 +6424,11 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         pending_invites = AgentAllowlistInvite.objects.filter(
             agent=agent, status=AgentAllowlistInvite.InviteStatus.PENDING
         ).count()
-        
+        total_count = active_count + pending_invites
+        contact_counts = get_agent_contact_counts(agent)
+        if contact_counts is not None:
+            total_count = contact_counts["total"]
+
         context['max_contacts'] = max_contacts
         context['contact_cap_unlimited'] = max_contacts <= 0
         context['active_count'] = active_count
@@ -8237,7 +8694,6 @@ class AgentAllowlistInviteRejectView(TemplateView):
             
             # Reject the invitation
             invite.reject()
-            messages.success(request, "You have declined the invitation.")
             
         except AgentAllowlistInvite.DoesNotExist:
             messages.error(request, "Invalid invitation token.")
@@ -8245,6 +8701,143 @@ class AgentAllowlistInviteRejectView(TemplateView):
             messages.error(request, f"Error rejecting invitation: {e}")
             
         return redirect("agent_allowlist_invite_reject", token=token)
+
+
+class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
+    """Handle accepting an agent collaborator invitation."""
+    template_name = "console/agent_collaborator_invite_response.html"
+
+    def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
+        invite_email = (invite.email or "").strip().lower()
+        if not invite_email:
+            return False
+        if (user.email or "").strip().lower() == invite_email:
+            return True
+        try:
+            from allauth.account.models import EmailAddress
+            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
+        except Exception:
+            return False
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        token = kwargs.get("token")
+
+        try:
+            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
+            context["invite"] = invite
+            context["agent"] = invite.agent
+
+            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
+                context["already_responded"] = True
+                context["status"] = invite.get_status_display()
+            elif invite.is_expired():
+                context["expired"] = True
+            elif not self._user_matches_invite(self.request.user, invite):
+                context["wrong_account"] = True
+            else:
+                context["can_accept"] = True
+        except AgentCollaboratorInvite.DoesNotExist:
+            context["invalid_token"] = True
+
+        return context
+
+    def post(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        try:
+            invite = AgentCollaboratorInvite.objects.get(token=token)
+        except AgentCollaboratorInvite.DoesNotExist:
+            messages.error(request, "Invalid invitation token.")
+            return redirect("agent_collaborator_invite_accept", token=token)
+
+        if not self._user_matches_invite(request.user, invite):
+            messages.error(request, "Please sign in with the invited email address to accept.")
+            return redirect("agent_collaborator_invite_accept", token=token)
+
+        if not invite.can_be_accepted():
+            messages.error(request, "This invitation is no longer valid.")
+            return redirect("agent_collaborator_invite_accept", token=token)
+
+        try:
+            invite.accept(request.user)
+            return redirect(
+                build_immersive_chat_url(
+                    request,
+                    invite.agent_id,
+                    return_to=reverse("agents"),
+                )
+            )
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to accept invitation."
+            messages.error(request, message_text)
+        except Exception as exc:
+            messages.error(request, f"Error accepting invitation: {exc}")
+
+        return redirect("agent_collaborator_invite_accept", token=token)
+
+
+class AgentCollaboratorInviteRejectView(LoginRequiredMixin, TemplateView):
+    """Handle rejecting an agent collaborator invitation."""
+    template_name = "console/agent_collaborator_invite_response.html"
+
+    def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
+        invite_email = (invite.email or "").strip().lower()
+        if not invite_email:
+            return False
+        if (user.email or "").strip().lower() == invite_email:
+            return True
+        try:
+            from allauth.account.models import EmailAddress
+            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
+        except Exception:
+            return False
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        token = kwargs.get("token")
+
+        try:
+            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
+            context["invite"] = invite
+            context["agent"] = invite.agent
+            context["rejecting"] = True
+
+            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
+                context["already_responded"] = True
+                context["status"] = invite.get_status_display()
+            elif invite.is_expired():
+                context["expired"] = True
+            elif not self._user_matches_invite(self.request.user, invite):
+                context["wrong_account"] = True
+            else:
+                context["can_reject"] = True
+        except AgentCollaboratorInvite.DoesNotExist:
+            context["invalid_token"] = True
+
+        return context
+
+    def post(self, request, *args, **kwargs):
+        token = kwargs.get("token")
+        try:
+            invite = AgentCollaboratorInvite.objects.get(token=token)
+        except AgentCollaboratorInvite.DoesNotExist:
+            messages.error(request, "Invalid invitation token.")
+            return redirect("agent_collaborator_invite_reject", token=token)
+
+        if not self._user_matches_invite(request.user, invite):
+            messages.error(request, "Please sign in with the invited email address to respond.")
+            return redirect("agent_collaborator_invite_reject", token=token)
+
+        if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
+            messages.error(request, "This invitation has already been responded to.")
+            return redirect("agent_collaborator_invite_reject", token=token)
+
+        try:
+            invite.reject()
+        except Exception as exc:
+            messages.error(request, f"Error rejecting invitation: {exc}")
+
+        return redirect("agent_collaborator_invite_reject", token=token)
 
 
 def _resolve_billing_owner(request):
