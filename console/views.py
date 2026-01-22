@@ -8761,7 +8761,6 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
 
         try:
             invite.accept(request.user)
-            messages.success(request, f"You now have access to {invite.agent.name}.")
         except ValidationError as exc:
             message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to accept invitation."
             messages.error(request, message_text)

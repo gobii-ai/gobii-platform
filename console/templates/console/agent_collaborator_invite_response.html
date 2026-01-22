@@ -66,7 +66,6 @@
           <div class="space-y-3">
             {% if invite.status == "accepted" %}
               <p class="text-emerald-700 font-semibold">You have accepted this invitation.</p>
-              <p class="text-sm text-slate-600">You can now chat and exchange files with {{ agent.name }}.</p>
               <div class="flex flex-wrap gap-3">
                 <a href="{% url 'agent_chat_shell' pk=agent.id %}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Chat</a>
               </div>
