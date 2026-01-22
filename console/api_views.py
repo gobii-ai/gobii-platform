@@ -1477,8 +1477,6 @@ class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
                 source=AnalyticsSource.WEB,
                 properties=collaborator_props.copy(),
             ))
-        else:
-            AgentCollaborator.objects.filter(agent=agent, user=request.user).delete()
         return JsonResponse({"success": True})
 
 

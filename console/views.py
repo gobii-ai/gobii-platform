@@ -3974,8 +3974,6 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         source=AnalyticsSource.WEB,
                         properties=invite_props.copy(),
                     ))
-                else:
-                    AgentCollaboratorInvite.objects.filter(agent=agent, id=invite_id).delete()
 
                 contact_counts = get_agent_contact_counts(agent)
                 total_count = contact_counts["total"] if contact_counts is not None else None
