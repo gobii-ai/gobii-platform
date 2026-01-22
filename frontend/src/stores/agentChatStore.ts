@@ -402,10 +402,12 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     // Check if we have cached state for the new agent
     const cachedState = nextCache[agentId]
 
-    // Clear insight rotation timer before switching agents
-    const existingInsightTimer = get().insightRotationTimer
-    if (existingInsightTimer) {
-      clearTimeout(existingInsightTimer)
+    // Clear insight rotation timer when switching to a different agent
+    if (!reuseExisting) {
+      const existingInsightTimer = get().insightRotationTimer
+      if (existingInsightTimer) {
+        clearTimeout(existingInsightTimer)
+      }
     }
 
     set({
@@ -437,14 +439,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       agentName: providedName ?? cachedState?.agentName ?? fallbackName ?? null,
       agentAvatarUrl: providedAvatarUrl ?? cachedState?.agentAvatarUrl ?? fallbackAvatarUrl ?? null,
       agentStateCache: nextCache,
-      // Reset insight state when switching agents to avoid stale data
-      insights: [],
-      currentInsightIndex: 0,
-      insightsFetchedAt: null,
-      insightRotationTimer: null,
-      insightProcessingStartedAt: null,
-      dismissedInsightIds: new Set(),
-      insightsPaused: false,
+      // Reset insight state only when switching to a different agent to avoid stale data
+      // (don't reset on same-agent metadata updates like name/color changes)
+      ...(reuseExisting ? {} : {
+        insights: [],
+        currentInsightIndex: 0,
+        insightsFetchedAt: null,
+        insightRotationTimer: null,
+        insightProcessingStartedAt: null,
+        dismissedInsightIds: new Set(),
+        insightsPaused: false,
+      }),
     })
 
     const currentAgentId = agentId
