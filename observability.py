@@ -31,6 +31,9 @@ _tracer_provider: Optional[TracerProvider] = None
 # Local tests disable tracing; in that case we suppress noisy INFO logs.
 _TRACING_ACTIVE: bool = False
 
+# Global reference for Pyroscope profiling cleanup
+_pyroscope_initialized: bool = False
+
 class DaemonOTLPSpanExporter(OTLPSpanExporter):
     """
     Custom OTLPSpanExporter that ensures the BatchSpanProcessor's worker thread
@@ -255,6 +258,83 @@ def shutdown_tracing() -> None:
     
     # Clean up reference regardless of success/failure
     _tracer_provider = None
+
+
+def init_profiling(service_name: GobiiService) -> None:
+    """
+    Initialize Pyroscope profiling exactly once per process.
+    Follows same environment-based enable/disable logic as tracing.
+    """
+    global _pyroscope_initialized
+
+    if _pyroscope_initialized:
+        return
+
+    # Check if Pyroscope is configured
+    server_address = os.getenv("PYROSCOPE_SERVER_ADDRESS", "")
+    if not server_address:
+        logger.debug("Pyroscope: No server address configured - skipping")
+        return
+
+    # Same environment checks as tracing
+    release_env = os.getenv("GOBII_RELEASE_ENV", "local").lower()
+    user_flag = os.getenv("GOBII_ENABLE_PROFILING", "").lower()
+
+    truthy = ("1", "true", "yes", "on")
+    falsy = ("0", "false", "no", "off")
+
+    if user_flag in falsy:
+        logger.debug("Pyroscope: Profiling explicitly disabled")
+        return
+
+    if release_env in {"local", "build"} and user_flag not in truthy:
+        logger.debug("Pyroscope: %s environment with no opt-in - disabled", release_env)
+        return
+
+    try:
+        import pyroscope
+
+        auth_token = os.getenv("PYROSCOPE_AUTH_TOKEN", "")
+        sample_rate = int(os.getenv("PYROSCOPE_SAMPLE_RATE", "100"))
+
+        pyroscope.configure(
+            application_name=service_name.value,
+            server_address=server_address,
+            auth_token=auth_token if auth_token else None,
+            sample_rate=sample_rate,
+            detect_subprocesses=True,  # Important for Celery
+            oncpu=True,                # CPU profiling
+            gil_only=True,             # Focus on GIL-holding code (more relevant for Python)
+            enable_logging=True,
+            tags={
+                "env": os.getenv("GOBII_RELEASE_ENV", "local"),
+                "version": os.getenv("GOBII_VERSION", "dev"),
+            }
+        )
+
+        _pyroscope_initialized = True
+        logger.info(f"Pyroscope: Profiling initialized for {service_name.value}")
+
+    except Exception as e:
+        logger.error(f"Pyroscope: Failed to initialize - {e}")
+
+
+def shutdown_profiling() -> None:
+    """Shutdown Pyroscope profiling gracefully."""
+    global _pyroscope_initialized
+
+    if not _pyroscope_initialized:
+        return
+
+    try:
+        import pyroscope
+        pyroscope.shutdown()
+        logger.debug("Pyroscope: Shutdown completed")
+    except Exception as e:
+        logger.warning(f"Pyroscope: Shutdown error - {e}")
+    finally:
+        _pyroscope_initialized = False
+
 
 @contextmanager
 def traced(name: str, **attrs):
