@@ -1451,7 +1451,32 @@ class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
         if not user_is_collaborator(request.user, agent):
             return JsonResponse({"error": "Not a collaborator"}, status=403)
 
-        AgentCollaborator.objects.filter(agent=agent, user=request.user).delete()
+        collaborator = (
+            AgentCollaborator.objects
+            .filter(agent=agent, user=request.user)
+            .select_related("user")
+            .first()
+        )
+        if collaborator:
+            collaborator_props = Analytics.with_org_properties(
+                {
+                    "agent_id": str(agent.id),
+                    "agent_name": agent.name,
+                    "collaborator_id": str(collaborator.id),
+                    "collaborator_user_id": str(request.user.id),
+                    "collaborator_email": request.user.email or "",
+                    "invited_by_id": str(collaborator.invited_by_id) if collaborator.invited_by_id else "",
+                    "actor_id": str(request.user.id),
+                },
+                organization=getattr(agent, "organization", None),
+            )
+            collaborator.delete()
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.AGENT_COLLABORATOR_LEFT,
+                source=AnalyticsSource.WEB,
+                properties=collaborator_props.copy(),
+            ))
         return JsonResponse({"success": True})
 
 

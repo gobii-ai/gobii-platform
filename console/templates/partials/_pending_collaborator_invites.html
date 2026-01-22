@@ -7,7 +7,7 @@
         <p class="text-xs font-semibold uppercase tracking-wide text-slate-500">Collaboration invite</p>
         <h2 class="text-lg font-semibold text-slate-900">{{ invite.agent.name }}</h2>
         <p class="text-sm text-slate-600">
-          {{ invite.invited_by.get_full_name|default:invite.invited_by.email }} invited you to collaborate on this agent.
+          {{ invite.invited_by.get_full_name|default:invite.invited_by.email }} invited you to collaborate with this agent.
         </p>
         <p class="text-xs text-slate-500">Sent to {{ invite.email }}</p>
       </div>

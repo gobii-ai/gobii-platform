@@ -169,6 +169,14 @@ class AnalyticsEvent(StrEnum):
     AGENT_CONTACTS_APPROVED = 'Agent Contacts Approved'
     AGENT_CONTACTS_REJECTED = 'Agent Contacts Rejected'
 
+    # Collaborator Events
+    AGENT_COLLABORATOR_INVITE_SENT = 'Agent Collaborator Invite Sent'
+    AGENT_COLLABORATOR_INVITE_CANCELLED = 'Agent Collaborator Invite Cancelled'
+    AGENT_COLLABORATOR_INVITE_ACCEPTED = 'Agent Collaborator Invite Accepted'
+    AGENT_COLLABORATOR_INVITE_DECLINED = 'Agent Collaborator Invite Declined'
+    AGENT_COLLABORATOR_REMOVED = 'Agent Collaborator Removed'
+    AGENT_COLLABORATOR_LEFT = 'Agent Collaborator Left'
+
     # Billing Events
     BILLING_CANCELLATION = 'Billing Cancellation'
     BILLING_UPDATED = 'Billing Updated'
