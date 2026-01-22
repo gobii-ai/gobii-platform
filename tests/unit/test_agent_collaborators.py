@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import Client, TestCase, tag
+from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 
@@ -130,6 +130,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
 
 
 @tag("batch_agent_collaborators")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentCollaboratorContactLimitTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -176,6 +177,7 @@ class AgentCollaboratorContactLimitTests(TestCase):
 
 
 @tag("batch_agent_collaborators")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentCollaboratorInviteLimitTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -220,6 +222,7 @@ class AgentCollaboratorInviteLimitTests(TestCase):
 
 
 @tag("batch_agent_collaborators")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentCollaboratorInviteExpiryTests(TestCase):
     def setUp(self):
         self.owner = User.objects.create_user(
@@ -264,6 +267,7 @@ class AgentCollaboratorInviteExpiryTests(TestCase):
 
 
 @tag("batch_agent_collaborators")
+@override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentCollaboratorReinviteTests(TestCase):
     def setUp(self):
         self.client = Client()
