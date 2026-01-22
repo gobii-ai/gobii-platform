@@ -26,16 +26,6 @@
           </h1>
         </div>
 
-        {% if messages %}
-          <div class="space-y-2">
-            {% for message in messages %}
-              <div class="rounded-lg border px-4 py-3 text-sm {% if message.tags == 'error' %}border-rose-200 bg-rose-50 text-rose-800{% elif message.tags == 'success' %}border-emerald-200 bg-emerald-50 text-emerald-800{% else %}border-blue-200 bg-blue-50 text-blue-800{% endif %}">
-                {{ message }}
-              </div>
-            {% endfor %}
-          </div>
-        {% endif %}
-
         {% if invalid_token %}
           <div class="space-y-3">
             <p class="text-sm text-slate-600">This invitation link is invalid or has been removed.</p>
