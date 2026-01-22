@@ -71,10 +71,10 @@ def set_cached_mcp_tool_definitions(
     try:
         redis_client = get_redis_client()
         payload = json.dumps(tools, ensure_ascii=True, separators=(",", ":"))
-        with redis_client.pipeline() as pipe:
-            pipe.set(key, payload, ex=CACHE_TTL_SECONDS)
-            pipe.set(_latest_cache_key(config_id), key, ex=CACHE_TTL_SECONDS)
-            pipe.execute()
+        pipe = redis_client.pipeline()
+        pipe.set(key, payload, ex=CACHE_TTL_SECONDS)
+        pipe.set(_latest_cache_key(config_id), key, ex=CACHE_TTL_SECONDS)
+        pipe.execute()
     except redis.exceptions.RedisError:
         logger.debug("Failed to write MCP tool cache for %s", config_id, exc_info=True)
     return key
