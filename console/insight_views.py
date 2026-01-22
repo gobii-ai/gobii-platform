@@ -140,6 +140,7 @@ def _build_agent_setup_metadata(
     email_verified = has_verified_email(agent.user)
     phone_payload = serialize_phone(phone)
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+    agent_email = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
 
     org_memberships = OrganizationMembership.objects.filter(
         user=request.user,
@@ -235,6 +236,8 @@ def _build_agent_setup_metadata(
             "body": "Your agent keeps working 24/7 in the background and will message you when it has updates.",
             "note": always_on_note,
         },
+        "agentName": agent.name or "",
+        "agentEmail": agent_email.address if agent_email else None,
         "sms": {
             "enabled": bool(agent_sms),
             "agentNumber": agent_sms.address if agent_sms else None,

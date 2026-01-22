@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -15,6 +15,7 @@ import {
 import { cloneAgentTemplate } from '../../../api/agentTemplates'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
+import { downloadVCard } from '../../../util/vcard'
 import '../../../styles/insights.css'
 
 // Staggered animation variants for insight panels
@@ -208,6 +209,8 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
 
   const phoneDisplay = phone?.number ? formatPhoneDisplay(phone.number, region) : ''
   const agentNumberDisplay = agentNumber ? formatPhoneDisplay(agentNumber, region) : ''
+  const agentDisplayName = metadata.agentName?.trim() || 'Agent'
+  const agentEmail = metadata.agentEmail ?? null
   const phoneVerified = Boolean(phone?.isVerified)
   const smsBusy = smsAction !== null
 
@@ -269,6 +272,17 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
       // Ignore clipboard failures.
     }
   }, [metadata.agentId])
+
+  const handleDownloadContact = useCallback(() => {
+    if (!agentNumber) {
+      return
+    }
+    downloadVCard({
+      name: agentDisplayName,
+      email: agentEmail,
+      phone: agentNumber,
+    })
+  }, [agentDisplayName, agentEmail, agentNumber])
 
   const handleTemplateCopy = useCallback(async (value: string) => {
     if (!value) return
@@ -634,6 +648,14 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
               >
                 <Copy size={14} />
                 {copied ? 'Copied!' : 'Copy Number'}
+              </button>
+              <button
+                type="button"
+                className="sms-hero__button sms-hero__button--secondary"
+                onClick={handleDownloadContact}
+              >
+                <Download size={14} />
+                Download Contact
               </button>
             </div>
           )}
