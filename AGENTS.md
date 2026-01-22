@@ -30,6 +30,7 @@ Code quality:
 - Break things into multiple files, smaller testable components.
 - Do things the right way.
 - Leave the codebase in a better state than when you started. If you can do light refactoring, cleanup, have a net negative lines of code, that is encouraged.
+- Avoid catching broad `Exception`; prefer specific exception classes so unrelated bugs are not masked.
 
 Debugging:
 - Never guess what the issue is. Aim to *prove it* via running unit tests, adding new tests when needed (if it's something that should be covered by unit tests), running one off code with uv run django shell, etc.

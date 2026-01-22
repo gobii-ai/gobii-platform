@@ -3,6 +3,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+import redis
+
 from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -40,7 +42,7 @@ def get_cached_mcp_tool_definitions(
     try:
         redis_client = get_redis_client()
         cached = redis_client.get(key)
-    except Exception:
+    except redis.exceptions.RedisError:
         logger.debug("Failed to read MCP tool cache for %s", config_id, exc_info=True)
         return None
 
@@ -69,9 +71,11 @@ def set_cached_mcp_tool_definitions(
     try:
         redis_client = get_redis_client()
         payload = json.dumps(tools, ensure_ascii=True, separators=(",", ":"))
-        redis_client.set(key, payload, ex=CACHE_TTL_SECONDS)
-        redis_client.set(_latest_cache_key(config_id), key, ex=CACHE_TTL_SECONDS)
-    except Exception:
+        with redis_client.pipeline() as pipe:
+            pipe.set(key, payload, ex=CACHE_TTL_SECONDS)
+            pipe.set(_latest_cache_key(config_id), key, ex=CACHE_TTL_SECONDS)
+            pipe.execute()
+    except redis.exceptions.RedisError:
         logger.debug("Failed to write MCP tool cache for %s", config_id, exc_info=True)
     return key
 
@@ -84,5 +88,5 @@ def invalidate_mcp_tool_cache(config_id: str) -> None:
         if cached_key:
             redis_client.delete(cached_key)
         redis_client.delete(latest_key)
-    except Exception:
+    except redis.exceptions.RedisError:
         logger.debug("Failed to invalidate MCP tool cache for %s", config_id, exc_info=True)
