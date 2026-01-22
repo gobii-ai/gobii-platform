@@ -2127,6 +2127,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         shared_agents = list(shared_agents_qs)
         all_agents = persistent_agents + shared_agents
         today = timezone.localdate()
+        day_start = datetime.combine(today, datetime.min.time())
+        if timezone.is_naive(day_start):
+            day_start = timezone.make_aware(day_start)
+        day_end = day_start + timedelta(days=1)
         next_reset = (
             timezone.localtime(timezone.now()).replace(
                 hour=0,
@@ -2140,6 +2144,18 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         lookback_start = lookback_end - timedelta(hours=24)
         agent_ids = [agent.id for agent in all_agents]
         recent_usage_map: dict[Any, Decimal] = {}
+        daily_usage_map: dict[Any, Decimal] = {}
+        pending_transfer_ids: set[Any] = set()
+        hard_limit_multiplier = Decimal("2")
+
+        owner, _, _ = self._resolve_context_owner(context)
+        if owner is not None:
+            try:
+                credit_settings = get_daily_credit_settings_for_owner(owner)
+                hard_limit_multiplier = Decimal(credit_settings.hard_limit_multiplier)
+            except Exception:
+                hard_limit_multiplier = Decimal("2")
+
         if agent_ids:
             usage_rows = (
                 PersistentAgentStep.objects.filter(
@@ -2155,6 +2171,26 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 row['agent_id']: row['total'] or Decimal("0")
                 for row in usage_rows
             }
+            daily_usage_rows = (
+                PersistentAgentStep.objects.filter(
+                    agent_id__in=agent_ids,
+                    created_at__gte=day_start,
+                    created_at__lt=day_end,
+                    credits_cost__isnull=False,
+                )
+                .values('agent_id')
+                .annotate(total=Sum('credits_cost'))
+            )
+            daily_usage_map = {
+                row['agent_id']: row['total'] or Decimal("0")
+                for row in daily_usage_rows
+            }
+            pending_transfer_ids = set(
+                AgentTransferInvite.objects.filter(
+                    agent_id__in=agent_ids,
+                    status=AgentTransferInvite.Status.PENDING,
+                ).values_list('agent_id', flat=True)
+            )
 
         for agent in all_agents:
             description, source = build_listing_description(agent, max_length=200)
@@ -2178,18 +2214,25 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.mini_description = mini_description
             agent.mini_description_source = mini_source
             agent.display_tags = agent.tags if isinstance(agent.tags, list) else []
-            agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
-                agent=agent,
-                status=AgentTransferInvite.Status.PENDING,
-            ).first()
+            agent.pending_transfer_invite = agent.id in pending_transfer_ids
 
             last_24h_usage = recent_usage_map.get(agent.id, Decimal("0"))
 
             try:
                 soft_target = agent.get_daily_credit_soft_target()
-                hard_limit = agent.get_daily_credit_hard_limit()
-                usage = agent.get_daily_credit_usage(usage_date=today)
-                remaining = agent.get_daily_credit_remaining(usage_date=today)
+                hard_limit = (
+                    (soft_target * hard_limit_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    if soft_target is not None
+                    else None
+                )
+                usage = daily_usage_map.get(agent.id, Decimal("0"))
+                remaining = (
+                    (hard_limit - usage if hard_limit is not None else None)
+                    if hard_limit is not None
+                    else None
+                )
+                if remaining is not None and remaining < Decimal("0"):
+                    remaining = Decimal("0")
             except Exception:
                 soft_target = None
                 hard_limit = None
