@@ -27,6 +27,7 @@ from ...models import (
     build_web_agent_address,
     parse_web_user_address,
 )
+from ...services.email_verification import has_verified_email
 from ...services.web_sessions import get_active_web_session
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 
@@ -38,6 +39,24 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         normalized = raw.strip().lower()
         return normalized in {"1", "true", "yes"}
     return bool(raw)
+
+def _has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
+    if has_verified_email(recipient_user):
+        return PersistentAgentCommsEndpoint.objects.filter(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+        ).exists()
+    if PersistentAgentCommsEndpoint.objects.filter(
+        owner_agent=agent,
+        channel=CommsChannel.SMS,
+    ).exists():
+        from api.models import UserPhoneNumber
+
+        return UserPhoneNumber.objects.filter(
+            user=recipient_user,
+            is_verified=True,
+        ).exists()
+    return False
 
 
 def get_send_chat_tool() -> Dict[str, Any]:
@@ -139,7 +158,18 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         except User.DoesNotExist:
             recipient_user = None
 
-        if not recipient_user or get_active_web_session(agent, recipient_user) is None:
+        if not recipient_user:
+            return {
+                "status": "error",
+                "message": (
+                    "No active web chat session exists for this user. Retry using the user's most recently "
+                    "active non-web communication channel (e.g., email or SMS)."
+                ),
+            }
+
+        # If the user has other communication channels, we want to ensure we're sending to an active chat session
+        # If the user does not have other communication channels, pass through to web because it's our only choice
+        if get_active_web_session(agent, recipient_user) is None and _has_other_contact_channel(agent, recipient_user):
             return {
                 "status": "error",
                 "message": (

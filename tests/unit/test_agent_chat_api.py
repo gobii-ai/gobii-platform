@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
 
@@ -424,6 +425,18 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_web_chat_tool_requires_active_session(self):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+            is_primary=True,
+        )
         result = execute_send_chat_message(
             self.agent,
             {"body": "Ping", "to_address": self.user_address},
@@ -458,6 +471,20 @@ class AgentChatAPITests(TestCase):
         )
 
         self.assertEqual(markdown_event["message"].get("bodyHtml"), "")
+
+    @tag("batch_agent_chat")
+    def test_web_chat_tool_allows_without_session_when_no_other_channels(self):
+        result = execute_send_chat_message(
+            self.agent,
+            {"body": "Ping", "to_address": self.user_address},
+        )
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.filter(
+            owner_agent=self.agent,
+            is_outbound=True,
+            body="Ping",
+        ).first()
+        self.assertIsNotNone(message)
 
     @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
