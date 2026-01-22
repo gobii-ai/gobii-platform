@@ -42,10 +42,11 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
 
 def _has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     if has_verified_email(recipient_user):
-        return PersistentAgentCommsEndpoint.objects.filter(
+        if PersistentAgentCommsEndpoint.objects.filter(
             owner_agent=agent,
             channel=CommsChannel.EMAIL,
-        ).exists()
+        ).exists():
+            return True
     if PersistentAgentCommsEndpoint.objects.filter(
         owner_agent=agent,
         channel=CommsChannel.SMS,

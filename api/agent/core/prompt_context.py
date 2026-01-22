@@ -2448,8 +2448,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 perms = ("inbound" if entry.allow_inbound else "") + ("/" if entry.allow_inbound and entry.allow_outbound else "") + ("outbound" if entry.allow_outbound else "")
                 allowed_lines.append(f"- {entry.channel}: {entry.address}{name_str}{config_marker} - ({perms})")
 
-        collaborator_qs = AgentCollaborator.objects.filter(agent=agent).select_related("user").order_by("user__email")
-        collaborators = [c for c in collaborator_qs if c.user and c.user.email]
+        collaborators = list(
+            AgentCollaborator.objects.filter(agent=agent, user__email__isnull=False)
+            .exclude(user__email="")
+            .select_related("user")
+            .order_by("user__email")
+        )
         if collaborators:
             allowed_lines.append("Collaborators with access:")
             for collaborator in collaborators:

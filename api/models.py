@@ -6723,6 +6723,7 @@ def get_agent_contact_counts(agent: PersistentAgent) -> dict[str, int] | None:
             .filter(
                 agent=agent,
                 status=AgentAllowlistInvite.InviteStatus.PENDING,
+                expires_at__gt=now,
             )
             .count()
         )
