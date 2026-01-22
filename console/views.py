@@ -3845,7 +3845,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     'reject_url': reject_url,
                     'invite': invite,
                 }
-                subject = f"You've been invited to collaborate on {agent.name} on Gobii"
+                subject = f"You've been invited to collaborate with {agent.name} on Gobii"
                 text_body = render_to_string('emails/agent_collaborator_invite.txt', context)
                 html_body = render_to_string('emails/agent_collaborator_invite.html', context)
                 try:
