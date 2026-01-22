@@ -130,6 +130,58 @@ class AgentCollaboratorInviteViewTests(TestCase):
 
 
 @tag("batch_agent_collaborators")
+class AgentCollaboratorLeaveTests(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.owner = User.objects.create_user(
+            username="owner",
+            email="owner@example.com",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(
+            user=self.owner,
+            name="Test Browser Agent",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.owner,
+            name="Test Agent",
+            charter="Test charter",
+            browser_use_agent=self.browser_agent,
+        )
+        self.collaborator = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+        )
+        AgentCollaborator.objects.create(
+            agent=self.agent,
+            user=self.collaborator,
+            invited_by=self.owner,
+        )
+
+    def test_leave_removes_collaborator(self):
+        self.client.force_login(self.collaborator)
+        url = reverse("console_agent_collaborator_leave", kwargs={"agent_id": self.agent.id})
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(
+            AgentCollaborator.objects.filter(agent=self.agent, user=self.collaborator).exists()
+        )
+
+    def test_leave_requires_collaborator(self):
+        other_user = User.objects.create_user(
+            username="other",
+            email="other@example.com",
+        )
+        self.client.force_login(other_user)
+        url = reverse("console_agent_collaborator_leave", kwargs={"agent_id": self.agent.id})
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 403)
+
+
+@tag("batch_agent_collaborators")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
 class AgentCollaboratorContactLimitTests(TestCase):
     def setUp(self):

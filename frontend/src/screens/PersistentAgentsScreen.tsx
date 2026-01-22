@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { ArrowRight, Ban, Check, Copy, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, X, Zap } from 'lucide-react'
+import { ArrowRight, Ban, Check, Copy, LogOut, Mail, MessageSquare, Phone, Plus, Search, Settings, Stethoscope, X, Zap } from 'lucide-react'
 import { AgentAvatarBadge } from '../components/common/AgentAvatarBadge'
+import { Modal } from '../components/common/Modal'
 import { normalizeHexColor } from '../util/color'
 import { track } from '../util/analytics'
+import { leaveCollaboration } from '../api/agents'
+import { useModal } from '../hooks/useModal'
 
 type AgentSummary = {
   id: string
@@ -62,6 +65,15 @@ type NormalizedAgent = AgentSummary & {
   gradientStyle: CSSProperties
 }
 
+function normalizeAgents(agents: AgentSummary[]): NormalizedAgent[] {
+  return agents.map((agent) => ({
+    ...agent,
+    displayTags: agent.displayTags ?? [],
+    searchBlob: buildSearchBlob(agent),
+    gradientStyle: styleStringToObject(agent.cardGradientStyle),
+  }))
+}
+
 function formatCreditBurn(value: number | null): string {
   if (value == null || value <= 0 || Number.isNaN(value)) {
     return '0 credits/day'
@@ -73,26 +85,14 @@ function formatCreditBurn(value: number | null): string {
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
   const [query, setQuery] = useState('')
   const [showVerificationDialog, setShowVerificationDialog] = useState(false)
+  const [sharedAgents, setSharedAgents] = useState<NormalizedAgent[]>(() => normalizeAgents(initialData.sharedAgents))
+  const [modal, showModal] = useModal()
 
   const normalizedAgents = useMemo<NormalizedAgent[]>(() => {
-    return initialData.agents.map((agent) => ({
-      ...agent,
-      displayTags: agent.displayTags ?? [],
-      searchBlob: buildSearchBlob(agent),
-      gradientStyle: styleStringToObject(agent.cardGradientStyle),
-    }))
+    return normalizeAgents(initialData.agents)
   }, [initialData.agents])
 
-  const normalizedSharedAgents = useMemo<NormalizedAgent[]>(() => {
-    return initialData.sharedAgents.map((agent) => ({
-      ...agent,
-      displayTags: agent.displayTags ?? [],
-      searchBlob: buildSearchBlob(agent),
-      gradientStyle: styleStringToObject(agent.cardGradientStyle),
-    }))
-  }, [initialData.sharedAgents])
-
-  const hasAnyAgents = normalizedAgents.length > 0 || normalizedSharedAgents.length > 0
+  const hasAnyAgents = normalizedAgents.length > 0 || sharedAgents.length > 0
   const filteredAgents = useMemo(() => {
     if (!query.trim()) {
       return normalizedAgents
@@ -102,11 +102,11 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
   }, [normalizedAgents, query])
   const filteredSharedAgents = useMemo(() => {
     if (!query.trim()) {
-      return normalizedSharedAgents
+      return sharedAgents
     }
     const needle = query.trim().toLowerCase()
-    return normalizedSharedAgents.filter((agent) => agent.searchBlob.includes(needle))
-  }, [normalizedSharedAgents, query])
+    return sharedAgents.filter((agent) => agent.searchBlob.includes(needle))
+  }, [sharedAgents, query])
 
   const showEmptyState = !hasAnyAgents
   const showEmptySearch = hasAnyAgents && filteredAgents.length === 0 && filteredSharedAgents.length === 0
@@ -121,11 +121,28 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
     [initialData.emailVerified],
   )
 
+  const handleLeaveCollaboration = useCallback(
+    (agent: NormalizedAgent) => {
+      showModal((onClose) => (
+        <LeaveCollaborationDialog
+          agentName={agent.name}
+          onClose={onClose}
+          onConfirm={async () => {
+            await leaveCollaboration(agent.id)
+            setSharedAgents((prev) => prev.filter((item) => item.id !== agent.id))
+          }}
+        />
+      ))
+    },
+    [setSharedAgents, showModal],
+  )
+
   return (
     <div className="space-y-6 pb-6">
       {showVerificationDialog && (
         <EmailVerificationDialog onClose={() => setShowVerificationDialog(false)} />
       )}
+      {modal}
       {showEmptyState ? (
         <AgentEmptyState spawnUrl={initialData.spawnAgentUrl} analyticsEvent={initialData.createFirstAgentEvent} />
       ) : (
@@ -169,6 +186,7 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
                     key={agent.id}
                     agent={agent}
                     onContactClick={handleContactClick}
+                    onLeaveCollaboration={handleLeaveCollaboration}
                   />
                 ))}
               </div>
@@ -266,9 +284,10 @@ function AgentListHeader({ query, onSearchChange, canSpawnAgents, spawnUrl, show
 type AgentCardProps = {
   agent: NormalizedAgent
   onContactClick?: (e: React.MouseEvent<HTMLAnchorElement>) => void
+  onLeaveCollaboration?: (agent: NormalizedAgent) => void
 }
 
-function AgentCard({ agent, onContactClick }: AgentCardProps) {
+function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardProps) {
   const creditsRemaining = agent.dailyCreditRemaining !== null ? agent.dailyCreditRemaining.toFixed(2) : null
   const creditsBurnLast24h = formatCreditBurn(agent.last24hCreditBurn)
   const smsValue = agent.primarySms
@@ -276,6 +295,7 @@ function AgentCard({ agent, onContactClick }: AgentCardProps) {
   const chatValue = agent.chatUrl
   const hasTags = agent.displayTags.length > 0
   const hasChannels = Boolean(smsValue || emailValue || chatValue)
+  const canLeave = agent.isShared && Boolean(onLeaveCollaboration)
   const [copiedField, setCopiedField] = useState<null | 'sms' | 'email'>(null)
   const copyResetTimeout = useRef<number | null>(null)
 
@@ -354,6 +374,17 @@ function AgentCard({ agent, onContactClick }: AgentCardProps) {
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
             <span>Transfer Pending</span>
           </div>
+        )}
+
+        {canLeave && (
+          <button
+            type="button"
+            onClick={() => onLeaveCollaboration?.(agent)}
+            className="absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 shadow-sm backdrop-blur transition hover:bg-rose-100"
+          >
+            <LogOut className="h-4 w-4" aria-hidden="true" />
+            Leave
+          </button>
         )}
 
         {!agent.isShared && (
@@ -566,6 +597,75 @@ function EmailVerificationDialog({ onClose }: EmailVerificationDialogProps) {
         </div>
       </div>
     </div>
+  )
+}
+
+type LeaveCollaborationDialogProps = {
+  agentName: string
+  onClose: () => void
+  onConfirm: () => Promise<void>
+}
+
+function LeaveCollaborationDialog({ agentName, onClose, onConfirm }: LeaveCollaborationDialogProps) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleConfirm = useCallback(async () => {
+    if (busy) {
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err) {
+      console.error('Failed to leave collaboration', err)
+      setError('Unable to leave this collaboration. Please try again.')
+    } finally {
+      setBusy(false)
+    }
+  }, [busy, onClose, onConfirm])
+
+  return (
+    <Modal
+      title="Leave collaboration?"
+      subtitle={`You will lose access to ${agentName}.`}
+      icon={LogOut}
+      iconBgClass="bg-rose-100"
+      iconColorClass="text-rose-600"
+      onClose={onClose}
+      widthClass="sm:max-w-lg"
+    >
+      <div className="space-y-4">
+        <p className="text-sm text-slate-600">
+          Once you leave, you will no longer see this agent in your list or access its chat and files.
+        </p>
+        {error && (
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {error}
+          </div>
+        )}
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirm}
+            disabled={busy}
+            className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {busy ? 'Leaving...' : 'Leave Collaboration'}
+          </button>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

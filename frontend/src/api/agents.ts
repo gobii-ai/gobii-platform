@@ -60,3 +60,10 @@ export async function createAgent(message: string): Promise<CreateAgentResponse>
     body: JSON.stringify({ message }),
   })
 }
+
+export function leaveCollaboration(agentId: string): Promise<void> {
+  return jsonRequest(`/console/api/agents/${agentId}/collaboration/leave/`, {
+    method: 'POST',
+    includeCsrf: true,
+  })
+}

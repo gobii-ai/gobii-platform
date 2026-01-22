@@ -64,6 +64,7 @@ from api.models import (
     AgentFileSpaceAccess,
     AgentFsNode,
     OrganizationMembership,
+    AgentCollaborator,
     build_web_agent_address,
     build_web_user_address,
     UserPhoneNumber,
@@ -1433,6 +1434,21 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             "agent_id": str(result.agent.id),
             "agent_name": result.agent.name,
         })
+
+
+class AgentCollaboratorLeaveAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = PersistentAgent.objects.non_eval().filter(pk=agent_id).first()
+        if not agent:
+            return JsonResponse({"error": "Agent not found"}, status=404)
+
+        if not user_is_collaborator(request.user, agent):
+            return JsonResponse({"error": "Not a collaborator"}, status=403)
+
+        AgentCollaborator.objects.filter(agent=agent, user=request.user).delete()
+        return JsonResponse({"success": True})
 
 
 def _extract_phone_form_error(form: PhoneAddForm) -> str:
