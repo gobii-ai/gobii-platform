@@ -1,10 +1,13 @@
 import copy
+import hashlib
 import logging
 import random
+from functools import lru_cache
 from typing import Dict, Iterable, Sequence, Any
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 
 from agents.pretrained_worker_definitions import (
     TEMPLATE_DEFINITIONS,
@@ -210,6 +213,9 @@ class AgentService:
 class PretrainedWorkerTemplateService:
     """Utilities for working with curated pretrained worker templates."""
 
+    _TOOL_DISPLAY_CACHE_VERSION = 1
+    _TOOL_DISPLAY_CACHE_SECONDS = 300
+
     TEMPLATE_SESSION_KEY = "pretrained_worker_template_code"
     CODE_ALIASES = {
         "talent-sourcer": "talent-scout",
@@ -320,6 +326,7 @@ class PretrainedWorkerTemplateService:
         return f"{jittered_minute} {jittered_hour} {day_of_month} {month} {day_of_week}"
 
     @staticmethod
+    @lru_cache(maxsize=512)
     def describe_schedule(base_schedule: str | None) -> str | None:
         """Return a human readable description of a cron schedule."""
         if not base_schedule:
@@ -361,14 +368,35 @@ class PretrainedWorkerTemplateService:
         return " ".join(part.capitalize() for part in cleaned.split())
 
     @staticmethod
+    def _tool_display_cache_key(tool_names: Iterable[str]) -> str:
+        normalized = sorted({name for name in tool_names if name})
+        if not normalized:
+            return ""
+        digest = hashlib.sha256("|".join(normalized).encode("utf-8")).hexdigest()
+        return f"tool_display_map:v{PretrainedWorkerTemplateService._TOOL_DISPLAY_CACHE_VERSION}:{digest}"
+
+    @staticmethod
     def get_tool_display_map(tool_names: Iterable[str]) -> Dict[str, str]:
         tool_list = [name for name in tool_names if name]
         if not tool_list:
             return {}
 
+        cache_key = PretrainedWorkerTemplateService._tool_display_cache_key(tool_list)
+        if cache_key:
+            cached = cache.get(cache_key)
+            if isinstance(cached, dict):
+                return cached
+
         ToolName = apps.get_model("api", "ToolFriendlyName")
         entries = ToolName.objects.filter(tool_name__in=tool_list)
-        return {entry.tool_name: entry.display_name for entry in entries}
+        result = {entry.tool_name: entry.display_name for entry in entries}
+        if cache_key:
+            cache.set(
+                cache_key,
+                result,
+                timeout=PretrainedWorkerTemplateService._TOOL_DISPLAY_CACHE_SECONDS,
+            )
+        return result
 
     @classmethod
     def get_tool_display_list(

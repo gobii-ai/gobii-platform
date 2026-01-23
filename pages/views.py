@@ -41,6 +41,7 @@ from .utils_markdown import (
     get_prev_next,
     get_all_doc_pages,
 )
+from .homepage_cache import get_homepage_pretrained_payload
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
 from django.contrib import sitemaps
@@ -330,20 +331,8 @@ class HomePage(TemplateView):
         context["simple_examples"] = SIMPLE_EXAMPLES
         context["rich_examples"] = RICH_EXAMPLES
 
-        # Featured and full pretrained worker templates for homepage
-        all_templates = list(PretrainedWorkerTemplateService.get_active_templates())
-
-        tool_names = set()
-        for template in all_templates:
-            template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-            tool_names.update(template.default_tools or [])
-
-        tool_display_map = PretrainedWorkerTemplateService.get_tool_display_map(tool_names)
-        for template in all_templates:
-            template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                template.default_tools or [],
-                display_map=tool_display_map,
-            )
+        payload = get_homepage_pretrained_payload()
+        all_templates = list(payload.get("templates") or [])
 
         category_filter = (self.request.GET.get("pretrained_category") or "").strip()
         search_term = (self.request.GET.get("pretrained_search") or "").strip()
@@ -354,7 +343,7 @@ class HomePage(TemplateView):
             filtered_templates = [
                 template
                 for template in filtered_templates
-                if (template.category or "").lower() == category_lower
+                if (template.get("category") or "").lower() == category_lower
             ]
 
         if search_term:
@@ -362,19 +351,17 @@ class HomePage(TemplateView):
             filtered_templates = [
                 template
                 for template in filtered_templates
-                if search_lower in template.display_name.lower()
-                or search_lower in template.tagline.lower()
-                or search_lower in template.description.lower()
+                if search_lower in (template.get("display_name") or "").lower()
+                or search_lower in (template.get("tagline") or "").lower()
+                or search_lower in (template.get("description") or "").lower()
             ]
 
         context.update(
             {
                 "homepage_pretrained_workers": filtered_templates,
-                "homepage_pretrained_total": len(all_templates),
+                "homepage_pretrained_total": payload.get("total", len(all_templates)),
                 "homepage_pretrained_filtered_count": len(filtered_templates),
-                "homepage_pretrained_categories": sorted(
-                    {template.category for template in all_templates if template.category}
-                ),
+                "homepage_pretrained_categories": payload.get("categories") or [],
                 "homepage_pretrained_selected_category": category_filter,
                 "homepage_pretrained_search_term": search_term,
             }

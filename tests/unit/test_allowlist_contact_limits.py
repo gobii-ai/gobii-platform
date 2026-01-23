@@ -4,6 +4,7 @@ Tests for contact limit enforcement in allowlist based on user's plan.
 from unittest.mock import patch, Mock
 
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
@@ -581,10 +582,14 @@ class ContactLimitContextProcessorTests(TestCase):
     """Test that contact limits are properly exposed in template context."""
     
     def setUp(self):
+        cache.clear()
         self.user = User.objects.create_user(
             username="testuser",
             email="test@example.com"
         )
+
+    def tearDown(self):
+        cache.clear()
         
     @patch('util.subscription_helper.get_user_plan')
     def test_free_plan_context_shows_limit(self, mock_get_user_plan):
