@@ -2253,10 +2253,8 @@ def build_prompt_context(
     )
 
 
-def _build_user_display_name(user) -> str | None:
-    full_name = ""
-    if hasattr(user, "get_full_name"):
-        full_name = (user.get_full_name() or "").strip()
+def _build_user_display_name(user: Any) -> str | None:
+    full_name = (getattr(user, "get_full_name", lambda: "")() or "").strip()
     email = (getattr(user, "email", "") or "").strip()
     username = (getattr(user, "username", "") or "").strip()
     if full_name:
@@ -2297,12 +2295,11 @@ def _get_web_user_display_map(
     display_by_user_id = {
         user.id: _build_user_display_name(user) for user in users
     }
-    display_by_endpoint: dict[UUID, str] = {}
-    for endpoint_id, user_id in endpoint_user_ids.items():
-        display = display_by_user_id.get(user_id)
-        if display:
-            display_by_endpoint[endpoint_id] = display
-    return display_by_endpoint
+    return {
+        endpoint_id: display
+        for endpoint_id, user_id in endpoint_user_ids.items()
+        if (display := display_by_user_id.get(user_id))
+    }
 
 
 def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str | None:
