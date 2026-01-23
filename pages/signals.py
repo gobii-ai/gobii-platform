@@ -411,10 +411,17 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     click_ids: dict[str, str] = {}
     fbc = getattr(attribution, "fbc", "")
     fbclid = getattr(attribution, "fbclid", "")
+    fbp = getattr(attribution, "fbp", "")
+
     if fbc:
         click_ids["fbc"] = fbc
+    elif fbclid:
+        # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
+        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp())}.{fbclid}"
     if fbclid:
         click_ids["fbclid"] = fbclid
+    if fbp:
+        click_ids["fbp"] = fbp
     if click_ids:
         context["click_ids"] = click_ids
 
@@ -432,6 +439,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     last_client_ip = getattr(attribution, "last_client_ip", None)
     if last_client_ip:
         context["client_ip"] = last_client_ip
+
+    last_user_agent = getattr(attribution, "last_user_agent", None)
+    if last_user_agent:
+        context["user_agent"] = last_user_agent
 
     return context
 
@@ -825,6 +836,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'first_touch_at': first_touch_at,
             'last_touch_at': last_touch_at,
             'last_client_ip': client_ip,
+            'last_user_agent': request.META.get('HTTP_USER_AGENT', ''),
+            'fbp': fbp_cookie,
         },
     )
         except Exception:
