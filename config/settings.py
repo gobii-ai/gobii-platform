@@ -981,12 +981,10 @@ OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED = env("OTEL_PYTHON_LOGGING_AUTO
 OTEL_EXPORTER_OTLP_INSECURE = env.bool("OTEL_EXPORTER_OTLP_INSECURE", default=False)
 OTEL_EXPORTER_OTLP_LOG_ENDPOINT = env("OTEL_EXPORTER_OTLP_LOG_ENDPOINT", default="http://localhost:4318/v1/logs")
 
-# Pyroscope Profiling (Grafana Cloud uses Basic auth)
+# Pyroscope Profiling
 PYROSCOPE_SERVER_ADDRESS = env("PYROSCOPE_SERVER_ADDRESS", default="")
-PYROSCOPE_BASIC_AUTH_USERNAME = env("PYROSCOPE_BASIC_AUTH_USERNAME", default="")  # Grafana Cloud instance ID
-PYROSCOPE_BASIC_AUTH_PASSWORD = env("PYROSCOPE_BASIC_AUTH_PASSWORD", default="")  # Grafana Cloud API key
+PYROSCOPE_AUTH_TOKEN = env("PYROSCOPE_AUTH_TOKEN", default="")
 PYROSCOPE_SAMPLE_RATE = env.int("PYROSCOPE_SAMPLE_RATE", default=100)  # Hz
-PYROSCOPE_PROFILE_TYPE = env("PYROSCOPE_PROFILE_TYPE", default="wall")  # "wall" (includes I/O) or "cpu"
 
 # Postmark Inbound Webhook Token - this is a token we create, and add to header on email open/click webhooks in Postmark
 # Infuriatingly, Postmark does not allow you to set it as a header for inbound delivery webhooks, so we have to use a query

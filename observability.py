@@ -294,24 +294,16 @@ def init_profiling(service_name: GobiiService) -> None:
     try:
         import pyroscope
 
-        # Grafana Cloud uses Basic auth (instance_id:api_key)
-        basic_auth_username = os.getenv("PYROSCOPE_BASIC_AUTH_USERNAME", "")
-        basic_auth_password = os.getenv("PYROSCOPE_BASIC_AUTH_PASSWORD", "")
+        auth_token = os.getenv("PYROSCOPE_AUTH_TOKEN", "")
         sample_rate = int(os.getenv("PYROSCOPE_SAMPLE_RATE", "100"))
-
-        # Profile type: "cpu" (oncpu=True) or "wall" (oncpu=False, includes I/O wait)
-        # Wall-clock is more useful for web apps with I/O; CPU for compute-heavy workers
-        profile_type = os.getenv("PYROSCOPE_PROFILE_TYPE", "wall").lower()
-        oncpu = profile_type == "cpu"
 
         pyroscope.configure(
             application_name=service_name.value,
             server_address=server_address,
-            basic_auth_username=basic_auth_username if basic_auth_username else None,
-            basic_auth_password=basic_auth_password if basic_auth_password else None,
+            auth_token=auth_token if auth_token else None,
             sample_rate=sample_rate,
             detect_subprocesses=True,  # Important for Celery
-            oncpu=oncpu,
+            oncpu=True,                # CPU profiling
             gil_only=True,             # Focus on GIL-holding code (more relevant for Python)
             enable_logging=True,
             tags={
@@ -321,7 +313,7 @@ def init_profiling(service_name: GobiiService) -> None:
         )
 
         _pyroscope_initialized = True
-        logger.info(f"Pyroscope: Profiling initialized for {service_name.value} (type={profile_type})")
+        logger.info(f"Pyroscope: Profiling initialized for {service_name.value}")
 
     except Exception as e:
         logger.error(f"Pyroscope: Failed to initialize - {e}")
