@@ -14,6 +14,7 @@ import zstandard as zstd
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
+from django.contrib.auth import get_user_model
 from django.db import DatabaseError, transaction
 from django.db.models import Q, Prefetch, Sum
 from django.urls import NoReverseMatch, reverse
@@ -41,6 +42,7 @@ from ...models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     build_web_user_address,
+    parse_web_user_address,
     CommsAllowlistEntry,
     CommsChannel,
     PersistentAgent,
@@ -2251,6 +2253,55 @@ def build_prompt_context(
     )
 
 
+def _build_user_display_name(user: Any) -> str | None:
+    full_name = (getattr(user, "get_full_name", lambda: "")() or "").strip()
+    email = (getattr(user, "email", "") or "").strip()
+    username = (getattr(user, "username", "") or "").strip()
+    if full_name:
+        if email:
+            return f"{full_name} ({email})"
+        return full_name
+    if email:
+        return email
+    return username or None
+
+
+def _get_web_user_display_map(
+    agent: PersistentAgent,
+    endpoints: Sequence[PersistentAgentCommsEndpoint],
+) -> dict[UUID, str]:
+    endpoint_user_ids: dict[UUID, int] = {}
+    for endpoint in endpoints:
+        if endpoint.channel != CommsChannel.WEB:
+            continue
+        user_id, agent_id = parse_web_user_address(endpoint.address)
+        if user_id is None:
+            continue
+        if agent_id and str(agent.id) != agent_id:
+            continue
+        endpoint_user_ids[endpoint.id] = user_id
+
+    if not endpoint_user_ids:
+        return {}
+
+    User = get_user_model()
+    users = User.objects.filter(id__in=set(endpoint_user_ids.values())).only(
+        "id",
+        "email",
+        "username",
+        "first_name",
+        "last_name",
+    )
+    display_by_user_id = {
+        user.id: _build_user_display_name(user) for user in users
+    }
+    return {
+        endpoint_id: display
+        for endpoint_id, user_id in endpoint_user_ids.items()
+        if (display := display_by_user_id.get(user_id))
+    }
+
+
 def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str | None:
     """Add contact information sections to the provided promptree group.
 
@@ -2307,11 +2358,19 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
     )
 
     if user_eps_qs:
+        user_eps = list(user_eps_qs)
+        web_user_display_map = _get_web_user_display_map(agent, user_eps)
         user_lines = ["These are the *USER'S* endpoints, i.e. the addresses you are sending messages *TO*."]
         pref_id = agent.preferred_contact_endpoint_id if agent.preferred_contact_endpoint else None
-        for ep in user_eps_qs:
-            label = " (preferred)" if ep.id == pref_id else ""
-            user_lines.append(f"- {ep.channel}: {ep.address}{label}")
+        for ep in user_eps:
+            annotations = []
+            if ep.id == pref_id:
+                annotations.append("preferred")
+            display_name = web_user_display_map.get(ep.id)
+            suffix = f" ({', '.join(annotations)})" if annotations else ""
+            if display_name:
+                suffix = f"{suffix} - {display_name}"
+            user_lines.append(f"- {ep.channel}: {ep.address}{suffix}")
 
         contacts_group.section_text(
             "user_endpoints",
