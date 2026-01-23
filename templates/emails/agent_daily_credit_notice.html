@@ -1,30 +1,22 @@
-{% load static %}
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <title>{{ agent.name }} reached today's task limit</title>
-</head>
-<body style="font-family: Arial, sans-serif; color: #0f172a; background-color: #ffffff; line-height: 1.6; padding: 24px;">
-  <div style="max-width: 520px; margin: 0 auto;">
-    <p style="margin: 0 0 12px;">
-      I reached my daily task limit and am not able to continue today.
-    </p>
-    <p style="margin: 0 0 20px;">
-      <a href="{{ link }}" title="Manage Your Agent's Task Limit">Adjust the limit in agent settings</a>.
-    </p>
-    {% if is_proprietary_mode %}
-      {% if plan_id == "free" %}
-      <p>
-        Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free">Upgrade your plan</a> to allow your agents to do more work for you.
-      </p>
-      {% elif plan_id == "pro" or plan_id == "startup" %}
-        <p>
-          Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro">Upgrade your plan</a> to allow your agents to do more work for you.
-        </p>
-      {% endif %}
-    {% endif %}
+{% extends "emails/gobii_base.html" %}
 
-  </div>
-</body>
-</html>
+{% block content %}
+  <h1 style="margin: 0 0 12px; font-size: 20px; line-height: 1.4; color: #0f172a;">Daily task limit reached</h1>
+  <p style="margin: 0 0 12px; font-size: 14px; color: #334155;">
+    I reached my daily task limit and am not able to continue today.
+  </p>
+  <p style="margin: 0 0 18px; font-size: 14px; color: #334155;">
+    <a href="{{ link }}" title="Manage Your Agent's Task Limit" style="color: #2563eb; text-decoration: none;">Adjust the limit in agent settings</a>.
+  </p>
+  {% if is_proprietary_mode %}
+    {% if plan_id == "free" %}
+      <div style="margin: 0 0 12px; padding: 12px 14px; background: #eff6ff; border-radius: 8px; font-size: 13px; color: #1e3a8a;">
+        Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=free" style="color: #1d4ed8; text-decoration: none;">Upgrade your plan</a> to allow your agents to do more work for you.
+      </div>
+    {% elif plan_id == "pro" or plan_id == "startup" %}
+      <div style="margin: 0 0 12px; padding: 12px 14px; background: #eff6ff; border-radius: 8px; font-size: 13px; color: #1e3a8a;">
+        Running out of credits? <a href="https://gobii.ai/pricing/?utm_source=gobii&utm_medium=email&utm_campaign=credit_notice&utm_content=pro" style="color: #1d4ed8; text-decoration: none;">Upgrade your plan</a> to allow your agents to do more work for you.
+      </div>
+    {% endif %}
+  {% endif %}
+{% endblock %}

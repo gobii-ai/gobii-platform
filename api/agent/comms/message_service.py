@@ -23,6 +23,7 @@ from django.core.mail import send_mail
 from django.db import transaction
 from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
+from django.templatetags.static import static
 from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
@@ -335,12 +336,17 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         "I reached my daily task limit and am not able to continue today. "
         f"Adjust the limit here: {link}"
     )
+    try:
+        logo_url = _build_site_url(static("images/noBgBlue.png"))
+    except Exception:
+        logo_url = ""
     email_context = {
         "agent": agent,
         "link": link,
         "plan_label": plan_label,
         "plan_id": plan_id,
         "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
+        "logo_url": logo_url,
     }
     channel_value = channel.value if isinstance(channel, CommsChannel) else channel
     analytics_source = {
@@ -510,6 +516,10 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             return False
 
         link = _build_agent_detail_url(agent)
+        context_query = ""
+        if agent.organization_id:
+            context_query = f"context_type=organization&context_id={agent.organization_id}"
+            link = f"{link}?{context_query}"
         owner = agent.organization or agent.user
         plan = get_owner_plan(owner) if owner is not None else None
         plan_id = str(plan.get("id", "")).lower() if plan else ""
@@ -525,16 +535,49 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             "I reached my daily task limit and am not able to continue today. "
             f"Adjust the limit here: {link}"
         )
-        email_lines = [
-            "I reached my daily task limit and am not able to continue today.",
-            f"[Adjust the limit in agent settings]({link}).",
-        ]
-        if upgrade_url:
-            email_lines.append(
-                "Running out of credits? "
-                f"[Upgrade your plan]({upgrade_url}) to allow your agents to do more work for you."
+        def _append_query(url: str, query: str) -> str:
+            if not url or not query:
+                return url
+            return f"{url}&{query}" if "?" in url else f"{url}?{query}"
+
+        try:
+            double_limit_url = _build_site_url(
+                reverse(
+                    "agent_daily_limit_action",
+                    kwargs={"pk": agent.id, "action": "double"},
+                )
             )
-        email_body = "\n\n".join(email_lines)
+            unlimited_limit_url = _build_site_url(
+                reverse(
+                    "agent_daily_limit_action",
+                    kwargs={"pk": agent.id, "action": "unlimited"},
+                )
+            )
+        except NoReverseMatch:
+            double_limit_url = link
+            unlimited_limit_url = link
+        else:
+            if context_query:
+                double_limit_url = _append_query(double_limit_url, context_query)
+                unlimited_limit_url = _append_query(unlimited_limit_url, context_query)
+
+        try:
+            logo_url = _build_site_url(static("images/noBgBlue.png"))
+        except Exception:
+            logo_url = ""
+
+        email_context = {
+            "agent": agent,
+            "settings_url": link,
+            "double_limit_url": double_limit_url,
+            "unlimited_limit_url": unlimited_limit_url,
+            "upgrade_url": upgrade_url,
+            "logo_url": logo_url,
+        }
+        email_body = render_to_string(
+            "emails/agent_daily_credit_owner_notice.html",
+            email_context,
+        )
 
         channel_value = endpoint.channel
         analytics_source = {

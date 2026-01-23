@@ -2458,6 +2458,53 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
 
+
+class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
+    """Apply one-click daily limit actions from the hard limit email."""
+
+    def get(self, request, *args, **kwargs):
+        agent_id = kwargs.get("pk")
+        action = (kwargs.get("action") or "").strip().lower()
+        if not agent_id or not action:
+            raise Http404()
+
+        agent = get_object_or_404(PersistentAgent.objects.non_eval(), pk=agent_id)
+        if not user_can_manage_agent(request.user, agent):
+            raise PermissionDenied("You do not have permission to manage this agent.")
+        owner = agent.organization or agent.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
+        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        max_limit = int(slider_bounds["slider_limit_max"])
+        current_limit = agent.daily_credit_limit
+
+        if action == "double":
+            if current_limit is None or current_limit <= 0:
+                messages.info(request, "This agent is already unlimited.")
+            else:
+                new_limit = min(int(current_limit) * 2, max_limit)
+                if new_limit == current_limit:
+                    messages.info(request, "This agent is already at your plan maximum.")
+                else:
+                    agent.daily_credit_limit = new_limit
+                    agent.save(update_fields=["daily_credit_limit"])
+                    messages.success(request, "Daily limit doubled.")
+        elif action == "unlimited":
+            if current_limit is None:
+                messages.info(request, "This agent is already unlimited.")
+            else:
+                agent.daily_credit_limit = None
+                agent.save(update_fields=["daily_credit_limit"])
+                messages.success(request, "Daily limit set to unlimited.")
+        else:
+            raise Http404()
+
+        redirect_url = reverse("agent_detail", kwargs={"pk": agent.pk})
+        if agent.organization_id:
+            redirect_url = (
+                f"{redirect_url}?context_type=organization&context_id={agent.organization_id}"
+            )
+        return redirect(redirect_url)
+
 class AgentDetailView(ConsoleViewMixin, DetailView):
     """Configuration page for a single agent.
 
