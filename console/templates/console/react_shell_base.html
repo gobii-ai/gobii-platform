@@ -79,62 +79,10 @@
   </script>
   {% endif %}
 
-  {# Signup tracking events #}
-  {% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
-  <script>
-  (function () {
-    var signupEventId = "{{ signup_event_id|default_if_none:'' }}";
-    var signupIdHash = "{{ analytics.data.id_hash|default_if_none:'' }}";
-    var signupEmailHash = "{{ analytics.data.email_hash|default_if_none:'' }}";
-    var registrationValue = Number("{{ settings.CAPI_REGISTRATION_VALUE|default_if_none:'0' }}");
-    var registrationCurrency = "USD";
-
-    {% if settings.REDDIT_PIXEL_ID %}
-    if (typeof window.rdt === 'function') {
-      rdt('track', 'SignUp', {
-        email: signupEmailHash,
-        externalId: signupIdHash,
-        conversionId: signupEventId || ('reg-' + signupIdHash),
-        value: registrationValue,
-        currency: registrationCurrency,
-      });
-    }
-    {% endif %}
-
-    {% if settings.TIKTOK_PIXEL_ID %}
-    if (window.ttq && typeof window.ttq.track === 'function') {
-      ttq.track('CompleteRegistration', {
-        event_id: signupEventId,
-        external_id: signupIdHash,
-        email: signupEmailHash,
-        value: registrationValue,
-        currency: registrationCurrency,
-      });
-    }
-    {% endif %}
-
-    {% if settings.GA_MEASUREMENT_ID %}
-    if (typeof window.gtag === 'function') {
-      gtag('event', 'sign_up', { method: 'email', value: registrationValue, currency: registrationCurrency });
-    }
-    {% endif %}
-
-    {% if settings.META_PIXEL_ID %}
-    if (typeof window.fbq === 'function') {
-      fbq('track', 'CompleteRegistration', {
-        value: registrationValue,
-        currency: registrationCurrency,
-      }, {
-        external_id: signupIdHash,
-        em: signupEmailHash,
-        eventID: signupEventId
-      });
-    }
-    {% endif %}
-  })();
-  </script>
-  <script>fetch('{% url "pages:clear_signup_tracking" %}', {method: 'GET', credentials: 'same-origin'});</script>
-  {% endif %}
+  {# Signup tracking events - uses shared include with fetch-based retry #}
+  {% with signup_tracking_source='react_shell' %}
+    {% include "includes/_signup_tracking.html" %}
+  {% endwith %}
 
   {# Segment Analytics - mirrors base.html setup #}
   {% if not debug and settings.SEGMENT_WEB_WRITE_KEY %}
