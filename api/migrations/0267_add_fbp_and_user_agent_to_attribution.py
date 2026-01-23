@@ -13,11 +13,11 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='userattribution',
             name='fbp',
-            field=models.CharField(blank=True, help_text='Meta Browser ID (_fbp cookie value).', max_length=256),
+            field=models.CharField(blank=True, default='', help_text='Meta Browser ID (_fbp cookie value).', max_length=256),
         ),
         migrations.AddField(
             model_name='userattribution',
             name='last_user_agent',
-            field=models.TextField(blank=True, help_text='Most recent user agent observed for this user.'),
+            field=models.TextField(blank=True, default='', help_text='Most recent user agent observed for this user.'),
         ),
     ]

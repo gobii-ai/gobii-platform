@@ -3418,8 +3418,8 @@ class UserAttribution(models.Model):
     first_touch_at = models.DateTimeField(null=True, blank=True)
     last_touch_at = models.DateTimeField(null=True, blank=True)
     last_client_ip = models.GenericIPAddressField(null=True, blank=True, help_text="Most recent client IP observed for this user.")
-    last_user_agent = models.TextField(blank=True, help_text="Most recent user agent observed for this user.")
-    fbp = models.CharField(max_length=256, blank=True, help_text="Meta Browser ID (_fbp cookie value).")
+    last_user_agent = models.TextField(blank=True, default='', help_text="Most recent user agent observed for this user.")
+    fbp = models.CharField(max_length=256, blank=True, default='', help_text="Meta Browser ID (_fbp cookie value).")
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
