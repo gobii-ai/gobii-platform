@@ -22,6 +22,7 @@ import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageSummaryResponse } from '../components/usage'
 import { storeConsoleContext } from '../util/consoleContextStorage'
+import { track, AnalyticsEvent } from '../util/analytics'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
@@ -897,6 +898,10 @@ export function AgentChatPage({
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
   const handleUpgrade = useCallback((plan: PlanTier) => {
+    track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
+      plan,
+      source: 'agent_chat_upgrade_modal',
+    })
     const checkoutUrl = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
     window.open(checkoutUrl, '_top')
   }, [])

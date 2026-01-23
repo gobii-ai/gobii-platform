@@ -411,10 +411,17 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     click_ids: dict[str, str] = {}
     fbc = getattr(attribution, "fbc", "")
     fbclid = getattr(attribution, "fbclid", "")
+    fbp = getattr(attribution, "fbp", "")
+
     if fbc:
         click_ids["fbc"] = fbc
+    elif fbclid:
+        # Synthesize fbc from fbclid if fbc is missing (improves Meta Event Match Quality)
+        click_ids["fbc"] = f"fb.1.{int(timezone.now().timestamp())}.{fbclid}"
     if fbclid:
         click_ids["fbclid"] = fbclid
+    if fbp:
+        click_ids["fbp"] = fbp
     if click_ids:
         context["click_ids"] = click_ids
 
@@ -432,6 +439,10 @@ def _build_marketing_context_from_user(user: Any) -> dict[str, Any]:
     last_client_ip = getattr(attribution, "last_client_ip", None)
     if last_client_ip:
         context["client_ip"] = last_client_ip
+
+    last_user_agent = getattr(attribution, "last_user_agent", None)
+    if last_user_agent:
+        context["user_agent"] = last_user_agent
 
     return context
 
@@ -825,6 +836,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'first_touch_at': first_touch_at,
             'last_touch_at': last_touch_at,
             'last_client_ip': client_ip,
+            'last_user_agent': request.META.get('HTTP_USER_AGENT', ''),
+            'fbp': fbp_cookie,
         },
     )
         except Exception:
@@ -944,6 +957,23 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     **additional_click_ids,
                     **(marketing_context.get('click_ids') or {}),
                 }
+            # Ensure fbc is present for Meta CAPI if we have fbclid from session/cookies
+            # This improves Event Match Quality when user lands with fbclid but signs up
+            # on a different page without fbclid in the URL
+            click_ids = marketing_context.get('click_ids') or {}
+            if not click_ids.get('fbc') and not fbc_cookie:
+                # No fbc from cookies or extract_click_context, try to synthesize from fbclid
+                stored_fbclid = fbclid_cookie  # includes session fallback from lines 750-753
+                if stored_fbclid:
+                    click_ids['fbc'] = f"fb.1.{event_timestamp_unix}.{stored_fbclid}"
+                    click_ids['fbclid'] = stored_fbclid
+                    marketing_context['click_ids'] = click_ids
+            elif fbc_cookie and not click_ids.get('fbc'):
+                # fbc exists in cookie but wasn't captured by extract_click_context
+                click_ids['fbc'] = fbc_cookie
+                if fbclid_cookie:
+                    click_ids['fbclid'] = fbclid_cookie
+                marketing_context['click_ids'] = click_ids
             utm_context = {
                 **{f'{k}_first': v for k, v in first_touch.items() if v},
                 **{f'{k}_last': v for k, v in last_touch.items() if v},

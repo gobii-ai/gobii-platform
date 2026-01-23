@@ -1,0 +1,92 @@
+{# Signup tracking with fetch-based retry logic for reliability #}
+{# Include this in templates that need to fire signup conversion pixels #}
+{% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
+<script>
+(function() {
+  var maxRetries = 3;
+  var baseDelay = 1000;
+  var source = '{{ signup_tracking_source|default:"unknown" }}';
+
+  function firePixels(data) {
+    var p = data.pixels || {};
+    var val = data.registrationValue || 0;
+    var cur = 'USD';
+    var utmParams = window.getUTMParams ? window.getUTMParams() : {};
+
+    // Google Analytics
+    if (p.ga && typeof window.gtag === 'function') {
+      gtag('event', 'sign_up', Object.assign({ method: 'email', value: val, currency: cur }, utmParams));
+    }
+
+    // Reddit
+    if (p.reddit && typeof window.rdt === 'function') {
+      rdt('track', 'SignUp', {
+        email: data.emailHash,
+        externalId: data.idHash,
+        conversionId: data.eventId || ('reg-' + data.idHash),
+        value: val,
+        currency: cur
+      });
+    }
+
+    // TikTok
+    if (p.tiktok && window.ttq && typeof window.ttq.track === 'function') {
+      ttq.track('CompleteRegistration', {
+        event_id: data.eventId,
+        external_id: data.idHash,
+        email: data.emailHash,
+        value: val,
+        currency: cur
+      });
+    }
+
+    // Meta/Facebook
+    if (p.meta && typeof window.fbq === 'function') {
+      fbq('track', 'CompleteRegistration', Object.assign({
+        value: val,
+        currency: cur
+      }, utmParams), {
+        external_id: data.idHash,
+        em: data.emailHash,
+        eventID: data.eventId
+      });
+    }
+
+    // LinkedIn
+    if (p.linkedin && typeof window.lintrk === 'function') {
+      window.lintrk('track', { conversion_id: p.linkedin });
+    }
+
+    // Track successful pixel fire for observability
+    if (window.analytics && typeof window.analytics.track === 'function') {
+      window.analytics.track('Signup Pixels Fired', { eventId: data.eventId, source: source, pixelsFired: Object.keys(p) });
+    }
+  }
+
+  function fetchWithRetry(attempt) {
+    fetch('{% url "pages:clear_signup_tracking" %}', { credentials: 'same-origin' })
+      .then(function(r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+      })
+      .then(function(data) {
+        if (data.tracking) firePixels(data);
+      })
+      .catch(function(err) {
+        if (attempt < maxRetries) {
+          var delay = baseDelay * Math.pow(2, attempt - 1);
+          setTimeout(function() { fetchWithRetry(attempt + 1); }, delay);
+        } else if (window.analytics && typeof window.analytics.track === 'function') {
+          window.analytics.track('Signup Pixel Fetch Failed', {
+            error: err.message || 'Unknown error',
+            attempts: maxRetries,
+            source: source
+          });
+        }
+      });
+  }
+
+  fetchWithRetry(1);
+})();
+</script>
+{% endif %}

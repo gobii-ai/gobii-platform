@@ -63,6 +63,8 @@ export const AnalyticsEvent = {
   UPGRADE_MODAL_DISMISSED: 'Upgrade Modal Dismissed',
   /** User clicked upgrade CTA for a specific plan in modal */
   UPGRADE_PLAN_SELECTED: 'Upgrade Plan Selected',
+  /** User was redirected to checkout for an upgrade */
+  UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
 } as const
 
 export type AnalyticsEventType = typeof AnalyticsEvent[keyof typeof AnalyticsEvent]

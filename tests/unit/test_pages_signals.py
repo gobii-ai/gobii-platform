@@ -139,6 +139,182 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(props["value"], 12.5)
         self.assertEqual(props["currency"], "USD")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.capi")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_capi_synthesizes_fbc_from_session_fbclid(self, mock_identify, mock_track, mock_capi):
+        """When user lands with fbclid but signs up on a page without it, fbc should be synthesized.
+
+        This improves Meta Event Match Quality by ensuring fbc is present even when
+        the signup URL doesn't contain fbclid in the querystring.
+        """
+        # Simulate signup on a page WITHOUT fbclid in URL
+        request = self.factory.get("/signup")  # No fbclid param
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        # But fbclid WAS captured in session from earlier landing
+        request.session["fbclid_last"] = "test-fbclid-from-session"
+        # No _fbc cookie, no fbclid cookie - only session has it
+        request.COOKIES = {}
+
+        with patch("pages.signals.transaction.on_commit", side_effect=lambda fn: fn()):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        context = capi_kwargs["context"]
+        click_ids = context.get("click_ids", {})
+
+        # fbc should be synthesized from session fbclid
+        self.assertIn("fbc", click_ids)
+        self.assertTrue(
+            click_ids["fbc"].startswith("fb.1."),
+            f"fbc should start with 'fb.1.' but was: {click_ids.get('fbc')}"
+        )
+        self.assertTrue(
+            click_ids["fbc"].endswith(".test-fbclid-from-session"),
+            f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
+        )
+        # fbclid should also be included
+        self.assertEqual(click_ids.get("fbclid"), "test-fbclid-from-session")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.capi")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_capi_uses_existing_fbc_cookie_over_synthesis(self, mock_identify, mock_track, mock_capi):
+        """When _fbc cookie exists, use it instead of synthesizing from fbclid."""
+        request = self.factory.get("/signup")
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        # Both _fbc cookie and session fbclid exist
+        request.COOKIES = {"_fbc": "fb.1.existing.cookie-fbc-value"}
+        request.session["fbclid_last"] = "session-fbclid"
+
+        with patch("pages.signals.transaction.on_commit", side_effect=lambda fn: fn()):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        context = capi_kwargs["context"]
+        click_ids = context.get("click_ids", {})
+
+        # Should use existing _fbc cookie, not synthesize
+        self.assertEqual(click_ids.get("fbc"), "fb.1.existing.cookie-fbc-value")
+
+
+@tag("batch_pages")
+class BuildMarketingContextFromUserTests(TestCase):
+    """Tests for _build_marketing_context_from_user used by Subscribe events."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="context-user",
+            email="context@example.com",
+            password="pw",
+        )
+
+    def test_synthesizes_fbc_from_fbclid_when_fbc_missing(self):
+        """When fbc is missing but fbclid exists, fbc should be synthesized."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            fbclid="test-fbclid-value",
+            fbc="",  # No fbc stored
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+        click_ids = context.get("click_ids", {})
+
+        # fbc should be synthesized
+        self.assertIn("fbc", click_ids)
+        self.assertTrue(
+            click_ids["fbc"].startswith("fb.1."),
+            f"fbc should start with 'fb.1.' but was: {click_ids.get('fbc')}"
+        )
+        self.assertTrue(
+            click_ids["fbc"].endswith(".test-fbclid-value"),
+            f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
+        )
+        # fbclid should also be included
+        self.assertEqual(click_ids.get("fbclid"), "test-fbclid-value")
+
+    def test_uses_existing_fbc_over_synthesis(self):
+        """When fbc already exists, don't synthesize from fbclid."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            fbc="fb.1.existing.stored-fbc",
+            fbclid="some-fbclid",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+        click_ids = context.get("click_ids", {})
+
+        # Should use existing fbc
+        self.assertEqual(click_ids.get("fbc"), "fb.1.existing.stored-fbc")
+
+    def test_includes_fbp_in_context(self):
+        """fbp (Browser ID) should be included in click_ids."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            fbp="fb.1.1234567890.987654321",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+        click_ids = context.get("click_ids", {})
+
+        self.assertEqual(click_ids.get("fbp"), "fb.1.1234567890.987654321")
+
+    def test_includes_user_agent_in_context(self):
+        """User agent should be included in context."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            last_user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+
+        self.assertEqual(
+            context.get("user_agent"),
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+        )
+
+    def test_includes_client_ip_in_context(self):
+        """Client IP should be included in context."""
+        from pages.signals import _build_marketing_context_from_user
+
+        UserAttribution.objects.create(
+            user=self.user,
+            last_client_ip="192.168.1.100",
+        )
+
+        context = _build_marketing_context_from_user(self.user)
+
+        self.assertEqual(context.get("client_ip"), "192.168.1.100")
+
+    def test_returns_minimal_context_when_no_attribution(self):
+        """When user has no attribution, return minimal context with consent."""
+        from pages.signals import _build_marketing_context_from_user
+
+        # Don't create attribution
+        context = _build_marketing_context_from_user(self.user)
+
+        self.assertEqual(context, {"consent": True})
+
 
 def _build_event_payload(
     *,
