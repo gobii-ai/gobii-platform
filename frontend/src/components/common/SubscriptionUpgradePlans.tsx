@@ -38,7 +38,7 @@ const PLANS: PlanConfig[] = [
     price: '$50',
     priceSubtext: 'per month',
     description: 'Smart Power for Everyday Work',
-    badge: 'Best for Everyday Work',
+    badge: 'Great for Everyday Work',
     features: [
       '500 tasks included',
       'Unlimited always-on agents (run 24/7)',
