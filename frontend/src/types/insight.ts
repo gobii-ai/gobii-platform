@@ -53,6 +53,8 @@ export type AgentSetupUpsellItem = {
 
 export type AgentSetupMetadata = {
   agentId: string
+  agentName?: string | null
+  agentEmail?: string | null
   panel?: AgentSetupPanel
   alwaysOn: {
     title: string
