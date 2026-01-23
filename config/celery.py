@@ -39,24 +39,20 @@ def worker_ready_handler(**_):
 @worker_process_init.connect
 def worker_process_init_handler(**_):
     """
-    Initialize OpenTelemetry and Pyroscope profiling for each worker process after forking.
-    This ensures each worker child has its own BatchSpanProcessor thread and profiler.
+    Initialize OpenTelemetry for each worker process after forking.
+    This ensures each worker child has its own BatchSpanProcessor thread.
     """
     print(f"Worker process init signal received, initializing OpenTelemetry for PID {os.getpid()}")
-
-    from observability import init_tracing, init_profiling, GobiiService
+    
+    from observability import init_tracing, GobiiService
     from opentelemetry.instrumentation.celery import CeleryInstrumentor
     from opentelemetry.instrumentation.logging import LoggingInstrumentor
 
     init_tracing(GobiiService.WORKER)
     CeleryInstrumentor().instrument()
     LoggingInstrumentor().instrument(set_logging_format=True)
-
+    
     print(f"OpenTelemetry initialization completed for worker PID {os.getpid()}")
-
-    # Initialize Pyroscope profiling
-    init_profiling(GobiiService.WORKER)
-    print(f"Pyroscope profiling initialization completed for worker PID {os.getpid()}")
 
 @task_prerun.connect
 def task_prerun_handler(sender=None, task_id=None, task=None, args=None, kwargs=None, **kwds):
@@ -99,15 +95,6 @@ def worker_shutdown_handler(**_):
         print(f"OpenTelemetry shutdown completed")
     except Exception as e:
         print(f"Error during OpenTelemetry shutdown: {e}")
-
-    # Shutdown Pyroscope profiling
-    print(f"Shutting down Pyroscope profiling...")
-    try:
-        from observability import shutdown_profiling
-        shutdown_profiling()
-        print(f"Pyroscope shutdown completed")
-    except Exception as e:
-        print(f"Error during Pyroscope shutdown: {e}")
 
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):

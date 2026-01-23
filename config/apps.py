@@ -3,7 +3,7 @@ import sys
 import logging
 logging.getLogger("opentelemetry").setLevel(logging.DEBUG)
 from django.apps import AppConfig
-from observability import init_tracing, init_profiling, GobiiService   # adjust import path if observability lives elsewhere
+from observability import init_tracing, GobiiService   # adjust import path if observability lives elsewhere
 
 
 logger = logging.getLogger(__name__)
@@ -24,7 +24,3 @@ class TracingInitialization(AppConfig):
         logger.info(f"Initializing OpenTelemetry for service: {service.value}")
         init_tracing(service)
         logger.info("OpenTelemetry initialized successfully")
-
-        logger.info("Initializing Pyroscope profiling...")
-        init_profiling(service)
-        logger.info("Pyroscope profiling initialization complete")
