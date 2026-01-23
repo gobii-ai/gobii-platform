@@ -17,36 +17,36 @@ type PlanConfig = {
 }
 
 const PLANS: PlanConfig[] = [
-  {
-    id: 'free',
-    name: 'Free',
-    price: '$0',
-    priceSubtext: 'Free to start',
-    description: 'Get started with core features',
-    features: [
-      '100 tasks (one-time)',
-      '3 contacts per agent',
-      '5 always-on agents',
-      'Agents run up to 30 days',
-      'Basic API access',
-      'Community support',
-    ],
-  },
+  // {
+  //   id: 'free',
+  //   name: 'Free',
+  //   price: '$0',
+  //   priceSubtext: 'Free to start',
+  //   description: 'Get started with core features',
+  //   features: [
+  //     '100 tasks (one-time)',
+  //     '3 contacts per agent',
+  //     '5 always-on agents',
+  //     'Agents run up to 30 days',
+  //     'Basic API access',
+  //     'Community support',
+  //   ],
+  // },
   {
     id: 'startup',
     name: 'Pro',
     price: '$50',
     priceSubtext: 'per month',
-    description: 'For growing teams',
-    badge: 'Most popular',
+    description: 'Smart Power for Everyday Work',
+    badge: 'Best for Everyday Work',
     features: [
       '500 tasks included',
+      'Unlimited always-on agents (run 24/7)',
       '10 contacts per agent',
-      'Unlimited always-on agents',
       'Agents never expire',
-      '$0.10 per task beyond 500',
       'Priority support',
       'Higher rate limits',
+      'Optional extra tasks available at $0.10/task over 500',
     ],
   },
   {
@@ -54,17 +54,18 @@ const PLANS: PlanConfig[] = [
     name: 'Scale',
     price: '$250',
     priceSubtext: 'per month',
-    description: 'For teams scaling fast',
+    description: 'Maximum Intelligence for Reliable Results',
     highlight: true,
-    badge: 'Best value',
+    badge: 'Best for Complex Tasks',
     features: [
-      '10,000 tasks included',
+
+      '10,000 tasks included per month',
+      'Unlimited always-on agents (run 24/7)',
       '50 contacts per agent',
-      'Unlimited always-on agents',
       'Agents never expire',
-      '$0.04 per task beyond 10k',
       'Priority work queue',
       '1,500 req/min API throughput',
+      'Optional extra tasks available at $0.04/task over 10k',
     ],
   },
 ]
@@ -99,7 +100,7 @@ export function SubscriptionUpgradePlans({
   return (
     <>
       <div className="px-6 py-6 sm:px-8">
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = isUpgrade(plan.id)
