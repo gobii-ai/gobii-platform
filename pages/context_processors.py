@@ -1,16 +1,18 @@
 import hashlib
+import logging
 from hashlib import sha256
 from datetime import datetime
 from agents.services import AgentService
 from django.conf import settings as django_settings
+from django.core.cache import cache
 from django.http import HttpRequest
+from django.utils import timezone
 from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
-from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import (
     get_user_plan,
     get_user_api_rate_limit,
@@ -29,6 +31,22 @@ def _enum_to_dict(enum_cls):
     """{'ENUM_MEMBER': 'string value', ...}"""
     return {member.name: member.value for member in enum_cls}
 
+logger = logging.getLogger(__name__)
+
+ACCOUNT_INFO_CACHE_VERSION = 1
+ACCOUNT_INFO_CACHE_FRESH_SECONDS = 45
+ACCOUNT_INFO_CACHE_STALE_SECONDS = 600
+ACCOUNT_INFO_CACHE_LOCK_SECONDS = 60
+
+
+def _account_info_cache_key(user_id: object) -> str:
+    return f"pages:account_info:v{ACCOUNT_INFO_CACHE_VERSION}:{user_id}"
+
+
+def _account_info_cache_lock_key(user_id: object) -> str:
+    return f"{_account_info_cache_key(user_id)}:refresh_lock"
+
+
 def sha256_hex(value: str | None) -> str:
     """
     Lower-case, trim, encode UTF-8, then return hex digest.
@@ -40,57 +58,111 @@ def sha256_hex(value: str | None) -> str:
     return hashlib.sha256(normalised).hexdigest()
 
 
+def _build_account_info(user):
+    # Get the user's plan and subscription details
+    plan = get_user_plan(user)
+    agents_unlimited = has_unlimited_agents(user) or ()
+
+    paid_plan = plan["id"] != PlanNames.FREE
+
+    # Get the user's task credits - there are multiple calls below that we can recycle this in to save on DB calls
+    task_credits = TaskCreditService.get_current_task_credit(user)
+    tasks_available = TaskCreditService.get_user_task_credits_available(user, task_credits=task_credits)
+    max_task_cost = get_most_expensive_tool_cost()
+
+    # Determine if the user effectively has unlimited tasks (e.g., unlimited additional tasks)
+    tasks_entitled = TaskCreditService.get_tasks_entitled(user)
+    tasks_unlimited = tasks_entitled == TASKS_UNLIMITED
+
+    acct_info = {
+        "account": {
+            "plan": plan,
+            "paid": paid_plan,
+            "usage": {
+                "rate_limit": get_user_api_rate_limit(user),
+                "agent_limit": get_user_agent_limit(user),
+                "agents_unlimited": agents_unlimited,
+                "agents_in_use": AgentService.get_agents_in_use(user),
+                "agents_available": AGENTS_UNLIMITED
+                if agents_unlimited is True
+                else AgentService.get_agents_available(user),
+                "tasks_entitled": tasks_entitled,
+                "tasks_available": tasks_available,
+                # If unlimited, usage is effectively 0%; else treat "can't afford a single tool" as 100%
+                "tasks_used_pct": (
+                    0
+                    if (tasks_unlimited or tasks_available == TASKS_UNLIMITED)
+                    else (
+                        100
+                        if tasks_available < max_task_cost
+                        else TaskCreditService.get_user_task_credits_used_pct(
+                            user,
+                            task_credits=task_credits,
+                        )
+                    )
+                ),
+                "tasks_addl_enabled": allow_user_extra_tasks(user),
+                "tasks_addl_limit": get_user_extra_task_limit(user),
+                "task_credits_monthly": get_user_task_credit_limit(user),
+                "task_credits_available": TaskCreditService.calculate_available_tasks(
+                    user,
+                    task_credits=task_credits,
+                ),
+                "max_contacts_per_agent": get_user_max_contacts_per_agent(user),
+            },
+        }
+    }
+
+    return acct_info
+
+
+def _enqueue_account_info_refresh(user_id: object) -> None:
+    lock_key = _account_info_cache_lock_key(user_id)
+    if not cache.add(lock_key, "1", timeout=ACCOUNT_INFO_CACHE_LOCK_SECONDS):
+        return
+
+    try:
+        from pages.tasks import refresh_account_info_cache
+
+        refresh_account_info_cache.delay(str(user_id))
+    except Exception:
+        cache.delete(lock_key)
+        logger.exception("Failed to enqueue account info refresh for user %s", user_id)
+
+
 def account_info(request):
     """
     Adds account info to every template so you can write
         {% if account.has_free_agent_slots %} … {% endif %}
     """
     if not request.user.is_authenticated:
-        return {}                         # skip work for anonymous users
+        return {}  # skip work for anonymous users
 
-    # Get the user's plan and subscription details
-    plan = get_user_plan(request.user)
-    agents_unlimited = has_unlimited_agents(request.user) or ()
+    user = request.user
+    cache_key = _account_info_cache_key(user.id)
+    cached = cache.get(cache_key)
+    now_ts = timezone.now().timestamp()
 
-    paid_plan = plan['id'] != PlanNames.FREE
+    if isinstance(cached, dict):
+        cached_data = cached.get("data")
+        refreshed_at = cached.get("refreshed_at")
+        if cached_data is not None and refreshed_at is not None:
+            age_seconds = max(0, now_ts - refreshed_at)
+            if age_seconds <= ACCOUNT_INFO_CACHE_FRESH_SECONDS:
+                return cached_data
+            if age_seconds <= ACCOUNT_INFO_CACHE_STALE_SECONDS:
+                _enqueue_account_info_refresh(user.id)
+                return cached_data
 
-    # Get the user's task credits - there are multiple calls below that we can recycle this in to save on DB calls
-    task_credits = TaskCreditService.get_current_task_credit(request.user)
-    tasks_available = TaskCreditService.get_user_task_credits_available(request.user, task_credits=task_credits)
-    max_task_cost = get_most_expensive_tool_cost()
-
-    # Determine if the user effectively has unlimited tasks (e.g., unlimited additional tasks)
-    tasks_entitled = TaskCreditService.get_tasks_entitled(request.user)
-    tasks_unlimited = tasks_entitled == TASKS_UNLIMITED
-
-    acct_info = {
-        'account': {
-            'plan': plan,
-            'paid': paid_plan,
-            'usage': {
-                'rate_limit': get_user_api_rate_limit(request.user),
-                'agent_limit': get_user_agent_limit(request.user),
-                'agents_unlimited': agents_unlimited,
-                'agents_in_use': AgentService.get_agents_in_use(request.user),
-                'agents_available': AGENTS_UNLIMITED if agents_unlimited is True else AgentService.get_agents_available(request.user),
-                'tasks_entitled': tasks_entitled,
-                'tasks_available': tasks_available,
-                # If unlimited, usage is effectively 0%; else treat "can't afford a single tool" as 100%
-                'tasks_used_pct': (
-                    0 if (tasks_unlimited or tasks_available == TASKS_UNLIMITED) else (
-                        100 if tasks_available < max_task_cost else TaskCreditService.get_user_task_credits_used_pct(request.user, task_credits=task_credits)
-                    )
-                ),
-                'tasks_addl_enabled': allow_user_extra_tasks(request.user),
-                'tasks_addl_limit': get_user_extra_task_limit(request.user),
-                'task_credits_monthly': get_user_task_credit_limit(request.user),
-                'task_credits_available': TaskCreditService.calculate_available_tasks(request.user, task_credits=task_credits),
-                'max_contacts_per_agent': get_user_max_contacts_per_agent(request.user),
-            }
-        }
-    }
+    acct_info = _build_account_info(user)
+    cache.set(
+        cache_key,
+        {"data": acct_info, "refreshed_at": now_ts},
+        timeout=ACCOUNT_INFO_CACHE_STALE_SECONDS,
+    )
 
     return acct_info
+
 
 def environment_info(request):
     """

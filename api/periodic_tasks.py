@@ -75,6 +75,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Refresh homepage pretrained cache to keep landing page fast
+    beat_schedule["homepage-pretrained-cache-refresh"] = {
+        "task": "pages.refresh_homepage_pretrained_cache",
+        "schedule": crontab(minute="*/2"),
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")

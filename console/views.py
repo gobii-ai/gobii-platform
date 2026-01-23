@@ -60,6 +60,7 @@ from console.daily_credit import (
     get_daily_credit_slider_bounds,
     serialize_daily_credit_payload,
 )
+from console.home_metrics import get_console_home_metrics
 
 from api.models import (
     ApiKey,
@@ -717,111 +718,13 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
                         invite.to_user = self.request.user
             context['pending_agent_transfer_invites'] = pending_transfers
 
-        # Add agent statistics (personal vs organization)
-        from api.models import BrowserUseAgentTask, Organization
-
-        ctx_type = current_ctx.get('type', 'personal')
-
-        if ctx_type == 'organization' and current_ctx.get('id'):
-            org_id = current_ctx.get('id')
-            membership = context.get('current_membership')
-            organization = None
-            if membership and str(membership.org_id) == org_id:
-                organization = getattr(membership, "org", None)
-            if organization is None:
-                organization = Organization.objects.filter(pk=org_id).first()
-            # Verify active membership; if missing, fall back to personal context values
-            if (
-                organization is not None
-                and OrganizationMembership.objects.filter(
-                    user=self.request.user,
-                    org_id=organization.id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                ).exists()
-            ):
-                # Agents (org-owned persistent agents)
-                context['agent_count'] = AgentService.get_agents_in_use(organization)
-
-                # Task status for org-owned agents
-                from django.db.models import Count, Sum
-                pa_browser_ids = (
-                    PersistentAgent.objects.non_eval().filter(organization_id=organization.id)
-                    .values_list('browser_use_agent_id', flat=True)
-                )
-                task_stats = (
-                    BrowserUseAgentTask.objects.filter(
-                        agent_id__in=pa_browser_ids,
-                        is_deleted=False,
-                    )
-                    .values('status')
-                    .annotate(count=Count('status'))
-                )
-
-                # Initialize counters
-                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
-                for stat in task_stats:
-                    status = stat['status']
-                    count = stat['count']
-                    if status == 'completed':
-                        completed_count = count
-                    elif status == 'in_progress':
-                        in_progress_count = count
-                    elif status == 'pending':
-                        pending_count = count
-                    elif status == 'failed':
-                        failed_count = count
-                    elif status == 'cancelled':
-                        cancelled_count = count
-
-                context['completed_tasks'] = completed_count
-                context['in_progress_tasks'] = in_progress_count
-                context['pending_tasks'] = pending_count
-                context['failed_tasks'] = failed_count
-                context['cancelled_tasks'] = cancelled_count
-                context['total_active_tasks'] = in_progress_count + pending_count
-
-                # Credits available for organization
-                from django.apps import apps
-                TaskCredit = apps.get_model('api', 'TaskCredit')
-                now = timezone.now()
-                qs = TaskCredit.objects.filter(
-                    organization_id=organization.id,
-                    granted_date__lte=now,
-                    expiration_date__gte=now,
-                    voided=False,
-                )
-                agg = qs.aggregate(
-                    avail=Sum('available_credits'),
-                    total=Sum('credits'),
-                    used=Sum('credits_used'),
-                )
-
-                def _to_decimal(value):
-                    if value is None:
-                        return Decimal("0")
-                    return value if isinstance(value, Decimal) else Decimal(value)
-
-                org_tasks_available = agg['avail'] if agg['avail'] is not None else Decimal("0")
-                total = _to_decimal(agg['total'])
-                used = _to_decimal(agg['used'])
-
-                if total == 0:
-                    tasks_used_pct = Decimal("0")
-                else:
-                    usage_pct = (used / total) * Decimal("100")
-                    tasks_used_pct = min(usage_pct, Decimal("100"))
-
-                tasks_used_pct = float(tasks_used_pct)
-
-                # Expose org metrics for dashboard rendering
-                context['org_tasks_available'] = org_tasks_available
-                context['org_tasks_used_pct'] = tasks_used_pct
-            else:
-                # Fallback to personal if no membership
-                context['agent_count'] = AgentService.get_agents_in_use(self.request.user)
-        else:
-            # Personal context defaults
-            context['agent_count'] = AgentService.get_agents_in_use(self.request.user)
+        context.update(
+            get_console_home_metrics(
+                self.request,
+                current_ctx,
+                context.get("current_membership"),
+            )
+        )
 
         # Get the user's subscription plan (defaults to 'free' if not set)
         context['subscription_plan'] = get_user_plan(self.request.user)
@@ -858,44 +761,6 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
 
             context['period_start_date'] = dt_start.strftime("%B %d, %Y")
             context['period_end_date'] = dt_end.strftime("%B %d, %Y")
-
-        # Get task status breakdown
-        from django.db.models import Count
-
-        # If not in org context above, compute personal task stats
-        if not (ctx_type == 'organization' and current_ctx.get('id')):
-            with traced("CONSOLE Task Stats") as task_span:
-                from django.db.models import Count
-                task_stats = BrowserUseAgentTask.objects.filter(
-                    user=self.request.user,
-                    is_deleted=False
-                ).values('status').annotate(count=Count('status'))
-
-                # Initialize counters
-                completed_count = in_progress_count = pending_count = failed_count = cancelled_count = 0
-
-                # Populate counters from query results
-                for stat in task_stats:
-                    status = stat['status']
-                    count = stat['count']
-                    if status == 'completed':
-                        completed_count = count
-                    elif status == 'in_progress':
-                        in_progress_count = count
-                    elif status == 'pending':
-                        pending_count = count
-                    elif status == 'failed':
-                        failed_count = count
-                    elif status == 'cancelled':
-                        cancelled_count = count
-
-                # Add task statistics to context
-                context['completed_tasks'] = completed_count
-                context['in_progress_tasks'] = in_progress_count
-                context['pending_tasks'] = pending_count
-                context['failed_tasks'] = failed_count
-                context['cancelled_tasks'] = cancelled_count
-                context['total_active_tasks'] = in_progress_count + pending_count
 
         return context
 
@@ -2127,6 +1992,10 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         shared_agents = list(shared_agents_qs)
         all_agents = persistent_agents + shared_agents
         today = timezone.localdate()
+        day_start = datetime.combine(today, datetime.min.time())
+        if timezone.is_naive(day_start):
+            day_start = timezone.make_aware(day_start)
+        day_end = day_start + timedelta(days=1)
         next_reset = (
             timezone.localtime(timezone.now()).replace(
                 hour=0,
@@ -2140,6 +2009,18 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         lookback_start = lookback_end - timedelta(hours=24)
         agent_ids = [agent.id for agent in all_agents]
         recent_usage_map: dict[Any, Decimal] = {}
+        daily_usage_map: dict[Any, Decimal] = {}
+        pending_transfer_ids: set[Any] = set()
+        hard_limit_multiplier = Decimal("2")
+
+        owner, _, _ = self._resolve_context_owner(context)
+        if owner is not None:
+            try:
+                credit_settings = get_daily_credit_settings_for_owner(owner)
+                hard_limit_multiplier = Decimal(credit_settings.hard_limit_multiplier)
+            except Exception:
+                hard_limit_multiplier = Decimal("2")
+
         if agent_ids:
             usage_rows = (
                 PersistentAgentStep.objects.filter(
@@ -2155,6 +2036,26 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 row['agent_id']: row['total'] or Decimal("0")
                 for row in usage_rows
             }
+            daily_usage_rows = (
+                PersistentAgentStep.objects.filter(
+                    agent_id__in=agent_ids,
+                    created_at__gte=day_start,
+                    created_at__lt=day_end,
+                    credits_cost__isnull=False,
+                )
+                .values('agent_id')
+                .annotate(total=Sum('credits_cost'))
+            )
+            daily_usage_map = {
+                row['agent_id']: row['total'] or Decimal("0")
+                for row in daily_usage_rows
+            }
+            pending_transfer_ids = set(
+                AgentTransferInvite.objects.filter(
+                    agent_id__in=agent_ids,
+                    status=AgentTransferInvite.Status.PENDING,
+                ).values_list('agent_id', flat=True)
+            )
 
         for agent in all_agents:
             description, source = build_listing_description(agent, max_length=200)
@@ -2178,18 +2079,25 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             agent.mini_description = mini_description
             agent.mini_description_source = mini_source
             agent.display_tags = agent.tags if isinstance(agent.tags, list) else []
-            agent.pending_transfer_invite = AgentTransferInvite.objects.filter(
-                agent=agent,
-                status=AgentTransferInvite.Status.PENDING,
-            ).first()
+            agent.pending_transfer_invite = agent.id in pending_transfer_ids
 
             last_24h_usage = recent_usage_map.get(agent.id, Decimal("0"))
 
             try:
                 soft_target = agent.get_daily_credit_soft_target()
-                hard_limit = agent.get_daily_credit_hard_limit()
-                usage = agent.get_daily_credit_usage(usage_date=today)
-                remaining = agent.get_daily_credit_remaining(usage_date=today)
+                hard_limit = (
+                    (soft_target * hard_limit_multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                    if soft_target is not None
+                    else None
+                )
+                usage = daily_usage_map.get(agent.id, Decimal("0"))
+                remaining = (
+                    (hard_limit - usage if hard_limit is not None else None)
+                    if hard_limit is not None
+                    else None
+                )
+                if remaining is not None and remaining < Decimal("0"):
+                    remaining = Decimal("0")
             except Exception:
                 soft_target = None
                 hard_limit = None
