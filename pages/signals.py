@@ -52,6 +52,7 @@ from util.subscription_helper import (
     _individual_plan_product_ids,
     _individual_plan_price_ids,
     ensure_single_individual_subscription,
+    get_active_subscription,
     mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
     downgrade_owner_to_free_plan,
@@ -1366,6 +1367,23 @@ def handle_subscription_event(event, **kwargs):
             )
 
         if event_type == "customer.subscription.deleted" or getattr(sub, "status", "") == "canceled":
+            active_sub = get_active_subscription(owner)
+            if active_sub and getattr(active_sub, "id", None) and getattr(active_sub, "id", None) != subscription_id:
+                span.add_event(
+                    "subscription.cancel_ignored_active_subscription",
+                    {
+                        "subscription.id": subscription_id or "",
+                        "active_subscription.id": getattr(active_sub, "id", "") or "",
+                    },
+                )
+                logger.info(
+                    "Skipping downgrade for owner %s: subscription %s canceled but active subscription %s exists.",
+                    getattr(owner, "id", None) or owner,
+                    subscription_id,
+                    getattr(active_sub, "id", None),
+                )
+                return
+
             downgrade_owner_to_free_plan(owner)
 
             try:
