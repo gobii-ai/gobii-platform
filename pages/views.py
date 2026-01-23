@@ -1,5 +1,6 @@
 from datetime import timezone, datetime
 from urllib.parse import urlencode
+from types import SimpleNamespace
 import uuid
 
 from django.http.response import JsonResponse
@@ -356,11 +357,12 @@ class HomePage(TemplateView):
                 or search_lower in (template.get("description") or "").lower()
             ]
 
+        filtered_workers = [SimpleNamespace(**template) for template in filtered_templates]
         context.update(
             {
-                "homepage_pretrained_workers": filtered_templates,
+                "homepage_pretrained_workers": filtered_workers,
                 "homepage_pretrained_total": payload.get("total", len(all_templates)),
-                "homepage_pretrained_filtered_count": len(filtered_templates),
+                "homepage_pretrained_filtered_count": len(filtered_workers),
                 "homepage_pretrained_categories": payload.get("categories") or [],
                 "homepage_pretrained_selected_category": category_filter,
                 "homepage_pretrained_search_term": search_term,
