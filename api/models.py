@@ -9194,6 +9194,82 @@ class AgentFsNode(models.Model):
         return descendants
 
 
+class ComputeSnapshot(models.Model):
+    """Disk-only snapshot metadata for sandbox compute sessions."""
+
+    class Status(models.TextChoices):
+        READY = "ready", "Ready"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="compute_snapshots",
+    )
+    k8s_snapshot_name = models.CharField(max_length=255)
+    size_bytes = models.PositiveBigIntegerField(null=True, blank=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.READY,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "created_at"], name="compute_snapshot_agent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"ComputeSnapshot<{self.id} agent={self.agent_id} status={self.status}>"
+
+
+class AgentComputeSession(models.Model):
+    """Control-plane metadata for a per-agent sandbox session."""
+
+    class State(models.TextChoices):
+        RUNNING = "running", "Running"
+        IDLE_STOPPING = "idle_stopping", "Idle Stopping"
+        STOPPED = "stopped", "Stopped"
+        ERROR = "error", "Error"
+
+    agent = models.OneToOneField(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        primary_key=True,
+        related_name="compute_session",
+    )
+    pod_name = models.CharField(max_length=128, blank=True)
+    namespace = models.CharField(max_length=128, blank=True)
+    state = models.CharField(
+        max_length=32,
+        choices=State.choices,
+        default=State.STOPPED,
+    )
+    last_activity_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    workspace_snapshot = models.ForeignKey(
+        "ComputeSnapshot",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sessions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["state"], name="compute_session_state_idx"),
+            models.Index(fields=["lease_expires_at"], name="compute_session_lease_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"AgentComputeSession<{self.agent_id} state={self.state}>"
+
+
 # Auto-provision a default filespace for new PersistentAgents
 @receiver(pre_save, sender=PersistentAgent)
 def enforce_org_seats_before_save(sender, instance: PersistentAgent, **kwargs):
@@ -9641,6 +9717,10 @@ def invalidate_mcp_tool_cache_for_server(sender, instance, **kwargs):
     server_id = getattr(instance, "id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
+        if getattr(instance, "scope", None) != MCPServerConfig.Scope.PLATFORM:
+            from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
+
+            schedule_mcp_tool_discovery(str(server_id), reason="config_changed")
 
 
 @receiver(post_save, sender=MCPServerOAuthCredential)
@@ -9649,3 +9729,8 @@ def invalidate_mcp_tool_cache_for_credentials(sender, instance, **kwargs):
     server_id = getattr(instance, "server_config_id", None)
     if server_id:
         invalidate_mcp_tool_cache(str(server_id))
+        server = MCPServerConfig.objects.filter(id=server_id).only("scope").first()
+        if server and server.scope != MCPServerConfig.Scope.PLATFORM:
+            from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
+
+            schedule_mcp_tool_discovery(str(server_id), reason="credentials_changed")

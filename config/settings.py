@@ -1012,6 +1012,36 @@ CAPSOLVER_API_KEY = env("CAPSOLVER_API_KEY", default="")
 
 GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
+# ────────── Sandbox Compute ──────────
+SANDBOX_COMPUTE_ENABLED = env.bool("SANDBOX_COMPUTE_ENABLED", default=False)
+SANDBOX_COMPUTE_BACKEND = env(
+    "SANDBOX_COMPUTE_BACKEND",
+    default=("local" if SANDBOX_COMPUTE_ENABLED else ""),
+)
+SANDBOX_COMPUTE_API_URL = env("SANDBOX_COMPUTE_API_URL", default="")
+SANDBOX_COMPUTE_API_TOKEN = env("SANDBOX_COMPUTE_API_TOKEN", default="")
+SANDBOX_COMPUTE_IDLE_TTL_SECONDS = env.int("SANDBOX_COMPUTE_IDLE_TTL_SECONDS", default=60 * 60)
+SANDBOX_COMPUTE_WORKSPACE_LIMIT_BYTES = env.int(
+    "SANDBOX_COMPUTE_WORKSPACE_LIMIT_BYTES",
+    default=1024 * 1024 * 1024,
+)
+SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS = env.int(
+    "SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS",
+    default=120,
+)
+SANDBOX_COMPUTE_PYTHON_DEFAULT_TIMEOUT_SECONDS = env.int(
+    "SANDBOX_COMPUTE_PYTHON_DEFAULT_TIMEOUT_SECONDS",
+    default=30,
+)
+SANDBOX_COMPUTE_PYTHON_MAX_TIMEOUT_SECONDS = env.int(
+    "SANDBOX_COMPUTE_PYTHON_MAX_TIMEOUT_SECONDS",
+    default=120,
+)
+SANDBOX_COMPUTE_STDIO_MAX_BYTES = env.int(
+    "SANDBOX_COMPUTE_STDIO_MAX_BYTES",
+    default=1024 * 1024,
+)
+
 # In local/dev by default, simulate email delivery when no real provider is configured.
 # This avoids blocking first‑run UX. If SMTP is configured per agent or
 # POSTMARK_SERVER_TOKEN is set, real delivery is used instead.

@@ -38,6 +38,9 @@ from .maintenance_tasks import (
     prune_prompt_archives,
 )
 
+# Sandbox compute tasks
+from .sandbox_compute import discover_mcp_tools  # noqa: F401
+
 # Soft-expiration task (global sweeper)
 from .soft_expiration_task import soft_expire_inactive_agents_task
 
