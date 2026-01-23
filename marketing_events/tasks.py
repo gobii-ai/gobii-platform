@@ -28,7 +28,7 @@ def enqueue_marketing_event(self, payload: dict):
     # Basic staleness guard: reject events older than 7 days
     if evt["event_time"] < int(time.time()) - 7 * 24 * 3600:
         logger.info(
-            "Dropping stale marketing event",
+            f"Dropping stale marketing event for user: {evt['ids']['external_id']}",
             extra={"event_name": evt["event_name"], "event_id": evt["event_id"]},
         )
         return

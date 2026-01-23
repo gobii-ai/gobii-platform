@@ -59,7 +59,7 @@
 
     // Track successful pixel fire for observability
     if (window.analytics && typeof window.analytics.track === 'function') {
-      window.analytics.track('Signup Pixels Fired', { eventId: data.eventId, source: source });
+      window.analytics.track('Signup Pixels Fired', { eventId: data.eventId, source: source, pixelsFired: Object.keys(p) });
     }
   }
 
