@@ -944,6 +944,23 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     **additional_click_ids,
                     **(marketing_context.get('click_ids') or {}),
                 }
+            # Ensure fbc is present for Meta CAPI if we have fbclid from session/cookies
+            # This improves Event Match Quality when user lands with fbclid but signs up
+            # on a different page without fbclid in the URL
+            click_ids = marketing_context.get('click_ids') or {}
+            if not click_ids.get('fbc') and not fbc_cookie:
+                # No fbc from cookies or extract_click_context, try to synthesize from fbclid
+                stored_fbclid = fbclid_cookie  # includes session fallback from lines 750-753
+                if stored_fbclid:
+                    click_ids['fbc'] = f"fb.1.{event_timestamp_unix}.{stored_fbclid}"
+                    click_ids['fbclid'] = stored_fbclid
+                    marketing_context['click_ids'] = click_ids
+            elif fbc_cookie and not click_ids.get('fbc'):
+                # fbc exists in cookie but wasn't captured by extract_click_context
+                click_ids['fbc'] = fbc_cookie
+                if fbclid_cookie:
+                    click_ids['fbclid'] = fbclid_cookie
+                marketing_context['click_ids'] = click_ids
             utm_context = {
                 **{f'{k}_first': v for k, v in first_touch.items() if v},
                 **{f'{k}_last': v for k, v in last_touch.items() if v},

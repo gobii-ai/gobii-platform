@@ -139,6 +139,76 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(props["value"], 12.5)
         self.assertEqual(props["currency"], "USD")
 
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.capi")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_capi_synthesizes_fbc_from_session_fbclid(self, mock_identify, mock_track, mock_capi):
+        """When user lands with fbclid but signs up on a page without it, fbc should be synthesized.
+
+        This improves Meta Event Match Quality by ensuring fbc is present even when
+        the signup URL doesn't contain fbclid in the querystring.
+        """
+        # Simulate signup on a page WITHOUT fbclid in URL
+        request = self.factory.get("/signup")  # No fbclid param
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        # But fbclid WAS captured in session from earlier landing
+        request.session["fbclid_last"] = "test-fbclid-from-session"
+        # No _fbc cookie, no fbclid cookie - only session has it
+        request.COOKIES = {}
+
+        with patch("pages.signals.transaction.on_commit", side_effect=lambda fn: fn()):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        context = capi_kwargs["context"]
+        click_ids = context.get("click_ids", {})
+
+        # fbc should be synthesized from session fbclid
+        self.assertIn("fbc", click_ids)
+        self.assertTrue(
+            click_ids["fbc"].startswith("fb.1."),
+            f"fbc should start with 'fb.1.' but was: {click_ids.get('fbc')}"
+        )
+        self.assertTrue(
+            click_ids["fbc"].endswith(".test-fbclid-from-session"),
+            f"fbc should end with fbclid but was: {click_ids.get('fbc')}"
+        )
+        # fbclid should also be included
+        self.assertEqual(click_ids.get("fbclid"), "test-fbclid-from-session")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.signals.capi")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_signup_capi_uses_existing_fbc_cookie_over_synthesis(self, mock_identify, mock_track, mock_capi):
+        """When _fbc cookie exists, use it instead of synthesizing from fbclid."""
+        request = self.factory.get("/signup")
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+
+        # Both _fbc cookie and session fbclid exist
+        request.COOKIES = {"_fbc": "fb.1.existing.cookie-fbc-value"}
+        request.session["fbclid_last"] = "session-fbclid"
+
+        with patch("pages.signals.transaction.on_commit", side_effect=lambda fn: fn()):
+            handle_user_signed_up(sender=None, request=request, user=self.user)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        context = capi_kwargs["context"]
+        click_ids = context.get("click_ids", {})
+
+        # Should use existing _fbc cookie, not synthesize
+        self.assertEqual(click_ids.get("fbc"), "fb.1.existing.cookie-fbc-value")
+
 
 def _build_event_payload(
     *,
