@@ -28,9 +28,11 @@ function splitName(name: string): NameParts {
   if (parts.length === 1) {
     return { given: parts[0], family: '' }
   }
+  const family = parts.pop() || ''
+  const given = parts.join(' ')
   return {
-    given: parts[0],
-    family: parts.slice(1).join(' '),
+    given,
+    family,
   }
 }
 
