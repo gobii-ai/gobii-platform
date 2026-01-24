@@ -396,57 +396,63 @@ class MailgunEmailAdapter(EmailAdapter):
 
         body = working_text
 
-        if EMAIL_STRIP_REPLIES is True:
-            span.set_attribute("mailgun.strip_replies", "True")
-            attachments_meta = []
-            for att in attachments:
-                content_type = getattr(att, "content_type", "")
-                file_size = getattr(att, "size", 0)
-                if file_size > MAX_FILE_SIZE:
-                    logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
-                    span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
-                    continue
+        # Build attachment metadata for forward detection (filter oversized files)
+        attachments_meta = []
+        for att in attachments:
+            content_type = getattr(att, "content_type", "")
+            file_size = getattr(att, "size", 0)
+            if file_size > MAX_FILE_SIZE:
+                logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
+                span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
+                continue
+            elif content_type:
+                attachments_meta.append({"ContentType": content_type})
 
-                elif content_type:
-                    attachments_meta.append({"ContentType": content_type})
+        # Forward detection and handling.
+        # We ALWAYS check for forwards regardless of EMAIL_STRIP_REPLIES, because:
+        # 1. Forwards need body-plain to preserve the quoted/forwarded content
+        #    (Mailgun's stripped-text removes it)
+        # 2. In production, EMAIL_STRIP_REPLIES is False, but working_text still
+        #    prefers stripped-text for historical reasons. We preserve that behavior
+        #    for non-forwards to avoid breaking existing functionality, but forwards
+        #    must use body-plain or the forwarded content is lost.
+        detection_text = body_plain_raw or working_text
+        is_forward = _is_forward_like(subject, detection_text, attachments_meta)
+        span.set_attribute("mailgun.is_forward", bool(is_forward))
 
-            # Use body-plain for forward detection since stripped-text may have
-            # removed the header block that indicates a forward
-            detection_text = body_plain_raw or working_text
-            is_forward = _is_forward_like(subject, detection_text, attachments_meta)
-            span.set_attribute("mailgun.is_forward", bool(is_forward))
-
-            if is_forward:
-                # For forwards, use body-plain to preserve the quoted/forwarded content
-                # that Mailgun's stripped-text would have removed
-                forward_text = body_plain_raw or _html_to_text(html_body) or working_text
-                preamble, forwarded = _extract_forward_sections(forward_text)
-                if forwarded and preamble:
-                    body = f"{preamble}\n\n{forwarded}"
-                    body_used = "Forward+Preamble+Block (body-plain)"
-                elif forwarded:
-                    body = forwarded
-                    body_used = "Forward+BlockOnly (body-plain)"
-                elif preamble:
-                    body = preamble
-                    body_used = "Forward+PreambleOnly (body-plain)"
-                else:
-                    body = forward_text.strip()
-                    body_used = "Forward+FullBodyFallback (body-plain)"
+        if is_forward:
+            # For forwards, use body-plain to preserve the quoted/forwarded content
+            forward_text = body_plain_raw or _html_to_text(html_body) or working_text
+            preamble, forwarded = _extract_forward_sections(forward_text)
+            if forwarded and preamble:
+                body = f"{preamble}\n\n{forwarded}"
+                body_used = "Forward+Preamble+Block (body-plain)"
+            elif forwarded:
+                body = forwarded
+                body_used = "Forward+BlockOnly (body-plain)"
+            elif preamble:
+                body = preamble
+                body_used = "Forward+PreambleOnly (body-plain)"
             else:
-                for field in ("stripped-text", "body-plain", "text"):
+                body = forward_text.strip()
+                body_used = "Forward+FullBodyFallback (body-plain)"
+        elif EMAIL_STRIP_REPLIES is True:
+            span.set_attribute("mailgun.strip_replies", "True")
+            for field in ("stripped-text", "body-plain", "text"):
+                value = _first_value(payload_dict.get(field))
+                if value:
+                    body = value
+                    body_used = field
+                    break
+            else:  # No plain text body found, try HTML
+                for field in ("stripped-html", "body-html", "html"):
                     value = _first_value(payload_dict.get(field))
                     if value:
-                        body = value
+                        body = _html_to_text(value)
                         body_used = field
                         break
-                else:  # No plain text body found, try HTML
-                    for field in ("stripped-html", "body-html", "html"):
-                        value = _first_value(payload_dict.get(field))
-                        if value:
-                            body = _html_to_text(value)
-                            body_used = field
-                            break
+        # else: non-forward with EMAIL_STRIP_REPLIES=False, body stays as working_text
+
         span.set_attribute("mailgun.body_used", body_used)
 
         sender = (
