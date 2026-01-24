@@ -24,14 +24,19 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
-FORWARD_MARKERS = [
-    r"^Begin forwarded message:",
-    r"^-{2,}\s*Forwarded message\s*-{2,}$",
+# Markers that definitively indicate a forward (not used in replies)
+FORWARD_ONLY_MARKERS = [
+    r"^Begin forwarded message:",  # Apple Mail
+    r"^-{2,}\s*Forwarded message\s*-{2,}$",  # Gmail
+]
+# Markers that are ambiguous - used by Outlook for both forwards AND replies
+AMBIGUOUS_QUOTE_MARKERS = [
     r"^-----Original Message-----$",
     r"^-{3,}\s*Original Message\s*-{3,}$",
-    r"^_{10,}$",  # Outlook web uses long underscore lines
+    r"^_{10,}$",  # Outlook web underscore separators
 ]
-FORWARD_MARKERS_RE = re.compile("|".join(FORWARD_MARKERS), re.IGNORECASE | re.MULTILINE)
+FORWARD_ONLY_MARKERS_RE = re.compile("|".join(FORWARD_ONLY_MARKERS), re.IGNORECASE | re.MULTILINE)
+AMBIGUOUS_QUOTE_MARKERS_RE = re.compile("|".join(AMBIGUOUS_QUOTE_MARKERS), re.IGNORECASE | re.MULTILINE)
 SUBJECT_FWD_RE = re.compile(r"^\s*(fwd?|fw|wg|tr|rv)\s*:", re.IGNORECASE)
 SUBJECT_REPLY_RE = re.compile(r"^\s*re\s*:", re.IGNORECASE)
 # Pattern to match individual header lines in forwarded content
@@ -71,14 +76,22 @@ def _is_forward_like(subject: str, body_text: str, attachments: list[dict]) -> b
     # Explicit forward subject prefix
     if SUBJECT_FWD_RE.search(subject or ""):
         return True
-    # Explicit forward markers in body (e.g., "Begin forwarded message:")
-    if FORWARD_MARKERS_RE.search(body_text or ""):
+    # Definitive forward-only markers (e.g., "Begin forwarded message:")
+    if FORWARD_ONLY_MARKERS_RE.search(body_text or ""):
         return True
-    # Header block detection - but NOT if subject indicates a reply.
-    # Replies (especially from Outlook) include quoted header blocks (From/Sent/To/Subject)
-    # that would otherwise be misdetected as forwards.
+
+    # For ambiguous markers and header blocks, skip if subject indicates a reply.
+    # Outlook uses "-----Original Message-----" and underscore separators for BOTH
+    # forwards and replies, so we can't rely on these alone.
     is_reply = bool(SUBJECT_REPLY_RE.search(subject or ""))
-    if not is_reply and _has_forwarded_header_block(body_text):
+    if is_reply:
+        return False
+
+    # Ambiguous markers (only count as forward if not a reply)
+    if AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text or ""):
+        return True
+    # Header block detection (only if not a reply)
+    if _has_forwarded_header_block(body_text):
         return True
     return False
 
@@ -122,9 +135,14 @@ def _extract_forward_sections(body_text: str) -> Tuple[str, str]:
     if not body_text:
         return "", ""
     starts = []
-    m1 = FORWARD_MARKERS_RE.search(body_text)
+    # Check both forward-only and ambiguous markers for extraction
+    # (by the time we call this, we've already determined it's a forward)
+    m1 = FORWARD_ONLY_MARKERS_RE.search(body_text)
     if m1:
         starts.append(m1.start())
+    m2 = AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text)
+    if m2:
+        starts.append(m2.start())
     header_start = _find_header_block_start(body_text)
     if header_start is not None:
         starts.append(header_start)

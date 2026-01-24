@@ -172,6 +172,40 @@ class ForwardDetectionTests(unittest.TestCase):
         )
         self.assertTrue(_is_forward_like(subject, body, []))
 
+    def test_is_forward_like_reply_with_underscore_separator(self):
+        """Outlook reply with underscore separator should NOT be a forward.
+
+        Regression test: Outlook uses ________________________________ for both
+        forwards AND replies, so it shouldn't trigger forward detection for Re: subjects.
+        """
+        subject = "RE: Weekly sync"
+        body = (
+            "Sounds good!\n\n"
+            "________________________________\n"
+            "From: Manager <manager@company.com>\n"
+            "Sent: Monday, January 6, 2025 9:00 AM\n"
+            "To: Team <team@company.com>\n"
+            "Subject: RE: Weekly sync\n"
+            "\n"
+            "Let's meet at 2pm.\n"
+        )
+        self.assertFalse(_is_forward_like(subject, body, []))
+
+    def test_is_forward_like_reply_with_original_message_marker(self):
+        """Outlook reply with -----Original Message----- should NOT be a forward."""
+        subject = "RE: Project update"
+        body = (
+            "Will do.\n\n"
+            "-----Original Message-----\n"
+            "From: Boss <boss@company.com>\n"
+            "Sent: Tuesday, January 7, 2025 10:00 AM\n"
+            "To: Employee <employee@company.com>\n"
+            "Subject: RE: Project update\n"
+            "\n"
+            "Please send me the report.\n"
+        )
+        self.assertFalse(_is_forward_like(subject, body, []))
+
     def test_extract_forward_sections_with_marker(self):
         body = (
             "Intro line\n\n"
