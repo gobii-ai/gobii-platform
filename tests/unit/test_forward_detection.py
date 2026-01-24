@@ -143,6 +143,35 @@ class ForwardDetectionTests(unittest.TestCase):
         body = "I heard from: the team that things are going well."
         self.assertFalse(_is_forward_like("", body, []))
 
+    def test_is_forward_like_reply_with_quoted_headers(self):
+        """Outlook-style reply with quoted header block should NOT be a forward.
+
+        This is a regression test: replies include quoted header blocks
+        (From/Sent/To/Subject) but should still use stripped-reply logic.
+        """
+        subject = "Re: Q1 Planning"
+        body = (
+            "Sounds good, let's proceed.\n\n"
+            "From: Boss <boss@company.com>\n"
+            "Sent: Tuesday, January 2, 2024 3:00 PM\n"
+            "To: Team <team@company.com>\n"
+            "Subject: Re: Q1 Planning\n"
+            "\n"
+            "What do you think?\n"
+        )
+        self.assertFalse(_is_forward_like(subject, body, []))
+
+    def test_is_forward_like_reply_with_explicit_forward_marker(self):
+        """Even with Re: subject, explicit forward marker should trigger forward detection."""
+        subject = "Re: Check this out"
+        body = (
+            "Here's that email I mentioned.\n\n"
+            "Begin forwarded message:\n"
+            "From: someone@example.com\n"
+            "Subject: Original topic\n"
+        )
+        self.assertTrue(_is_forward_like(subject, body, []))
+
     def test_extract_forward_sections_with_marker(self):
         body = (
             "Intro line\n\n"

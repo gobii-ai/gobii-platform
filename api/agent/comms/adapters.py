@@ -33,6 +33,7 @@ FORWARD_MARKERS = [
 ]
 FORWARD_MARKERS_RE = re.compile("|".join(FORWARD_MARKERS), re.IGNORECASE | re.MULTILINE)
 SUBJECT_FWD_RE = re.compile(r"^\s*(fwd?|fw|wg|tr|rv)\s*:", re.IGNORECASE)
+SUBJECT_REPLY_RE = re.compile(r"^\s*re\s*:", re.IGNORECASE)
 # Pattern to match individual header lines in forwarded content
 FORWARDED_HEADER_LINE_RE = re.compile(
     r"^(From|Date|Sent|Subject|To):\s*.+",
@@ -64,13 +65,20 @@ def _has_forwarded_header_block(text: str) -> bool:
 
 
 def _is_forward_like(subject: str, body_text: str, attachments: list[dict]) -> bool:
+    # Embedded message/rfc822 attachment is a definitive forward
     if any((a.get("ContentType", "") or "").lower() == "message/rfc822" for a in (attachments or [])):
         return True
+    # Explicit forward subject prefix
     if SUBJECT_FWD_RE.search(subject or ""):
         return True
+    # Explicit forward markers in body (e.g., "Begin forwarded message:")
     if FORWARD_MARKERS_RE.search(body_text or ""):
         return True
-    if _has_forwarded_header_block(body_text):
+    # Header block detection - but NOT if subject indicates a reply.
+    # Replies (especially from Outlook) include quoted header blocks (From/Sent/To/Subject)
+    # that would otherwise be misdetected as forwards.
+    is_reply = bool(SUBJECT_REPLY_RE.search(subject or ""))
+    if not is_reply and _has_forwarded_header_block(body_text):
         return True
     return False
 
