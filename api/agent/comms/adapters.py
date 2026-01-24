@@ -24,29 +24,108 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
-FORWARD_MARKERS = [
-    r"^Begin forwarded message:",
-    r"^-{2,}\s*Forwarded message\s*-{2,}$",
-    r"^-----Original Message-----$",
+# Markers that definitively indicate a forward (not used in replies)
+FORWARD_ONLY_MARKERS = [
+    r"^Begin forwarded message:",  # Apple Mail
+    r"^-{2,}\s*Forwarded message\s*-{2,}$",  # Gmail
 ]
-HEADER_BLOCK_RE = re.compile(
-    r"(?m)^(From:\s*.+)\n(?:.+\n){0,6}?(Date:\s*.+|Sent:\s*.+)\n(?:.+\n){0,6}?(Subject:\s*.+)\n(?:.+\n){0,6}?(To:\s*.+)",
-    re.IGNORECASE,
-)
-FORWARD_MARKERS_RE = re.compile("|".join(FORWARD_MARKERS), re.IGNORECASE | re.MULTILINE)
+# Markers that are ambiguous - used by Outlook for both forwards AND replies
+AMBIGUOUS_QUOTE_MARKERS = [
+    r"^-----Original Message-----$",
+    r"^-{3,}\s*Original Message\s*-{3,}$",
+    r"^_{10,}$",  # Outlook web underscore separators
+]
+FORWARD_ONLY_MARKERS_RE = re.compile("|".join(FORWARD_ONLY_MARKERS), re.IGNORECASE | re.MULTILINE)
+AMBIGUOUS_QUOTE_MARKERS_RE = re.compile("|".join(AMBIGUOUS_QUOTE_MARKERS), re.IGNORECASE | re.MULTILINE)
 SUBJECT_FWD_RE = re.compile(r"^\s*(fwd?|fw|wg|tr|rv)\s*:", re.IGNORECASE)
+SUBJECT_REPLY_RE = re.compile(r"^\s*re\s*:", re.IGNORECASE)
+# Pattern to match individual header lines in forwarded content
+FORWARDED_HEADER_LINE_RE = re.compile(
+    r"^(From|Date|Sent|Subject|To):\s*.+",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def _has_forwarded_header_block(text: str) -> bool:
+    """Check if text contains a clustered block of email headers (indicating forwarded content).
+
+    This is more flexible than a strict regex - it looks for at least 3 of the typical
+    forwarded email headers (From, Date/Sent, Subject, To) within an 8-line window,
+    regardless of their order. Different email clients arrange these headers differently.
+    """
+    if not text:
+        return False
+    lines = text.split('\n')
+    for i in range(len(lines)):
+        window = '\n'.join(lines[i:i + 8])
+        matches = FORWARDED_HEADER_LINE_RE.findall(window)
+        # Normalize and dedupe (e.g., "From" and "from" count as one)
+        unique_headers = set(m.lower() for m in matches)
+        # "Sent" and "Date" are equivalent (different clients use different names)
+        if "sent" in unique_headers:
+            unique_headers.add("date")
+        if len(unique_headers) >= 3:
+            return True
+    return False
 
 
 def _is_forward_like(subject: str, body_text: str, attachments: list[dict]) -> bool:
+    # Embedded message/rfc822 attachment is a definitive forward
     if any((a.get("ContentType", "") or "").lower() == "message/rfc822" for a in (attachments or [])):
         return True
+    # Explicit forward subject prefix
     if SUBJECT_FWD_RE.search(subject or ""):
         return True
-    if FORWARD_MARKERS_RE.search(body_text or ""):
+    # Definitive forward-only markers (e.g., "Begin forwarded message:")
+    if FORWARD_ONLY_MARKERS_RE.search(body_text or ""):
         return True
-    if HEADER_BLOCK_RE.search(body_text or ""):
+
+    # For ambiguous markers and header blocks, skip if subject indicates a reply.
+    # Outlook uses "-----Original Message-----" and underscore separators for BOTH
+    # forwards and replies, so we can't rely on these alone.
+    is_reply = bool(SUBJECT_REPLY_RE.search(subject or ""))
+    if is_reply:
+        return False
+
+    # Ambiguous markers (only count as forward if not a reply)
+    if AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text or ""):
+        return True
+    # Header block detection (only if not a reply)
+    if _has_forwarded_header_block(body_text):
         return True
     return False
+
+
+def _find_header_block_start(text: str) -> int | None:
+    """Find the start index of a forwarded header block in the text.
+
+    Returns the character index where the first header line of the block begins,
+    or None if no header block is found.
+    """
+    if not text:
+        return None
+    lines = text.split('\n')
+    line_starts = []
+    pos = 0
+    for line in lines:
+        line_starts.append(pos)
+        pos += len(line) + 1  # +1 for newline
+
+    for i in range(len(lines)):
+        window_lines = lines[i:i + 8]
+        window = '\n'.join(window_lines)
+        matches = FORWARDED_HEADER_LINE_RE.findall(window)
+        unique_headers = set(m.lower() for m in matches)
+        if "sent" in unique_headers:
+            unique_headers.add("date")
+        if len(unique_headers) >= 3:
+            # Find the first actual header line within this window
+            for j, line in enumerate(window_lines):
+                if FORWARDED_HEADER_LINE_RE.match(line):
+                    return line_starts[i + j]
+            # Fallback (shouldn't happen if we found matches)
+            return line_starts[i]
+    return None
 
 
 def _extract_forward_sections(body_text: str) -> Tuple[str, str]:
@@ -56,12 +135,17 @@ def _extract_forward_sections(body_text: str) -> Tuple[str, str]:
     if not body_text:
         return "", ""
     starts = []
-    m1 = FORWARD_MARKERS_RE.search(body_text)
+    # Check both forward-only and ambiguous markers for extraction
+    # (by the time we call this, we've already determined it's a forward)
+    m1 = FORWARD_ONLY_MARKERS_RE.search(body_text)
     if m1:
         starts.append(m1.start())
-    m2 = HEADER_BLOCK_RE.search(body_text)
+    m2 = AMBIGUOUS_QUOTE_MARKERS_RE.search(body_text)
     if m2:
         starts.append(m2.start())
+    header_start = _find_header_block_start(body_text)
+    if header_start is not None:
+        starts.append(header_start)
     if not starts:
         return body_text.strip(), ""
     idx = min(starts)
@@ -286,12 +370,9 @@ class MailgunEmailAdapter(EmailAdapter):
 
         subject = (_first_value(payload_dict.get("subject")) or "").strip()
 
-        text_body = (
-            _first_value(payload_dict.get("stripped-text"))
-            or _first_value(payload_dict.get("body-plain"))
-            or _first_value(payload_dict.get("text"))
-            or ""
-        )
+        # Get the full unstripped body for forward detection and extraction
+        # Mailgun's stripped-text removes quoted content, which we need for forwards
+        body_plain_raw = _first_value(payload_dict.get("body-plain")) or ""
         html_body = (
             _first_value(payload_dict.get("stripped-html"))
             or _first_value(payload_dict.get("body-html"))
@@ -299,12 +380,15 @@ class MailgunEmailAdapter(EmailAdapter):
             or ""
         )
 
-        working_text = text_body or _html_to_text(html_body)
+        # For non-forwards, prefer stripped content; for forwards, we'll use body-plain
+        stripped_text = _first_value(payload_dict.get("stripped-text")) or ""
+        working_text = stripped_text or body_plain_raw or _html_to_text(html_body)
+
         body_used = (
             "stripped-text"
-            if payload_dict.get("stripped-text")
+            if stripped_text
             else "body-plain"
-            if payload_dict.get("body-plain")
+            if body_plain_raw
             else "html"
             if html_body
             else "None"
@@ -312,51 +396,63 @@ class MailgunEmailAdapter(EmailAdapter):
 
         body = working_text
 
-        if EMAIL_STRIP_REPLIES is True:
-            span.set_attribute("mailgun.strip_replies", "True")
-            attachments_meta = []
-            for att in attachments:
-                content_type = getattr(att, "content_type", "")
-                file_size = getattr(att, "size", 0)
-                if file_size > MAX_FILE_SIZE:
-                    logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
-                    span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
-                    continue
+        # Build attachment metadata for forward detection (filter oversized files)
+        attachments_meta = []
+        for att in attachments:
+            content_type = getattr(att, "content_type", "")
+            file_size = getattr(att, "size", 0)
+            if file_size > MAX_FILE_SIZE:
+                logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
+                span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
+                continue
+            elif content_type:
+                attachments_meta.append({"ContentType": content_type})
 
-                elif content_type:
-                    attachments_meta.append({"ContentType": content_type})
+        # Forward detection and handling.
+        # We ALWAYS check for forwards regardless of EMAIL_STRIP_REPLIES, because:
+        # 1. Forwards need body-plain to preserve the quoted/forwarded content
+        #    (Mailgun's stripped-text removes it)
+        # 2. In production, EMAIL_STRIP_REPLIES is False, but working_text still
+        #    prefers stripped-text for historical reasons. We preserve that behavior
+        #    for non-forwards to avoid breaking existing functionality, but forwards
+        #    must use body-plain or the forwarded content is lost.
+        detection_text = body_plain_raw or working_text
+        is_forward = _is_forward_like(subject, detection_text, attachments_meta)
+        span.set_attribute("mailgun.is_forward", bool(is_forward))
 
-            is_forward = _is_forward_like(subject, working_text, attachments_meta)
-            span.set_attribute("mailgun.is_forward", bool(is_forward))
-
-            if is_forward:
-                preamble, forwarded = _extract_forward_sections(working_text)
-                if forwarded and preamble:
-                    body = f"{preamble}\n\n{forwarded}"
-                    body_used = "Forward+Preamble+Block"
-                elif forwarded:
-                    body = forwarded
-                    body_used = "Forward+BlockOnly"
-                elif preamble:
-                    body = preamble
-                    body_used = "Forward+PreambleOnly"
-                else:
-                    body = working_text.strip()
-                    body_used = "Forward+WorkingTextFallback"
+        if is_forward:
+            # For forwards, use body-plain to preserve the quoted/forwarded content
+            forward_text = body_plain_raw or _html_to_text(html_body) or working_text
+            preamble, forwarded = _extract_forward_sections(forward_text)
+            if forwarded and preamble:
+                body = f"{preamble}\n\n{forwarded}"
+                body_used = "Forward+Preamble+Block (body-plain)"
+            elif forwarded:
+                body = forwarded
+                body_used = "Forward+BlockOnly (body-plain)"
+            elif preamble:
+                body = preamble
+                body_used = "Forward+PreambleOnly (body-plain)"
             else:
-                for field in ("stripped-text", "body-plain", "text"):
+                body = forward_text.strip()
+                body_used = "Forward+FullBodyFallback (body-plain)"
+        elif EMAIL_STRIP_REPLIES is True:
+            span.set_attribute("mailgun.strip_replies", "True")
+            for field in ("stripped-text", "body-plain", "text"):
+                value = _first_value(payload_dict.get(field))
+                if value:
+                    body = value
+                    body_used = field
+                    break
+            else:  # No plain text body found, try HTML
+                for field in ("stripped-html", "body-html", "html"):
                     value = _first_value(payload_dict.get(field))
                     if value:
-                        body = value
+                        body = _html_to_text(value)
                         body_used = field
                         break
-                else:  # No plain text body found, try HTML
-                    for field in ("stripped-html", "body-html", "html"):
-                        value = _first_value(payload_dict.get(field))
-                        if value:
-                            body = _html_to_text(value)
-                            body_used = field
-                            break
+        # else: non-forward with EMAIL_STRIP_REPLIES=False, body stays as working_text
+
         span.set_attribute("mailgun.body_used", body_used)
 
         sender = (
