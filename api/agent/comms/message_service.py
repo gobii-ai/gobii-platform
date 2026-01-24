@@ -277,11 +277,13 @@ def _build_site_url(path: str) -> str:
         return ""
     if path.startswith("http://") or path.startswith("https://"):
         return path
-    current_site = Site.objects.get_current()
-    protocol = "https://"
-    base = f"{protocol}{current_site.domain}"
+    base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
+    if not base_url:
+        current_site = Site.objects.get_current()
+        protocol = "https://"
+        base_url = f"{protocol}{current_site.domain}"
     normalized = path if path.startswith("/") else f"/{path}"
-    return f"{base}{normalized}"
+    return f"{base_url}{normalized}"
 
 @tracer.start_as_current_span("_build_agent_detail_url")
 def _build_agent_detail_url(agent) -> str:
@@ -318,7 +320,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                               sender_endpoint: PersistentAgentCommsEndpoint | None,
                               conversation: PersistentAgentConversation | None,
                               link: str) -> bool:
-    """Send a daily credit limit notice back to the inbound sender."""
+    """Send a daily credit limit notice to the inbound sender for SMS/web; email notifies owner."""
+
+    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
+    if channel_value == CommsChannel.EMAIL.value:
+        return send_owner_daily_credit_hard_limit_notice(agent)
 
     plan_label = ""
     plan_id = ""
@@ -336,19 +342,6 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         "I reached my daily task limit and am not able to continue today. "
         f"Adjust the limit here: {link}"
     )
-    try:
-        logo_url = _build_site_url(static("images/noBgBlue.png"))
-    except Exception:
-        logo_url = ""
-    email_context = {
-        "agent": agent,
-        "link": link,
-        "plan_label": plan_label,
-        "plan_id": plan_id,
-        "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
-        "logo_url": logo_url,
-    }
-    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
     analytics_source = {
         CommsChannel.EMAIL.value: AnalyticsSource.EMAIL,
         CommsChannel.SMS.value: AnalyticsSource.SMS,
@@ -356,42 +349,6 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
     }.get(str(channel_value), AnalyticsSource.AGENT)
 
     try:
-        if channel_value == CommsChannel.EMAIL.value:
-            recipient = (parsed.sender or "").strip()
-            if not recipient:
-                return False
-            if not agent.is_sender_whitelisted(CommsChannel.EMAIL, recipient):
-                return False
-
-            subject = f"{agent.name} reached today's task limit"
-            text_body = render_to_string("emails/agent_daily_credit_notice.txt", email_context)
-            html_body = render_to_string("emails/agent_daily_credit_notice.html", email_context)
-            send_mail(
-                subject,
-                text_body,
-                None,
-                [recipient],
-                html_message=html_body,
-                fail_silently=True,
-            )
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "channel": channel_value,
-                        "recipient": recipient,
-                        "plan_id": plan_id,
-                        "plan_label": plan_label,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            return True
-
         if channel_value == CommsChannel.SMS.value:
             if not parsed.sender or sender_endpoint is None:
                 return False
