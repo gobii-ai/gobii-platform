@@ -172,6 +172,38 @@ class ForwardDetectionTests(unittest.TestCase):
         )
         self.assertTrue(_is_forward_like(subject, body, []))
 
+    def test_is_forward_like_quote_prefixed_forward(self):
+        """Forward with > quote prefixes should still be detected.
+
+        This handles cases where someone replies to a forwarded email,
+        and the forward markers/headers get quote-prefixed.
+        """
+        subject = ""
+        body = (
+            "Hilda, please track this.\n\n"
+            "> Begin forwarded message:\n"
+            "> \n"
+            "> From: Andrew <andrew@example.com>\n"
+            "> Subject: Re: Intro\n"
+            "> Date: January 14, 2026\n"
+            "> To: Shyam <shyam@example.com>\n"
+            "> \n"
+            "> Hi Shyam,\n"
+        )
+        self.assertTrue(_is_forward_like(subject, body, []))
+
+    def test_is_forward_like_nested_quote_prefixed_forward(self):
+        """Deeply nested quote prefixes should still be detected."""
+        subject = ""
+        body = (
+            "See below\n\n"
+            "> > Begin forwarded message:\n"
+            "> > From: someone@example.com\n"
+            "> > Subject: Test\n"
+            "> > Date: Jan 1, 2024\n"
+        )
+        self.assertTrue(_is_forward_like(subject, body, []))
+
     def test_is_forward_like_reply_with_underscore_separator(self):
         """Outlook reply with underscore separator should NOT be a forward.
 

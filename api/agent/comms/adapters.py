@@ -24,24 +24,28 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
 
 
+# Optional quote prefix pattern - matches "> " or "> > " etc. at start of line
+# This handles forwarded content that's been quoted (e.g., when replying to a forward)
+_QUOTE_PREFIX = r"(?:>\s*)*"
+
 # Markers that definitively indicate a forward (not used in replies)
 FORWARD_ONLY_MARKERS = [
-    r"^Begin forwarded message:",  # Apple Mail
-    r"^-{2,}\s*Forwarded message\s*-{2,}$",  # Gmail
+    r"^" + _QUOTE_PREFIX + r"Begin forwarded message:",  # Apple Mail
+    r"^" + _QUOTE_PREFIX + r"-{2,}\s*Forwarded message\s*-{2,}$",  # Gmail
 ]
 # Markers that are ambiguous - used by Outlook for both forwards AND replies
 AMBIGUOUS_QUOTE_MARKERS = [
-    r"^-----Original Message-----$",
-    r"^-{3,}\s*Original Message\s*-{3,}$",
-    r"^_{10,}$",  # Outlook web underscore separators
+    r"^" + _QUOTE_PREFIX + r"-----Original Message-----$",
+    r"^" + _QUOTE_PREFIX + r"-{3,}\s*Original Message\s*-{3,}$",
+    r"^" + _QUOTE_PREFIX + r"_{10,}$",  # Outlook web underscore separators
 ]
 FORWARD_ONLY_MARKERS_RE = re.compile("|".join(FORWARD_ONLY_MARKERS), re.IGNORECASE | re.MULTILINE)
 AMBIGUOUS_QUOTE_MARKERS_RE = re.compile("|".join(AMBIGUOUS_QUOTE_MARKERS), re.IGNORECASE | re.MULTILINE)
 SUBJECT_FWD_RE = re.compile(r"^\s*(fwd?|fw|wg|tr|rv)\s*:", re.IGNORECASE)
 SUBJECT_REPLY_RE = re.compile(r"^\s*re\s*:", re.IGNORECASE)
-# Pattern to match individual header lines in forwarded content
+# Pattern to match individual header lines in forwarded content (with optional quote prefix)
 FORWARDED_HEADER_LINE_RE = re.compile(
-    r"^(From|Date|Sent|Subject|To):\s*.+",
+    r"^" + _QUOTE_PREFIX + r"(From|Date|Sent|Subject|To):\s*.+",
     re.IGNORECASE | re.MULTILINE,
 )
 
