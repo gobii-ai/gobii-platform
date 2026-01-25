@@ -46,6 +46,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
 )
+from api.services.referral_service import ReferralService
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
 from util.subscription_helper import (
@@ -772,6 +773,12 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         segment_anonymous_id = _decode_cookie_value(request.COOKIES.get('ajs_anonymous_id'))
         ga_client_id = _decode_cookie_value(request.COOKIES.get('_ga'))
 
+        # ── Referral tracking ──────────────────────────────────────────
+        # Direct referral: ?ref=<code> captured into session
+        referrer_code = _decode_cookie_value(request.session.get('referrer_code', ''))
+        # Template share: when user signed up after viewing a shared agent template
+        signup_template_code = _decode_cookie_value(request.session.get('signup_template_code', ''))
+
         traits.update({f'{k}_first': v for k, v in first_touch.items()})
         if last_touch:
             traits.update({f'{k}_last': v for k, v in last_touch.items()})
@@ -838,10 +845,29 @@ def handle_user_signed_up(sender, request, user, **kwargs):
             'last_client_ip': client_ip,
             'last_user_agent': request.META.get('HTTP_USER_AGENT', ''),
             'fbp': fbp_cookie,
+            'referrer_code': referrer_code,
+            'signup_template_code': signup_template_code,
         },
     )
         except Exception:
             logger.exception("Failed to persist user attribution for user %s", user.id)
+
+        # ── Handle Referral ────────────────────────────────────────────
+        # Process referral signup - identifies referrer and (TODO) grants credits
+        if referrer_code or signup_template_code:
+            try:
+                ReferralService.process_signup_referral(
+                    new_user=user,
+                    referrer_code=referrer_code,
+                    template_code=signup_template_code,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to process referral for user %s (ref=%s, template=%s)",
+                    user.id,
+                    referrer_code or '(none)',
+                    signup_template_code or '(none)',
+                )
 
         Analytics.identify(
             user_id=str(user.id),

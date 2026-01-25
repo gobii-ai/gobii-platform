@@ -5,7 +5,7 @@ from urllib.parse import urlencode
 
 
 class UTMTrackingMiddleware:
-    """Persist UTM/click IDs in the session so redirects don’t drop attribution."""
+    """Persist UTM/click IDs in the session so redirects don't drop attribution."""
 
     UTM_PARAMS: Tuple[str, ...] = (
         "utm_source",
@@ -24,6 +24,10 @@ class UTMTrackingMiddleware:
     SESSION_FBCLID_FIRST = "fbclid_first"
     SESSION_FBCLID_LAST = "fbclid_last"
     SESSION_QUERYSTRING = "utm_querystring"
+
+    # Referral tracking session keys
+    SESSION_REFERRER_CODE = "referrer_code"
+    SESSION_SIGNUP_TEMPLATE_CODE = "signup_template_code"
 
     PROPAGATION_ORDER: Tuple[str, ...] = (
         *UTM_PARAMS,
@@ -72,6 +76,16 @@ class UTMTrackingMiddleware:
                 session_modified = True
             if session.get(self.SESSION_FBCLID_LAST) != fbclid_value:
                 session[self.SESSION_FBCLID_LAST] = fbclid_value
+                session_modified = True
+
+        # Capture direct referral code (?ref=CODE)
+        # "Last one wins": if user clicks a ref link, clear any template referral
+        ref_code = (params.get("ref") or "").strip()
+        if ref_code:
+            if session.get(self.SESSION_REFERRER_CODE) != ref_code:
+                session[self.SESSION_REFERRER_CODE] = ref_code
+                # Clear template code - direct referral takes precedence as "last action"
+                session.pop(self.SESSION_SIGNUP_TEMPLATE_CODE, None)
                 session_modified = True
 
         if session_modified:

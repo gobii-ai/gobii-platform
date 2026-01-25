@@ -663,6 +663,12 @@ class PublicTemplateHireView(View):
         request.session["agent_charter"] = template.charter
         request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         request.session["agent_charter_source"] = "template"
+
+        # Track template for referral attribution (if user signs up)
+        # "Last one wins": hiring a template clears any direct referral code
+        request.session["signup_template_code"] = template.code
+        request.session.pop("referrer_code", None)
+
         request.session.modified = True
 
         source_page = request.POST.get("source_page") or "public_template"

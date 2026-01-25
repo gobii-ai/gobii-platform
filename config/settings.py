@@ -74,6 +74,9 @@ GOBII_PROPRIETARY_MODE = env.bool("GOBII_PROPRIETARY_MODE", default=False)
 # In Community Edition, we optionally override limits to be effectively unlimited
 # for agents/tasks. Can be disabled (e.g., in tests) via env.
 GOBII_ENABLE_COMMUNITY_UNLIMITED = env.bool("GOBII_ENABLE_COMMUNITY_UNLIMITED", default=True)
+# Referral credits: if True, credits are granted after referred user completes first task.
+# If False, credits are granted immediately at signup. Default True for fraud prevention.
+REFERRAL_DEFERRED_GRANT = env.bool("REFERRAL_DEFERRED_GRANT", default=True)
 # Allow disabling the first-run setup redirect (e.g., in automated tests)
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
