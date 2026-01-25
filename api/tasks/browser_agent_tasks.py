@@ -857,6 +857,7 @@ async def _run_agent(
     extraction_supports_vision: Optional[bool] = None,
     extraction_max_output_tokens: Optional[int] = None,
     extraction_provider_key: Optional[str] = None,
+    captcha_enabled: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """Execute the Browser‑Use agent for a single provider."""
     if baggage:
@@ -1123,6 +1124,12 @@ async def _run_agent(
             current_time = timezone.now()
             current_time_str = current_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
+            captcha_guidance = ""
+            if captcha_enabled:
+                captcha_guidance = (
+                    "CAPTCHA SOLVER IS AVAILABLE. USE THE 'solve_captcha' ACTION TO SOLVE CAPTCHAS. "
+                )
+
             base_prompt = (
                 f"<task>{task_input}</task>\n\n"
                 f"CURRENT TIME: {current_time_str}\n"
@@ -1141,6 +1148,7 @@ async def _run_agent(
                 "IF YOU GET A CAPTCHA CHALLENGE THAT YOU CANNOT PASS IN TWO ATTEMPTS AND THERE "
                 "IS AN ALTERNATIVE WAY TO GET THE JOB DONE, JUST DO THAT INSTEAD OF FIGHTING "
                 "THE CAPTCHA FOR MANY STEPS. "
+                f"{captcha_guidance}"
                 "Files that you download will be saved in a virtual filespace that you cannot read directly. "
                 "The file download probably succeeded unless you see something specific that indicates otherwise. "
                 "If you cannot read the downloaded file, don't automatically take that as a failure. "
@@ -1459,6 +1467,7 @@ def _execute_agent_with_failover(
     is_eval: bool = False,
     max_steps: Optional[int] = None,
     vision_detail_level: Optional[str] = None,
+    captcha_enabled: bool = False,
 ) -> Tuple[Optional[str], Optional[dict]]:
     """
     Execute the agent with tiered, weighted load-balancing and fail-over.
@@ -1642,6 +1651,7 @@ def _execute_agent_with_failover(
                         extraction_max_output_tokens=extraction_max_output_tokens,
                         extraction_provider_key=extraction_provider,
                         vision_detail_level=vision_detail_level,
+                        captcha_enabled=captcha_enabled,
                     )
                 )
 
@@ -1815,6 +1825,8 @@ def _process_browser_use_task_core(
                 agent_span.set_attribute("browser_tier.intelligence_tier", agent_tier.value)
 
                 owner = task_obj.organization or getattr(agent_context, "organization", None) or task_obj.user
+                captcha_enabled = _has_advanced_captcha_resolution(owner)
+                agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                 actions = ['mcp_brightdata_search_engine']
                 try:
                     from ..agent.browser_actions import (
@@ -1823,8 +1835,6 @@ def _process_browser_use_task_core(
                     )
 
                     register_web_search_action(controller)
-                    captcha_enabled = _has_advanced_captcha_resolution(owner)
-                    agent_span.set_attribute("captcha.addon_enabled", captcha_enabled)
                     if captcha_enabled:
                         captcha_user_id = None
                         if getattr(agent_context, "user_id", None):
@@ -1918,6 +1928,7 @@ def _process_browser_use_task_core(
                     is_eval=is_eval,
                     max_steps=plan_settings.max_browser_steps,
                     vision_detail_level=plan_settings.vision_detail_level,
+                    captcha_enabled=captcha_enabled,
                 )
 
                 safe_result = _jsonify(raw_result)
