@@ -587,8 +587,13 @@ class UserReferral(models.Model):
         try:
             return cls.objects.get(user=user)
         except cls.DoesNotExist:
-            code = cls.generate_code()
-            return cls.objects.create(user=user, referral_code=code)
+            try:
+                code = cls.generate_code()
+                return cls.objects.create(user=user, referral_code=code)
+            except IntegrityError:
+                # The object was created by another process after the initial get failed.
+                # We can now safely get it.
+                return cls.objects.get(user=user)
 
     @classmethod
     def get_user_by_code(cls, code):
