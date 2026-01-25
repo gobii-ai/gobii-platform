@@ -38,7 +38,12 @@ from .timeline import (
 )
 
 logger = logging.getLogger(__name__)
-_DAILY_CREDIT_LIMIT_NOTES = {"daily_credit_limit_mid_loop", "daily_credit_limit_exhausted"}
+_CREDIT_EVENT_NOTES = {
+    "daily_credit_limit_mid_loop",
+    "daily_credit_limit_exhausted",
+    "credit_insufficient_mid_loop",
+    "credit_consumption_failure_mid_loop",
+}
 
 
 def _group_name(agent_id) -> str:
@@ -199,7 +204,7 @@ def broadcast_credit_limit_event(sender, instance: PersistentAgentSystemStep, cr
         return
     if instance.code != PersistentAgentSystemStep.Code.PROCESS_EVENTS:
         return
-    if instance.notes not in _DAILY_CREDIT_LIMIT_NOTES:
+    if instance.notes not in _CREDIT_EVENT_NOTES:
         return
     step = instance.step
     if not step or not step.agent_id:

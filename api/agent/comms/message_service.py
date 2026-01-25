@@ -485,11 +485,19 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
         plan_id = str(plan.get("id", "")).lower() if plan else ""
         is_free_plan = plan_id == PlanNamesChoices.FREE.value
         upgrade_url = None
+        task_pack_url = None
         if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
             try:
                 upgrade_url = _build_site_url(reverse("proprietary:pricing"))
             except NoReverseMatch:
                 upgrade_url = None
+        elif settings.GOBII_PROPRIETARY_MODE:
+            try:
+                billing_url = _build_site_url(reverse("billing"))
+            except NoReverseMatch:
+                billing_url = None
+            else:
+                task_pack_url = append_context_query(billing_url, agent.organization_id)
         subject = f"{agent.name} reached today's task limit"
         text_body = (
             "I reached my daily task limit and am not able to continue today. "
@@ -536,6 +544,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             "double_limit_url": double_limit_url,
             "unlimited_limit_url": unlimited_limit_url,
             "upgrade_url": upgrade_url,
+            "task_pack_url": task_pack_url,
             "logo_url": logo_url,
         }
         email_body = render_to_string(
