@@ -26,7 +26,8 @@ tracer = trace.get_tracer('gobii.utils')
 
 # Optional quote prefix pattern - matches "> " or "> > " etc. at start of line
 # This handles forwarded content that's been quoted (e.g., when replying to a forward)
-_QUOTE_PREFIX = r"(?:>\s*)*"
+# Also allows leading whitespace (e.g., from copy-paste or email client indentation)
+_QUOTE_PREFIX = r"\s*(?:>\s*)*"
 
 # Markers that definitively indicate a forward (not used in replies)
 FORWARD_ONLY_MARKERS = [
