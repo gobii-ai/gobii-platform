@@ -1041,6 +1041,51 @@ SANDBOX_COMPUTE_STDIO_MAX_BYTES = env.int(
     "SANDBOX_COMPUTE_STDIO_MAX_BYTES",
     default=1024 * 1024,
 )
+SANDBOX_COMPUTE_ALLOWED_ENV_KEYS = env.list(
+    "SANDBOX_COMPUTE_ALLOWED_ENV_KEYS",
+    default=[
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "TERM",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "PYTHONUNBUFFERED",
+        "PYTHONIOENCODING",
+    ],
+)
+SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS = env.list(
+    "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS",
+    default=["create_chart"],
+)
+SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP = env.bool(
+    "SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP",
+    default=True,
+)
+SANDBOX_COMPUTE_SYNC_ON_TOOL_CALL = env.bool(
+    "SANDBOX_COMPUTE_SYNC_ON_TOOL_CALL",
+    default=True,
+)
+SANDBOX_COMPUTE_SYNC_ON_MCP_CALL = env.bool(
+    "SANDBOX_COMPUTE_SYNC_ON_MCP_CALL",
+    default=True,
+)
+SANDBOX_COMPUTE_SYNC_ON_RUN_COMMAND = env.bool(
+    "SANDBOX_COMPUTE_SYNC_ON_RUN_COMMAND",
+    default=False,
+)
+SANDBOX_COMPUTE_REQUIRE_PROXY = env.bool(
+    "SANDBOX_COMPUTE_REQUIRE_PROXY",
+    default=GOBII_PROPRIETARY_MODE,
+)
+SANDBOX_COMPUTE_NO_PROXY = env("SANDBOX_COMPUTE_NO_PROXY", default="")
 
 # In local/dev by default, simulate email delivery when no real provider is configured.
 # This avoids blocking first‑run UX. If SMTP is configured per agent or

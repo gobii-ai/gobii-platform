@@ -83,6 +83,10 @@ def _sandbox_enabled() -> bool:
     return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
 
 
+def _sandbox_mcp_fallback_enabled() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP", True))
+
+
 MCP_WILL_CONTINUE_TOOL_NAMES = {
     "search_engine",
     "search_engine_batch",
@@ -1432,13 +1436,21 @@ class MCPToolManager:
                 service = SandboxComputeService()
             except SandboxComputeUnavailable as exc:
                 return {"status": "error", "message": str(exc)}
-            return service.mcp_request(
+            sandbox_result = service.mcp_request(
                 agent,
                 runtime.config_id,
                 actual_tool_name,
                 params,
                 full_tool_name=tool_name,
             )
+            if (
+                isinstance(sandbox_result, dict)
+                and sandbox_result.get("error_code") == "sandbox_unsupported_mcp"
+                and _sandbox_mcp_fallback_enabled()
+            ):
+                logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
+            else:
+                return sandbox_result
 
         if server_name == "pipedream":
             app_slug, mode = self._pd_parse_tool(info.tool_name)

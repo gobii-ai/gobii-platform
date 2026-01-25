@@ -83,6 +83,13 @@ def _sandbox_enabled() -> bool:
     return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
 
 
+def _sandbox_fallback_tools() -> Set[str]:
+    tools = getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS", [])
+    if isinstance(tools, (list, tuple, set)):
+        return {str(tool) for tool in tools if str(tool)}
+    return set()
+
+
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     """
     Check if the sqlite tool should be available for this agent.
@@ -894,7 +901,15 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
                     service = SandboxComputeService()
                 except SandboxComputeUnavailable as exc:
                     return {"status": "error", "message": str(exc)}
-                return service.tool_request(agent, resolved_name, params)
+                sandbox_result = service.tool_request(agent, resolved_name, params)
+                if (
+                    isinstance(sandbox_result, dict)
+                    and sandbox_result.get("error_code") == "sandbox_unsupported_tool"
+                    and resolved_name in _sandbox_fallback_tools()
+                    and executor
+                ):
+                    return executor(agent, params)
+                return sandbox_result
 
         if executor:
             return executor(agent, params)

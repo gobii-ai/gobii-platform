@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -9,9 +10,11 @@ from typing import Any, Dict, Optional
 
 import requests
 from django.conf import settings
+from django.utils.dateparse import parse_datetime
 from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot
+from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
 
 logger = logging.getLogger(__name__)
@@ -35,6 +38,60 @@ def _python_default_timeout() -> int:
 
 def _python_max_timeout() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_PYTHON_MAX_TIMEOUT_SECONDS", 120))
+
+
+def _sync_on_tool_call() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_SYNC_ON_TOOL_CALL", True))
+
+
+def _sync_on_mcp_call() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_SYNC_ON_MCP_CALL", True))
+
+
+def _sync_on_run_command() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_SYNC_ON_RUN_COMMAND", False))
+
+
+def _proxy_required() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_REQUIRE_PROXY", False))
+
+
+def _no_proxy_value() -> str:
+    return str(getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or "").strip()
+
+
+def _allowed_env_keys() -> set[str]:
+    keys = getattr(settings, "SANDBOX_COMPUTE_ALLOWED_ENV_KEYS", None)
+    if isinstance(keys, (list, tuple, set)):
+        return {str(key) for key in keys if str(key)}
+    return {
+        "PATH",
+        "HOME",
+        "USER",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TMPDIR",
+        "TERM",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "PYTHONUNBUFFERED",
+        "PYTHONIOENCODING",
+    }
+
+
+def _sanitize_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    allowed = _allowed_env_keys()
+    env = {key: value for key, value in os.environ.items() if key in allowed}
+    env.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    if extra_env:
+        for key, value in extra_env.items():
+            if key in allowed or str(key).startswith("SANDBOX_"):
+                env[str(key)] = str(value)
+    return env
 
 
 class SandboxComputeUnavailable(RuntimeError):
@@ -128,7 +185,7 @@ class LocalSandboxBackend(SandboxComputeBackend):
                 command,
                 shell=True,
                 cwd=cwd or None,
-                env=env or None,
+                env=_sanitize_env(env),
                 capture_output=True,
                 text=True,
                 timeout=timeout_value,
@@ -238,6 +295,9 @@ class HttpSandboxBackend(SandboxComputeBackend):
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         payload = {"agent_id": str(agent.id)}
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         response = self._post("sandbox/compute/deploy_or_resume", payload)
         return _session_update_from_response(response)
 
@@ -260,6 +320,9 @@ class HttpSandboxBackend(SandboxComputeBackend):
             "timeout": timeout,
             "interactive": interactive,
         }
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/run_command", payload)
 
     def mcp_request(
@@ -278,6 +341,9 @@ class HttpSandboxBackend(SandboxComputeBackend):
             "tool_name": tool_name,
             "params": params,
         }
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/mcp_request", payload)
 
     def tool_request(
@@ -292,6 +358,9 @@ class HttpSandboxBackend(SandboxComputeBackend):
             "tool_name": tool_name,
             "params": params,
         }
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/tool_request", payload)
 
     def sync_filespace(
@@ -304,10 +373,16 @@ class HttpSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         payload = payload or {}
         payload.update({"agent_id": str(agent.id), "direction": direction})
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/sync_filespace", payload)
 
     def terminate(self, agent, session: AgentComputeSession, *, reason: str) -> SandboxSessionUpdate:
         payload = {"agent_id": str(agent.id), "reason": reason}
+        proxy_env = _proxy_env_for_session(session)
+        if proxy_env:
+            payload["proxy_env"] = proxy_env
         response = self._post("sandbox/compute/terminate", payload)
         return _session_update_from_response(response)
 
@@ -362,6 +437,16 @@ def _normalize_timeout(value: Any, *, default: int, maximum: int) -> int:
     return min(parsed, maximum)
 
 
+def _parse_sync_timestamp(value: Any) -> Optional[timezone.datetime]:
+    if isinstance(value, timezone.datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        parsed = parse_datetime(value.strip())
+        if parsed:
+            return parsed
+    return None
+
+
 def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
     code = params.get("code")
     if not isinstance(code, str) or not code.strip():
@@ -376,6 +461,7 @@ def _execute_python_exec(params: Dict[str, Any]) -> Dict[str, Any]:
     try:
         result = subprocess.run(
             [sys.executable, "-c", code],
+            env=_sanitize_env(),
             capture_output=True,
             text=True,
             timeout=timeout_value,
@@ -411,6 +497,79 @@ def _local_tool_executors() -> Dict[str, Any]:
     }
 
 
+def _build_filespace_export_response(agent, export_path: str) -> Dict[str, Any]:
+    from api.agent.files.filespace_service import get_or_create_default_filespace
+    from api.agent.files.attachment_helpers import build_signed_filespace_download_url
+    from api.agent.tools.agent_variables import set_agent_variable
+    from api.models import AgentFsNode
+
+    filespace = get_or_create_default_filespace(agent)
+    node = AgentFsNode.objects.filter(filespace=filespace, path=export_path).first()
+    if not node:
+        return {"status": "error", "message": "Exported file not found in filespace."}
+
+    signed_url = build_signed_filespace_download_url(
+        agent_id=str(agent.id),
+        node_id=str(node.id),
+    )
+    set_agent_variable(export_path, signed_url)
+
+    var_ref = f"$[{export_path}]"
+    return {
+        "status": "ok",
+        "file": var_ref,
+        "inline": f"[Download]({var_ref})",
+        "inline_html": f"<a href='{var_ref}'>Download</a>",
+        "attach": var_ref,
+    }
+
+
+def _select_proxy_for_session(agent, session: AgentComputeSession) -> Optional[Any]:
+    if not getattr(settings, "ENABLE_PROXY_ROUTING", True):
+        return None
+    preferred_proxy = session.proxy_server if session.proxy_server and session.proxy_server.is_active else None
+    try:
+        if preferred_proxy:
+            proxy = select_proxy(
+                preferred_proxy=preferred_proxy,
+                allow_no_proxy_in_debug=not _proxy_required(),
+                context_id=f"sandbox_agent_{agent.id}",
+            )
+        else:
+            proxy = select_proxy_for_persistent_agent(
+                agent,
+                allow_no_proxy_in_debug=not _proxy_required(),
+            )
+    except RuntimeError as exc:
+        if _proxy_required():
+            raise SandboxComputeUnavailable(str(exc)) from exc
+        logger.warning("Sandbox proxy selection failed for agent=%s: %s", agent.id, exc)
+        proxy = None
+
+    if _proxy_required() and not proxy:
+        raise SandboxComputeUnavailable("No proxy server available for sandbox compute.")
+
+    if proxy and proxy != session.proxy_server:
+        session.proxy_server = proxy
+        session.save(update_fields=["proxy_server", "updated_at"])
+    return proxy
+
+
+def _proxy_env_for_session(session: AgentComputeSession) -> Optional[Dict[str, str]]:
+    proxy = session.proxy_server
+    if not proxy:
+        return None
+    proxy_url = proxy.proxy_url
+    env = {
+        "HTTP_PROXY": proxy_url,
+        "HTTPS_PROXY": proxy_url,
+    }
+    no_proxy = _no_proxy_value()
+    if no_proxy:
+        env["NO_PROXY"] = no_proxy
+    return env
+
+
 class SandboxComputeService:
     def __init__(self, backend: Optional[SandboxComputeBackend] = None):
         if not sandbox_compute_enabled():
@@ -443,13 +602,63 @@ class SandboxComputeService:
             agent=agent,
             defaults={"state": AgentComputeSession.State.STOPPED},
         )
-        if session.state != AgentComputeSession.State.RUNNING:
+        _select_proxy_for_session(agent, session)
+        started = session.state != AgentComputeSession.State.RUNNING
+        if started:
             update = self._backend.deploy_or_resume(agent, session)
             if not update.state:
                 update.state = AgentComputeSession.State.RUNNING
             self._apply_session_update(session, update)
+            sync_result = self._sync_workspace_pull(agent, session)
+            if sync_result and sync_result.get("status") != "ok":
+                logger.warning("Sandbox pull sync failed agent=%s result=%s", agent.id, sync_result)
         self._touch_session(session, source=source)
         return session
+
+    def _sync_workspace_pull(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
+        if not isinstance(self._backend, HttpSandboxBackend):
+            return None
+        manifest = build_filespace_pull_manifest(agent)
+        if manifest.get("status") != "ok":
+            return manifest
+        files = manifest.get("files") or []
+        payload = {"files": files}
+        response = self._backend.sync_filespace(agent, session, direction="pull", payload=payload)
+        return response
+
+    def _sync_workspace_push(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
+        if not isinstance(self._backend, HttpSandboxBackend):
+            return None
+        since = session.last_filespace_sync_at.isoformat() if session.last_filespace_sync_at else None
+        response = self._backend.sync_filespace(agent, session, direction="push", payload={"since": since})
+        if response.get("status") != "ok":
+            return response
+
+        changes = response.get("changes") or []
+        sync_timestamp = _parse_sync_timestamp(response.get("sync_timestamp"))
+        applied = apply_filespace_push(agent, changes, sync_timestamp=sync_timestamp)
+        if applied.get("status") != "ok":
+            return applied
+
+        stamped = _parse_sync_timestamp(applied.get("sync_timestamp")) or sync_timestamp or timezone.now()
+        session.last_filespace_sync_at = stamped
+        session.save(update_fields=["last_filespace_sync_at", "updated_at"])
+        return applied
+
+    def _maybe_sync_after_tool(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
+        if not _sync_on_tool_call():
+            return None
+        return self._sync_workspace_push(agent, session)
+
+    def _maybe_sync_after_mcp(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
+        if not _sync_on_mcp_call():
+            return None
+        return self._sync_workspace_push(agent, session)
+
+    def _maybe_sync_after_run_command(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
+        if not _sync_on_run_command():
+            return None
+        return self._sync_workspace_push(agent, session)
 
     def deploy_or_resume(self, agent, *, reason: str = "") -> AgentComputeSession:
         session = self._ensure_session(agent, source="deploy_or_resume")
@@ -477,6 +686,10 @@ class SandboxComputeService:
             timeout=timeout,
             interactive=interactive,
         )
+        if isinstance(result, dict) and result.get("status") != "error":
+            sync_result = self._maybe_sync_after_run_command(agent, session)
+            if sync_result and sync_result.get("status") != "ok":
+                return sync_result
         return result
 
     def mcp_request(
@@ -497,12 +710,25 @@ class SandboxComputeService:
             params,
             full_tool_name=full_tool_name,
         )
+        if isinstance(result, dict) and result.get("status") != "error":
+            sync_result = self._maybe_sync_after_mcp(agent, session)
+            if sync_result and sync_result.get("status") != "ok":
+                return sync_result
         _log_tool_call("mcp_request", tool_name, params, agent_id=str(agent.id))
         return result
 
     def tool_request(self, agent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         session = self._ensure_session(agent, source="tool_request")
         result = self._backend.tool_request(agent, session, tool_name, params)
+        if isinstance(result, dict) and result.get("status") != "error":
+            sync_result = self._maybe_sync_after_tool(agent, session)
+            if sync_result and sync_result.get("status") != "ok":
+                return sync_result
+            export_path = result.get("export_path")
+            if isinstance(export_path, str) and export_path.strip():
+                response = _build_filespace_export_response(agent, export_path)
+                if response.get("status") == "ok":
+                    result = response
         _log_tool_call("tool_request", tool_name, params, agent_id=str(agent.id))
         return result
 

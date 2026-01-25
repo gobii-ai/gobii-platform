@@ -9250,6 +9250,14 @@ class AgentComputeSession(models.Model):
     )
     last_activity_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
+    last_filespace_sync_at = models.DateTimeField(null=True, blank=True)
+    proxy_server = models.ForeignKey(
+        "ProxyServer",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="compute_sessions",
+    )
     workspace_snapshot = models.ForeignKey(
         "ComputeSnapshot",
         on_delete=models.SET_NULL,
