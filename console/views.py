@@ -117,7 +117,12 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
 )
-from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url
+from util.urls import (
+    IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_context_query,
+    build_immersive_chat_url,
+    load_daily_limit_action_payload,
+)
 from console.agent_chat.access import resolve_agent_for_request, user_can_manage_agent, user_is_collaborator
 from config import settings
 from config.stripe_config import get_stripe_settings
@@ -2457,6 +2462,60 @@ class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
 
         messages.success(self.request, "SMS has been enabled for this agent.")
         return redirect("agent_detail", pk=self.agent.pk)
+
+
+class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
+    """Apply one-click daily limit actions from the hard limit email."""
+
+    def get(self, request, *args, **kwargs):
+        agent_id = kwargs.get("pk")
+        action = (kwargs.get("action") or "").strip().lower()
+        if not agent_id or not action:
+            raise Http404()
+
+        agent = get_object_or_404(PersistentAgent.objects.non_eval(), pk=agent_id)
+        if not user_can_manage_agent(request.user, agent):
+            raise PermissionDenied("You do not have permission to manage this agent.")
+        if action not in {"double", "unlimited"}:
+            raise Http404()
+        redirect_url = append_context_query(
+            reverse("agent_detail", kwargs={"pk": agent.pk}),
+            agent.organization_id,
+        )
+        token_payload = load_daily_limit_action_payload((request.GET.get("token") or "").strip())
+        if (
+            not token_payload
+            or str(token_payload.get("agent_id")) != str(agent.id)
+            or token_payload.get("action") != action
+        ):
+            messages.error(request, "This daily limit link is invalid or expired.")
+            return redirect(redirect_url)
+        owner = agent.organization or agent.user
+        credit_settings = get_daily_credit_settings_for_owner(owner)
+        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        max_limit = int(slider_bounds["slider_limit_max"])
+        current_limit = agent.daily_credit_limit
+
+        if action == "double":
+            if current_limit is None or current_limit <= 0:
+                messages.info(request, "This agent is already unlimited.")
+            else:
+                new_limit = min(int(current_limit) * 2, max_limit)
+                if new_limit == current_limit:
+                    messages.info(request, "This agent is already at your plan maximum.")
+                else:
+                    agent.daily_credit_limit = new_limit
+                    agent.save(update_fields=["daily_credit_limit"])
+                    messages.success(request, "Daily limit doubled.")
+        elif action == "unlimited":
+            if current_limit is None:
+                messages.info(request, "This agent is already unlimited.")
+            else:
+                agent.daily_credit_limit = None
+                agent.save(update_fields=["daily_credit_limit"])
+                messages.success(request, "Daily limit set to unlimited.")
+
+        return redirect(redirect_url)
 
 class AgentDetailView(ConsoleViewMixin, DetailView):
     """Configuration page for a single agent.

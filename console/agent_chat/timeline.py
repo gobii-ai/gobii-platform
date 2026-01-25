@@ -42,6 +42,19 @@ DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 100
 COLLAPSE_THRESHOLD = 3
 THINKING_COMPLETION_TYPES = (PersistentAgentCompletion.CompletionType.ORCHESTRATOR,)
+HIDE_IN_CHAT_PAYLOAD_KEY = "hide_in_chat"
+
+
+def is_chat_hidden_message(message: PersistentAgentMessage) -> bool:
+    payload = message.raw_payload or {}
+    return bool(payload.get(HIDE_IN_CHAT_PAYLOAD_KEY))
+
+
+def _message_queryset(agent: PersistentAgent):
+    hidden_key = f"raw_payload__{HIDE_IN_CHAT_PAYLOAD_KEY}"
+    return PersistentAgentMessage.objects.filter(owner_agent=agent).filter(
+        Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True}),
+    )
 
 def _build_html_cleaner() -> Cleaner:
     """Create a Bleach cleaner that preserves common email formatting."""
@@ -511,7 +524,7 @@ def _build_cluster(entries: Sequence[StepEnvelope], labels: Mapping[str, str]) -
 def _messages_queryset(agent: PersistentAgent, direction: TimelineDirection, cursor: CursorPayload | None) -> Sequence[PersistentAgentMessage]:
     limit = MAX_PAGE_SIZE * 3
     qs = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        _message_queryset(agent)
         .select_related(
             "from_endpoint",
             "to_endpoint",
@@ -738,13 +751,10 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
     if cursor is None:
         return False
     dt = _dt_from_cursor(cursor)
-    message_exists = PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        timestamp__lt=dt,
-    ).exists()
+    message_qs = _message_queryset(agent)
+    message_exists = message_qs.filter(timestamp__lt=dt).exists()
     if cursor.kind == "message":
-        message_exists = message_exists or PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
+        message_exists = message_exists or message_qs.filter(
             timestamp=dt,
             seq__lt=cursor.identifier,
         ).exists()
@@ -813,13 +823,10 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         return False
     dt = _dt_from_cursor(cursor)
 
-    message_exists = PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        timestamp__gt=dt,
-    ).exists()
+    message_qs = _message_queryset(agent)
+    message_exists = message_qs.filter(timestamp__gt=dt).exists()
     if cursor.kind == "message":
-        message_exists = message_exists or PersistentAgentMessage.objects.filter(
-            owner_agent=agent,
+        message_exists = message_exists or message_qs.filter(
             timestamp=dt,
             seq__gt=cursor.identifier,
         ).exists()

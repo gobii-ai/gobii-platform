@@ -20,9 +20,10 @@ from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned
 from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
+from django.templatetags.static import static
 from django.utils import timezone
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
@@ -49,6 +50,11 @@ from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
 from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
+from util.urls import (
+    append_context_query,
+    append_query_params,
+    build_daily_limit_action_token,
+)
 
 tracer = trace.get_tracer("gobii.utils")
 
@@ -272,15 +278,19 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
 
 def _build_site_url(path: str) -> str:
     """Return an absolute URL for a site-relative path."""
+    from django.conf import settings as django_settings
+
     if not path:
         return ""
     if path.startswith("http://") or path.startswith("https://"):
         return path
-    current_site = Site.objects.get_current()
-    protocol = "https://"
-    base = f"{protocol}{current_site.domain}"
+    base_url = (getattr(django_settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
+    if not base_url:
+        current_site = Site.objects.get_current()
+        protocol = "https://"
+        base_url = f"{protocol}{current_site.domain}"
     normalized = path if path.startswith("/") else f"/{path}"
-    return f"{base}{normalized}"
+    return f"{base_url}{normalized}"
 
 @tracer.start_as_current_span("_build_agent_detail_url")
 def _build_agent_detail_url(agent) -> str:
@@ -317,7 +327,11 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                               sender_endpoint: PersistentAgentCommsEndpoint | None,
                               conversation: PersistentAgentConversation | None,
                               link: str) -> bool:
-    """Send a daily credit limit notice back to the inbound sender."""
+    """Send a daily credit limit notice to the inbound sender for SMS/web; email notifies owner."""
+
+    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
+    if channel_value == CommsChannel.EMAIL.value:
+        return send_owner_daily_credit_hard_limit_notice(agent)
 
     plan_label = ""
     plan_id = ""
@@ -335,14 +349,6 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
         "I reached my daily task limit and am not able to continue today. "
         f"Adjust the limit here: {link}"
     )
-    email_context = {
-        "agent": agent,
-        "link": link,
-        "plan_label": plan_label,
-        "plan_id": plan_id,
-        "is_proprietary_mode": settings.GOBII_PROPRIETARY_MODE,
-    }
-    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
     analytics_source = {
         CommsChannel.EMAIL.value: AnalyticsSource.EMAIL,
         CommsChannel.SMS.value: AnalyticsSource.SMS,
@@ -350,42 +356,6 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
     }.get(str(channel_value), AnalyticsSource.AGENT)
 
     try:
-        if channel_value == CommsChannel.EMAIL.value:
-            recipient = (parsed.sender or "").strip()
-            if not recipient:
-                return False
-            if not agent.is_sender_whitelisted(CommsChannel.EMAIL, recipient):
-                return False
-
-            subject = f"{agent.name} reached today's task limit"
-            text_body = render_to_string("emails/agent_daily_credit_notice.txt", email_context)
-            html_body = render_to_string("emails/agent_daily_credit_notice.html", email_context)
-            send_mail(
-                subject,
-                text_body,
-                None,
-                [recipient],
-                html_message=html_body,
-                fail_silently=True,
-            )
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "channel": channel_value,
-                        "recipient": recipient,
-                        "plan_id": plan_id,
-                        "plan_label": plan_label,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            return True
-
         if channel_value == CommsChannel.SMS.value:
             if not parsed.sender or sender_endpoint is None:
                 return False
@@ -509,7 +479,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             )
             return False
 
-        link = _build_agent_detail_url(agent)
+        link = append_context_query(_build_agent_detail_url(agent), agent.organization_id)
         owner = agent.organization or agent.user
         plan = get_owner_plan(owner) if owner is not None else None
         plan_id = str(plan.get("id", "")).lower() if plan else ""
@@ -525,16 +495,53 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             "I reached my daily task limit and am not able to continue today. "
             f"Adjust the limit here: {link}"
         )
-        email_lines = [
-            "I reached my daily task limit and am not able to continue today.",
-            f"[Adjust the limit in agent settings]({link}).",
-        ]
-        if upgrade_url:
-            email_lines.append(
-                "Running out of credits? "
-                f"[Upgrade your plan]({upgrade_url}) to allow your agents to do more work for you."
+        try:
+            double_limit_url = _build_site_url(
+                reverse(
+                    "agent_daily_limit_action",
+                    kwargs={"pk": agent.id, "action": "double"},
+                )
             )
-        email_body = "\n\n".join(email_lines)
+            unlimited_limit_url = _build_site_url(
+                reverse(
+                    "agent_daily_limit_action",
+                    kwargs={"pk": agent.id, "action": "unlimited"},
+                )
+            )
+        except NoReverseMatch:
+            double_limit_url = link
+            unlimited_limit_url = link
+        else:
+            double_limit_url = append_query_params(
+                double_limit_url,
+                {"token": build_daily_limit_action_token(str(agent.id), "double")},
+            )
+            unlimited_limit_url = append_query_params(
+                unlimited_limit_url,
+                {"token": build_daily_limit_action_token(str(agent.id), "unlimited")},
+            )
+            if agent.organization_id:
+                double_limit_url = append_context_query(double_limit_url, agent.organization_id)
+                unlimited_limit_url = append_context_query(unlimited_limit_url, agent.organization_id)
+
+        try:
+            logo_url = _build_site_url(static("images/noBgBlue.png"))
+        except (Site.DoesNotExist, MultipleObjectsReturned, DatabaseError, ValueError) as exc:
+            logging.warning("Failed to build logo URL for daily credit email: %s", exc)
+            logo_url = ""
+
+        email_context = {
+            "agent": agent,
+            "settings_url": link,
+            "double_limit_url": double_limit_url,
+            "unlimited_limit_url": unlimited_limit_url,
+            "upgrade_url": upgrade_url,
+            "logo_url": logo_url,
+        }
+        email_body = render_to_string(
+            "emails/agent_daily_credit_owner_notice.html",
+            email_context,
+        )
 
         channel_value = endpoint.channel
         analytics_source = {
@@ -554,7 +561,11 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 to_endpoint=endpoint,
                 is_outbound=True,
                 body=email_body,
-                raw_payload={"subject": subject, "kind": "daily_credit_hard_limit_owner_notice"},
+                raw_payload={
+                    "subject": subject,
+                    "kind": "daily_credit_hard_limit_owner_notice",
+                    "hide_in_chat": True,
+                },
             )
             deliver_agent_email(message)
         elif channel_value == CommsChannel.SMS:
