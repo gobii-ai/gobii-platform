@@ -23,6 +23,7 @@ from django.utils import timezone
 
 from api.models import UserReferral, UserAttribution, PersistentAgentTemplate
 from constants.grant_types import GrantTypeChoices
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -93,9 +94,34 @@ class ReferralService:
             result = cls._process_direct_referral(new_user, referrer_code)
 
         if not result:
+            # Track invalid referral attempt
+            Analytics.track_event(
+                user_id=new_user.id,
+                event=AnalyticsEvent.REFERRAL_SIGNUP_INVALID,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referrer_code': referrer_code or '',
+                    'template_code': template_code or '',
+                    'reason': 'code_not_found_or_invalid',
+                },
+            )
             return None
 
         referral_type, referring_user = result
+
+        # Track successful referral identification
+        Analytics.track_event(
+            user_id=new_user.id,
+            event=AnalyticsEvent.REFERRAL_SIGNUP_IDENTIFIED,
+            source=AnalyticsSource.WEB,
+            properties={
+                'referral_type': referral_type,
+                'referrer_user_id': str(referring_user.id),
+                'referrer_code': referrer_code or '',
+                'template_code': template_code or '',
+                'deferred_granting': cls.is_deferred_granting_enabled(),
+            },
+        )
 
         # If deferred granting is disabled, grant credits immediately
         if not cls.is_deferred_granting_enabled():
@@ -109,6 +135,17 @@ class ReferralService:
                 new_user=new_user,
                 grant_type=grant_type,
                 template_code=template_code if referral_type == ReferralType.TEMPLATE else None,
+            )
+        else:
+            # Track that credits are deferred
+            Analytics.track_event(
+                user_id=new_user.id,
+                event=AnalyticsEvent.REFERRAL_CREDITS_DEFERRED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referral_type': referral_type,
+                    'referrer_user_id': str(referring_user.id),
+                },
             )
 
         return result
@@ -192,6 +229,7 @@ class ReferralService:
             new_user=user,
             grant_type=grant_type,
             template_code=template_code,
+            deferred=True,
         )
 
         # Mark as granted
@@ -203,6 +241,21 @@ class ReferralService:
             user.id,
             referring_user.id,
             grant_type,
+        )
+
+        # Track the deferred grant
+        Analytics.track_event(
+            user_id=user.id,
+            event=AnalyticsEvent.REFERRAL_CREDITS_GRANTED,
+            source=AnalyticsSource.WEB,
+            properties={
+                'referral_type': ReferralType.TEMPLATE if template_code else ReferralType.DIRECT,
+                'referrer_user_id': str(referring_user.id),
+                'grant_type': grant_type,
+                'template_code': template_code or '',
+                'deferred': True,
+                'trigger': 'first_task_completion',
+            },
         )
 
         return True
@@ -310,6 +363,7 @@ class ReferralService:
         new_user: User,
         grant_type: str,
         template_code: Optional[str] = None,
+        deferred: bool = False,
     ) -> None:
         """
         Grant credits to the referring user.
@@ -321,19 +375,36 @@ class ReferralService:
             new_user: User who signed up
             grant_type: GrantTypeChoices.REFERRAL or GrantTypeChoices.REFERRAL_SHARED
             template_code: Template code if this was a template referral
+            deferred: Whether this is a deferred grant (after first task)
         """
         # TODO: Implement credit granting
         # - Determine credit amount based on plan/config
         # - Create TaskCredit record with appropriate grant_type
         # - Optionally grant welcome credits to new_user
-        # - Track in analytics
         logger.info(
-            "Referral credit grant (TODO): referrer=%s new_user=%s type=%s template=%s",
+            "Referral credit grant (TODO): referrer=%s new_user=%s type=%s template=%s deferred=%s",
             referring_user.id,
             new_user.id,
             grant_type,
             template_code or '(none)',
+            deferred,
         )
+
+        # Track the grant (for immediate grants; deferred grants tracked separately)
+        if not deferred:
+            Analytics.track_event(
+                user_id=new_user.id,
+                event=AnalyticsEvent.REFERRAL_CREDITS_GRANTED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referral_type': ReferralType.TEMPLATE if template_code else ReferralType.DIRECT,
+                    'referrer_user_id': str(referring_user.id),
+                    'grant_type': grant_type,
+                    'template_code': template_code or '',
+                    'deferred': False,
+                    'trigger': 'signup',
+                },
+            )
 
     @classmethod
     def get_or_create_referral_code(cls, user: User) -> str:
@@ -350,19 +421,32 @@ class ReferralService:
         return referral.referral_code
 
     @classmethod
-    def get_referral_link(cls, user: User, base_url: str = "") -> str:
+    def get_referral_link(cls, user: User, base_url: str = "", track: bool = True) -> str:
         """
         Get the full referral link for a user.
 
         Args:
             user: The user who wants to share their referral link
             base_url: Base URL (e.g., "https://gobii.ai")
+            track: Whether to track this as an analytics event (default True)
 
         Returns:
             Full referral URL (e.g., "https://gobii.ai/?ref=ABC123")
         """
         code = cls.get_or_create_referral_code(user)
-        return f"{base_url}/?ref={code}"
+        link = f"{base_url}/?ref={code}"
+
+        if track:
+            Analytics.track_event(
+                user_id=user.id,
+                event=AnalyticsEvent.REFERRAL_LINK_GENERATED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referral_code': code,
+                },
+            )
+
+        return link
 
     @classmethod
     def has_pending_referral_credit(cls, user: User) -> bool:

@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
 from typing import Dict, Iterable, Tuple
 from urllib.parse import urlencode
+
+logger = logging.getLogger(__name__)
 
 
 class UTMTrackingMiddleware:
@@ -82,11 +85,29 @@ class UTMTrackingMiddleware:
         # "Last one wins": if user clicks a ref link, clear any template referral
         ref_code = (params.get("ref") or "").strip()
         if ref_code:
-            if session.get(self.SESSION_REFERRER_CODE) != ref_code:
+            previous_code = session.get(self.SESSION_REFERRER_CODE)
+            if previous_code != ref_code:
+                previous_template = session.pop(self.SESSION_SIGNUP_TEMPLATE_CODE, None)
                 session[self.SESSION_REFERRER_CODE] = ref_code
-                # Clear template code - direct referral takes precedence as "last action"
-                session.pop(self.SESSION_SIGNUP_TEMPLATE_CODE, None)
                 session_modified = True
+
+                # Track referral code capture (deferred to avoid import at module level)
+                try:
+                    from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+                    session_key = session.session_key if hasattr(session, 'session_key') else None
+                    if session_key:
+                        Analytics.track_event_anonymous(
+                            anonymous_id=str(session_key),
+                            event=AnalyticsEvent.REFERRAL_CODE_CAPTURED,
+                            source=AnalyticsSource.WEB,
+                            properties={
+                                'referrer_code': ref_code,
+                                'previous_referrer_code': previous_code or '',
+                                'previous_template_code': previous_template or '',
+                            },
+                        )
+                except Exception:
+                    logger.debug("Failed to track referral code capture", exc_info=True)
 
         if session_modified:
             session[self.SESSION_QUERYSTRING] = self._build_querystring(session)
