@@ -19,6 +19,7 @@ from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
 from ..core.event_processing import process_agent_events
+from ...services.referral_service import ReferralService
 from ..core.processing_flags import (
     claim_pending_drain_slot,
     clear_pending_drain_slot,
@@ -153,6 +154,19 @@ def process_agent_events_task(
         if not is_agent_pending(persistent_agent_id):
             clear_processing_queued_flag(persistent_agent_id)
         _broadcast_processing_state(persistent_agent_id)
+
+        # Check for deferred referral credits on successful agent processing
+        try:
+            from api.models import PersistentAgent
+            agent = PersistentAgent.objects.select_related('user').filter(id=persistent_agent_id).first()
+            if settings.DEFERRED_REFERRAL_CREDITS_ENABLED and agent and agent.user_id:
+                ReferralService.check_and_grant_deferred_referral_credits(agent.user)
+        except Exception:
+            logger.debug(
+                "Failed to check/grant deferred referral credits for agent %s",
+                persistent_agent_id,
+                exc_info=True,
+            )
 
 
 @shared_task(bind=True, name="api.agent.tasks.process_pending_agent_events")
