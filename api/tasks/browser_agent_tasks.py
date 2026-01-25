@@ -2098,7 +2098,8 @@ def _process_browser_use_task_core(
 
             # Check for deferred referral credits on first successful task completion
             if (
-                task_obj.status == BrowserUseAgentTask.StatusChoices.COMPLETED
+                settings.DEFERRED_REFERRAL_CREDITS_ENABLED
+                and task_obj.status == BrowserUseAgentTask.StatusChoices.COMPLETED
                 and task_obj.user_id
             ):
                 try:
