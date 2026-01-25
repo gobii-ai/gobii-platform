@@ -20,7 +20,7 @@ from django.contrib.sites.models import Site
 from django.core.exceptions import MultipleObjectsReturned
 from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
-from django.db import transaction
+from django.db import DatabaseError, transaction
 from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
 from django.templatetags.static import static
@@ -50,6 +50,11 @@ from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
 from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
+from util.urls import (
+    append_context_query,
+    append_query_params,
+    build_daily_limit_action_token,
+)
 
 tracer = trace.get_tracer("gobii.utils")
 
@@ -273,11 +278,13 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
 
 def _build_site_url(path: str) -> str:
     """Return an absolute URL for a site-relative path."""
+    from django.conf import settings as django_settings
+
     if not path:
         return ""
     if path.startswith("http://") or path.startswith("https://"):
         return path
-    base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
+    base_url = (getattr(django_settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
     if not base_url:
         current_site = Site.objects.get_current()
         protocol = "https://"
@@ -472,11 +479,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             )
             return False
 
-        link = _build_agent_detail_url(agent)
-        context_query = ""
-        if agent.organization_id:
-            context_query = f"context_type=organization&context_id={agent.organization_id}"
-            link = f"{link}?{context_query}"
+        link = append_context_query(_build_agent_detail_url(agent), agent.organization_id)
         owner = agent.organization or agent.user
         plan = get_owner_plan(owner) if owner is not None else None
         plan_id = str(plan.get("id", "")).lower() if plan else ""
@@ -492,11 +495,6 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             "I reached my daily task limit and am not able to continue today. "
             f"Adjust the limit here: {link}"
         )
-        def _append_query(url: str, query: str) -> str:
-            if not url or not query:
-                return url
-            return f"{url}&{query}" if "?" in url else f"{url}?{query}"
-
         try:
             double_limit_url = _build_site_url(
                 reverse(
@@ -514,13 +512,22 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             double_limit_url = link
             unlimited_limit_url = link
         else:
-            if context_query:
-                double_limit_url = _append_query(double_limit_url, context_query)
-                unlimited_limit_url = _append_query(unlimited_limit_url, context_query)
+            double_limit_url = append_query_params(
+                double_limit_url,
+                {"token": build_daily_limit_action_token(str(agent.id), "double")},
+            )
+            unlimited_limit_url = append_query_params(
+                unlimited_limit_url,
+                {"token": build_daily_limit_action_token(str(agent.id), "unlimited")},
+            )
+            if agent.organization_id:
+                double_limit_url = append_context_query(double_limit_url, agent.organization_id)
+                unlimited_limit_url = append_context_query(unlimited_limit_url, agent.organization_id)
 
         try:
             logo_url = _build_site_url(static("images/noBgBlue.png"))
-        except Exception:
+        except (Site.DoesNotExist, MultipleObjectsReturned, DatabaseError, ValueError) as exc:
+            logging.warning("Failed to build logo URL for daily credit email: %s", exc)
             logo_url = ""
 
         email_context = {

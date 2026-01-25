@@ -117,7 +117,12 @@ from util.subscription_helper import (
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
 )
-from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url
+from util.urls import (
+    IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_context_query,
+    build_immersive_chat_url,
+    load_daily_limit_action_payload,
+)
 from console.agent_chat.access import resolve_agent_for_request, user_can_manage_agent, user_is_collaborator
 from config import settings
 from config.stripe_config import get_stripe_settings
@@ -2471,6 +2476,20 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
         agent = get_object_or_404(PersistentAgent.objects.non_eval(), pk=agent_id)
         if not user_can_manage_agent(request.user, agent):
             raise PermissionDenied("You do not have permission to manage this agent.")
+        if action not in {"double", "unlimited"}:
+            raise Http404()
+        redirect_url = append_context_query(
+            reverse("agent_detail", kwargs={"pk": agent.pk}),
+            agent.organization_id,
+        )
+        token_payload = load_daily_limit_action_payload((request.GET.get("token") or "").strip())
+        if (
+            not token_payload
+            or str(token_payload.get("agent_id")) != str(agent.id)
+            or token_payload.get("action") != action
+        ):
+            messages.error(request, "This daily limit link is invalid or expired.")
+            return redirect(redirect_url)
         owner = agent.organization or agent.user
         credit_settings = get_daily_credit_settings_for_owner(owner)
         slider_bounds = get_daily_credit_slider_bounds(credit_settings)
@@ -2495,14 +2514,7 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
                 agent.daily_credit_limit = None
                 agent.save(update_fields=["daily_credit_limit"])
                 messages.success(request, "Daily limit set to unlimited.")
-        else:
-            raise Http404()
 
-        redirect_url = reverse("agent_detail", kwargs={"pk": agent.pk})
-        if agent.organization_id:
-            redirect_url = (
-                f"{redirect_url}?context_type=organization&context_id={agent.organization_id}"
-            )
         return redirect(redirect_url)
 
 class AgentDetailView(ConsoleViewMixin, DetailView):
