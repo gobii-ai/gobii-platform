@@ -554,7 +554,11 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                 to_endpoint=endpoint,
                 is_outbound=True,
                 body=email_body,
-                raw_payload={"subject": subject, "kind": "daily_credit_hard_limit_owner_notice"},
+                raw_payload={
+                    "subject": subject,
+                    "kind": "daily_credit_hard_limit_owner_notice",
+                    "hide_in_chat": True,
+                },
             )
             deliver_agent_email(message)
         elif channel_value == CommsChannel.SMS:

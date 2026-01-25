@@ -490,7 +490,7 @@ def broadcast_message_attachment_update(message_id: str) -> None:
     try:
         from asgiref.sync import async_to_sync
         from channels.layers import get_channel_layer
-        from console.agent_chat.timeline import serialize_message_event
+        from console.agent_chat.timeline import is_chat_hidden_message, serialize_message_event
         from console.agent_audit.serializers import serialize_message as serialize_audit_message
         from console.agent_audit.realtime import send_audit_event
     except Exception:
@@ -498,13 +498,14 @@ def broadcast_message_attachment_update(message_id: str) -> None:
         return
 
     try:
-        payload = serialize_message_event(message)
-        channel_layer = get_channel_layer()
-        if channel_layer is not None:
-            async_to_sync(channel_layer.group_send)(
-                f"agent-chat-{agent_id}",
-                {"type": "timeline_event", "payload": payload},
-            )
+        if not is_chat_hidden_message(message):
+            payload = serialize_message_event(message)
+            channel_layer = get_channel_layer()
+            if channel_layer is not None:
+                async_to_sync(channel_layer.group_send)(
+                    f"agent-chat-{agent_id}",
+                    {"type": "timeline_event", "payload": payload},
+                )
     except Exception:
         logger.exception("Failed to broadcast chat attachment update for message %s", message_id)
 
