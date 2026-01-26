@@ -32,6 +32,14 @@ def _stdio_max_bytes() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_STDIO_MAX_BYTES", 1024 * 1024))
 
 
+def _http_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
+
+
+def _run_command_timeout_seconds() -> int:
+    return int(getattr(settings, "SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS", 120))
+
+
 def _python_default_timeout() -> int:
     return int(getattr(settings, "SANDBOX_COMPUTE_PYTHON_DEFAULT_TIMEOUT_SECONDS", 30))
 
@@ -178,6 +186,8 @@ class LocalSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         if not command:
             return {"status": "error", "message": "Command is required."}
+        if interactive:
+            return {"status": "error", "message": "Interactive sessions are not supported yet."}
 
         timeout_value = timeout or getattr(settings, "SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS", 120)
         try:
@@ -278,13 +288,18 @@ class HttpSandboxBackend(SandboxComputeBackend):
         self.base_url = base_url.rstrip("/")
         self.token = token
 
-    def _post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _post(self, path: str, payload: Dict[str, Any], *, timeout: Optional[int] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/{path.lstrip('/')}"
         headers = {"Content-Type": "application/json"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         try:
-            response = requests.post(url, json=payload, headers=headers, timeout=30)
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=timeout or _http_timeout_seconds(),
+            )
             response.raise_for_status()
         except requests.RequestException as exc:
             return {"status": "error", "message": str(exc)}
@@ -312,18 +327,20 @@ class HttpSandboxBackend(SandboxComputeBackend):
         timeout: Optional[int] = None,
         interactive: bool = False,
     ) -> Dict[str, Any]:
+        timeout_value = timeout if isinstance(timeout, int) and timeout > 0 else _run_command_timeout_seconds()
         payload = {
             "agent_id": str(agent.id),
             "command": command,
             "cwd": cwd,
             "env": env,
-            "timeout": timeout,
+            "timeout": timeout_value,
             "interactive": interactive,
         }
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
-        return self._post("sandbox/compute/run_command", payload)
+        request_timeout = max(_http_timeout_seconds(), timeout_value + 10)
+        return self._post("sandbox/compute/run_command", payload, timeout=request_timeout)
 
     def mcp_request(
         self,
@@ -353,15 +370,27 @@ class HttpSandboxBackend(SandboxComputeBackend):
         tool_name: str,
         params: Dict[str, Any],
     ) -> Dict[str, Any]:
+        params_payload = params or {}
+        request_timeout = _http_timeout_seconds()
+        if tool_name == "python_exec":
+            normalized = _normalize_timeout(
+                params_payload.get("timeout_seconds"),
+                default=_python_default_timeout(),
+                maximum=_python_max_timeout(),
+            )
+            params_payload = dict(params_payload)
+            params_payload["timeout_seconds"] = normalized
+            request_timeout = max(_http_timeout_seconds(), normalized + 10)
+
         payload = {
             "agent_id": str(agent.id),
             "tool_name": tool_name,
-            "params": params,
+            "params": params_payload,
         }
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
-        return self._post("sandbox/compute/tool_request", payload)
+        return self._post("sandbox/compute/tool_request", payload, timeout=request_timeout)
 
     def sync_filespace(
         self,

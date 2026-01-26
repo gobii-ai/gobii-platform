@@ -86,6 +86,54 @@ def _stdio_max_bytes() -> int:
     return 1024 * 1024
 
 
+def _run_command_timeout_seconds() -> int:
+    raw = os.environ.get("SANDBOX_COMPUTE_RUN_COMMAND_TIMEOUT_SECONDS")
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 120
+
+
+def _python_default_timeout_seconds() -> int:
+    raw = os.environ.get("SANDBOX_COMPUTE_PYTHON_DEFAULT_TIMEOUT_SECONDS")
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 30
+
+
+def _python_max_timeout_seconds() -> int:
+    raw = os.environ.get("SANDBOX_COMPUTE_PYTHON_MAX_TIMEOUT_SECONDS")
+    if raw:
+        try:
+            value = int(raw)
+            if value > 0:
+                return value
+        except ValueError:
+            pass
+    return 120
+
+
+def _normalize_timeout(value: Any, *, default: int, maximum: Optional[int] = None) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed <= 0:
+        parsed = default
+    if maximum is not None:
+        return min(parsed, maximum)
+    return parsed
+
+
 def _agent_workspace(agent_id: str) -> Path:
     root = _workspace_root()
     root.mkdir(parents=True, exist_ok=True)
@@ -174,6 +222,22 @@ def _parse_since(value: Any) -> Optional[float]:
         return None
 
 
+def _parse_entry_updated_at(entry: Dict[str, Any]) -> Optional[float]:
+    raw = entry.get("updated_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    value = raw.strip()
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.timestamp()
+    except ValueError:
+        return None
+
+
 def _normalize_workspace_path(agent_root: Path, path: str) -> Tuple[Optional[Path], Optional[str]]:
     if not isinstance(path, str):
         return None, None
@@ -200,18 +264,20 @@ def _workspace_size_bytes(agent_root: Path) -> int:
     return total
 
 
-def _ensure_capacity(agent_root: Path, new_bytes: int) -> Optional[Dict[str, Any]]:
+def _ensure_capacity(agent_root: Path, new_bytes: int, *, existing_bytes: int = 0) -> Optional[Dict[str, Any]]:
     max_bytes = _workspace_max_bytes()
     if max_bytes <= 0:
         return None
     current = _workspace_size_bytes(agent_root)
-    if current + new_bytes > max_bytes:
+    adjusted = max(current - max(existing_bytes, 0), 0)
+    if adjusted + new_bytes > max_bytes:
         return {
             "status": "error",
             "message": "Workspace size limit exceeded.",
             "limit_bytes": max_bytes,
             "current_bytes": current,
             "attempted_bytes": new_bytes,
+            "existing_bytes": existing_bytes,
         }
     return None
 
@@ -338,6 +404,8 @@ def _handle_run_command(payload: Dict[str, Any]) -> Dict[str, Any]:
     command = payload.get("command")
     if not isinstance(command, str) or not command.strip():
         return {"status": "error", "message": "Missing required parameter: command"}
+    if payload.get("interactive") is True:
+        return {"status": "error", "message": "Interactive sessions are not supported yet."}
     cwd = payload.get("cwd")
     if isinstance(cwd, str) and cwd.strip():
         cwd_path, _ = _normalize_workspace_path(agent_root, cwd)
@@ -347,9 +415,10 @@ def _handle_run_command(payload: Dict[str, Any]) -> Dict[str, Any]:
     else:
         cwd = None
     env = payload.get("env") if isinstance(payload.get("env"), dict) else None
-    timeout = payload.get("timeout")
-    if not isinstance(timeout, int):
-        timeout = None
+    timeout = _normalize_timeout(
+        payload.get("timeout"),
+        default=_run_command_timeout_seconds(),
+    )
 
     try:
         result = subprocess.run(
@@ -384,9 +453,11 @@ def _handle_python_exec(payload: Dict[str, Any]) -> Dict[str, Any]:
     code = payload.get("code")
     if not isinstance(code, str) or not code.strip():
         return {"status": "error", "message": "Missing required parameter: code"}
-    timeout = payload.get("timeout_seconds")
-    if not isinstance(timeout, int):
-        timeout = None
+    timeout = _normalize_timeout(
+        payload.get("timeout_seconds"),
+        default=_python_default_timeout_seconds(),
+        maximum=_python_max_timeout_seconds(),
+    )
 
     try:
         result = subprocess.run(
@@ -417,7 +488,14 @@ def _write_file(agent_root: Path, rel_path: str, content: bytes, overwrite: bool
     if full_path.exists() and not overwrite:
         return {"status": "error", "message": "File already exists. Use overwrite=true to replace it."}
 
-    capacity_error = _ensure_capacity(agent_root, len(content))
+    existing_bytes = 0
+    if full_path.exists():
+        try:
+            existing_bytes = full_path.stat().st_size
+        except OSError:
+            existing_bytes = 0
+
+    capacity_error = _ensure_capacity(agent_root, len(content), existing_bytes=existing_bytes)
     if capacity_error:
         return capacity_error
 
@@ -625,6 +703,8 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
         entries = payload.get("files") or payload.get("changes") or []
         if not isinstance(entries, list):
             return {"status": "error", "message": "files must be a list."}
+        skipped = 0
+        conflicts = 0
         for entry in entries:
             if not isinstance(entry, dict):
                 continue
@@ -632,15 +712,26 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             full_path, normalized = _normalize_workspace_path(agent_root, path)
             if full_path is None or not normalized:
                 continue
+            entry_updated_at = _parse_entry_updated_at(entry)
             is_deleted = bool(entry.get("is_deleted"))
             if is_deleted:
+                if entry_updated_at is not None and full_path.exists():
+                    try:
+                        local_mtime = full_path.stat().st_mtime
+                    except OSError:
+                        local_mtime = None
+                    if local_mtime is not None and local_mtime > entry_updated_at:
+                        conflicts += 1
+                        skipped += 1
+                        continue
                 try:
                     if full_path.exists():
                         full_path.unlink()
                 except OSError:
                     continue
                 manifest["files"].pop(normalized, None)
-                manifest.setdefault("deleted", {})[normalized] = {"deleted_at": time.time()}
+                deleted_at = entry_updated_at if entry_updated_at is not None else time.time()
+                manifest.setdefault("deleted", {})[normalized] = {"deleted_at": deleted_at}
                 continue
 
             content = _decode_content(entry)
@@ -656,7 +747,23 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             if content is None:
                 return {"status": "error", "message": f"Missing content for {normalized}"}
 
-            capacity_error = _ensure_capacity(agent_root, len(content))
+            existing_bytes = 0
+            if full_path.exists():
+                try:
+                    existing_bytes = full_path.stat().st_size
+                except OSError:
+                    existing_bytes = 0
+            if entry_updated_at is not None and full_path.exists():
+                try:
+                    local_mtime = full_path.stat().st_mtime
+                except OSError:
+                    local_mtime = None
+                if local_mtime is not None and local_mtime > entry_updated_at:
+                    conflicts += 1
+                    skipped += 1
+                    continue
+
+            capacity_error = _ensure_capacity(agent_root, len(content), existing_bytes=existing_bytes)
             if capacity_error:
                 return capacity_error
 
@@ -669,11 +776,17 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             manifest["files"][normalized] = {
                 "mtime": full_path.stat().st_mtime,
                 "size": full_path.stat().st_size,
+                "updated_at": entry.get("updated_at"),
             }
             manifest["deleted"].pop(normalized, None)
 
         _save_manifest(agent_root, manifest)
-        return {"status": "ok", "applied": len(entries)}
+        return {
+            "status": "ok",
+            "applied": len(entries) - skipped,
+            "skipped": skipped,
+            "conflicts": conflicts,
+        }
 
     return {"status": "error", "message": "Invalid sync direction."}
 
