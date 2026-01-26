@@ -335,7 +335,8 @@ class MCPToolManagerTests(TestCase):
         async def _fake_fetch(*args, **kwargs):
             return []
 
-        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+        with patch("api.agent.tools.mcp_manager._sandbox_enabled", return_value=False), \
+                patch.object(manager, "_ensure_event_loop", return_value=loop), \
                 patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
                 patch.object(manager, "_fetch_server_tools", new=_fake_fetch):
             manager._register_server(runtime)
@@ -367,7 +368,8 @@ class MCPToolManagerTests(TestCase):
         credential.token_type = "Bearer"
         credential.expires_at = timezone.now() - timedelta(minutes=5)
         credential.metadata = {"token_endpoint": "https://notion.example.com/oauth/token"}
-        credential.save()
+        with patch("api.services.mcp_tool_discovery.schedule_mcp_tool_discovery"):
+            credential.save()
 
         mock_response = MagicMock()
         mock_response.json.return_value = {
