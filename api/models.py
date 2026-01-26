@@ -571,15 +571,16 @@ class UserReferral(models.Model):
         return f"{self.referral_code} ({self.user_id})"
 
     @classmethod
-    def generate_code(cls, length=8):
+    def generate_code(cls, length=8, max_attempts=100):
         """Generate a random alphanumeric referral code."""
         alphabet = string.ascii_uppercase + string.digits
         # Remove ambiguous characters (0, O, I, 1, L)
         alphabet = alphabet.replace('0', '').replace('O', '').replace('I', '').replace('1', '').replace('L', '')
-        while True:
+        for _ in range(max_attempts):
             code = ''.join(secrets.choice(alphabet) for _ in range(length))
             if not cls.objects.filter(referral_code=code).exists():
                 return code
+        raise RuntimeError("Failed to generate unique referral code after max attempts")
 
     @classmethod
     def get_or_create_for_user(cls, user):
@@ -3492,6 +3493,7 @@ class UserAttribution(models.Model):
         max_length=32,
         blank=True,
         default='',
+        db_index=True,
         help_text="Referral code used at signup (direct referral from another user)"
     )
     signup_template_code = models.CharField(
