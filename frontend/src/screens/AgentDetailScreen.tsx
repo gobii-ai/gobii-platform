@@ -2189,7 +2189,6 @@ function AllowlistManager({
 }: AllowlistManagerProps) {
   const allowAllOutbound = policy === 'blocklist'
   const approvalLabel = allowAllOutbound ? 'Inbound approval' : 'Approved contact'
-  const approvalLabelPlural = allowAllOutbound ? 'Inbound approvals' : 'Approved contacts'
   const approvalLabelLower = allowAllOutbound ? 'inbound approval' : 'approved contact'
   const pendingLabel = allowAllOutbound ? 'Pending approval' : 'Pending contact'
   const outboundLabel = 'Outbound block'
@@ -2213,9 +2212,7 @@ function AllowlistManager({
           <div>
             <h3 className="text-base font-semibold text-gray-800">Contact Rules</h3>
             <p className="text-sm text-gray-500">
-              {allowAllOutbound
-                ? `${approvalLabelPlural} control who can message the agent. Outbound messages are allowed by default unless blocked.`
-                : `${approvalLabelPlural} can message the agent or receive outreach. Multi-recipient messaging is limited to email only.`}
+              Control who can send and receive messages with your agent.
             </p>
           </div>
           <button
