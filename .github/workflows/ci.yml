@@ -214,6 +214,8 @@ jobs:
             tag: batch_agent_tags
           - batch: agent_tools
             tag: batch_agent_tools
+          - batch: sandbox_k8s
+            tag: batch_sandbox_k8s
           - batch: user_flags
             tag: batch_user_flags
           - batch: llm_tier_preferences

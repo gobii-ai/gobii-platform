@@ -82,30 +82,44 @@ def ensure_workspace_pvc(agent_id: str, *, namespace: str) -> str:
     pvc_name = sandbox_pvc_name(agent_id)
     core = _core_v1()
 
+    def _create_workspace_pvc() -> str:
+        storage_class = getattr(settings, "SANDBOX_STORAGE_CLASS", "") or None
+        storage_size = getattr(settings, "SANDBOX_WORKSPACE_SIZE", "1Gi")
+
+        pvc = client.V1PersistentVolumeClaim(
+            metadata=client.V1ObjectMeta(
+                name=pvc_name,
+                labels={"app": "sandbox-compute", "agent_id": str(agent_id)},
+            ),
+            spec=client.V1PersistentVolumeClaimSpec(
+                access_modes=["ReadWriteOnce"],
+                resources=client.V1ResourceRequirements(requests={"storage": storage_size}),
+                storage_class_name=storage_class,
+            ),
+        )
+
+        try:
+            core.create_namespaced_persistent_volume_claim(namespace=namespace, body=pvc)
+        except ApiException as exc:
+            status = getattr(exc, "status", None)
+            if status == 409:
+                return pvc_name
+            if status == 403:
+                raise SandboxK8sError(
+                    "Sandbox workspace PVC access is forbidden by Kubernetes RBAC. "
+                    f"Grant the sandbox service account get/create access to persistentvolumeclaims in {namespace}."
+                ) from exc
+            raise SandboxK8sError(f"Failed to create workspace PVC {pvc_name}: {exc}") from exc
+        return pvc_name
+
     try:
         core.read_namespaced_persistent_volume_claim(name=pvc_name, namespace=namespace)
         return pvc_name
     except ApiException as exc:
-        if getattr(exc, "status", None) != 404:
-            raise
-
-    storage_class = getattr(settings, "SANDBOX_STORAGE_CLASS", "") or None
-    storage_size = getattr(settings, "SANDBOX_WORKSPACE_SIZE", "1Gi")
-
-    pvc = client.V1PersistentVolumeClaim(
-        metadata=client.V1ObjectMeta(
-            name=pvc_name,
-            labels={"app": "sandbox-compute", "agent_id": str(agent_id)},
-        ),
-        spec=client.V1PersistentVolumeClaimSpec(
-            access_modes=["ReadWriteOnce"],
-            resources=client.V1ResourceRequirements(requests={"storage": storage_size}),
-            storage_class_name=storage_class,
-        ),
-    )
-
-    core.create_namespaced_persistent_volume_claim(namespace=namespace, body=pvc)
-    return pvc_name
+        status = getattr(exc, "status", None)
+        if status in {403, 404}:
+            return _create_workspace_pvc()
+        raise SandboxK8sError(f"Failed to read workspace PVC {pvc_name}: {exc}") from exc
 
 
 def _build_pod(agent_id: str, *, namespace: str, pvc_name: str) -> "client.V1Pod":
