@@ -25,8 +25,10 @@ from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
+from .execute_python import get_execute_python_tool, execute_execute_python
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
+from api.services.sandbox_access import has_sandbox_access
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +76,7 @@ CREATE_FILE_TOOL_NAME = "create_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
+EXECUTE_PYTHON_TOOL_NAME = "execute_python"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -138,6 +141,10 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_CHART_TOOL_NAME: {
         "definition": get_create_chart_tool,
         "executor": execute_create_chart,
+    },
+    EXECUTE_PYTHON_TOOL_NAME: {
+        "definition": get_execute_python_tool,
+        "executor": execute_execute_python,
     },
 }
 
@@ -214,6 +221,8 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
         )
 
     for name, info in BUILTIN_TOOL_REGISTRY.items():
+        if name == EXECUTE_PYTHON_TOOL_NAME and not has_sandbox_access(agent.user):
+            continue
         try:
             tool_def = info["definition"]()
         except Exception:
