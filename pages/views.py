@@ -663,7 +663,31 @@ class PublicTemplateHireView(View):
         request.session["agent_charter"] = template.charter
         request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
         request.session["agent_charter_source"] = "template"
+
+        # Track template for referral attribution (if user signs up)
+        # "Last one wins": hiring a template clears any direct referral code
+        previous_referrer_code = request.session.pop("referrer_code", None)
+        request.session["signup_template_code"] = template.code
+
         request.session.modified = True
+
+        # Track referral template capture for analytics
+        if not request.user.is_authenticated:
+            # Anonymous user hiring template - potential referral signup
+            session_key = request.session.session_key
+            if not session_key:
+                request.session.save()
+                session_key = request.session.session_key
+            Analytics.track_event_anonymous(
+                anonymous_id=str(session_key),
+                event=AnalyticsEvent.REFERRAL_TEMPLATE_CAPTURED,
+                source=AnalyticsSource.WEB,
+                properties={
+                    'template_code': template.code,
+                    'template_creator_id': str(template.created_by_id) if template.created_by_id else '',
+                    'previous_referrer_code': previous_referrer_code or '',
+                },
+            )
 
         source_page = request.POST.get("source_page") or "public_template"
         flow = (request.POST.get("flow") or "").strip().lower()

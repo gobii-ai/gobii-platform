@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from typing import Dict, Iterable, Tuple
 from urllib.parse import urlencode
 
+logger = logging.getLogger(__name__)
+
 
 class UTMTrackingMiddleware:
-    """Persist UTM/click IDs in the session so redirects don’t drop attribution."""
+    """Persist UTM/click IDs in the session so redirects don't drop attribution."""
 
     UTM_PARAMS: Tuple[str, ...] = (
         "utm_source",
@@ -24,6 +27,10 @@ class UTMTrackingMiddleware:
     SESSION_FBCLID_FIRST = "fbclid_first"
     SESSION_FBCLID_LAST = "fbclid_last"
     SESSION_QUERYSTRING = "utm_querystring"
+
+    # Referral tracking session keys
+    SESSION_REFERRER_CODE = "referrer_code"
+    SESSION_SIGNUP_TEMPLATE_CODE = "signup_template_code"
 
     PROPAGATION_ORDER: Tuple[str, ...] = (
         *UTM_PARAMS,
@@ -73,6 +80,34 @@ class UTMTrackingMiddleware:
             if session.get(self.SESSION_FBCLID_LAST) != fbclid_value:
                 session[self.SESSION_FBCLID_LAST] = fbclid_value
                 session_modified = True
+
+        # Capture direct referral code (?ref=CODE)
+        # "Last one wins": if user clicks a ref link, clear any template referral
+        ref_code = (params.get("ref") or "").strip()
+        if ref_code:
+            previous_code = session.get(self.SESSION_REFERRER_CODE)
+            if previous_code != ref_code:
+                previous_template = session.pop(self.SESSION_SIGNUP_TEMPLATE_CODE, None)
+                session[self.SESSION_REFERRER_CODE] = ref_code
+                session_modified = True
+
+                # Track referral code capture (deferred to avoid import at module level)
+                try:
+                    from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+                    session_key = session.session_key if hasattr(session, 'session_key') else None
+                    if session_key:
+                        Analytics.track_event_anonymous(
+                            anonymous_id=str(session_key),
+                            event=AnalyticsEvent.REFERRAL_CODE_CAPTURED,
+                            source=AnalyticsSource.WEB,
+                            properties={
+                                'referrer_code': ref_code,
+                                'previous_referrer_code': previous_code or '',
+                                'previous_template_code': previous_template or '',
+                            },
+                        )
+                except Exception:
+                    logger.debug("Failed to track referral code capture", exc_info=True)
 
         if session_modified:
             session[self.SESSION_QUERYSTRING] = self._build_querystring(session)

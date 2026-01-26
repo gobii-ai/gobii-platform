@@ -262,6 +262,15 @@ class AnalyticsEvent(StrEnum):
     ORGANIZATION_SEAT_ASSIGNED = 'Organization Seat Assigned'
     ORGANIZATION_SEAT_UNASSIGNED = 'Organization Seat Unassigned'
 
+    # Referral Events
+    REFERRAL_CODE_CAPTURED = 'Referral Code Captured'
+    REFERRAL_TEMPLATE_CAPTURED = 'Referral Template Captured'
+    REFERRAL_SIGNUP_IDENTIFIED = 'Referral Signup Identified'
+    REFERRAL_SIGNUP_INVALID = 'Referral Signup Invalid'
+    REFERRAL_CREDITS_GRANTED = 'Referral Credits Granted'
+    REFERRAL_CREDITS_DEFERRED = 'Referral Credits Deferred'
+    REFERRAL_LINK_GENERATED = 'Referral Link Generated'
+
 class AnalyticsCTAs(StrEnum):
     CTA_CREATE_AGENT_CLICKED = 'CTA - Create Agent Clicked'
     CTA_EXAMPLE_AGENT_CLICKED = 'CTA - Example Agent Clicked'

@@ -28,7 +28,7 @@ from .admin_forms import (
     MCPServerConfigAdminForm,
 )
 from .models import (
-    ApiKey, UserQuota, UserFlags, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
+    ApiKey, UserQuota, UserFlags, UserReferral, TaskCredit, BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTaskStep, PaidPlanIntent,
     DecodoCredential, DecodoIPBlock, DecodoIP, ProxyServer, DedicatedProxyAllocation, ProxyHealthCheckSpec, ProxyHealthCheckResult,
     PersistentAgent, PersistentAgentTemplate, PublicProfile, PersistentAgentCommsEndpoint, PersistentAgentMessage, PersistentAgentEmailFooter, PersistentAgentMessageAttachment, PersistentAgentConversation,
     AgentPeerLink, AgentCommPeerState,
@@ -394,6 +394,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
         "expiration_date",
         "additional_task",
         "voided",
+        "comments_preview",
     )
     list_filter = [
         OwnershipTypeFilter,
@@ -404,10 +405,16 @@ class TaskCreditAdmin(admin.ModelAdmin):
         "grant_type",
         "voided",
     ]
-    search_fields = ("user__email", "stripe_invoice_id", "user__id", "organization__name", "organization__id")
+    search_fields = ("user__email", "stripe_invoice_id", "user__id", "organization__name", "organization__id", "comments")
     readonly_fields = ("id", "stripe_invoice_id")
     raw_id_fields = ("user", "organization")
     ordering = ("-granted_date",)
+
+    @admin.display(description='Comments')
+    def comments_preview(self, obj):
+        if obj.comments:
+            return obj.comments[:50] + '...' if len(obj.comments) > 50 else obj.comments
+        return '-'
 
     # Performance: avoid an extra query per row for the user column.
     list_select_related = ("user", "organization")
@@ -723,6 +730,19 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
         return False
+
+
+@admin.register(UserReferral)
+class UserReferralAdmin(admin.ModelAdmin):
+    list_display = ("referral_code", "user_email", "created_at")
+    search_fields = ("referral_code", "user__email", "user__id")
+    readonly_fields = ("referral_code", "created_at")
+    raw_id_fields = ("user",)
+    ordering = ("-created_at",)
+
+    @admin.display(description='User')
+    def user_email(self, obj):
+        return obj.user.email if obj.user else '-'
 
 
 @admin.register(Plan)
@@ -1578,6 +1598,15 @@ class UserFlagsInlineForUser(admin.StackedInline):
     fields = ("is_vip",)
 
 
+class UserReferralInlineForUser(admin.StackedInline):
+    model = UserReferral
+    extra = 0
+    max_num = 1
+    can_delete = False
+    readonly_fields = ("referral_code", "created_at")
+    fields = ("referral_code", "created_at")
+
+
 User = get_user_model()
 
 if admin.site.is_registered(User):
@@ -1589,8 +1618,8 @@ if admin.site.is_registered(User):
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    # Keep lightweight inlines only (flags, agents); omit heavy TaskCredit inline.
-    inlines = [UserFlagsInlineForUser, BrowserUseAgentInlineForUser]
+    # Keep lightweight inlines only (flags, referral, agents); omit heavy TaskCredit inline.
+    inlines = [UserFlagsInlineForUser, UserReferralInlineForUser, BrowserUseAgentInlineForUser]
 
     actions = ['queue_rollup_for_selected_users']
 

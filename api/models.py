@@ -544,6 +544,67 @@ UserModel = get_user_model()
 if not hasattr(UserModel, "is_vip"):
     UserModel.add_to_class("is_vip", property(_user_is_vip))
 
+
+class UserReferral(models.Model):
+    """
+    Stores a user's referral code for sharing with others.
+    Created lazily when user first requests their referral link.
+    """
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="referral",
+    )
+    referral_code = models.CharField(
+        max_length=12,
+        unique=True,
+        db_index=True,
+        help_text="Unique code this user shares to refer others"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        verbose_name = "User Referral"
+        verbose_name_plural = "User Referrals"
+
+    def __str__(self):
+        return f"{self.referral_code} ({self.user_id})"
+
+    @classmethod
+    def generate_code(cls, length=8, max_attempts=100):
+        """Generate a random alphanumeric referral code."""
+        alphabet = string.ascii_uppercase + string.digits
+        # Remove ambiguous characters (0, O, I, 1, L)
+        alphabet = alphabet.replace('0', '').replace('O', '').replace('I', '').replace('1', '').replace('L', '')
+        for _ in range(max_attempts):
+            code = ''.join(secrets.choice(alphabet) for _ in range(length))
+            if not cls.objects.filter(referral_code=code).exists():
+                return code
+        raise RuntimeError("Failed to generate unique referral code after max attempts")
+
+    @classmethod
+    def get_or_create_for_user(cls, user):
+        """Get existing referral code or create one for the user."""
+        try:
+            return cls.objects.get(user=user)
+        except cls.DoesNotExist:
+            try:
+                code = cls.generate_code()
+                return cls.objects.create(user=user, referral_code=code)
+            except IntegrityError:
+                # The object was created by another process after the initial get failed.
+                # We can now safely get it.
+                return cls.objects.get(user=user)
+
+    @classmethod
+    def get_user_by_code(cls, code):
+        """Look up the user who owns a given referral code. Returns None if not found."""
+        try:
+            return cls.objects.select_related('user').get(referral_code=code).user
+        except cls.DoesNotExist:
+            return None
+
+
 class TaskCredit(models.Model):
     """Discrete block of task credits granted to a user."""
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -602,6 +663,12 @@ class TaskCredit(models.Model):
     voided = models.BooleanField(
         default=False,
         help_text="Whether this credit block has been voided and should not be used"
+    )
+
+    comments = models.TextField(
+        blank=True,
+        default='',
+        help_text="Optional notes about this credit grant (e.g., reason for compensation, promo details)"
     )
 
     class Meta:
@@ -3420,6 +3487,26 @@ class UserAttribution(models.Model):
     last_client_ip = models.GenericIPAddressField(null=True, blank=True, help_text="Most recent client IP observed for this user.")
     last_user_agent = models.TextField(blank=True, default='', help_text="Most recent user agent observed for this user.")
     fbp = models.CharField(max_length=256, blank=True, default='', help_text="Meta Browser ID (_fbp cookie value).")
+
+    # Referral tracking: who referred this user at signup
+    referrer_code = models.CharField(
+        max_length=32,
+        blank=True,
+        default='',
+        db_index=True,
+        help_text="Referral code used at signup (direct referral from another user)"
+    )
+    signup_template_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default='',
+        help_text="Template code if user signed up via a shared agent template"
+    )
+    referral_credit_granted_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When referral credits were granted to the referrer (null if pending or N/A)"
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

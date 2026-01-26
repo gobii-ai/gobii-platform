@@ -39,6 +39,7 @@ from ..services.browser_settings import (
     get_browser_settings_for_owner,
 )
 from ..services.task_webhooks import trigger_task_webhook
+from ..services.referral_service import ReferralService
 from ..openrouter import DEFAULT_API_BASE, get_attribution_headers
 from util import EphemeralXvfb, should_use_ephemeral_xvfb
 
@@ -2094,6 +2095,20 @@ def _process_browser_use_task_core(
                 trigger_task_webhook(task_obj)
             except Exception:  # noqa: BLE001
                 logger.exception("Unexpected error while triggering webhook for task %s", task_obj.id)
+
+            # Check for deferred referral credits on first successful task completion
+            if (
+                settings.DEFERRED_REFERRAL_CREDITS_ENABLED
+                and task_obj.status == BrowserUseAgentTask.StatusChoices.COMPLETED
+                and task_obj.user_id
+            ):
+                try:
+                    ReferralService.check_and_grant_deferred_referral_credits(task_obj.user)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to check/grant deferred referral credits for user %s",
+                        task_obj.user_id,
+                    )
 
 
 @shared_task(bind=True, name="gobii_platform.api.tasks.process_browser_use_task")
