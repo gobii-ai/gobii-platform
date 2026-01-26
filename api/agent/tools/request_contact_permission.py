@@ -1,9 +1,9 @@
 """
 Request contact permission tool for persistent agents.
 
-This tool allows agents to request permission to contact people
-who are not yet in their allowlist. The agent owner must approve
-these requests before the agent can send messages.
+This tool allows agents to request permission to add people to
+their allowlist. The agent owner must approve these requests
+before inbound messages from those contacts are accepted.
 """
 import logging
 from django.contrib.sites.models import Site
@@ -28,8 +28,8 @@ def get_request_contact_permission_tool() -> dict:
         "function": {
             "name": "request_contact_permission",
             "description": (
-                "Request permission to contact someone via email or SMS who is not in your allowlist. "
-                "Creates a request that the user must approve before you can contact them. "
+                "Request permission to add someone to your allowlist. "
+                "Creates a request that the user must approve before inbound messages are accepted. "
                 "Returns a URL that you MUST send to the user so they can approve the contact. "
                 "Check if contact already exists before requesting."
                 "Only use an email or phone number the user has previously provided to you, or that is publicly available."
@@ -79,9 +79,8 @@ def get_request_contact_permission_tool() -> dict:
 def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> dict:
     """Create contact permission requests for the agent.
     
-    This tool allows agents to request permission to contact people
-    who are not yet in their allowlist. The requests are created as
-    CommsAllowlistRequest records that the user must approve.
+    This tool allows agents to request permission to add people to their allowlist.
+    The requests are created as CommsAllowlistRequest records that the user must approve.
     """
     contacts = params.get("contacts")
     if not contacts or not isinstance(contacts, list):

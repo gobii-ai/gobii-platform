@@ -34,7 +34,7 @@ from .models import (
     AgentPeerLink, AgentCommPeerState,
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
-    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
+    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry, CommsBlocklistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
@@ -2158,6 +2158,15 @@ class CommsAllowlistEntryInline(admin.TabularInline):
     classes = ("collapse",)
 
 
+class CommsBlocklistEntryInline(admin.TabularInline):
+    """Inline to manage manual blocklist entries for an agent."""
+    model = CommsBlocklistEntry
+    extra = 0
+    fields = ("channel", "address", "is_active", "block_inbound", "block_outbound")
+    readonly_fields = ()
+    classes = ("collapse",)
+
+
 class AgentMessageInline(admin.TabularInline):
     """Inline for viewing agent conversation history."""
     model = PersistentAgentMessage
@@ -2298,6 +2307,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         PersistentAgentCommsEndpointInline,
         PersistentAgentWebhookInline,
         CommsAllowlistEntryInline,
+        CommsBlocklistEntryInline,
         AgentMessageInline,
         PersistentAgentSystemMessageInline,
     ]

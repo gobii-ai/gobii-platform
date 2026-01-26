@@ -2,7 +2,6 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -218,10 +217,10 @@ class AgentCollaboratorContactLimitTests(TestCase):
             whitelist_policy=PersistentAgent.WhitelistPolicy.MANUAL,
         )
         billing, _ = UserBilling.objects.get_or_create(user=self.owner)
-        billing.max_contacts_per_agent = 2
+        billing.max_contacts_per_agent = 1
         billing.save(update_fields=["max_contacts_per_agent"])
 
-    def test_collaborator_invite_counts_toward_limit(self):
+    def test_allowlist_entries_ignore_contact_cap(self):
         AgentCollaboratorInvite.objects.create(
             agent=self.agent,
             email="invite@example.com",
@@ -236,13 +235,13 @@ class AgentCollaboratorContactLimitTests(TestCase):
             is_active=True,
         )
 
-        with self.assertRaises(ValidationError):
-            CommsAllowlistEntry.objects.create(
-                agent=self.agent,
-                channel=CommsChannel.EMAIL,
-                address="contact2@example.com",
-                is_active=True,
-            )
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="contact2@example.com",
+            is_active=True,
+        )
+        self.assertEqual(CommsAllowlistEntry.objects.filter(agent=self.agent).count(), 2)
 
 
 @tag("batch_agent_collaborators")

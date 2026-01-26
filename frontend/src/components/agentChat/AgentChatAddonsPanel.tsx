@@ -116,6 +116,20 @@ export function AgentChatAddonsPanel({
   const contactCapLimitLabel = contactCap?.unlimited
     ? 'Unlimited'
     : contactCap?.limit ?? 'Unlimited'
+  const contactChannelSummary = useMemo(() => {
+    if (!contactCap?.channels?.length) {
+      return null
+    }
+    return contactCap.channels.map((entry) => {
+      const label = entry.channel?.toLowerCase() === 'sms'
+        ? 'SMS'
+        : entry.channel?.toLowerCase() === 'web'
+          ? 'Web'
+          : 'Email'
+      const limitLabel = entry.limit ?? 'Unlimited'
+      return `${label} ${entry.used} / ${limitLabel}`
+    }).join(', ')
+  }, [contactCap?.channels])
   const taskQuotaLabel = useMemo(() => {
     if (!taskQuota) {
       return '—'
@@ -154,9 +168,9 @@ export function AgentChatAddonsPanel({
         {!isTaskMode && contactCap ? (
           <div className="agent-settings-metrics">
             <div>
-              <span className="agent-settings-metric-label">Used contacts</span>
+              <span className="agent-settings-metric-label">Outbound contacts</span>
               <span className="agent-settings-metric-value">
-                {contactCap.used} / {contactCapLimitLabel}
+                {contactChannelSummary ?? `${contactCap.used} / ${contactCapLimitLabel}`}
               </span>
             </div>
             <div>
@@ -258,7 +272,7 @@ export function AgentChatAddonsPanel({
 
   const subtitle = isTaskMode
     ? 'Add task credits for this billing period.'
-    : 'Increase contact limits for all agents.'
+    : 'Increase per-channel contact limits for this billing period.'
 
   if (!isMobile) {
     return (

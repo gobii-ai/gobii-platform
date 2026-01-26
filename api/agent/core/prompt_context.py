@@ -1603,14 +1603,11 @@ def _get_addon_details(owner) -> tuple[int, int, int, int]:
         return tuple(_safe_int(getattr(addon_uplift, attr, 0)) for attr in attrs)
     return 0, 0, 0, 0
 
-def _get_contact_usage(agent: PersistentAgent) -> int | None:
+def _get_contact_usage(agent: PersistentAgent) -> dict[str, object] | None:
     try:
-        from api.models import get_agent_contact_counts
+        from api.services.contact_limits import get_contact_usage_summary
 
-        counts = get_agent_contact_counts(agent)
-        if counts is None:
-            return None
-        return counts["total"]
+        return get_contact_usage_summary(agent)
     except DatabaseError:
         logger.warning(
             "Failed to compute contact usage for agent %s", getattr(agent, "id", "unknown"), exc_info=True
@@ -1680,16 +1677,26 @@ def _build_agent_capabilities_sections(agent: PersistentAgent) -> dict[str, str]
     if effective_contact_cap or contact_uplift:
         if is_proprietary:
             lines.append(
-                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} included in plan + add-ons)."
+                f"Per-channel contact cap: {effective_contact_cap} per channel per billing cycle "
+                f"({base_contact_cap or 0} included in plan + add-ons)."
             )
         else:
             lines.append(
-                f"Per-agent contact cap: {effective_contact_cap} ({base_contact_cap or 0} base + add-ons)."
+                f"Per-channel contact cap: {effective_contact_cap} per channel per billing cycle "
+                f"({base_contact_cap or 0} base + add-ons)."
             )
 
     contact_usage = _get_contact_usage(agent)
     if contact_usage is not None and effective_contact_cap:
-        lines.append(f"Contact usage: {contact_usage}/{effective_contact_cap}.")
+        channel_parts: list[str] = []
+        for entry in contact_usage.get("channels", []):
+            channel = entry.get("channel")
+            used = entry.get("used")
+            limit = entry.get("limit")
+            if channel and limit is not None:
+                channel_parts.append(f"{channel}: {used}/{limit}")
+        if channel_parts:
+            lines.append(f"Contact usage this cycle (per channel): {', '.join(channel_parts)}.")
 
     lines.append(f"Dedicated IPs purchased: {dedicated_total}.")
     if is_proprietary:
@@ -1708,7 +1715,7 @@ def _build_agent_addons_section() -> str:
     """Return a short description of the available add-ons."""
     lines: list[str] = [
         "Task pack: adds extra task credits for the current billing period.",
-        "Contact pack: increases the per-agent contact cap.",
+        "Contact pack: increases the per-channel contact cap for the current billing cycle.",
         "Browser task pack: increases the per-agent daily browser task limit.",
         "Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving during browser tasks.",
     ]

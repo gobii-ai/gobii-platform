@@ -39,7 +39,7 @@ export function ContactCapCalloutCard({
         </span>
         <div>
           <p className="hard-limit-callout-title">Contact limit reached</p>
-          <p className="hard-limit-callout-subtitle">This agent has hit its contact cap for the current cycle.</p>
+          <p className="hard-limit-callout-subtitle">This agent has hit a per-channel contact cap for the current cycle.</p>
         </div>
       </div>
       {showActions ? (
@@ -52,7 +52,7 @@ export function ContactCapCalloutCard({
           ) : null}
           {canShowUpgrade ? (
             <div className="hard-limit-callout-upsell">
-              <span>Need more contacts? Upgrade your plan to expand the contact cap.</span>
+              <span>Need more contacts per channel? Upgrade your plan to expand the contact cap.</span>
               <button type="button" className="banner-upgrade banner-upgrade--text" onClick={handleUpgradeClick}>
                 <Zap size={14} strokeWidth={2} />
                 <span>Upgrade</span>

@@ -185,6 +185,15 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
                 "message": "Recipient is not authorized for web chat with this agent.",
             }
 
+        from api.services.contact_limits import check_and_register_outbound_contact
+        contact_result = check_and_register_outbound_contact(
+            agent,
+            CommsChannel.WEB,
+            to_address,
+        )
+        if not contact_result.allowed:
+            return {"status": "error", "message": contact_result.reason or "Contact limit reached for this channel."}
+
     agent_endpoint = _ensure_agent_web_endpoint(agent)
     user_endpoint = _ensure_user_web_endpoint(to_address)
 

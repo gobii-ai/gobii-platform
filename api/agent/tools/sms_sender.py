@@ -150,6 +150,15 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
             if not agent.is_recipient_whitelisted(CommsChannel.SMS, cc_num):
                 return {"status": "error", "message": f"Group member {cc_num} not allowed for this agent."}
 
+        from api.services.contact_limits import check_and_register_outbound_contacts
+        contact_result = check_and_register_outbound_contacts(
+            agent,
+            CommsChannel.SMS,
+            [to_number] + cc_numbers,
+        )
+        if not contact_result.allowed:
+            return {"status": "error", "message": contact_result.reason or "Contact limit reached for this channel."}
+
         to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
             channel=CommsChannel.SMS, address=to_number, defaults={"owner_agent": None}
         )

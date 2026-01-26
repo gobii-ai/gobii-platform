@@ -30,26 +30,36 @@
         <div>
           <h3 class="text-sm font-semibold text-gray-800 mb-1">Contact Limit Status</h3>
           <p class="text-sm text-gray-700">
-            Currently using <span class="font-semibold">{{ total_count }}</span>
-            {% if contact_cap_unlimited %}
-              contacts (unlimited)
-            {% else %}
-              of <span class="font-semibold">{{ max_contacts }}</span> allowed contacts
-            {% endif %}
-            {% if pending_invites > 0 %}
-              (includes {{ pending_invites }} pending invitation{{ pending_invites|pluralize }})
-            {% endif %}
+            Outbound contact usage for this billing cycle (per channel):
           </p>
+          <div class="mt-2 space-y-1 text-sm text-gray-700">
+            {% for entry in contact_usage.channels %}
+              <div class="flex items-center justify-between">
+                <span class="font-medium">
+                  {% if entry.channel == "sms" %}
+                    SMS
+                  {% elif entry.channel == "web" %}
+                    Web
+                  {% else %}
+                    Email
+                  {% endif %}
+                </span>
+                <span>
+                  {{ entry.used }}
+                  /
+                  {% if entry.limit is None %}
+                    Unlimited
+                  {% else %}
+                    {{ entry.limit }}
+                  {% endif %}
+                </span>
+              </div>
+            {% endfor %}
+          </div>
           {% if not contact_cap_unlimited %}
-            {% if remaining_slots <= 0 %}
-              <p class="text-sm text-orange-700 mt-1 font-semibold">
-                ⚠️ Contact limit reached. You must remove existing contacts before sending new invitations.
-              </p>
-            {% elif remaining_slots <= 3 %}
-              <p class="text-sm text-orange-700 mt-1">
-                Only {{ remaining_slots }} slot{{ remaining_slots|pluralize }} remaining.
-              </p>
-            {% endif %}
+            <p class="text-sm text-orange-700 mt-2">
+              Each channel has a limit of {{ max_contacts }} unique outbound contacts per billing cycle.
+            </p>
           {% endif %}
         </div>
       </div>

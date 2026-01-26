@@ -379,8 +379,15 @@ from console.agent_reassignment import reassign_agent_organization
 from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
-from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
-from console.forms import AllowlistEntryForm
+from api.models import (
+    CommsAllowlistEntry,
+    CommsBlocklistEntry,
+    AgentAllowlistInvite,
+    AgentTransferInvite,
+    OrganizationMembership,
+    MCPServerConfig,
+)
+from console.forms import AllowlistEntryForm, BlocklistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
 
@@ -2638,11 +2645,16 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         )
 
         # Always include allowlist configuration (flag removed)
-        from api.models import CommsAllowlistEntry
+        from api.models import CommsAllowlistEntry, CommsBlocklistEntry
+        from api.services.contact_limits import get_contact_usage_summary
         context['show_allowlist'] = True
         context['whitelist_policy'] = agent.whitelist_policy
         context['allowlist_entries'] = CommsAllowlistEntry.objects.filter(
             agent=agent
+        ).order_by('channel', 'address')
+        context['blocklist_entries'] = CommsBlocklistEntry.objects.filter(
+            agent=agent,
+            is_active=True,
         ).order_by('channel', 'address')
         context['pending_invites'] = AgentAllowlistInvite.objects.filter(
             agent=agent,
@@ -2660,9 +2672,12 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         ).count()
         total_contacts = allowlist_active_count + allowlist_pending_count
         contact_counts = get_agent_contact_counts(agent)
-        if contact_counts is not None:
-            total_contacts = contact_counts["total"]
+        contact_usage = get_contact_usage_summary(agent)
+        usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+        if usage_total is not None:
+            total_contacts = int(usage_total)
         context['contact_counts'] = contact_counts
+        context['contact_usage'] = contact_usage
         context['active_allowlist_count'] = total_contacts
         max_contacts_limit = get_user_max_contacts_per_agent(
             agent.user,
@@ -2684,9 +2699,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             ):
                 max_contacts_override = int(billing.max_contacts_per_agent)
         context['max_contacts_per_agent_override'] = max_contacts_override
-        context['allowlist_limit_reached'] = (
-            max_contacts_limit > 0 and total_contacts >= max_contacts_limit
-        )
+        usage_limit_reached = False
+        if max_contacts_limit > 0:
+            for entry in (contact_usage.get("channels") or []):
+                if (entry.get("used") or 0) >= max_contacts_limit:
+                    usage_limit_reached = True
+                    break
+        context['allowlist_limit_reached'] = usage_limit_reached
 
         context['collaborators'] = AgentCollaborator.objects.filter(
             agent=agent,
@@ -2821,11 +2840,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         pending_count: int | None = None,
         total_count: int | None = None,
         max_contacts: int | None = None,
+        contact_usage: dict[str, object] | None = None,
         pending_contact_requests: int | None = None,
         email_verified: bool | None = None,
     ) -> dict[str, object]:
         from api.models import CommsAllowlistEntry, AgentAllowlistInvite
         from api.services.email_verification import has_verified_email
+        from api.services.contact_limits import get_contact_usage_summary
 
         entries_qs = entries
         if entries_qs is None:
@@ -2860,6 +2881,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         display_total = total_count
         if display_total is None:
             display_total = (active_count or 0) + (pending_count or 0)
+        if contact_usage is None:
+            contact_usage = get_contact_usage_summary(agent)
 
         return {
             'show': True,
@@ -2887,6 +2910,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             ],
             'activeCount': display_total,
             'maxContacts': max_contacts,
+            'contactUsage': contact_usage,
             'pendingContactRequests': pending_contact_requests,
             'emailVerified': email_verified,
         }
@@ -2952,6 +2976,36 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             "totalCount": int(counts.get("total", 0) or 0),
             "maxContacts": max_contacts,
             "canManage": bool(can_manage),
+        }
+
+    def _serialize_blocklist_state(
+        self,
+        agent: PersistentAgent,
+        *,
+        entries=None,
+    ) -> dict[str, object]:
+        from api.models import CommsBlocklistEntry
+
+        entries_qs = entries
+        if entries_qs is None:
+            entries_qs = CommsBlocklistEntry.objects.filter(
+                agent=agent,
+                is_active=True,
+            ).order_by("channel", "address")
+        entries_list = list(entries_qs)
+
+        return {
+            "entries": [
+                {
+                    "id": str(entry.id),
+                    "channel": entry.channel,
+                    "address": entry.address,
+                    "blockInbound": entry.block_inbound,
+                    "blockOutbound": entry.block_outbound,
+                }
+                for entry in entries_list
+            ],
+            "activeCount": len(entries_list),
         }
 
     def _can_manage_collaborators(self, user, agent: PersistentAgent) -> bool:
@@ -3176,9 +3230,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             owner_phone=context.get('owner_phone'),
             total_count=context.get('active_allowlist_count'),
             max_contacts=max_contacts,
+            contact_usage=context.get('contact_usage'),
             pending_contact_requests=context.get('pending_contact_requests'),
         )
         allowlist['show'] = bool(context.get('show_allowlist'))
+
+        blocklist = self._serialize_blocklist_state(
+            agent,
+            entries=context.get('blocklist_entries'),
+        )
 
         collaborators = self._serialize_collaborator_state(
             agent,
@@ -3370,6 +3430,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 'organizationName': agent.organization.name if agent.organization_id else None,
             },
             'allowlist': allowlist,
+            'blocklist': blocklist,
             'collaborators': collaborators,
             'mcpServers': {
                 'inherited': inherited_servers,
@@ -3426,6 +3487,9 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             'add_allowlist',
             'remove_allowlist',
             'cancel_invite',
+            'add_blocklist',
+            'remove_blocklist',
+            'update_whitelist_policy',
             'add_collaborator',
             'remove_collaborator',
             'cancel_collaborator_invite',
@@ -3547,8 +3611,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     ).count()
                     total_count = active_count + pending_count
                     contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
+                    from api.services.contact_limits import get_contact_usage_summary
+                    contact_usage = get_contact_usage_summary(agent)
+                    usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                    if usage_total is not None:
+                        total_count = int(usage_total)
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3559,6 +3626,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         pending_count=pending_count,
                         total_count=total_count,
                         max_contacts=max_contacts_per_agent,
+                        contact_usage=contact_usage,
                     )
                     collaborators_payload = self._serialize_collaborator_state(
                         agent,
@@ -3629,8 +3697,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     ).count()
                     total_count = active_count + pending_count
                     contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
+                    from api.services.contact_limits import get_contact_usage_summary
+                    contact_usage = get_contact_usage_summary(agent)
+                    usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                    if usage_total is not None:
+                        total_count = int(usage_total)
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3641,6 +3712,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         pending_count=pending_count,
                         total_count=total_count,
                         max_contacts=max_contacts_per_agent,
+                        contact_usage=contact_usage,
                     )
 
                     collaborators_payload = self._serialize_collaborator_state(
@@ -3706,8 +3778,11 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     ).count()
                     total_count = active_count + pending_count
                     contact_counts = get_agent_contact_counts(agent)
-                    if contact_counts is not None:
-                        total_count = contact_counts["total"]
+                    from api.services.contact_limits import get_contact_usage_summary
+                    contact_usage = get_contact_usage_summary(agent)
+                    usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                    if usage_total is not None:
+                        total_count = int(usage_total)
                     allowlist_payload = self._serialize_allowlist_state(
                         agent,
                         entries=entries,
@@ -3718,6 +3793,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         pending_count=pending_count,
                         total_count=total_count,
                         max_contacts=max_contacts_per_agent,
+                        contact_usage=contact_usage,
                     )
 
                     collaborators_payload = self._serialize_collaborator_state(
@@ -3737,6 +3813,82 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     
                 except Exception as e:
                     return JsonResponse({'success': False, 'error': str(e)})
+
+            elif action == 'add_blocklist':
+                from api.models import CommsBlocklistEntry
+                from django.db import IntegrityError
+
+                channel = request.POST.get('channel', 'email')
+                address = request.POST.get('address', '').strip()
+
+                if not address:
+                    return JsonResponse({'success': False, 'error': 'Address is required'})
+
+                try:
+                    existing_entry = CommsBlocklistEntry.objects.filter(
+                        agent=agent,
+                        channel=channel,
+                        address=address,
+                    ).first()
+                    block_inbound = request.POST.get('block_inbound', 'true').lower() == 'true'
+                    block_outbound = request.POST.get('block_outbound', 'true').lower() == 'true'
+
+                    if existing_entry:
+                        existing_entry.is_active = True
+                        existing_entry.block_inbound = block_inbound
+                        existing_entry.block_outbound = block_outbound
+                        existing_entry.save(update_fields=["is_active", "block_inbound", "block_outbound"])
+                    else:
+                        CommsBlocklistEntry.objects.create(
+                            agent=agent,
+                            channel=channel,
+                            address=address,
+                            is_active=True,
+                            block_inbound=block_inbound,
+                            block_outbound=block_outbound,
+                        )
+
+                    blocklist_payload = self._serialize_blocklist_state(
+                        agent,
+                    )
+                    return JsonResponse({'success': True, 'blocklist': blocklist_payload})
+                except (ValidationError, IntegrityError) as e:
+                    return JsonResponse({'success': False, 'error': _format_validation_error(e)})
+                except Exception as e:
+                    return JsonResponse({'success': False, 'error': str(e)})
+
+            elif action == 'remove_blocklist':
+                from api.models import CommsBlocklistEntry
+
+                entry_id = request.POST.get('entry_id')
+                if not entry_id:
+                    return JsonResponse({'success': False, 'error': 'Entry id is required'})
+                CommsBlocklistEntry.objects.filter(agent=agent, id=entry_id).delete()
+                blocklist_payload = self._serialize_blocklist_state(agent)
+                return JsonResponse({'success': True, 'blocklist': blocklist_payload})
+
+            elif action == 'update_whitelist_policy':
+                from api.services.contact_limits import get_contact_usage_summary
+                new_policy = (request.POST.get('whitelist_policy') or '').strip()
+                if new_policy in dict(PersistentAgent.WhitelistPolicy.choices):
+                    agent.whitelist_policy = new_policy
+                    agent.save(update_fields=['whitelist_policy'])
+                    contact_usage = get_contact_usage_summary(agent)
+                    usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                    allowlist_payload = self._serialize_allowlist_state(
+                        agent,
+                        total_count=int(usage_total) if usage_total is not None else None,
+                        max_contacts=max_contacts_per_agent,
+                        contact_usage=contact_usage,
+                    )
+                    blocklist_payload = self._serialize_blocklist_state(agent)
+                    return JsonResponse({
+                        'success': True,
+                        'allowlist': allowlist_payload,
+                        'blocklist': blocklist_payload,
+                        'whitelistPolicy': agent.whitelist_policy,
+                    })
+                return JsonResponse({'success': False, 'error': 'Invalid policy value.'})
 
             elif action == 'add_collaborator':
                 if not self._can_manage_collaborators(request.user, agent):
@@ -3846,11 +3998,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     logger.warning("Failed to send collaborator invitation email to %s", email, exc_info=True)
 
                 contact_counts = get_agent_contact_counts(agent)
-                total_count = contact_counts["total"] if contact_counts is not None else None
+                from api.services.contact_limits import get_contact_usage_summary
+                contact_usage = get_contact_usage_summary(agent)
+                usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                total_count = int(usage_total) if usage_total is not None else None
                 allowlist_payload = self._serialize_allowlist_state(
                     agent,
                     total_count=total_count,
                     max_contacts=max_contacts_per_agent,
+                    contact_usage=contact_usage,
                 )
                 collaborators_payload = self._serialize_collaborator_state(
                     agent,
@@ -3898,11 +4054,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     ))
 
                 contact_counts = get_agent_contact_counts(agent)
-                total_count = contact_counts["total"] if contact_counts is not None else None
+                from api.services.contact_limits import get_contact_usage_summary
+                contact_usage = get_contact_usage_summary(agent)
+                usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                total_count = int(usage_total) if usage_total is not None else None
                 allowlist_payload = self._serialize_allowlist_state(
                     agent,
                     total_count=total_count,
                     max_contacts=max_contacts_per_agent,
+                    contact_usage=contact_usage,
                 )
                 collaborators_payload = self._serialize_collaborator_state(
                     agent,
@@ -3943,11 +4103,15 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                     ))
 
                 contact_counts = get_agent_contact_counts(agent)
-                total_count = contact_counts["total"] if contact_counts is not None else None
+                from api.services.contact_limits import get_contact_usage_summary
+                contact_usage = get_contact_usage_summary(agent)
+                usage_total = contact_usage.get("total_used") if isinstance(contact_usage, dict) else None
+                total_count = int(usage_total) if usage_total is not None else None
                 allowlist_payload = self._serialize_allowlist_state(
                     agent,
                     total_count=total_count,
                     max_contacts=max_contacts_per_agent,
+                    contact_usage=contact_usage,
                 )
                 collaborators_payload = self._serialize_collaborator_state(
                     agent,
@@ -3982,7 +4146,17 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         # Handle regular form submission
         # Check if this is an allowlist action that shouldn't have gotten here
         action = action or ''
-        if action in ['add_allowlist', 'remove_allowlist', 'cancel_invite', 'add_collaborator', 'remove_collaborator', 'cancel_collaborator_invite']:
+        if action in [
+            'add_allowlist',
+            'remove_allowlist',
+            'cancel_invite',
+            'add_blocklist',
+            'remove_blocklist',
+            'update_whitelist_policy',
+            'add_collaborator',
+            'remove_collaborator',
+            'cancel_collaborator_invite',
+        ]:
             # This shouldn't happen, but if JavaScript failed, redirect back
             # Import messages here if needed
             from django.contrib import messages as django_messages
@@ -5049,7 +5223,15 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
         context['agent'] = agent
         context['entries'] = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
         context['form'] = kwargs.get('form') or AllowlistEntryForm()
+        context['blocklist_entries'] = CommsBlocklistEntry.objects.filter(
+            agent=agent,
+            is_active=True,
+        ).order_by('channel', 'address')
+        context['blocklist_form'] = kwargs.get('blocklist_form') or BlocklistEntryForm()
         context['policy'] = agent.whitelist_policy
+        context['policy_help_text'] = (
+            agent._meta.get_field("whitelist_policy").help_text or ""
+        )
         return context
 
     def get(self, request, *args, **kwargs):
@@ -5089,6 +5271,27 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
                 entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
                 return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
 
+        elif action == 'add_blocklist':
+            form = BlocklistEntryForm(request.POST)
+            if not form.is_valid():
+                messages.error(request, "Please correct the errors below.")
+                return render(request, self.template_name, self.get_context_data(blocklist_form=form))
+            try:
+                from django.db import IntegrityError
+
+                entry = CommsBlocklistEntry(
+                    agent=agent,
+                    channel=form.cleaned_data['channel'],
+                    address=form.cleaned_data['address'],
+                    block_inbound=form.cleaned_data.get('block_inbound', True),
+                    block_outbound=form.cleaned_data.get('block_outbound', True),
+                )
+                entry.full_clean()
+                entry.save()
+                messages.success(request, "Blocklist entry added.")
+            except (ValidationError, IntegrityError) as e:
+                messages.error(request, f"Could not add entry: {e}")
+
         elif action == 'delete':
             entry_id = request.POST.get('entry_id')
             deleted = CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()[0]
@@ -5099,6 +5302,14 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
             if request.headers.get('HX-Request'):
                 entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
                 return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
+
+        elif action == 'delete_blocklist':
+            entry_id = request.POST.get('entry_id')
+            deleted = CommsBlocklistEntry.objects.filter(agent=agent, id=entry_id).delete()[0]
+            if deleted:
+                messages.success(request, "Blocklist entry deleted.")
+            else:
+                messages.error(request, "Entry not found.")
 
         elif action == 'policy':
             policy = request.POST.get('whitelist_policy')
@@ -6443,30 +6654,17 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         context['pending_requests'] = pending_requests
         context['has_pending_requests'] = pending_requests.exists()
         
-        # Get current allowlist usage for limit display
+        # Get current outbound contact usage for limit display
         max_contacts = get_user_max_contacts_per_agent(
             agent.user,
             organization=agent.organization,
         )
-        active_count = CommsAllowlistEntry.objects.filter(
-            agent=agent, is_active=True
-        ).count()
-        pending_invites = AgentAllowlistInvite.objects.filter(
-            agent=agent, status=AgentAllowlistInvite.InviteStatus.PENDING
-        ).count()
-        total_count = active_count + pending_invites
-        contact_counts = get_agent_contact_counts(agent)
-        if contact_counts is not None:
-            total_count = contact_counts["total"]
+        from api.services.contact_limits import get_contact_usage_summary
+        contact_usage = get_contact_usage_summary(agent)
 
         context['max_contacts'] = max_contacts
         context['contact_cap_unlimited'] = max_contacts <= 0
-        context['active_count'] = active_count
-        context['pending_invites'] = pending_invites
-        context['total_count'] = active_count + pending_invites
-        context['remaining_slots'] = (
-            None if max_contacts <= 0 else max(0, max_contacts - (active_count + pending_invites))
-        )
+        context['contact_usage'] = contact_usage
         
         # Create form
         from console.forms import ContactRequestApprovalForm

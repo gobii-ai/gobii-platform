@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import patch
 
-from django.test import TestCase, RequestFactory, override_settings, tag
+from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 
@@ -11,6 +10,7 @@ from api.models import (
     PersistentAgent,
     BrowserUseAgent,
     CommsAllowlistEntry,
+    CommsBlocklistEntry,
     CommsChannel,
     UserPhoneNumber,
     Organization,
@@ -39,19 +39,18 @@ class AllowlistModelValidationTests(TestCase):
         )
 
     @patch("util.subscription_helper.get_user_max_contacts_per_agent", return_value=1)
-    def test_cap_enforced_via_clean(self, *_):
+    def test_allowlist_entries_do_not_enforce_contact_cap(self, *_):
         CommsAllowlistEntry.objects.create(
             agent=self.agent, channel=CommsChannel.EMAIL, address="first@example.com", is_active=True
         )
-        entry = CommsAllowlistEntry(
+        CommsAllowlistEntry.objects.create(
             agent=self.agent, channel=CommsChannel.EMAIL, address="second@example.com", is_active=True
         )
-        with self.assertRaises(ValidationError):
-            entry.full_clean()
+        self.assertEqual(CommsAllowlistEntry.objects.filter(agent=self.agent).count(), 2)
 
     def test_uniqueness_and_email_normalization(self):
         e1 = CommsAllowlistEntry(agent=self.agent, channel=CommsChannel.EMAIL, address="FRIEND@EXAMPLE.COM")
-        e1.full_clean();
+        e1.full_clean()
         e1.save()
 
         e2 = CommsAllowlistEntry(agent=self.agent, channel=CommsChannel.EMAIL, address="friend@example.com")
@@ -71,7 +70,6 @@ class AllowlistModelValidationTests(TestCase):
 @tag("batch_allowlist_rules")
 class WhitelistPolicyAndFlagsTests(TestCase):
     def setUp(self):
-        self.factory = RequestFactory()
         self.owner = User.objects.create_user(
             username="own@example.com", email="own@example.com", password="pw"
         )
@@ -172,5 +170,49 @@ class WhitelistPolicyAndFlagsTests(TestCase):
         self.assertFalse(agent.is_sender_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
         self.assertFalse(agent.is_recipient_whitelisted(CommsChannel.EMAIL, "stranger@example.com"))
 
-            # SMS: only verified numbers of org members
-            # NOTE: Temporarily disabled until we add multi player SMS support
+    def test_blocklist_policy_allows_unblocked_contacts(self):
+        self.agent_user_owned.whitelist_policy = PersistentAgent.WhitelistPolicy.BLOCKLIST
+        self.agent_user_owned.save(update_fields=["whitelist_policy"])
+
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "friend@example.com"))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "friend@example.com"))
+
+    def test_blocklist_entries_block_by_direction(self):
+        self.agent_user_owned.whitelist_policy = PersistentAgent.WhitelistPolicy.BLOCKLIST
+        self.agent_user_owned.save(update_fields=["whitelist_policy"])
+
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent_user_owned,
+            channel=CommsChannel.EMAIL,
+            address="blocked@example.com",
+            allow_inbound=True,
+            allow_outbound=True,
+            is_active=True,
+        )
+        CommsBlocklistEntry.objects.create(
+            agent=self.agent_user_owned,
+            channel=CommsChannel.EMAIL,
+            address="blocked@example.com",
+            block_inbound=True,
+            block_outbound=False,
+        )
+        self.assertFalse(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "blocked@example.com"))
+        self.assertTrue(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "blocked@example.com"))
+
+        CommsAllowlistEntry.objects.create(
+            agent=self.agent_user_owned,
+            channel=CommsChannel.EMAIL,
+            address="outbound@example.com",
+            allow_inbound=True,
+            allow_outbound=True,
+            is_active=True,
+        )
+        CommsBlocklistEntry.objects.create(
+            agent=self.agent_user_owned,
+            channel=CommsChannel.EMAIL,
+            address="outbound@example.com",
+            block_inbound=False,
+            block_outbound=True,
+        )
+        self.assertTrue(self.agent_user_owned.is_sender_whitelisted(CommsChannel.EMAIL, "outbound@example.com"))
+        self.assertFalse(self.agent_user_owned.is_recipient_whitelisted(CommsChannel.EMAIL, "outbound@example.com"))

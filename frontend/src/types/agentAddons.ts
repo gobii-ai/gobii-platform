@@ -5,6 +5,14 @@ export type ContactCapInfo = {
   active: number
   pending: number
   unlimited: boolean
+  channels?: {
+    channel: string
+    used: number
+    limit: number | null
+    remaining: number | null
+  }[]
+  periodStart?: string | null
+  periodEnd?: string | null
 }
 
 export type ContactCapStatus = {

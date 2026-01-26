@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 
 from api.agent.core.prompt_context import _build_agent_capabilities_sections
-from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
+from api.models import BrowserUseAgent, PersistentAgent
 from billing.addons import AddonUplift
 
 
@@ -29,6 +29,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         )
 
     @override_settings(PUBLIC_SITE_URL="https://app.test")
+    @patch("api.agent.core.prompt_context._get_contact_usage")
     @patch("api.agent.core.prompt_context.DedicatedProxyService.allocated_count", return_value=2)
     @patch("api.agent.core.prompt_context.AddonEntitlementService.get_uplift")
     @patch("api.agent.core.prompt_context.get_owner_plan")
@@ -37,6 +38,7 @@ class AgentCapabilitiesPromptTests(TestCase):
         plan_mock,
         uplift_mock,
         _dedicated_mock,
+        contact_usage_mock,
     ):
         plan_mock.return_value = {
             "id": "startup",
@@ -49,15 +51,15 @@ class AgentCapabilitiesPromptTests(TestCase):
             browser_task_daily=5,
             advanced_captcha_resolution=1,
         )
-
-        CommsAllowlistEntry.objects.create(
-            agent=self.agent,
-            channel="email",
-            address="a@example.com",
-            is_active=True,
-            allow_inbound=True,
-            allow_outbound=True,
-        )
+        contact_usage_mock.return_value = {
+            "channels": [
+                {
+                    "channel": "email",
+                    "used": 1,
+                    "limit": 30,
+                },
+            ]
+        }
 
         sections = _build_agent_capabilities_sections(self.agent)
         capabilities_note = sections.get("agent_capabilities_note", "")
@@ -76,15 +78,18 @@ class AgentCapabilitiesPromptTests(TestCase):
             "Add-ons: +2000 credits; +10 contacts; +5 browser tasks/day; Advanced CAPTCHA resolution enabled.",
             plan_info,
         )
-        self.assertIn("Per-agent contact cap: 30 (20 included in plan + add-ons", plan_info)
-        self.assertIn("Contact usage: 1/30", plan_info)
+        self.assertIn(
+            "Per-channel contact cap: 30 per channel per billing cycle (20 included in plan + add-ons).",
+            plan_info,
+        )
+        self.assertIn("Contact usage this cycle (per channel): email: 1/30.", plan_info)
         self.assertIn("Dedicated IPs purchased: 2", plan_info)
         self.assertIn("/console/billing/", plan_info)
         self.assertNotIn(f"/console/agents/{self.agent.id}/", plan_info)
 
         self.assertIn("Agent add-ons:", agent_addons)
         self.assertIn("Task pack: adds extra task credits", agent_addons)
-        self.assertIn("Contact pack: increases the per-agent contact cap", agent_addons)
+        self.assertIn("Contact pack: increases the per-channel contact cap", agent_addons)
         self.assertIn("Browser task pack: increases the per-agent daily browser task limit", agent_addons)
         self.assertIn("Advanced CAPTCHA resolution: enables CapSolver-powered CAPTCHA solving", agent_addons)
 

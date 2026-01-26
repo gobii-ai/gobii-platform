@@ -152,6 +152,21 @@ type AllowlistInvite = {
   allowOutbound: boolean
 }
 
+type ContactUsageChannel = {
+  channel: string
+  used: number
+  limit: number | null
+  remaining: number | null
+}
+
+type ContactUsageSummary = {
+  limit_per_channel: number | null
+  channels: ContactUsageChannel[]
+  total_used: number
+  period_start: string | null
+  period_end: string | null
+}
+
 type AllowlistState = {
   show: boolean
   ownerEmail: string | null
@@ -160,8 +175,22 @@ type AllowlistState = {
   pendingInvites: AllowlistInvite[]
   activeCount: number
   maxContacts: number | null
+  contactUsage?: ContactUsageSummary | null
   pendingContactRequests: number
   emailVerified: boolean
+}
+
+type BlocklistEntry = {
+  id: string
+  channel: string
+  address: string
+  blockInbound: boolean
+  blockOutbound: boolean
+}
+
+type BlocklistState = {
+  entries: BlocklistEntry[]
+  activeCount: number
 }
 
 type CollaboratorEntry = {
@@ -307,6 +336,7 @@ type AgentDetailPageData = {
   dailyCredits: DailyCreditsInfo
   dedicatedIps: DedicatedIpInfo
   allowlist: AllowlistState
+  blocklist: BlocklistState
   collaborators: CollaboratorState
   mcpServers: McpServersInfo
   peerLinks: PeerLinksInfo
@@ -338,6 +368,13 @@ type AllowlistInput = {
   channel: string
   allowInbound: boolean
   allowOutbound: boolean
+}
+
+type BlocklistInput = {
+  address: string
+  channel: string
+  blockInbound: boolean
+  blockOutbound: boolean
 }
 
 const generateTempId = () =>
@@ -868,6 +905,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const [allowlistState, setAllowlistState] = useState(initialData.allowlist)
   const [allowlistError, setAllowlistError] = useState<string | null>(null)
   const [allowlistBusy, setAllowlistBusy] = useState(false)
+  const [blocklistState, setBlocklistState] = useState(initialData.blocklist)
+  const [blocklistError, setBlocklistError] = useState<string | null>(null)
+  const [blocklistBusy, setBlocklistBusy] = useState(false)
+  const [whitelistPolicy, setWhitelistPolicy] = useState(initialData.agent.whitelistPolicy)
   const [collaboratorState, setCollaboratorState] = useState(initialData.collaborators)
   const [collaboratorError, setCollaboratorError] = useState<string | null>(null)
   const [collaboratorBusy, setCollaboratorBusy] = useState(false)
@@ -941,6 +982,22 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       ownerEmail: payload.ownerEmail ?? prev.ownerEmail,
       ownerPhone: payload.ownerPhone ?? prev.ownerPhone,
       activeCount: typeof payload.activeCount === 'number' ? payload.activeCount : prev.activeCount,
+      maxContacts: payload.maxContacts ?? prev.maxContacts,
+      contactUsage: payload.contactUsage ?? prev.contactUsage,
+      pendingContactRequests:
+        typeof payload.pendingContactRequests === 'number' ? payload.pendingContactRequests : prev.pendingContactRequests,
+      emailVerified: typeof payload.emailVerified === 'boolean' ? payload.emailVerified : prev.emailVerified,
+    }))
+  }, [])
+
+  const applyBlocklistPatch = useCallback((payload?: Partial<BlocklistState>) => {
+    if (!payload) {
+      return
+    }
+    setBlocklistState((prev) => ({
+      ...prev,
+      entries: payload.entries ?? prev.entries,
+      activeCount: typeof payload.activeCount === 'number' ? payload.activeCount : prev.activeCount,
     }))
   }, [])
 
@@ -979,8 +1036,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         if (data.allowlist) {
           applyAllowlistPatch(data.allowlist as Partial<AllowlistState>)
         }
+        if (data.blocklist) {
+          applyBlocklistPatch(data.blocklist as Partial<BlocklistState>)
+        }
         if (data.collaborators) {
           applyCollaboratorPatch(data.collaborators as Partial<CollaboratorState>)
+        }
+        if (data.whitelistPolicy) {
+          setWhitelistPolicy(String(data.whitelistPolicy))
         }
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'Request failed. Please try again.')
@@ -992,7 +1055,42 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         setAllowlistBusy(false)
       }
     },
-    [applyAllowlistPatch, initialData.csrfToken, initialData.urls.detail],
+    [applyAllowlistPatch, applyBlocklistPatch, applyCollaboratorPatch, initialData.csrfToken, initialData.urls.detail],
+  )
+
+  const postBlocklistAction = useCallback(
+    async (body: Record<string, string | Blob>) => {
+      setBlocklistBusy(true)
+      setBlocklistError(null)
+      try {
+        const formData = new FormData()
+        formData.append('csrfmiddlewaretoken', initialData.csrfToken)
+        for (const [key, value] of Object.entries(body)) {
+          formData.append(key, value)
+        }
+        const response = await fetch(initialData.urls.detail, {
+          method: 'POST',
+          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          body: formData,
+        })
+        const data = await response.json()
+        if (data.blocklist) {
+          applyBlocklistPatch(data.blocklist as Partial<BlocklistState>)
+        }
+        if (data.whitelistPolicy) {
+          setWhitelistPolicy(String(data.whitelistPolicy))
+        }
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || 'Request failed. Please try again.')
+        }
+      } catch (error) {
+        setBlocklistError(error instanceof Error ? error.message : 'Request failed. Please try again.')
+        throw error
+      } finally {
+        setBlocklistBusy(false)
+      }
+    },
+    [applyBlocklistPatch, initialData.csrfToken, initialData.urls.detail],
   )
 
   const handleAllowlistAdd = useCallback(
@@ -1026,6 +1124,49 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       })
     },
     [postAllowlistAction],
+  )
+
+  const handleBlocklistAdd = useCallback(
+    async (input: BlocklistInput) => {
+      await postBlocklistAction({
+        action: 'add_blocklist',
+        channel: input.channel,
+        address: input.address,
+        block_inbound: String(input.blockInbound),
+        block_outbound: String(input.blockOutbound),
+      })
+    },
+    [postBlocklistAction],
+  )
+
+  const handleBlocklistRemove = useCallback(
+    async (entryId: string) => {
+      await postBlocklistAction({
+        action: 'remove_blocklist',
+        entry_id: entryId,
+      })
+    },
+    [postBlocklistAction],
+  )
+
+  const handlePolicyChange = useCallback(
+    async (policy: string) => {
+      if (!policy || policy === whitelistPolicy) {
+        return
+      }
+      const previous = whitelistPolicy
+      setWhitelistPolicy(policy)
+      try {
+        await postAllowlistAction({
+          action: 'update_whitelist_policy',
+          whitelist_policy: policy,
+        })
+      } catch (error) {
+        setWhitelistPolicy(previous)
+        throw error
+      }
+    },
+    [postAllowlistAction, whitelistPolicy],
   )
 
   const postCollaboratorAction = useCallback(
@@ -1296,7 +1437,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         onChange={handleAvatarChange}
       />
       {initialData.allowlist.show && (
-        <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
+        <input type="hidden" name="whitelist_policy" value={whitelistPolicy} />
       )}
         <details className="gobii-card-base group" id="agent-identity" open>
           <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
@@ -1567,7 +1708,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Contacts &amp; Access</h2>
-            <p className="text-sm text-gray-500">Contact endpoints and allowlist management.</p>
+            <p className="text-sm text-gray-500">Contact endpoints and access policy.</p>
           </div>
           <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
         </summary>
@@ -1582,11 +1723,18 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           {initialData.allowlist.show && (
             <AllowlistManager
               state={allowlistState}
+              blocklist={blocklistState}
+              policy={whitelistPolicy}
               error={allowlistError}
               busy={allowlistBusy}
               onAdd={handleAllowlistAdd}
               onRemove={handleAllowlistRemove}
               onCancelInvite={handleCancelInvite}
+              onPolicyChange={handlePolicyChange}
+              blocklistError={blocklistError}
+              blocklistBusy={blocklistBusy}
+              onBlocklistAdd={handleBlocklistAdd}
+              onBlocklistRemove={handleBlocklistRemove}
               contactRequestsUrl={initialData.urls.contactRequests}
               onConfirmAction={openConfirmAction}
             />
@@ -1988,20 +2136,47 @@ function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnable
 
 type AllowlistManagerProps = {
   state: AllowlistState
+  blocklist: BlocklistState
+  policy: string
   error: string | null
   busy: boolean
   onAdd: (input: AllowlistInput) => Promise<void>
   onRemove: (entryId: string) => Promise<void>
   onCancelInvite: (inviteId: string) => Promise<void>
+  onPolicyChange: (policy: string) => Promise<void>
+  blocklistError: string | null
+  blocklistBusy: boolean
+  onBlocklistAdd: (input: BlocklistInput) => Promise<void>
+  onBlocklistRemove: (entryId: string) => Promise<void>
   contactRequestsUrl: string
   onConfirmAction: (config: ConfirmActionConfig) => void
 }
 
-function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite, contactRequestsUrl, onConfirmAction }: AllowlistManagerProps) {
+function AllowlistManager({
+  state,
+  blocklist,
+  policy,
+  error,
+  busy,
+  onAdd,
+  onRemove,
+  onCancelInvite,
+  onPolicyChange,
+  blocklistError,
+  blocklistBusy,
+  onBlocklistAdd,
+  onBlocklistRemove,
+  contactRequestsUrl,
+  onConfirmAction,
+}: AllowlistManagerProps) {
   const [channel, setChannel] = useState('email')
   const [address, setAddress] = useState('')
   const [allowInbound, setAllowInbound] = useState(true)
   const [allowOutbound, setAllowOutbound] = useState(true)
+  const [blockChannel, setBlockChannel] = useState('email')
+  const [blockAddress, setBlockAddress] = useState('')
+  const [blockInbound, setBlockInbound] = useState(true)
+  const [blockOutbound, setBlockOutbound] = useState(true)
 
   const handleSubmit = async () => {
     if (!address.trim()) {
@@ -2018,14 +2193,78 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
     }
   }
 
+  const handleBlockSubmit = async () => {
+    if (!blockAddress.trim()) {
+      return
+    }
+    try {
+      await onBlocklistAdd({ channel: blockChannel, address: blockAddress.trim(), blockInbound, blockOutbound })
+      setBlockAddress('')
+      setBlockInbound(true)
+      setBlockOutbound(true)
+    } catch (blockError) {
+      console.error(blockError)
+    }
+  }
+
+  const usageChannels = state.contactUsage?.channels ?? []
+  const usageLimit = state.contactUsage?.limit_per_channel ?? null
+  const allowAllOutbound = policy === 'blocklist'
+  const showAllowlist = true
+  const showBlocklist = allowAllOutbound
+  const inboundLabel = allowAllOutbound ? 'Inbound approvals' : 'Approved contacts'
+  const inboundSingleLabel = allowAllOutbound ? 'inbound approval' : 'approved contact'
+  const outboundLabel = 'Outbound blocks'
+  const usageLimitLabel = usageLimit === null ? 'Unlimited' : usageLimit
+  const formatChannelLabel = (value: string) => {
+    const normalized = (value || '').toLowerCase()
+    if (normalized === 'sms') {
+      return 'SMS'
+    }
+    if (normalized === 'web') {
+      return 'Web'
+    }
+    return 'Email'
+  }
+
   return (
     <div className="space-y-4">
-      <p className="text-xs text-gray-500">
-        By default, the agent owner and organization members can communicate with this agent. You can add additional contacts below. Note: Multi-recipient messaging is limited to email only.
-      </p>
-      <p className="text-xs text-slate-600">
-        Contact slots include allowlist entries and collaborators.
-      </p>
+      <div className="p-3 border border-gray-200 rounded-lg bg-white space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-medium text-gray-700">Outbound access</h4>
+            <p className="text-xs text-gray-500">
+              Allow outbound messaging to any contact unless blocked.
+            </p>
+          </div>
+          <AriaCheckbox
+            isSelected={allowAllOutbound}
+            onChange={(isSelected) => onPolicyChange(isSelected ? 'blocklist' : 'manual')}
+            isDisabled={busy || blocklistBusy}
+            className="group inline-flex items-center gap-2 text-sm text-gray-700"
+          >
+            {({ isSelected }) => (
+              <>
+                <span
+                  aria-hidden="true"
+                  className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                    isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                  }`}
+                >
+                  <Check className="h-3 w-3" aria-hidden="true" />
+                </span>
+                <span className="flex flex-col leading-tight">
+                  <span>Allow all outbound</span>
+                  <span className="text-xs text-gray-500">(except blocked contacts)</span>
+                </span>
+              </>
+            )}
+          </AriaCheckbox>
+        </div>
+        <p className="text-xs text-gray-500">
+          Owner/org members and collaborators are always allowed and excluded from contact caps.
+        </p>
+      </div>
 
       {!state.emailVerified && (
         <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-start gap-2">
@@ -2038,125 +2277,261 @@ function AllowlistManager({ state, error, busy, onAdd, onRemove, onCancelInvite,
         </div>
       )}
 
-      <div className="space-y-4">
-        <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">Add Allowed Contact</h4>
-          <div className="flex gap-2">
-            <select
-              id="allowlist-channel"
-              name="channel"
-              value={channel}
-              onChange={(event) => setChannel(event.target.value)}
-              className="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
-            >
-              <option value="email">Email</option>
-            </select>
-            <input
-              type="email"
-              id="allowlist-address"
-              name="address"
-              placeholder="email@example.com"
-              value={address}
-              onChange={(event) => setAddress(event.target.value)}
-              className="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+      <div className="p-3 bg-gray-50 rounded-lg space-y-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-sm font-medium text-gray-700">Outbound contact usage (per channel)</h4>
+          <span className="text-xs text-gray-500">
+            {usageLimitLabel} per channel
+          </span>
+        </div>
+        {usageChannels.length > 0 ? (
+          <div className="grid gap-2 sm:grid-cols-3">
+            {usageChannels.map((entry) => (
+              <div key={`${entry.channel}-usage`} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-600">
+                <div className="font-medium text-gray-700">{formatChannelLabel(entry.channel)}</div>
+                <div className="mt-1 text-gray-500">
+                  {entry.used} / {entry.limit ?? 'Unlimited'}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs text-gray-500">No outbound contacts used yet this billing cycle.</p>
+        )}
+      </div>
+
+      {showAllowlist && (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            {allowAllOutbound
+              ? `${inboundLabel} control who can message the agent. Outbound messages are allowed by default unless blocked.`
+              : `${inboundLabel} can message the agent or receive outreach. Multi-recipient messaging is limited to email only.`}
+          </p>
+
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg space-y-2">
+            <h4 className="text-sm font-medium text-gray-700">Add {inboundSingleLabel}</h4>
+            <div className="flex gap-2">
+              <select
+                id="allowlist-channel"
+                name="channel"
+                value={channel}
+                onChange={(event) => setChannel(event.target.value)}
+                className="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              >
+                <option value="email">Email</option>
+              </select>
+              <input
+                type="email"
+                id="allowlist-address"
+                name="address"
+                placeholder="email@example.com"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                className="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              />
+            </div>
+            <div className="flex gap-4 items-center">
+              <AriaCheckbox
+                isSelected={allowInbound}
+                onChange={setAllowInbound}
+                className="group inline-flex items-center gap-2 text-sm text-gray-700"
+              >
+                {({ isSelected }) => (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                        isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    <span className="flex flex-col leading-tight">
+                      <span>Allow inbound</span>
+                      <span className="text-xs text-gray-500">(can send to agent)</span>
+                    </span>
+                  </>
+                )}
+              </AriaCheckbox>
+              <AriaCheckbox
+                isSelected={allowOutbound}
+                onChange={setAllowOutbound}
+                className="group inline-flex items-center gap-2 text-sm text-gray-700"
+              >
+                {({ isSelected }) => (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                        isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    <span className="flex flex-col leading-tight">
+                      <span>Allow outbound</span>
+                      <span className="text-xs text-gray-500">(agent can send to)</span>
+                    </span>
+                  </>
+                )}
+              </AriaCheckbox>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleSubmit}
+                disabled={busy || !address.trim()}
+                className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                Add
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAddress('')
+                  setAllowInbound(true)
+                  setAllowOutbound(true)
+                }}
+                className="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+            {error && <div className="text-xs text-red-600">{error}</div>}
+          </div>
+
+          {state.pendingContactRequests > 0 && (
+            <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-yellow-600" aria-hidden="true" />
+                  <span className="text-sm font-medium text-yellow-800">
+                    {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
+                  </span>
+                </div>
+                <a href={contactRequestsUrl} className="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
+                  Review
+                </a>
+              </div>
+            </div>
+          )}
+
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <AllowlistEntries
+              state={state}
+              onRemove={onRemove}
+              onCancelInvite={onCancelInvite}
+              onConfirmAction={onConfirmAction}
+              labelPlural={inboundLabel}
+              labelSingular={inboundSingleLabel}
             />
           </div>
-          <div className="flex gap-4 items-center">
-            <AriaCheckbox
-              isSelected={allowInbound}
-              onChange={setAllowInbound}
-              className="group inline-flex items-center gap-2 text-sm text-gray-700"
-            >
-              {({ isSelected }) => (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
-                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
-                    }`}
-                  >
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                  <span className="flex flex-col leading-tight">
-                    <span>Allow Inbound</span>
-                    <span className="text-xs text-gray-500">(can send to agent)</span>
-                  </span>
-                </>
-              )}
-            </AriaCheckbox>
-            <AriaCheckbox
-              isSelected={allowOutbound}
-              onChange={setAllowOutbound}
-              className="group inline-flex items-center gap-2 text-sm text-gray-700"
-            >
-              {({ isSelected }) => (
-                <>
-                  <span
-                    aria-hidden="true"
-                    className={`flex h-4 w-4 items-center justify-center rounded border transition ${
-                      isSelected ? 'border-blue-600 bg-blue-600 text-white' : 'border-gray-300 bg-white text-transparent'
-                    }`}
-                  >
-                    <Check className="h-3 w-3" aria-hidden="true" />
-                  </span>
-                  <span className="flex flex-col leading-tight">
-                    <span>Allow Outbound</span>
-                    <span className="text-xs text-gray-500">(agent can send to)</span>
-                  </span>
-                </>
-              )}
-            </AriaCheckbox>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={busy || !address.trim()}
-              className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              Add
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAddress('')
-                setAllowInbound(true)
-                setAllowOutbound(true)
-              }}
-              className="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
-            >
-              Cancel
-            </button>
-          </div>
-          {error && <div className="text-xs text-red-600">{error}</div>}
         </div>
+      )}
 
-        {state.pendingContactRequests > 0 && (
-          <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5 text-yellow-600" aria-hidden="true" />
-                <span className="text-sm font-medium text-yellow-800">
-                  {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
-                </span>
-              </div>
-              <a href={contactRequestsUrl} className="text-sm font-medium text-yellow-700 hover:text-yellow-900 underline">
-                Review
-              </a>
+      {showBlocklist && (
+        <div className="space-y-4">
+          <p className="text-xs text-gray-500">
+            {outboundLabel} prevent the agent from reaching contacts. You can also block inbound messages if needed.
+          </p>
+
+          <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg space-y-2">
+            <h4 className="text-sm font-medium text-gray-700">Add outbound block</h4>
+            <div className="flex gap-2">
+              <select
+                id="blocklist-channel"
+                name="channel"
+                value={blockChannel}
+                onChange={(event) => setBlockChannel(event.target.value)}
+                className="py-1.5 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              >
+                <option value="email">Email</option>
+              </select>
+              <input
+                type="email"
+                id="blocklist-address"
+                name="address"
+                placeholder="email@example.com"
+                value={blockAddress}
+                onChange={(event) => setBlockAddress(event.target.value)}
+                className="flex-1 py-1.5 px-2 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500"
+              />
             </div>
+            <div className="flex gap-4 items-center">
+              <AriaCheckbox
+                isSelected={blockInbound}
+                onChange={setBlockInbound}
+                className="group inline-flex items-center gap-2 text-sm text-gray-700"
+              >
+                {({ isSelected }) => (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                        isSelected ? 'border-rose-600 bg-rose-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    <span className="flex flex-col leading-tight">
+                      <span>Block inbound</span>
+                      <span className="text-xs text-gray-500">(cannot send to agent)</span>
+                    </span>
+                  </>
+                )}
+              </AriaCheckbox>
+              <AriaCheckbox
+                isSelected={blockOutbound}
+                onChange={setBlockOutbound}
+                className="group inline-flex items-center gap-2 text-sm text-gray-700"
+              >
+                {({ isSelected }) => (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className={`flex h-4 w-4 items-center justify-center rounded border transition ${
+                        isSelected ? 'border-rose-600 bg-rose-600 text-white' : 'border-gray-300 bg-white text-transparent'
+                      }`}
+                    >
+                      <Check className="h-3 w-3" aria-hidden="true" />
+                    </span>
+                    <span className="flex flex-col leading-tight">
+                      <span>Block outbound</span>
+                      <span className="text-xs text-gray-500">(agent cannot send)</span>
+                    </span>
+                  </>
+                )}
+              </AriaCheckbox>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleBlockSubmit}
+                disabled={blocklistBusy || !blockAddress.trim()}
+                className="px-3 py-1.5 text-sm bg-rose-600 text-white rounded-lg hover:bg-rose-700 disabled:opacity-50"
+              >
+                Block
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setBlockAddress('')
+                  setBlockInbound(true)
+                  setBlockOutbound(true)
+                }}
+                className="px-3 py-1.5 text-sm bg-gray-300 text-gray-700 rounded-lg hover:bg-gray-400"
+              >
+                Cancel
+              </button>
+            </div>
+            {blocklistError && <div className="text-xs text-red-600">{blocklistError}</div>}
           </div>
-        )}
 
-        <div className="p-3 bg-gray-50 rounded-lg">
-          <div className="flex justify-between items-center mb-2">
-            <h4 className="text-sm font-medium text-gray-700">Contact slots used</h4>
-            <span className="text-xs text-gray-500">
-              {state.activeCount} / {state.maxContacts ?? 'Unlimited'} contacts
-            </span>
+          <div className="p-3 bg-gray-50 rounded-lg">
+            <BlocklistEntries state={blocklist} onRemove={onBlocklistRemove} onConfirmAction={onConfirmAction} />
           </div>
-          <AllowlistEntries state={state} onRemove={onRemove} onCancelInvite={onCancelInvite} onConfirmAction={onConfirmAction} />
         </div>
-      </div>
+      )}
     </div>
   )
 }
@@ -2166,9 +2541,18 @@ type AllowlistEntriesProps = {
   onRemove: (entryId: string) => Promise<void>
   onCancelInvite: (inviteId: string) => Promise<void>
   onConfirmAction: (config: ConfirmActionConfig) => void
+  labelPlural: string
+  labelSingular: string
 }
 
-function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: AllowlistEntriesProps) {
+function AllowlistEntries({
+  state,
+  onRemove,
+  onCancelInvite,
+  onConfirmAction,
+  labelPlural,
+  labelSingular,
+}: AllowlistEntriesProps) {
   const hasContacts = state.entries.length > 0 || state.pendingInvites.length > 0
   const renderChannelIcon = (channel: string, className = 'w-4 h-4 text-gray-400') =>
     channel?.toLowerCase() === 'sms' ? (
@@ -2181,7 +2565,7 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
     <div className="space-y-2">
       {(state.ownerEmail || state.ownerPhone) && (
         <div className="text-xs text-gray-500 mb-2">
-          <div className="font-medium">Owner (always allowed in Default mode):</div>
+          <div className="font-medium">Owner (always allowed):</div>
           {state.ownerEmail && (
             <div className="flex items-center justify-between py-1 px-2">
               <span className="flex items-center gap-2">
@@ -2204,7 +2588,9 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
 
       {state.pendingInvites.length > 0 && (
         <div>
-          <div className="text-xs text-gray-500 mb-2 font-medium">Pending Invitations:</div>
+          <div className="text-xs text-gray-500 mb-2 font-medium">
+            Pending {labelPlural.toLowerCase()}:
+          </div>
           {state.pendingInvites.map((invite) => (
             <div key={invite.id} className="py-2 px-3 bg-yellow-50 rounded-lg border border-yellow-200 mb-2">
               <div className="flex items-center justify-between">
@@ -2219,7 +2605,7 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
                     onClick={() =>
                       onConfirmAction({
                         title: 'Cancel invitation',
-                        body: `Cancel the allowlist invitation for ${invite.address}?`,
+                        body: `Cancel the ${labelSingular} invitation for ${invite.address}?`,
                         confirmLabel: 'Cancel invitation',
                         tone: 'danger',
                         onConfirm: () => onCancelInvite(invite.id),
@@ -2240,7 +2626,7 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
 
       {state.entries.length > 0 && (
         <div>
-          <div className="text-xs text-gray-500 mb-2 font-medium">Allowed Contacts:</div>
+          <div className="text-xs text-gray-500 mb-2 font-medium">{labelPlural}:</div>
           {state.entries.map((entry) => (
             <div key={entry.id} className="flex items-center justify-between py-2 px-3 bg-gray-50 rounded-lg group hover:bg-gray-100 border border-gray-200 mb-2">
               <div className="flex-1">
@@ -2253,9 +2639,9 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
                     type="button"
                     onClick={() =>
                       onConfirmAction({
-                        title: 'Remove contact',
-                        body: `Remove ${entry.address} from the allowlist?`,
-                        confirmLabel: 'Remove contact',
+                        title: `Remove ${labelSingular}`,
+                        body: `Remove ${labelSingular} for ${entry.address}?`,
+                        confirmLabel: 'Remove',
                         tone: 'danger',
                         onConfirm: () => onRemove(entry.id),
                       })
@@ -2273,6 +2659,56 @@ function AllowlistEntries({ state, onRemove, onCancelInvite, onConfirmAction }: 
       )}
 
       {!hasContacts && <div className="text-sm text-gray-500 py-2">No additional contacts configured yet.</div>}
+    </div>
+  )
+}
+
+type BlocklistEntriesProps = {
+  state: BlocklistState
+  onRemove: (entryId: string) => Promise<void>
+  onConfirmAction: (config: ConfirmActionConfig) => void
+}
+
+function BlocklistEntries({ state, onRemove, onConfirmAction }: BlocklistEntriesProps) {
+  const hasContacts = state.entries.length > 0
+  const renderChannelIcon = (channel: string, className = 'w-4 h-4 text-gray-400') =>
+    channel?.toLowerCase() === 'sms' ? (
+      <Phone className={className} aria-hidden="true" />
+    ) : (
+      <Mail className={className} aria-hidden="true" />
+    )
+
+  return (
+    <div className="space-y-2">
+      {state.entries.map((entry) => (
+        <div key={entry.id} className="flex items-center justify-between py-2 px-3 bg-white rounded-lg border border-gray-200">
+          <div className="flex-1">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium flex items-center gap-2">
+                {renderChannelIcon(entry.channel, 'w-4 h-4 text-gray-400')}
+                {entry.address}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  onConfirmAction({
+                    title: 'Remove block',
+                    body: `Remove outbound block for ${entry.address}?`,
+                    confirmLabel: 'Remove block',
+                    tone: 'danger',
+                    onConfirm: () => onRemove(entry.id),
+                  })
+                }
+                className="text-xs text-red-600 hover:text-red-800"
+              >
+                Remove
+              </button>
+            </div>
+            <BlocklistDirectionFlags blockInbound={entry.blockInbound} blockOutbound={entry.blockOutbound} />
+          </div>
+        </div>
+      ))}
+      {!hasContacts && <div className="text-sm text-gray-500 py-2">No blocked contacts configured yet.</div>}
     </div>
   )
 }
@@ -2302,6 +2738,29 @@ function AllowlistDirectionFlags({ allowInbound, allowOutbound, labelColor }: Al
   )
 }
 
+type BlocklistDirectionFlagsProps = {
+  blockInbound: boolean
+  blockOutbound: boolean
+}
+
+function BlocklistDirectionFlags({ blockInbound, blockOutbound }: BlocklistDirectionFlagsProps) {
+  const inboundClass = blockInbound ? 'text-rose-700' : 'text-gray-400 line-through'
+  const outboundClass = blockOutbound ? 'text-rose-700' : 'text-gray-400 line-through'
+
+  return (
+    <div className="flex flex-wrap gap-3 mt-1 ml-6">
+      <div className="flex items-center gap-1 text-xs text-gray-500">
+        <ArrowDownToLine className={`w-4 h-4 ${blockInbound ? 'text-rose-600' : 'text-gray-400'}`} aria-hidden="true" />
+        <span className={`text-xs ${inboundClass}`}>Blocks inbound</span>
+      </div>
+      <div className="flex items-center gap-1 text-xs text-gray-500">
+        <ArrowUpFromLine className={`w-4 h-4 ${blockOutbound ? 'text-rose-600' : 'text-gray-400'}`} aria-hidden="true" />
+        <span className={`text-xs ${outboundClass}`}>Blocks outbound</span>
+      </div>
+    </div>
+  )
+}
+
 type CollaboratorManagerProps = {
   state: CollaboratorState
   error: string | null
@@ -2315,7 +2774,6 @@ type CollaboratorManagerProps = {
 function CollaboratorManager({ state, error, busy, onAdd, onRemove, onCancelInvite, onConfirmAction }: CollaboratorManagerProps) {
   const [email, setEmail] = useState('')
   const canManage = state.canManage
-  const totalLimit = state.maxContacts ?? 'Unlimited'
 
   const handleInvite = async () => {
     if (!email.trim()) {
@@ -2342,7 +2800,7 @@ function CollaboratorManager({ state, error, busy, onAdd, onRemove, onCancelInvi
               Invite coworkers to chat and exchange files. Collaborators can upload and download files only.
             </p>
             <p className="mt-2 text-xs text-slate-600">
-              Contact slots used: {state.totalCount} / {totalLimit}
+              Collaborators are excluded from contact caps.
             </p>
           </div>
         </div>

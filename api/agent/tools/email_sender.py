@@ -178,6 +178,15 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
             if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, cc_addr):
                 return {"status": "error", "message": f"CC address {cc_addr} not allowed for this agent."}
 
+        from api.services.contact_limits import check_and_register_outbound_contacts
+        contact_result = check_and_register_outbound_contacts(
+            agent,
+            CommsChannel.EMAIL,
+            [to_address] + cc_addresses,
+        )
+        if not contact_result.allowed:
+            return {"status": "error", "message": contact_result.reason or "Contact limit reached for this channel."}
+
         close_old_connections()
         try:
             to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(

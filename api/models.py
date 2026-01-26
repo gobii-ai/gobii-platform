@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.files.storage import default_storage
 from django.core.validators import MinValueValidator, MaxValueValidator
 from django.core.validators import RegexValidator
-from django.db import IntegrityError, connection, models, transaction
+from django.db import IntegrityError, DatabaseError, connection, models, transaction
 from django.db.models import Count, Q, Sum, UniqueConstraint
 from django.db.models.functions import Lower
 from django.db.models.functions.datetime import TruncMonth
@@ -4743,6 +4743,7 @@ class PersistentAgent(models.Model):
     class WhitelistPolicy(models.TextChoices):
         DEFAULT = "default", "Default (Owner or Org Members)"
         MANUAL = "manual", "Allowed Contacts List"
+        BLOCKLIST = "blocklist", "Blocklist (Outbound Allow All)"
 
     whitelist_policy = models.CharField(
         max_length=16,
@@ -4750,7 +4751,8 @@ class PersistentAgent(models.Model):
         default=WhitelistPolicy.MANUAL,  # Changed to MANUAL - all agents now use manual mode
         help_text=(
             "Controls who can message this agent and who the agent may contact. "
-            "Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default)."
+            "Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default). "
+            "Blocklist: outbound is allowed for all contacts unless explicitly blocked; inbound still requires approval."
         ),
     )
     execution_environment = models.CharField(
@@ -4965,23 +4967,39 @@ class PersistentAgent(models.Model):
         remaining = limit - used
         return remaining if remaining > Decimal("0") else Decimal("0")
 
+    def _get_inbound_policy(self) -> str:
+        """Return the effective policy for inbound checks."""
+        if self.whitelist_policy == self.WhitelistPolicy.BLOCKLIST:
+            return self.WhitelistPolicy.MANUAL
+        return self.whitelist_policy
+
     @tracer.start_as_current_span("WHITELIST PersistentAgent Inbound Sender Check")
     def is_sender_whitelisted(self, channel: CommsChannel | str, address: str) -> bool:
         """Check if an inbound address/number is allowed to contact this agent."""
         channel_val = channel.value if isinstance(channel, CommsChannel) else str(channel)
         addr = (address or "").strip()
         addr_lower = addr.lower()
+        inbound_policy = self._get_inbound_policy()
 
         logger.info("Whitelist check for channel: %s, address: %s, policy=%s", channel_val, addr_lower, self.whitelist_policy)
 
         if channel_val == CommsChannel.WEB:
-            return self._is_allowed_web_address(addr, direction="inbound")
+            if self._is_blocked_contact(channel_val, addr, direction="inbound"):
+                return False
+            return self._is_allowed_web_address(
+                addr,
+                direction="inbound",
+                allow_manual=(inbound_policy == self.WhitelistPolicy.MANUAL),
+            )
 
         if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
             logger.info("Whitelist check - Unsupported channel '%s'; defaulting to False", channel_val)
             return False
 
-        if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
+        if self._is_blocked_contact(channel_val, addr, direction="inbound"):
+            return False
+
+        if inbound_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="inbound")
 
         return self._is_allowed_default(channel_val, addr)
@@ -4993,6 +5011,11 @@ class PersistentAgent(models.Model):
         addr = (address or "").strip()
 
         if channel_val == CommsChannel.WEB:
+            if self._is_blocked_contact(channel_val, addr, direction="outbound"):
+                return False
+            if self.whitelist_policy == self.WhitelistPolicy.BLOCKLIST:
+                user_id, agent_id = parse_web_user_address(addr)
+                return agent_id == str(self.id) and user_id is not None
             return self._is_allowed_web_address(addr, direction="outbound")
 
         if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS):
@@ -5004,6 +5027,12 @@ class PersistentAgent(models.Model):
             if self.organization_id is not None:
                 # Org-owned agents can only use email (group SMS not yet supported)
                 return False
+
+        if self._is_blocked_contact(channel_val, addr, direction="outbound"):
+            return False
+
+        if self.whitelist_policy == self.WhitelistPolicy.BLOCKLIST:
+            return True
 
         if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
             return self._is_in_manual_allowlist(channel_val, addr, direction="outbound")
@@ -5039,69 +5068,8 @@ class PersistentAgent(models.Model):
         For org-owned agents, org members are also implicitly allowed.
         """
         addr = (address or "").strip()
-        if channel_val == CommsChannel.EMAIL:
-            # Normalize display-name formats like "Name <email@example.com>"
-            addr = (parseaddr(addr)[1] or addr).lower()
-            
-            # Owner is always allowed
-            owner_email = (self.user.email or "").lower()
-            if addr == owner_email:
-                return True
-            
-            # For org-owned agents, org members are implicitly allowed
-            if self.organization_id:
-                from .models import OrganizationMembership
-                if OrganizationMembership.objects.filter(
-                    org=self.organization,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                    user__email__iexact=addr,
-                ).exists():
-                    return True
-
-            if AgentCollaborator.objects.filter(
-                agent=self,
-                user__email__iexact=addr,
-            ).exists():
-                return True
-                
-        elif channel_val == CommsChannel.SMS:
-            # Owner's verified phone is always allowed
-            from .models import UserPhoneNumber
-            if UserPhoneNumber.objects.filter(
-                user=self.user,
-                phone_number__iexact=addr,
-                is_verified=True,
-            ).exists():
-                return True
-
-            # For org-owned agents, any verified phone of org members is allowed
-            if self.organization_id:
-                from .models import OrganizationMembership
-                if UserPhoneNumber.objects.filter(
-                    user__organizationmembership__org=self.organization,
-                    user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
-                    phone_number__iexact=addr,
-                    is_verified=True,
-                ).exists():
-                    return True
-        elif channel_val == CommsChannel.WEB:
-            # Owner is always allowed
-            user_id, agent_id = parse_web_user_address(addr)
-            if agent_id == str(self.id) and user_id == self.user_id:
-                return True
-
-            if self.organization_id and agent_id == str(self.id):
-                from .models import OrganizationMembership
-
-                if OrganizationMembership.objects.filter(
-                    org=self.organization,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                    user_id=user_id,
-                ).exists():
-                    return True
-
-            if AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists():
-                return True
+        if self._is_privileged_contact(channel_val, addr):
+            return True
 
         # Check manual allowlist entries with direction
         try:
@@ -5131,7 +5099,12 @@ class PersistentAgent(models.Model):
             )
             return False
 
-    def _is_allowed_web_address(self, address: str, direction: str = "both") -> bool:
+    def _is_allowed_web_address(
+        self,
+        address: str,
+        direction: str = "both",
+        allow_manual: bool | None = None,
+    ) -> bool:
         """Return True if a web chat address is permitted for the requested direction."""
         addr = (address or "").strip()
         user_id, agent_id = parse_web_user_address(addr)
@@ -5139,26 +5112,14 @@ class PersistentAgent(models.Model):
         if agent_id != str(self.id) or user_id is None:
             return False
 
-        # Owner is always allowed regardless of policy
-        if user_id == self.user_id:
+        if self._is_privileged_contact(CommsChannel.WEB, addr):
             return True
 
-        # Organization members are implicitly allowed
-        if self.organization_id:
-            from .models import OrganizationMembership
-
-            if OrganizationMembership.objects.filter(
-                org=self.organization,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                user_id=user_id,
-            ).exists():
-                return True
-
-        if AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists():
-            return True
+        if allow_manual is None:
+            allow_manual = self.whitelist_policy == self.WhitelistPolicy.MANUAL
 
         # Manual allowlist entries can extend access beyond owner/org members
-        if self.whitelist_policy == self.WhitelistPolicy.MANUAL:
+        if allow_manual:
             try:
                 query = CommsAllowlistEntry.objects.filter(
                     agent=self,
@@ -5187,65 +5148,110 @@ class PersistentAgent(models.Model):
 
     def _is_allowed_default(self, channel_val: str, address: str) -> bool:
         """Default allow rules: owner-only for user-owned agents; org members for org-owned agents."""
+        if channel_val not in (CommsChannel.EMAIL, CommsChannel.SMS, CommsChannel.WEB):
+            return False
+        return self._is_privileged_contact(channel_val, address)
+
+    def _is_privileged_contact(self, channel_val: str, address: str) -> bool:
+        """Return True for owner/org/collaborator contacts that bypass allowlist/cap checks."""
         addr_raw = (address or "").strip()
-        addr_lower = addr_raw.lower()
-        # Email rules
         if channel_val == CommsChannel.EMAIL:
-            # Normalize display-name formats like "Name <email@example.com>"
-            email_only = (parseaddr(addr_raw)[1] or addr_lower).lower()
+            email_only = (parseaddr(addr_raw)[1] or addr_raw).lower()
+            owner_email = (self.user.email or "").lower()
+            if email_only == owner_email:
+                return True
             if self.organization_id:
-                # Org members by email
                 from .models import OrganizationMembership
-                return OrganizationMembership.objects.filter(
+                if OrganizationMembership.objects.filter(
                     org=self.organization,
                     status=OrganizationMembership.OrgStatus.ACTIVE,
                     user__email__iexact=email_only,
-                ).exists()
-            # User-owned: owner email
-            owner_email = (self.user.email or "").lower()
+                ).exists():
+                    return True
             if AgentCollaborator.objects.filter(
                 agent=self,
                 user__email__iexact=email_only,
             ).exists():
                 return True
-            whitelisted = email_only == owner_email
-            logger.info("Whitelist default EMAIL check: %s === %s -> %s", email_only, owner_email, whitelisted)
-            return whitelisted
+            return False
 
-        # SMS rules
         if channel_val == CommsChannel.SMS:
+            addr = addr_raw
             from .models import UserPhoneNumber
+            if UserPhoneNumber.objects.filter(
+                user=self.user,
+                phone_number__iexact=addr,
+                is_verified=True,
+            ).exists():
+                return True
             if self.organization_id:
                 from .models import OrganizationMembership
-                # Any verified number belonging to an active org member
-                return UserPhoneNumber.objects.filter(
+                if UserPhoneNumber.objects.filter(
                     user__organizationmembership__org=self.organization,
                     user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
-                    phone_number__iexact=address.strip(),
+                    phone_number__iexact=addr,
                     is_verified=True,
-                ).exists()
-            # User-owned: owner's verified number
-            return UserPhoneNumber.objects.filter(
-                user=self.user,
-                phone_number__iexact=address.strip(),
+                ).exists():
+                    return True
+            if UserPhoneNumber.objects.filter(
+                user__agent_collaborations__agent=self,
+                phone_number__iexact=addr,
                 is_verified=True,
-            ).exists()
+            ).exists():
+                return True
+            return False
 
         if channel_val == CommsChannel.WEB:
             user_id, agent_id = parse_web_user_address(addr_raw)
             if agent_id != str(self.id) or user_id is None:
                 return False
+            if user_id == self.user_id:
+                return True
             if self.organization_id:
                 from .models import OrganizationMembership
 
-                return OrganizationMembership.objects.filter(
+                if OrganizationMembership.objects.filter(
                     org=self.organization,
                     status=OrganizationMembership.OrgStatus.ACTIVE,
                     user_id=user_id,
-                ).exists()
-            return user_id == self.user_id
+                ).exists():
+                    return True
+            if AgentCollaborator.objects.filter(agent=self, user_id=user_id).exists():
+                return True
+            return False
 
         return False
+
+    def is_privileged_contact(self, channel_val: str, address: str) -> bool:
+        """Public wrapper for privileged contact checks."""
+        return self._is_privileged_contact(channel_val, address)
+
+    def _is_blocked_contact(self, channel_val: str, address: str, direction: str = "both") -> bool:
+        """Return True if the address is explicitly blocked for the requested direction."""
+        addr_raw = (address or "").strip()
+        if channel_val == CommsChannel.EMAIL:
+            addr_raw = (parseaddr(addr_raw)[1] or addr_raw).lower()
+        try:
+            query = CommsBlocklistEntry.objects.filter(
+                agent=self,
+                channel=channel_val,
+                address__iexact=addr_raw,
+                is_active=True,
+            )
+            if direction == "inbound":
+                query = query.filter(block_inbound=True)
+            elif direction == "outbound":
+                query = query.filter(block_outbound=True)
+            else:
+                query = query.filter(
+                    models.Q(block_inbound=True) | models.Q(block_outbound=True)
+                )
+            return query.exists()
+        except DatabaseError as exc:
+            logger.error(
+                "Error checking blocklist for agent %s: %s", self.id, exc, exc_info=True
+            )
+            return False
 
     def _remove_celery_beat_task(self):
         """Removes the associated Celery Beat schedule task."""
@@ -6356,6 +6362,58 @@ class PersistentAgentCommsEndpoint(models.Model):
         return f"{self.channel}:{self.address}"
 
 
+class CommsBlocklistEntry(models.Model):
+    """Manual blocklist entry for agent communications (agent-level only)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="manual_blocklist",
+        help_text="Agent to which this blocklist entry applies",
+    )
+    channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    address = models.CharField(max_length=512, help_text="Email address or E.164 phone number")
+    is_active = models.BooleanField(default=True)
+    block_inbound = models.BooleanField(
+        default=True,
+        help_text="Whether this contact is blocked from sending messages to the agent",
+    )
+    block_outbound = models.BooleanField(
+        default=True,
+        help_text="Whether the agent is blocked from sending messages to this contact",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "channel", "address"],
+                name="uniq_blocklist_agent_channel_address",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "channel"], name="block_agent_channel_idx"),
+        ]
+        ordering = ["channel", "address"]
+
+    def clean(self):
+        super().clean()
+        if self.channel == CommsChannel.EMAIL:
+            # Normalize display-name formats like "Name <email@example.com>"
+            self.address = (parseaddr(self.address or "")[1] or self.address or "").strip().lower()
+        else:
+            self.address = (self.address or "").strip()
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Block<{self.channel}:{self.address}> for {self.agent_id}"
+
+
 class CommsAllowlistEntry(models.Model):
     """Manual allowlist entry for agent communications (agent-level only)."""
 
@@ -6419,51 +6477,7 @@ class CommsAllowlistEntry(models.Model):
             })
 
         # Enforce per-agent cap on *active* entries and pending invitations when activating entries
-        enforce_cap = False
-        if self.is_active:
-            if self._state.adding:
-                enforce_cap = True
-            elif self.pk:
-                previous_active = (
-                    type(self)
-                    .objects
-                    .filter(pk=self.pk)
-                    .values_list('is_active', flat=True)
-                    .first()
-                )
-                enforce_cap = previous_active is False
-
-        if enforce_cap:
-            # Get the plan-based limit for this agent's owner
-            from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(
-                self.agent.user,
-                organization=self.agent.organization,
-            )
-            if cap <= 0:
-                return
-            
-            try:
-                counts = get_agent_contact_counts(self.agent)
-                if counts is None:
-                    return
-                active_count = counts["active_total"]
-                pending_count = counts["pending_total"]
-                total_count = counts["total"]
-            except Exception as e:
-                logger.error(
-                    "Skipping allowlist cap check for agent %s due to error: %s",
-                    self.agent_id, e
-                )
-                return
-
-            if total_count >= cap:
-                raise ValidationError({
-                    "agent": (
-                        f"Cannot add more contacts. Maximum {cap} contacts "
-                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
-                    )
-                })
+        # NOTE: Contact caps are enforced at outbound send time, not when adding allowlist entries.
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
@@ -6471,6 +6485,50 @@ class CommsAllowlistEntry(models.Model):
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
+
+
+class CommsOutboundContactUsage(models.Model):
+    """Unique outbound contact usage for the current billing period."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="outbound_contact_usage",
+    )
+    channel = models.CharField(max_length=32, choices=CommsChannel.choices)
+    address = models.CharField(max_length=512)
+    period_start = models.DateField()
+    period_end = models.DateField()
+    first_used_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "channel", "address", "period_start"],
+                name="uniq_contact_usage_agent_channel_address_period",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "channel", "period_start"], name="usage_agent_channel_period_idx"),
+            models.Index(fields=["agent", "period_start"], name="usage_agent_period_idx"),
+        ]
+        ordering = ["-last_used_at"]
+
+    def clean(self):
+        super().clean()
+        if self.channel == CommsChannel.EMAIL:
+            self.address = (parseaddr(self.address or "")[1] or self.address or "").strip().lower()
+        else:
+            self.address = (self.address or "").strip()
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"Usage<{self.channel}:{self.address}> {self.period_start}"
 
 
 class AgentAllowlistInvite(models.Model):
@@ -6530,39 +6588,7 @@ class AgentAllowlistInvite(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
-        
-        # Check contact limit when creating new invitation
-        if self._state.adding and self.status == self.InviteStatus.PENDING:
-            # Get the plan-based limit for this agent's owner
-            from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(
-                self.agent.user,
-                organization=self.agent.organization,
-            )
-            if cap <= 0:
-                return
-            
-            try:
-                counts = get_agent_contact_counts(self.agent)
-                if counts is None:
-                    return
-                active_count = counts["active_total"]
-                pending_count = counts["pending_total"]
-                total_count = counts["total"]
-            except Exception as e:
-                logger.error(
-                    "Skipping invitation cap check for agent %s due to error: %s",
-                    self.agent_id, e
-                )
-                return
-            
-            if total_count >= cap:
-                raise ValidationError({
-                    "agent": (
-                        f"Cannot send more invitations. Maximum {cap} contacts "
-                        f"allowed per agent for your plan (currently {active_count} active, {pending_count} pending)."
-                    )
-                })
+        # NOTE: Contact caps are enforced at outbound send time, not on invitations.
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
@@ -6658,37 +6684,7 @@ class AgentCollaborator(models.Model):
 
     def clean(self):
         super().clean()
-        if self._state.adding:
-            from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(
-                self.agent.user,
-                organization=self.agent.organization,
-            )
-            if cap <= 0:
-                return
-            counts = get_agent_contact_counts(self.agent)
-            if counts is None:
-                return
-            if counts["total"] >= cap:
-                allow_pending_accept = False
-                if counts["total"] == cap:
-                    user_email = (getattr(self.user, "email", "") or "").strip()
-                    if user_email:
-                        allow_pending_accept = AgentCollaboratorInvite.objects.filter(
-                            agent=self.agent,
-                            email__iexact=user_email,
-                            status=AgentCollaboratorInvite.InviteStatus.PENDING,
-                            expires_at__gt=timezone.now(),
-                        ).exists()
-                if allow_pending_accept:
-                    return
-                pending_count = counts["pending_total"]
-                raise ValidationError({
-                    "agent": (
-                        f"Cannot add more contacts. Maximum {cap} contacts "
-                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
-                    )
-                })
+        # NOTE: Contact caps are enforced at outbound send time, not on collaborators.
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
@@ -6742,25 +6738,7 @@ class AgentCollaboratorInvite(models.Model):
     def clean(self):
         super().clean()
         self.email = (self.email or "").strip().lower()
-        if self._state.adding and self.status == self.InviteStatus.PENDING:
-            from util.subscription_helper import get_user_max_contacts_per_agent
-            cap = get_user_max_contacts_per_agent(
-                self.agent.user,
-                organization=self.agent.organization,
-            )
-            if cap <= 0:
-                return
-            counts = get_agent_contact_counts(self.agent)
-            if counts is None:
-                return
-            if counts["total"] >= cap:
-                pending_count = counts["pending_total"]
-                raise ValidationError({
-                    "agent": (
-                        f"Cannot send more invitations. Maximum {cap} contacts "
-                        f"allowed per agent for your plan (including {pending_count} pending invitations)."
-                    )
-                })
+        # NOTE: Contact caps are enforced at outbound send time, not on collaborator invites.
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)

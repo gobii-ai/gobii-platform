@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="max-w-3xl mx-auto py-8">
-  <h1 class="text-2xl font-semibold mb-4">Manual Allowlist for {{ agent.name }}</h1>
+  <h1 class="text-2xl font-semibold mb-4">Inbound approvals for {{ agent.name }}</h1>
 
   <form method="post" action="" class="mb-6 p-4 bg-white rounded-xl shadow">
     {% csrf_token %}
@@ -17,12 +17,12 @@
       {% endfor %}
     </select>
     <button type="submit" class="ml-3 inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Save Policy</button>
-    <p class="text-sm text-gray-500 mt-2">Default: owner or org members. Manual: only entries listed below.</p>
+    <p class="text-sm text-gray-500 mt-2">{{ policy_help_text }}</p>
   </form>
 
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     <div class="p-4 bg-white rounded-xl shadow">
-      <h2 class="text-lg font-medium mb-3">Add Entry</h2>
+      <h2 class="text-lg font-medium mb-3">Add inbound approval</h2>
       <form method="post" action="" hx-post="" hx-target="#allowlist-entries" hx-swap="innerHTML">
         {% csrf_token %}
         <input type="hidden" name="action" value="add" />
@@ -42,10 +42,63 @@
     </div>
 
     <div class="p-4 bg-white rounded-xl shadow">
-      <h2 class="text-lg font-medium mb-3">Current Entries</h2>
+      <h2 class="text-lg font-medium mb-3">Inbound approvals</h2>
       <div id="allowlist-entries">
         {% include "console/partials/_allowlist_entries.html" with entries=entries %}
       </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+    <div class="p-4 bg-white rounded-xl shadow">
+      <h2 class="text-lg font-medium mb-3">Add outbound block</h2>
+      <form method="post" action="">
+        {% csrf_token %}
+        <input type="hidden" name="action" value="add_blocklist" />
+        <div class="mb-3">
+          {{ blocklist_form.channel.label_tag }}
+          {{ blocklist_form.channel }}
+          {% for e in blocklist_form.channel.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div class="mb-3">
+          {{ blocklist_form.address.label_tag }}
+          {{ blocklist_form.address }}
+          {% if blocklist_form.address.help_text %}<p class="text-sm text-gray-500">{{ blocklist_form.address.help_text }}</p>{% endif %}
+          {% for e in blocklist_form.address.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div class="mb-3 flex items-center gap-4">
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            {{ blocklist_form.block_inbound }}
+            Block inbound
+          </label>
+          <label class="flex items-center gap-2 text-sm text-gray-600">
+            {{ blocklist_form.block_outbound }}
+            Block outbound
+          </label>
+        </div>
+        <button type="submit" class="inline-flex items-center px-4 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg">Block</button>
+      </form>
+    </div>
+
+    <div class="p-4 bg-white rounded-xl shadow">
+      <h2 class="text-lg font-medium mb-3">Outbound blocks</h2>
+      {% if blocklist_entries %}
+        <ul class="space-y-2">
+          {% for entry in blocklist_entries %}
+            <li class="flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-sm">
+              <span>{{ entry.address }}</span>
+              <form method="post" action="">
+                {% csrf_token %}
+                <input type="hidden" name="action" value="delete_blocklist" />
+                <input type="hidden" name="entry_id" value="{{ entry.id }}" />
+                <button type="submit" class="text-xs text-red-600 hover:text-red-800">Remove</button>
+              </form>
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="text-sm text-gray-500">No blocked contacts configured yet.</p>
+      {% endif %}
     </div>
   </div>
 

@@ -561,6 +561,56 @@ class AllowlistEntryForm(forms.Form):
         return cleaned
 
 
+class BlocklistEntryForm(forms.Form):
+    """Form to add a manual blocklist entry for an agent."""
+
+    CHANNEL_CHOICES = [
+        (CommsChannel.EMAIL, 'Email'),
+        (CommsChannel.SMS, 'SMS'),
+    ]
+
+    channel = forms.ChoiceField(
+        choices=CHANNEL_CHOICES,
+        required=True,
+        widget=forms.Select(attrs={
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        })
+    )
+    address = forms.CharField(
+        required=True,
+        widget=forms.TextInput(attrs={
+            'placeholder': 'email@example.com or +15551234567',
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        }),
+        label='Email or Phone',
+        help_text='Emails are case-insensitive. Phone must be in E.164 (+15551234567).'
+    )
+    block_inbound = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
+        }),
+        label='Block Inbound',
+        help_text='Block this contact from sending messages to the agent'
+    )
+    block_outbound = forms.BooleanField(
+        required=False,
+        initial=True,
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
+        }),
+        label='Block Outbound',
+        help_text='Block the agent from sending messages to this contact'
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        address = (cleaned.get('address') or '').strip()
+        cleaned['address'] = address
+        return cleaned
+
+
 class PersistentAgentAddSecretForm(forms.Form):
     """Form for adding a single secret to an agent."""
     

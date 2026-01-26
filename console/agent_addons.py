@@ -29,32 +29,28 @@ MAX_ADDON_PACK_QUANTITY = 999
 
 
 def _build_contact_cap_payload(agent) -> tuple[dict, bool]:
-    from api.models import CommsAllowlistEntry, AgentAllowlistInvite
+    from api.services.contact_limits import get_contact_usage_summary
 
-    active_count = CommsAllowlistEntry.objects.filter(
-        agent=agent,
-        is_active=True,
-    ).count()
-    pending_count = AgentAllowlistInvite.objects.filter(
-        agent=agent,
-        status=AgentAllowlistInvite.InviteStatus.PENDING,
-    ).count()
-    used = active_count + pending_count
-    limit = get_user_max_contacts_per_agent(
-        agent.user,
-        organization=agent.organization,
+    summary = get_contact_usage_summary(agent)
+    limit = summary.get("limit_per_channel")
+    channels = summary.get("channels") or []
+    max_used = max([channel.get("used", 0) for channel in channels], default=0)
+    unlimited = limit is None
+    remaining = None if unlimited else max(0, limit - max_used)
+    limit_reached = False if unlimited else any(
+        (channel.get("used") or 0) >= limit for channel in channels
     )
-    unlimited = limit <= 0
-    remaining = None if unlimited else max(0, limit - used)
-    limit_reached = False if unlimited else limit > 0 and used >= limit
 
     payload = {
-        "limit": None if unlimited else limit,
-        "used": used,
+        "limit": limit,
+        "used": max_used,
         "remaining": remaining,
-        "active": active_count,
-        "pending": pending_count,
+        "active": 0,
+        "pending": 0,
         "unlimited": unlimited,
+        "channels": channels,
+        "periodStart": summary.get("period_start"),
+        "periodEnd": summary.get("period_end"),
     }
     return payload, limit_reached
 
