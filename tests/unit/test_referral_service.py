@@ -3,7 +3,7 @@ from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask, PersistentAgent, PersistentAgentStep
 from api.services.referral_service import ReferralService, ReferralType
 from middleware.utm_capture import UTMTrackingMiddleware
 
@@ -151,6 +151,18 @@ class DeferredReferralGrantTests(TestCase):
             task='Test task',
         )
 
+    def _create_persistent_agent_step(self, user):
+        """Helper to create a persistent agent with a step for a user."""
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name='Test Agent',
+            charter='Test charter',
+        )
+        return PersistentAgentStep.objects.create(
+            agent=agent,
+            description='Test step',
+        )
+
     def test_has_pending_referral_credit_true(self):
         """Test has_pending_referral_credit returns True when pending."""
         UserAttribution.objects.create(
@@ -217,6 +229,20 @@ class DeferredReferralGrantTests(TestCase):
         # Verify it was NOT marked as granted
         attribution = UserAttribution.objects.get(user=self.new_user)
         self.assertIsNone(attribution.referral_credit_granted_at)
+
+    def test_check_and_grant_deferred_credits_persistent_agent_activity(self):
+        """Test that persistent agent activity also triggers deferred credits."""
+        self._create_persistent_agent_step(self.new_user)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertTrue(result)
+
+        # Verify it was marked as granted
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNotNone(attribution.referral_credit_granted_at)
 
     def test_check_and_grant_deferred_credits_already_granted(self):
         """Test that credits aren't granted twice."""

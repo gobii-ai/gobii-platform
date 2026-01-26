@@ -21,7 +21,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, BrowserUseAgentTask
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, BrowserUseAgentTask, PersistentAgentStep
 from constants.grant_types import GrantTypeChoices
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -152,11 +152,16 @@ class ReferralService:
 
     @classmethod
     def _user_has_completed_task(cls, user: User) -> bool:
-        """Check if user has at least one completed browser task."""
-        return BrowserUseAgentTask.objects.filter(
+        """Check if user has completed real work (browser task or persistent agent activity)."""
+        # Browser task completion
+        if BrowserUseAgentTask.objects.filter(
             user=user,
             status=BrowserUseAgentTask.StatusChoices.COMPLETED,
-        ).exists()
+        ).exists():
+            return True
+
+        # Persistent agent activity (has at least one step processed)
+        return PersistentAgentStep.objects.filter(agent__user=user).exists()
 
     @classmethod
     def check_and_grant_deferred_referral_credits(cls, user: User) -> bool:
