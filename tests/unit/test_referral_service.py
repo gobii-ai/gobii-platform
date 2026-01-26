@@ -3,7 +3,7 @@ from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask, PersistentAgent, PersistentAgentStep
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask, BrowserUseAgent, PersistentAgent, PersistentAgentStep
 from api.services.referral_service import ReferralService, ReferralType
 from middleware.utm_capture import UTMTrackingMiddleware
 
@@ -148,15 +148,21 @@ class DeferredReferralGrantTests(TestCase):
         return BrowserUseAgentTask.objects.create(
             user=user,
             status=BrowserUseAgentTask.StatusChoices.COMPLETED,
-            task='Test task',
         )
 
     def _create_persistent_agent_step(self, user):
         """Helper to create a persistent agent with a step for a user."""
+        import uuid
+        # PersistentAgent requires a BrowserUseAgent
+        browser_agent = BrowserUseAgent.objects.create(
+            user=user,
+            name=f'Test Agent {uuid.uuid4().hex[:8]}',
+        )
         agent = PersistentAgent.objects.create(
             user=user,
-            name='Test Agent',
+            name='Test Persistent Agent',
             charter='Test charter',
+            browser_use_agent=browser_agent,
         )
         return PersistentAgentStep.objects.create(
             agent=agent,
