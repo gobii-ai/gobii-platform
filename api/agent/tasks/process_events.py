@@ -162,10 +162,9 @@ def process_agent_events_task(
             if settings.DEFERRED_REFERRAL_CREDITS_ENABLED and agent and agent.user_id:
                 ReferralService.check_and_grant_deferred_referral_credits(agent.user)
         except Exception:
-            logger.debug(
+            logger.exception(
                 "Failed to check/grant deferred referral credits for agent %s",
                 persistent_agent_id,
-                exc_info=True,
             )
 
 
