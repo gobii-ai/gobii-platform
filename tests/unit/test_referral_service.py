@@ -125,6 +125,30 @@ class ReferralServiceTests(TestCase):
         """Test that deferred granting can be disabled via settings."""
         self.assertFalse(ReferralService.is_deferred_granting_enabled())
 
+    @override_settings(REFERRAL_DEFERRED_GRANT=False)
+    def test_immediate_grant_marks_attribution_as_granted(self):
+        """Test that immediate grants mark referral_credit_granted_at to prevent duplicates."""
+        # Create attribution first (simulating what signal handler does)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+
+        # Process signup referral with immediate granting
+        result = ReferralService.process_signup_referral(
+            new_user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        self.assertIsNotNone(result)
+
+        # Verify referral_credit_granted_at was set
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNotNone(attribution.referral_credit_granted_at)
+
+        # Verify deferred grant check won't grant again
+        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertFalse(result)
+
 
 @tag('referral_batch')
 class DeferredReferralGrantTests(TestCase):

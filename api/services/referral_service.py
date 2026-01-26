@@ -136,6 +136,17 @@ class ReferralService:
                 grant_type=grant_type,
                 template_code=template_code if referral_type == ReferralType.TEMPLATE else None,
             )
+            # Mark as granted to prevent duplicate grants from deferred check
+            try:
+                UserAttribution.objects.filter(user=new_user).update(
+                    referral_credit_granted_at=timezone.now()
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to mark referral as granted for user %s",
+                    new_user.id,
+                    exc_info=True,
+                )
         else:
             # Track that credits are deferred
             Analytics.track_event(
