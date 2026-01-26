@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 import requests
 from django.conf import settings
 from django.utils.dateparse import parse_datetime
+from django.db import DatabaseError
 from django.utils import timezone
 
 from api.models import AgentComputeSession, ComputeSnapshot
@@ -162,7 +163,17 @@ class SandboxComputeBackend:
     ) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def terminate(self, agent, session: AgentComputeSession, *, reason: str) -> SandboxSessionUpdate:
+    def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
+        raise NotImplementedError
+
+    def terminate(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        reason: str,
+        delete_workspace: bool = False,
+    ) -> SandboxSessionUpdate:
         raise NotImplementedError
 
     def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
@@ -270,8 +281,18 @@ class LocalSandboxBackend(SandboxComputeBackend):
             return build_filespace_pull_manifest(agent, since=since)
         return {"status": "error", "message": "Invalid sync direction."}
 
-    def terminate(self, agent, session: AgentComputeSession, *, reason: str) -> SandboxSessionUpdate:
+    def terminate(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        reason: str,
+        delete_workspace: bool = False,
+    ) -> SandboxSessionUpdate:
         return SandboxSessionUpdate(state=AgentComputeSession.State.STOPPED)
+
+    def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
+        return {"status": "skipped", "message": "Snapshots are not supported by local backend."}
 
     def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
         from api.agent.tools.mcp_manager import get_mcp_manager
@@ -407,8 +428,15 @@ class HttpSandboxBackend(SandboxComputeBackend):
             payload["proxy_env"] = proxy_env
         return self._post("sandbox/compute/sync_filespace", payload)
 
-    def terminate(self, agent, session: AgentComputeSession, *, reason: str) -> SandboxSessionUpdate:
-        payload = {"agent_id": str(agent.id), "reason": reason}
+    def terminate(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        reason: str,
+        delete_workspace: bool = False,
+    ) -> SandboxSessionUpdate:
+        payload = {"agent_id": str(agent.id), "reason": reason, "delete_workspace": delete_workspace}
         proxy_env = _proxy_env_for_session(session)
         if proxy_env:
             payload["proxy_env"] = proxy_env
@@ -418,6 +446,9 @@ class HttpSandboxBackend(SandboxComputeBackend):
     def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
         payload = {"server_id": server_config_id, "reason": reason}
         return self._post("sandbox/compute/discover_mcp_tools", payload)
+
+    def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
+        return {"status": "skipped", "message": "Workspace snapshots are not available via HTTP backend."}
 
 
 def _session_update_from_response(response: Dict[str, Any]) -> SandboxSessionUpdate:
@@ -436,6 +467,10 @@ def _resolve_backend() -> SandboxComputeBackend:
             getattr(settings, "SANDBOX_COMPUTE_API_URL", ""),
             getattr(settings, "SANDBOX_COMPUTE_API_TOKEN", ""),
         )
+    if backend_name in ("kubernetes", "k8s"):
+        from api.services.sandbox_kubernetes import KubernetesSandboxBackend
+
+        return KubernetesSandboxBackend()
     return LocalSandboxBackend()
 
 
@@ -645,7 +680,7 @@ class SandboxComputeService:
         return session
 
     def _sync_workspace_pull(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not isinstance(self._backend, HttpSandboxBackend):
+        if isinstance(self._backend, LocalSandboxBackend):
             return None
         manifest = build_filespace_pull_manifest(agent)
         if manifest.get("status") != "ok":
@@ -656,7 +691,7 @@ class SandboxComputeService:
         return response
 
     def _sync_workspace_push(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
-        if not isinstance(self._backend, HttpSandboxBackend):
+        if isinstance(self._backend, LocalSandboxBackend):
             return None
         since = session.last_filespace_sync_at.isoformat() if session.last_filespace_sync_at else None
         response = self._backend.sync_filespace(agent, session, direction="push", payload={"since": since})
@@ -673,6 +708,23 @@ class SandboxComputeService:
         session.last_filespace_sync_at = stamped
         session.save(update_fields=["last_filespace_sync_at", "updated_at"])
         return applied
+
+    def _record_snapshot(self, agent, snapshot_payload: Dict[str, Any]) -> Optional[ComputeSnapshot]:
+        if not snapshot_payload or snapshot_payload.get("status") != "ok":
+            return None
+        snapshot_name = snapshot_payload.get("snapshot_name") or snapshot_payload.get("k8s_snapshot_name")
+        if not snapshot_name:
+            return None
+        size_bytes = snapshot_payload.get("size_bytes")
+        try:
+            return ComputeSnapshot.objects.create(
+                agent=agent,
+                k8s_snapshot_name=str(snapshot_name),
+                size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                status=ComputeSnapshot.Status.READY,
+            )
+        except (DatabaseError, ValueError, TypeError):
+            return None
 
     def _maybe_sync_after_tool(self, agent, session: AgentComputeSession) -> Optional[Dict[str, Any]]:
         if not _sync_on_tool_call():
@@ -776,9 +828,48 @@ class SandboxComputeService:
         session = AgentComputeSession.objects.filter(agent=agent).first()
         if not session:
             raise SandboxComputeUnavailable("Sandbox session not found.")
-        update = self._backend.terminate(agent, session, reason=reason)
+        update = self._backend.terminate(agent, session, reason=reason, delete_workspace=False)
         self._apply_session_update(session, update)
         return session
+
+    def idle_stop_session(self, session: AgentComputeSession, *, reason: str = "idle_ttl") -> Dict[str, Any]:
+        agent = session.agent
+        sync_result = self._sync_workspace_push(agent, session)
+        sync_failed = False
+        if sync_result and sync_result.get("status") != "ok":
+            retry_result = self._sync_workspace_push(agent, session)
+            if retry_result and retry_result.get("status") != "ok":
+                sync_failed = True
+            sync_result = retry_result
+
+        snapshot_payload = self._backend.snapshot_workspace(agent, session, reason=reason)
+        snapshot = self._record_snapshot(agent, snapshot_payload or {})
+        snapshot_failed = bool(snapshot_payload and snapshot_payload.get("status") == "error")
+        delete_workspace = snapshot is not None and not sync_failed
+
+        update = self._backend.terminate(
+            agent,
+            session,
+            reason=reason,
+            delete_workspace=delete_workspace,
+        )
+        self._apply_session_update(session, update)
+
+        if snapshot:
+            session.workspace_snapshot = snapshot
+        if sync_failed or snapshot_failed:
+            session.state = AgentComputeSession.State.ERROR
+        else:
+            session.state = AgentComputeSession.State.STOPPED
+        session.lease_expires_at = None
+        session.save(update_fields=["state", "workspace_snapshot", "lease_expires_at", "updated_at"])
+
+        return {
+            "status": "ok" if not (sync_failed or snapshot_failed) else "error",
+            "sync_result": sync_result,
+            "snapshot": snapshot_payload,
+            "stopped": True,
+        }
 
     def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
         result = self._backend.discover_mcp_tools(server_config_id, reason=reason)

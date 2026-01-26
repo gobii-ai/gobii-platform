@@ -3,6 +3,7 @@ Gobii settings – dev profile
 """
 
 from pathlib import Path
+from datetime import timedelta
 import environ, os
 from decimal import Decimal
 from typing import Any
@@ -647,6 +648,13 @@ CELERY_BEAT_SCHEDULE = {
             "routing_key": "celery.single_instance",
         },
     },
+    "sandbox-compute-idle-sweep": {
+        "task": "api.tasks.sandbox_compute.sweep_idle_sessions",
+        "schedule": timedelta(seconds=env.int("SANDBOX_COMPUTE_IDLE_SWEEP_INTERVAL_SECONDS", default=300)),
+        "options": {
+            "routing_key": "celery.single_instance",
+        },
+    },
 }
 
 # Conditionally enable Twilio sync task only when explicitly enabled
@@ -1020,7 +1028,45 @@ SANDBOX_COMPUTE_BACKEND = env(
 )
 SANDBOX_COMPUTE_API_URL = env("SANDBOX_COMPUTE_API_URL", default="")
 SANDBOX_COMPUTE_API_TOKEN = env("SANDBOX_COMPUTE_API_TOKEN", default="")
+SANDBOX_COMPUTE_K8S_API_URL = env("SANDBOX_COMPUTE_K8S_API_URL", default="")
+SANDBOX_COMPUTE_K8S_NAMESPACE = env("SANDBOX_COMPUTE_K8S_NAMESPACE", default="")
+SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS = env.int("SANDBOX_COMPUTE_K8S_TIMEOUT_SECONDS", default=30)
+SANDBOX_COMPUTE_POD_IMAGE = env(
+    "SANDBOX_COMPUTE_POD_IMAGE",
+    default="ghcr.io/gobii-ai/gobii-sandbox-compute:main",
+)
+SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT = env(
+    "SANDBOX_COMPUTE_POD_SERVICE_ACCOUNT",
+    default="gobii-sa",
+)
+SANDBOX_COMPUTE_POD_RUNTIME_CLASS = env(
+    "SANDBOX_COMPUTE_POD_RUNTIME_CLASS",
+    default="gvisor",
+)
+SANDBOX_COMPUTE_POD_CONFIGMAP_NAME = env(
+    "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME",
+    default="gobii-sandbox-common-env",
+)
+SANDBOX_COMPUTE_POD_SECRET_NAME = env(
+    "SANDBOX_COMPUTE_POD_SECRET_NAME",
+    default="gobii-sandbox-env",
+)
+SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS = env.int(
+    "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS",
+    default=60,
+)
+SANDBOX_COMPUTE_PVC_SIZE = env("SANDBOX_COMPUTE_PVC_SIZE", default="1Gi")
+SANDBOX_COMPUTE_PVC_STORAGE_CLASS = env("SANDBOX_COMPUTE_PVC_STORAGE_CLASS", default="")
+SANDBOX_COMPUTE_SNAPSHOT_CLASS = env("SANDBOX_COMPUTE_SNAPSHOT_CLASS", default="")
+SANDBOX_COMPUTE_SNAPSHOT_TIMEOUT_SECONDS = env.int(
+    "SANDBOX_COMPUTE_SNAPSHOT_TIMEOUT_SECONDS",
+    default=60,
+)
 SANDBOX_COMPUTE_IDLE_TTL_SECONDS = env.int("SANDBOX_COMPUTE_IDLE_TTL_SECONDS", default=60 * 60)
+SANDBOX_COMPUTE_IDLE_SWEEP_INTERVAL_SECONDS = env.int(
+    "SANDBOX_COMPUTE_IDLE_SWEEP_INTERVAL_SECONDS",
+    default=300,
+)
 SANDBOX_COMPUTE_WORKSPACE_LIMIT_BYTES = env.int(
     "SANDBOX_COMPUTE_WORKSPACE_LIMIT_BYTES",
     default=1024 * 1024 * 1024,
