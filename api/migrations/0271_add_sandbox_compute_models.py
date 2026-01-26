@@ -9,7 +9,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0266_add_collaborator_added_system_step"),
+        ("api", "0270_alter_userattribution_referrer_code"),
     ]
 
     operations = [

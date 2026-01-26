@@ -3,7 +3,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0267_add_sandbox_compute_models"),
+        ("api", "0271_add_sandbox_compute_models"),
     ]
 
     operations = [

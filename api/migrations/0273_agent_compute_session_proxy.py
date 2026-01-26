@@ -4,7 +4,7 @@ import django.db.models.deletion
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0268_agent_compute_session_sync_at"),
+        ("api", "0272_agent_compute_session_sync_at"),
     ]
 
     operations = [
