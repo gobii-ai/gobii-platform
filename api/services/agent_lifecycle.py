@@ -123,3 +123,20 @@ AgentCleanupRegistry.register(
     _cleanup_pipedream_delete_user,
     reasons=[AgentShutdownReason.HARD_DELETE, AgentShutdownReason.SOFT_EXPIRE],
 )
+
+
+def _cleanup_compute_session(agent_id: str, reason: str, meta: Optional[dict]) -> None:
+    """Terminate any running sandbox compute pod for the agent."""
+    try:
+        from api.models import PersistentAgent
+        from api.services.compute_control import terminate
+
+        agent = PersistentAgent.objects.filter(id=agent_id).first()
+        if agent is None:
+            return
+        terminate(agent, reason=f"Agent shutdown: {reason}")
+    except Exception:
+        logger.exception("Sandbox compute cleanup failed for agent %s", agent_id)
+
+
+AgentCleanupRegistry.register(_cleanup_compute_session)

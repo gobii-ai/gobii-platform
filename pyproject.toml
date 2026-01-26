@@ -42,6 +42,7 @@ dependencies = [
   "python-frontmatter~=1.1.0",
   "ulid-py~=1.1.0",
   "redis~=6.2.0",
+  "kubernetes~=29.0.0",
   "requests~=2.32.4",
   "segment-analytics-python~=2.3.4",
   "whitenoise[brotli]~=6.9.0",

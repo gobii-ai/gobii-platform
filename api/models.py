@@ -8016,6 +8016,45 @@ class PersistentAgentWebSession(models.Model):
     def __str__(self) -> str:
         return f"WebSession<{self.agent_id}:{self.user_id}:{self.session_key}>"
 
+
+class AgentComputeSession(models.Model):
+    """Represents the active sandbox compute session for an agent."""
+
+    class State(models.TextChoices):
+        RUNNING = ("running", "Running")
+        IDLE_STOPPING = ("idle_stopping", "Idle stopping")
+        STOPPED = ("stopped", "Stopped")
+        ERROR = ("error", "Error")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.OneToOneField(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="compute_session",
+    )
+    pod_name = models.CharField(max_length=128, blank=True)
+    namespace = models.CharField(max_length=128)
+    workspace_pvc = models.CharField(max_length=128, blank=True)
+    state = models.CharField(
+        max_length=32,
+        choices=State.choices,
+        default=State.STOPPED,
+    )
+    last_activity_at = models.DateTimeField(null=True, blank=True)
+    lease_expires_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["state", "last_activity_at"], name="compute_state_activity_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"ComputeSession<{self.agent_id}:{self.state}>"
+
+
 class PersistentAgentCompletion(models.Model):
     """Represents a single LLM completion within a persistent agent run."""
 

@@ -8,6 +8,11 @@ from .views import (
     BrowserUseAgentTaskViewSet,
     PersistentAgentViewSet,
 )
+from .compute_views import (
+    sandbox_deploy,
+    sandbox_run_command,
+    sandbox_terminate,
+)
 from .webhooks import (
     sms_webhook,
     sms_status_webhook,
@@ -72,6 +77,11 @@ urlpatterns = [
     path("tasks/browser-use/<uuid:id>/result/", 
          BrowserUseAgentTaskViewSet.as_view({'get': 'result'}),
          name="user-tasks-result"),
+
+    # Sandbox compute (K8s)
+    path("agents/<uuid:agent_id>/sandbox/deploy/", sandbox_deploy, name="sandbox-deploy"),
+    path("agents/<uuid:agent_id>/sandbox/run/", sandbox_run_command, name="sandbox-run-command"),
+    path("agents/<uuid:agent_id>/sandbox/terminate/", sandbox_terminate, name="sandbox-terminate"),
 
     #  Webhooks for messages endpoint
     path('webhooks/inbound/sms/', sms_webhook, name='sms_webhook'),

@@ -753,6 +753,35 @@ AGENT_EVENT_PROCESSING_PENDING_FALLBACK_DELAY_SECONDS = AGENT_EVENT_PROCESSING_P
 # You can still override with WAFFLE_FLAG_DEFAULT=1 in environments where you want missing flags active.
 WAFFLE_FLAG_DEFAULT = env.bool("WAFFLE_FLAG_DEFAULT", default=False)
 
+# ────────── Sandbox compute (K8s) ──────────
+SANDBOX_RUNTIME_CLASS = env("SANDBOX_RUNTIME_CLASS", default="gvisor")
+SANDBOX_STORAGE_CLASS = env("SANDBOX_STORAGE_CLASS", default="")
+SANDBOX_WORKSPACE_SIZE = env("SANDBOX_WORKSPACE_SIZE", default="1Gi")
+SANDBOX_IDLE_TTL_SECONDS = env.int("SANDBOX_IDLE_TTL_SECONDS", default=60 * 60)
+SANDBOX_SUPERVISOR_IMAGE = env(
+    "SANDBOX_SUPERVISOR_IMAGE",
+    default="ghcr.io/gobii-ai/gobii-platform",
+)
+SANDBOX_SUPERVISOR_PORT = env.int("SANDBOX_SUPERVISOR_PORT", default=8081)
+
+
+def _resolve_sandbox_namespace() -> str:
+    explicit = env("SANDBOX_NAMESPACE", default="").strip()
+    if explicit:
+        return explicit
+    service_account_ns = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+    try:
+        with open(service_account_ns, "r", encoding="utf-8") as handle:
+            value = handle.read().strip()
+        if value:
+            return value
+    except FileNotFoundError:
+        pass
+    return env("K8S_NAMESPACE", default="").strip()
+
+
+SANDBOX_NAMESPACE = _resolve_sandbox_namespace()
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

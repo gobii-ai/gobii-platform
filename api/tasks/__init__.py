@@ -58,3 +58,6 @@ import api.evals.tasks  # noqa: F401
 
 # Agent lifecycle cleanup task (one-stop shutdown cleanup)
 from .agent_lifecycle import agent_shutdown_cleanup_task  # noqa: F401
+
+# Sandbox compute sweeper
+from .compute_tasks import sandbox_idle_sweep  # noqa: F401

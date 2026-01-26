@@ -9,6 +9,8 @@ AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 # Exponential backoff for cron-triggered runs on free-plan agents
 AGENT_CRON_THROTTLE = "agent_cron_throttle"
 
+# Sandbox compute pods (K8s)
+SANDBOX_COMPUTE = "sandbox_compute"
 
 
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS

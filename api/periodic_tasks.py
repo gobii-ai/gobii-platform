@@ -82,6 +82,13 @@ def add_dynamic_schedules():
         "args": [],
     }
 
+    # Sandbox compute idle sweep
+    beat_schedule["sandbox-idle-sweep"] = {
+        "task": "api.tasks.sandbox_idle_sweep",
+        "schedule": crontab(minute="*/5"),
+        "args": [],
+    }
+
 def clean_up_old_decodo_schedules():
     """Clean up old per-block schedule entries from Redis Beat."""
     logger.info("Starting cleanup of old Decodo IP block sync schedules")
