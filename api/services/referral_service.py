@@ -223,18 +223,19 @@ class ReferralService:
             attribution.save(update_fields=['referral_credit_granted_at'])
             return False
 
-        # Grant the credits
-        cls._grant_referral_credits(
-            referring_user=referring_user,
-            new_user=user,
-            grant_type=grant_type,
-            template_code=template_code,
-            deferred=True,
-        )
+        # Grant the credits and mark as granted atomically
+        with transaction.atomic():
+            cls._grant_referral_credits(
+                referring_user=referring_user,
+                new_user=user,
+                grant_type=grant_type,
+                template_code=template_code,
+                deferred=True,
+            )
 
-        # Mark as granted
-        attribution.referral_credit_granted_at = timezone.now()
-        attribution.save(update_fields=['referral_credit_granted_at'])
+            # Mark as granted
+            attribution.referral_credit_granted_at = timezone.now()
+            attribution.save(update_fields=['referral_credit_granted_at'])
 
         logger.info(
             "Deferred referral credits granted: new_user=%s referrer=%s type=%s",
