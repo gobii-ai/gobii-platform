@@ -21,7 +21,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, BrowserUseAgentTask
 from constants.grant_types import GrantTypeChoices
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -151,14 +151,25 @@ class ReferralService:
         return result
 
     @classmethod
+    def _user_has_completed_task(cls, user: User) -> bool:
+        """Check if user has at least one completed browser task."""
+        return BrowserUseAgentTask.objects.filter(
+            user=user,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        ).exists()
+
+    @classmethod
     def check_and_grant_deferred_referral_credits(cls, user: User) -> bool:
         """
         Check if user has pending referral credits and grant them.
 
         This should be called after the user completes their first task.
         Only grants if:
+        - User has at least one completed task (fraud prevention)
         - User has referral attribution (referrer_code or signup_template_code)
         - Credits haven't already been granted (referral_credit_granted_at is null)
+
+        Uses select_for_update() to prevent duplicate grants under concurrency.
 
         Args:
             user: The user who completed a task
@@ -166,65 +177,79 @@ class ReferralService:
         Returns:
             True if credits were granted, False otherwise.
         """
+        # Quick check without locking - avoid transaction overhead for most users
         try:
             attribution = UserAttribution.objects.get(user=user)
         except UserAttribution.DoesNotExist:
             return False
 
-        # Already granted
+        # Early exit checks (no lock needed)
         if attribution.referral_credit_granted_at is not None:
             return False
-
-        # No referral to process
         if not attribution.referrer_code and not attribution.signup_template_code:
             return False
 
-        # Determine referral type and find referrer
-        referring_user = None
-        grant_type = None
-        template_code = None
-
-        if attribution.signup_template_code:
-            # Template referral
-            try:
-                template = PersistentAgentTemplate.objects.select_related(
-                    'created_by'
-                ).get(code=attribution.signup_template_code)
-                referring_user = template.created_by
-                grant_type = GrantTypeChoices.REFERRAL_SHARED
-                template_code = attribution.signup_template_code
-            except PersistentAgentTemplate.DoesNotExist:
-                logger.warning(
-                    "Deferred grant: template not found code=%s user=%s",
-                    attribution.signup_template_code,
-                    user.id,
-                )
-
-        if not referring_user and attribution.referrer_code:
-            # Direct referral
-            referring_user = UserReferral.get_user_by_code(attribution.referrer_code)
-            grant_type = GrantTypeChoices.REFERRAL
-
-        if not referring_user:
-            logger.warning(
-                "Deferred grant: referrer not found user=%s ref_code=%s template_code=%s",
-                user.id,
-                attribution.referrer_code,
-                attribution.signup_template_code,
-            )
-            # Mark as processed to avoid repeated lookups
-            attribution.referral_credit_granted_at = timezone.now()
-            attribution.save(update_fields=['referral_credit_granted_at'])
+        # Verify user has actually completed a task (fraud prevention)
+        if not cls._user_has_completed_task(user):
             return False
 
-        # Don't grant if referring self (shouldn't happen, but defensive)
-        if referring_user.id == user.id:
-            attribution.referral_credit_granted_at = timezone.now()
-            attribution.save(update_fields=['referral_credit_granted_at'])
-            return False
-
-        # Grant the credits and mark as granted atomically
+        # Now do the actual grant with proper locking
         with transaction.atomic():
+            # Re-fetch with lock to prevent race conditions
+            try:
+                attribution = UserAttribution.objects.select_for_update().get(user=user)
+            except UserAttribution.DoesNotExist:
+                return False
+
+            # Double-check after acquiring lock (another process may have granted)
+            if attribution.referral_credit_granted_at is not None:
+                return False
+
+            # Determine referral type and find referrer
+            referring_user = None
+            grant_type = None
+            template_code = None
+
+            if attribution.signup_template_code:
+                # Template referral
+                try:
+                    template = PersistentAgentTemplate.objects.select_related(
+                        'created_by'
+                    ).get(code=attribution.signup_template_code)
+                    referring_user = template.created_by
+                    grant_type = GrantTypeChoices.REFERRAL_SHARED
+                    template_code = attribution.signup_template_code
+                except PersistentAgentTemplate.DoesNotExist:
+                    logger.warning(
+                        "Deferred grant: template not found code=%s user=%s",
+                        attribution.signup_template_code,
+                        user.id,
+                    )
+
+            if not referring_user and attribution.referrer_code:
+                # Direct referral
+                referring_user = UserReferral.get_user_by_code(attribution.referrer_code)
+                grant_type = GrantTypeChoices.REFERRAL
+
+            if not referring_user:
+                logger.warning(
+                    "Deferred grant: referrer not found user=%s ref_code=%s template_code=%s",
+                    user.id,
+                    attribution.referrer_code,
+                    attribution.signup_template_code,
+                )
+                # Mark as processed to avoid repeated lookups
+                attribution.referral_credit_granted_at = timezone.now()
+                attribution.save(update_fields=['referral_credit_granted_at'])
+                return False
+
+            # Don't grant if referring self (shouldn't happen, but defensive)
+            if referring_user.id == user.id:
+                attribution.referral_credit_granted_at = timezone.now()
+                attribution.save(update_fields=['referral_credit_granted_at'])
+                return False
+
+            # Grant the credits
             cls._grant_referral_credits(
                 referring_user=referring_user,
                 new_user=user,
@@ -244,7 +269,7 @@ class ReferralService:
             grant_type,
         )
 
-        # Track the deferred grant
+        # Track the deferred grant (outside transaction - analytics can fail independently)
         Analytics.track_event(
             user_id=user.id,
             event=AnalyticsEvent.REFERRAL_CREDITS_GRANTED,
@@ -450,12 +475,13 @@ class ReferralService:
         return link
 
     @classmethod
-    def has_pending_referral_credit(cls, user: User) -> bool:
+    def has_pending_referral_credit(cls, user: User, require_completed_task: bool = False) -> bool:
         """
         Check if user has a pending referral credit that hasn't been granted yet.
 
         Args:
             user: The user to check
+            require_completed_task: If True, also verify user has completed a task
 
         Returns:
             True if there's a pending referral credit, False otherwise.
@@ -468,4 +494,11 @@ class ReferralService:
         if attribution.referral_credit_granted_at is not None:
             return False
 
-        return bool(attribution.referrer_code or attribution.signup_template_code)
+        has_referral = bool(attribution.referrer_code or attribution.signup_template_code)
+        if not has_referral:
+            return False
+
+        if require_completed_task and not cls._user_has_completed_task(user):
+            return False
+
+        return True

@@ -3,7 +3,7 @@ from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile
+from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask
 from api.services.referral_service import ReferralService, ReferralType
 from middleware.utm_capture import UTMTrackingMiddleware
 
@@ -143,6 +143,14 @@ class DeferredReferralGrantTests(TestCase):
         )
         self.referrer_referral = UserReferral.get_or_create_for_user(self.referrer)
 
+    def _create_completed_task(self, user):
+        """Helper to create a completed browser task for a user."""
+        return BrowserUseAgentTask.objects.create(
+            user=user,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            task='Test task',
+        )
+
     def test_has_pending_referral_credit_true(self):
         """Test has_pending_referral_credit returns True when pending."""
         UserAttribution.objects.create(
@@ -166,8 +174,26 @@ class DeferredReferralGrantTests(TestCase):
         UserAttribution.objects.create(user=self.new_user)
         self.assertFalse(ReferralService.has_pending_referral_credit(self.new_user))
 
+    def test_has_pending_referral_credit_with_task_requirement(self):
+        """Test has_pending_referral_credit with require_completed_task=True."""
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        # Without completed task
+        self.assertFalse(ReferralService.has_pending_referral_credit(
+            self.new_user, require_completed_task=True
+        ))
+
+        # With completed task
+        self._create_completed_task(self.new_user)
+        self.assertTrue(ReferralService.has_pending_referral_credit(
+            self.new_user, require_completed_task=True
+        ))
+
     def test_check_and_grant_deferred_credits_success(self):
         """Test granting deferred credits after first task."""
+        self._create_completed_task(self.new_user)
         UserAttribution.objects.create(
             user=self.new_user,
             referrer_code=self.referrer_referral.referral_code,
@@ -179,9 +205,23 @@ class DeferredReferralGrantTests(TestCase):
         attribution = UserAttribution.objects.get(user=self.new_user)
         self.assertIsNotNone(attribution.referral_credit_granted_at)
 
+    def test_check_and_grant_deferred_credits_no_completed_task(self):
+        """Test that credits aren't granted without a completed task."""
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertFalse(result)
+
+        # Verify it was NOT marked as granted
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNone(attribution.referral_credit_granted_at)
+
     def test_check_and_grant_deferred_credits_already_granted(self):
         """Test that credits aren't granted twice."""
         from django.utils import timezone
+        self._create_completed_task(self.new_user)
         UserAttribution.objects.create(
             user=self.new_user,
             referrer_code=self.referrer_referral.referral_code,
@@ -190,6 +230,21 @@ class DeferredReferralGrantTests(TestCase):
         result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
         self.assertFalse(result)
 
+    def test_check_and_grant_deferred_credits_idempotent(self):
+        """Test that repeated calls don't grant credits twice."""
+        self._create_completed_task(self.new_user)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        # First call should succeed
+        result1 = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertTrue(result1)
+
+        # Second call should fail (already granted)
+        result2 = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertFalse(result2)
+
     def test_check_and_grant_deferred_credits_no_attribution(self):
         """Test graceful handling when user has no attribution record."""
         result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
@@ -197,6 +252,7 @@ class DeferredReferralGrantTests(TestCase):
 
     def test_check_and_grant_deferred_credits_invalid_code(self):
         """Test handling when referral code is no longer valid."""
+        self._create_completed_task(self.new_user)
         UserAttribution.objects.create(
             user=self.new_user,
             referrer_code='INVALID_CODE',
