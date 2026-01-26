@@ -1290,7 +1290,7 @@ class MCPToolExecutorsTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["result"], "Tool executed")
         mock_manager.execute_mcp_tool.assert_called_once_with(
-            self.agent, "mcp_test_tool", {"param": "value"}
+            self.agent, "mcp_test_tool", {"param": "value"}, force_local=False
         )
 
 
