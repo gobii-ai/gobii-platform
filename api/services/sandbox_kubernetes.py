@@ -79,6 +79,16 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
+        self._egress_proxy_image = getattr(settings, "SANDBOX_EGRESS_PROXY_POD_IMAGE", "")
+        self._egress_proxy_port = int(getattr(settings, "SANDBOX_EGRESS_PROXY_POD_PORT", 3128))
+        self._egress_proxy_service_port = int(
+            getattr(settings, "SANDBOX_EGRESS_PROXY_SERVICE_PORT", self._egress_proxy_port)
+        )
+        self._egress_proxy_runtime_class = getattr(settings, "SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS", "") or ""
+        self._egress_proxy_service_account = (
+            getattr(settings, "SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT", "") or ""
+        )
+        self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
         self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
@@ -91,6 +101,22 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
         pvc_name = _pvc_name(agent.id)
+        proxy_url = None
+        no_proxy = None
+        if session.proxy_server:
+            if not self._egress_proxy_image:
+                raise SandboxComputeUnavailable(
+                    "SANDBOX_EGRESS_PROXY_POD_IMAGE is required to use proxy-backed sandbox pods."
+                )
+            service_name = self._ensure_egress_proxy(agent, session.proxy_server)
+            proxy_url = f"http://{service_name}:{self._egress_proxy_service_port}"
+            no_proxy = _merge_no_proxy_values(
+                self._no_proxy,
+                "localhost",
+                "127.0.0.1",
+                ".svc",
+                ".cluster.local",
+            )
 
         snapshot_name = session.workspace_snapshot.k8s_snapshot_name if session.workspace_snapshot else None
         if snapshot_name and not _resource_exists(self._client, _snapshot_path(self._namespace, snapshot_name)):
@@ -102,12 +128,24 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
             pod = self._get_pod(pod_name)
             if not pod:
-                self._create_pod(pod_name, pvc_name, agent_id=str(agent.id))
+                self._create_pod(
+                    pod_name,
+                    pvc_name,
+                    agent_id=str(agent.id),
+                    proxy_url=proxy_url,
+                    no_proxy=no_proxy,
+                )
             else:
                 phase = (pod.get("status") or {}).get("phase")
                 if phase not in {"Running", "Pending"}:
                     self._delete_pod(pod_name)
-                    self._create_pod(pod_name, pvc_name, agent_id=str(agent.id))
+                    self._create_pod(
+                        pod_name,
+                        pvc_name,
+                        agent_id=str(agent.id),
+                        proxy_url=proxy_url,
+                        no_proxy=no_proxy,
+                    )
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
 
@@ -251,6 +289,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> SandboxSessionUpdate:
         pod_name = session.pod_name or _pod_name(agent.id)
         self._delete_pod(pod_name)
+        self._delete_egress_proxy(agent)
         if delete_workspace:
             pvc_name = _pvc_name(agent.id)
             self._delete_pvc(pvc_name)
@@ -288,7 +327,65 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             logger.warning("Failed to fetch pod %s: %s", pod_name, exc)
             return None
 
-    def _create_pod(self, pod_name: str, pvc_name: str, *, agent_id: str) -> None:
+    def _get_service(self, service_name: str) -> Optional[Dict[str, Any]]:
+        try:
+            return self._client.request_json(
+                "GET",
+                _service_path(self._namespace, service_name),
+                allow_404=True,
+            )
+        except KubernetesApiError as exc:
+            logger.warning("Failed to fetch service %s: %s", service_name, exc)
+            return None
+
+    def _ensure_egress_proxy(self, agent, proxy_server) -> str:
+        proxy_type = str(getattr(proxy_server, "proxy_type", "") or "").upper()
+        if proxy_type in {"SOCKS4", "SOCKS5"}:
+            raise SandboxComputeUnavailable("SOCKS proxies are not supported for sandbox egress.")
+
+        host = str(getattr(proxy_server, "host", "") or "").strip()
+        port = getattr(proxy_server, "port", None)
+        if not host or not port:
+            raise SandboxComputeUnavailable("Proxy server is missing host/port metadata.")
+
+        pod_name = _egress_proxy_pod_name(agent.id)
+        service_name = _egress_proxy_service_name(agent.id)
+
+        try:
+            service = self._get_service(service_name)
+            if not service:
+                self._create_egress_proxy_service(service_name, agent_id=str(agent.id))
+
+            pod = self._get_pod(pod_name)
+            if not pod:
+                self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
+            else:
+                phase = (pod.get("status") or {}).get("phase")
+                labels = (pod.get("metadata") or {}).get("labels") or {}
+                current_proxy_id = str(getattr(proxy_server, "id", "") or "")
+                if current_proxy_id and labels.get("proxy_id") != current_proxy_id:
+                    self._delete_pod(pod_name)
+                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
+                elif phase not in {"Running", "Pending"}:
+                    self._delete_pod(pod_name)
+                    self._create_egress_proxy_pod(pod_name, agent_id=str(agent.id), proxy_server=proxy_server)
+        except KubernetesApiError as exc:
+            raise SandboxComputeUnavailable(f"Egress proxy provisioning failed: {exc}") from exc
+
+        if not self._wait_for_pod_ready(pod_name):
+            raise SandboxComputeUnavailable("Egress proxy pod did not become ready in time.")
+
+        return service_name
+
+    def _create_pod(
+        self,
+        pod_name: str,
+        pvc_name: str,
+        *,
+        agent_id: str,
+        proxy_url: Optional[str],
+        no_proxy: Optional[str],
+    ) -> None:
         body = _build_pod_manifest(
             pod_name=pod_name,
             pvc_name=pvc_name,
@@ -299,9 +396,42 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
             agent_id=agent_id,
+            proxy_url=proxy_url,
+            no_proxy=no_proxy,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
+        except KubernetesApiError as exc:
+            if exc.status_code != 409:
+                raise
+
+    def _create_egress_proxy_pod(self, pod_name: str, *, agent_id: str, proxy_server) -> None:
+        body = _build_egress_proxy_pod_manifest(
+            pod_name=pod_name,
+            namespace=self._namespace,
+            image=self._egress_proxy_image,
+            runtime_class=self._egress_proxy_runtime_class or None,
+            service_account=self._egress_proxy_service_account or None,
+            agent_id=agent_id,
+            proxy_server=proxy_server,
+            listen_port=self._egress_proxy_port,
+        )
+        try:
+            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
+        except KubernetesApiError as exc:
+            if exc.status_code != 409:
+                raise
+
+    def _create_egress_proxy_service(self, service_name: str, *, agent_id: str) -> None:
+        body = _build_egress_proxy_service_manifest(
+            service_name=service_name,
+            namespace=self._namespace,
+            agent_id=agent_id,
+            port=self._egress_proxy_service_port,
+            target_port=self._egress_proxy_port,
+        )
+        try:
+            self._client.request_json("POST", _service_collection_path(self._namespace), json_body=body)
         except KubernetesApiError as exc:
             if exc.status_code != 409:
                 raise
@@ -331,6 +461,15 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._client.request_json("DELETE", _pvc_path(self._namespace, pvc_name), allow_404=True)
         except KubernetesApiError as exc:
             logger.warning("Failed to delete PVC %s: %s", pvc_name, exc)
+
+    def _delete_egress_proxy(self, agent) -> None:
+        pod_name = _egress_proxy_pod_name(agent.id)
+        service_name = _egress_proxy_service_name(agent.id)
+        self._delete_pod(pod_name)
+        try:
+            self._client.request_json("DELETE", _service_path(self._namespace, service_name), allow_404=True)
+        except KubernetesApiError as exc:
+            logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
         deadline = time.time() + self._pod_ready_timeout
@@ -441,6 +580,14 @@ def _pvc_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-workspace-{agent_id}")
 
 
+def _egress_proxy_pod_name(agent_id: Any) -> str:
+    return _slugify(f"sandbox-egress-{agent_id}")
+
+
+def _egress_proxy_service_name(agent_id: Any) -> str:
+    return _slugify(f"sandbox-egress-{agent_id}")
+
+
 def _snapshot_name(agent_id: Any) -> str:
     stamp = time.strftime("%Y%m%d%H%M%S", time.gmtime())
     return _slugify(f"sandbox-snap-{str(agent_id)[:8]}-{stamp}")
@@ -465,6 +612,14 @@ def _pvc_collection_path(namespace: str) -> str:
 
 def _pvc_path(namespace: str, pvc_name: str) -> str:
     return f"/api/v1/namespaces/{namespace}/persistentvolumeclaims/{pvc_name}"
+
+
+def _service_collection_path(namespace: str) -> str:
+    return f"/api/v1/namespaces/{namespace}/services"
+
+
+def _service_path(namespace: str, service_name: str) -> str:
+    return f"/api/v1/namespaces/{namespace}/services/{service_name}"
 
 
 def _snapshot_collection_path(namespace: str) -> str:
@@ -520,7 +675,45 @@ def _build_pod_manifest(
     configmap_name: str,
     secret_name: str,
     agent_id: str,
+    proxy_url: Optional[str],
+    no_proxy: Optional[str],
 ) -> Dict[str, Any]:
+    env: list[Dict[str, str]] = []
+    if proxy_url:
+        env.append({"name": "HTTP_PROXY", "value": proxy_url})
+        env.append({"name": "HTTPS_PROXY", "value": proxy_url})
+    if no_proxy:
+        env.append({"name": "NO_PROXY", "value": no_proxy})
+
+    container: Dict[str, Any] = {
+        "name": "sandbox-supervisor",
+        "image": image,
+        "imagePullPolicy": "Always",
+        "ports": [{"containerPort": 8080}],
+        "envFrom": [
+            {"secretRef": {"name": secret_name}},
+            {"configMapRef": {"name": configmap_name}},
+        ],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "runAsNonRoot": True,
+            "runAsUser": 1000,
+            "runAsGroup": 1000,
+            "capabilities": {"drop": ["ALL"]},
+        },
+        "volumeMounts": [
+            {"name": "workspace", "mountPath": "/workspace"},
+        ],
+        "readinessProbe": {
+            "httpGet": {"path": "/healthz", "port": 8080},
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "failureThreshold": 3,
+        },
+    }
+    if env:
+        container["env"] = env
+
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -540,34 +733,7 @@ def _build_pod_manifest(
             "securityContext": {
                 "seccompProfile": {"type": "RuntimeDefault"},
             },
-            "containers": [
-                {
-                    "name": "sandbox-supervisor",
-                    "image": image,
-                    "imagePullPolicy": "Always",
-                    "ports": [{"containerPort": 8080}],
-                    "envFrom": [
-                        {"secretRef": {"name": secret_name}},
-                        {"configMapRef": {"name": configmap_name}},
-                    ],
-                    "securityContext": {
-                        "allowPrivilegeEscalation": False,
-                        "runAsNonRoot": True,
-                        "runAsUser": 1000,
-                        "runAsGroup": 1000,
-                        "capabilities": {"drop": ["ALL"]},
-                    },
-                    "volumeMounts": [
-                        {"name": "workspace", "mountPath": "/workspace"},
-                    ],
-                    "readinessProbe": {
-                        "httpGet": {"path": "/healthz", "port": 8080},
-                        "initialDelaySeconds": 10,
-                        "periodSeconds": 10,
-                        "failureThreshold": 3,
-                    },
-                }
-            ],
+            "containers": [container],
             "volumes": [
                 {
                     "name": "workspace",
@@ -576,3 +742,140 @@ def _build_pod_manifest(
             ],
         },
     }
+
+
+def _build_egress_proxy_pod_manifest(
+    *,
+    pod_name: str,
+    namespace: str,
+    image: str,
+    runtime_class: Optional[str],
+    service_account: Optional[str],
+    agent_id: str,
+    proxy_server: Any,
+    listen_port: int,
+) -> Dict[str, Any]:
+    host = str(getattr(proxy_server, "host", "") or "").strip()
+    port = str(getattr(proxy_server, "port", "") or "").strip()
+    username = str(getattr(proxy_server, "username", "") or "").strip()
+    password = str(getattr(proxy_server, "password", "") or "").strip()
+    proxy_id = str(getattr(proxy_server, "id", "") or "").strip()
+
+    env = [
+        {"name": "UPSTREAM_HOST", "value": host},
+        {"name": "UPSTREAM_PORT", "value": port},
+        {"name": "PROXY_LISTEN_PORT", "value": str(listen_port)},
+    ]
+    if username:
+        env.append({"name": "UPSTREAM_USERNAME", "value": username})
+    if password:
+        env.append({"name": "UPSTREAM_PASSWORD", "value": password})
+
+    labels = {
+        "app": "sandbox-egress-proxy",
+        "component": "sandbox-egress",
+        "agent_id": agent_id,
+    }
+    if proxy_id:
+        labels["proxy_id"] = proxy_id
+
+    spec: Dict[str, Any] = {
+        "terminationGracePeriodSeconds": 30,
+        "securityContext": {
+            "seccompProfile": {"type": "RuntimeDefault"},
+        },
+        "containers": [
+            {
+                "name": "egress-proxy",
+                "image": image,
+                "imagePullPolicy": "Always",
+                "ports": [{"containerPort": listen_port}],
+                "env": env,
+                "securityContext": {
+                    "allowPrivilegeEscalation": False,
+                    "runAsNonRoot": True,
+                    "runAsUser": 1000,
+                    "runAsGroup": 1000,
+                    "capabilities": {"drop": ["ALL"]},
+                },
+                "readinessProbe": {
+                    "tcpSocket": {"port": listen_port},
+                    "initialDelaySeconds": 3,
+                    "periodSeconds": 5,
+                    "failureThreshold": 3,
+                },
+                "livenessProbe": {
+                    "tcpSocket": {"port": listen_port},
+                    "initialDelaySeconds": 5,
+                    "periodSeconds": 10,
+                    "failureThreshold": 3,
+                },
+            }
+        ],
+    }
+    if runtime_class:
+        spec["runtimeClassName"] = runtime_class
+    if service_account:
+        spec["serviceAccountName"] = service_account
+
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": pod_name,
+            "namespace": namespace,
+            "labels": labels,
+        },
+        "spec": spec,
+    }
+
+
+def _build_egress_proxy_service_manifest(
+    *,
+    service_name: str,
+    namespace: str,
+    agent_id: str,
+    port: int,
+    target_port: int,
+) -> Dict[str, Any]:
+    return {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {
+            "name": service_name,
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-egress-proxy",
+                "component": "sandbox-egress",
+                "agent_id": agent_id,
+            },
+        },
+        "spec": {
+            "type": "ClusterIP",
+            "selector": {
+                "app": "sandbox-egress-proxy",
+                "agent_id": agent_id,
+            },
+            "ports": [
+                {
+                    "name": "http",
+                    "port": port,
+                    "targetPort": target_port,
+                    "protocol": "TCP",
+                }
+            ],
+        },
+    }
+
+
+def _merge_no_proxy_values(*values: str) -> str:
+    parts: list[str] = []
+    for value in values:
+        if not value:
+            continue
+        for item in value.split(","):
+            cleaned = item.strip()
+            if not cleaned or cleaned in parts:
+                continue
+            parts.append(cleaned)
+    return ",".join(parts)

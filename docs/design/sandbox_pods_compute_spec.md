@@ -33,11 +33,17 @@ Owner: Platform
 - Compute API service used by Gobii agents and tools.
 - Metadata store for session state and snapshots.
 - Scheduler that creates, resumes, or stops per-agent pods.
+- Egress proxy controller that creates per-agent egress proxy pods and services.
 
 ### Compute Pods (in GKE)
 - GKE sandbox pods using gVisor (RuntimeClass: gvisor).
 - One pod per agent, running a sandbox tool supervisor.
 - Interactive session via exec/PTY proxy.
+
+### Egress Proxy Pods (in GKE)
+- One proxy pod per agent, configured with the selected Decodo upstream (host/port/creds).
+- Exposes a per-agent ClusterIP service (e.g., `sandbox-egress-<agent_id>`).
+- Sandbox pods send all outbound HTTP/S traffic to the per-agent proxy service.
 
 ### Storage
 - Per-agent PVC for workspace (1 GB cap).
@@ -47,6 +53,8 @@ Owner: Platform
 ### Networking
 - NetworkPolicy enforces egress only to proxy endpoints.
 - Pod environment provides proxy settings for all tools.
+- Control plane selects a healthy Decodo proxy from the DB and wires the per-agent proxy pod.
+- Sandbox pod `HTTP_PROXY/HTTPS_PROXY` point at the per-agent proxy service; the proxy pod connects to Decodo.
 
 ## Kubernetes Primitives
 
@@ -61,6 +69,13 @@ Owner: Platform
   - optional sync-sidecar (if using continuous sync)
 - Volumes:
   - workspace PVC mounted at /workspace
+
+### Pod (per-agent egress proxy)
+- Labels: agent_id, compute_session_id, app=sandbox-egress-proxy
+- Container:
+  - egress-proxy (connects to Decodo upstream defined by env)
+- Service:
+  - ClusterIP per agent (e.g., `sandbox-egress-<agent_id>`)
 
 ### PVC
 - Size: 1Gi

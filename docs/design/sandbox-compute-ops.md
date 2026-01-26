@@ -8,6 +8,9 @@
 - SANDBOX_COMPUTE_PVC_STORAGE_CLASS / SANDBOX_COMPUTE_SNAPSHOT_CLASS: storage/snapshot class names.
 - SANDBOX_COMPUTE_POD_CONFIGMAP_NAME / SANDBOX_COMPUTE_POD_SECRET_NAME: env sources for pods.
 - SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS / SANDBOX_COMPUTE_SNAPSHOT_TIMEOUT_SECONDS: readiness timeouts.
+- SANDBOX_EGRESS_PROXY_POD_IMAGE: per-agent egress proxy image.
+- SANDBOX_EGRESS_PROXY_POD_PORT / SANDBOX_EGRESS_PROXY_SERVICE_PORT: listen + service ports for the proxy.
+- SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS / SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT: optional proxy pod settings.
 
 ## RBAC requirements
 The control-plane service account must be able to:
@@ -20,6 +23,7 @@ The control-plane service account must be able to:
 - Pods: sandbox-agent-<agent_uuid>
 - PVCs: sandbox-workspace-<agent_uuid>
 - Snapshots: sandbox-snap-<agent_prefix>-<timestamp>
+- Egress proxy pods/services: sandbox-egress-<agent_uuid>
 
 ## Lifecycle
 - Idle sweeper syncs workspace, snapshots PVC, deletes pod, and deletes PVC on success.
