@@ -1021,7 +1021,7 @@ CAPSOLVER_API_KEY = env("CAPSOLVER_API_KEY", default="")
 GOBII_RELEASE_ENV = env("GOBII_RELEASE_ENV", default="local")
 
 # ────────── Sandbox Compute ──────────
-SANDBOX_COMPUTE_ENABLED = env.bool("SANDBOX_COMPUTE_ENABLED", default=False)
+SANDBOX_COMPUTE_ENABLED = env.bool("SANDBOX_COMPUTE_ENABLED", default=True)
 SANDBOX_COMPUTE_BACKEND = env(
     "SANDBOX_COMPUTE_BACKEND",
     default=("local" if SANDBOX_COMPUTE_ENABLED else ""),
