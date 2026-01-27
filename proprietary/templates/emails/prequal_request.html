@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      color: #333;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .header {
+      background-color: #f0f7ff;
+      padding: 15px;
+      border-bottom: 1px solid #dbeafe;
+    }
+    .content {
+      padding: 20px 0;
+    }
+    .footer {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid #dee2e6;
+      font-size: 12px;
+      color: #6c757d;
+    }
+    .field {
+      margin-bottom: 15px;
+    }
+    .field-label {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h2>New pre-qualification request</h2>
+    </div>
+
+    <div class="content">
+      <p>A new request has been submitted through the pre-qualification form:</p>
+
+      <div class="field">
+        <div class="field-label">Name:</div>
+        <div>{{ name }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Email:</div>
+        <div>{{ email }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Company:</div>
+        <div>{{ company }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Role:</div>
+        <div>{{ role }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Team size:</div>
+        <div>{{ team_size }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Monthly volume:</div>
+        <div>{{ monthly_volume }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Budget range:</div>
+        <div>{{ budget_range }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Timeline:</div>
+        <div>{{ timeline }}</div>
+      </div>
+
+      <div class="field">
+        <div class="field-label">Primary use case:</div>
+        <div>{{ use_case|linebreaksbr }}</div>
+      </div>
+
+      {% if website %}
+      <div class="field">
+        <div class="field-label">Website or LinkedIn:</div>
+        <div>{{ website }}</div>
+      </div>
+      {% endif %}
+
+      {% if notes %}
+      <div class="field">
+        <div class="field-label">Additional context:</div>
+        <div>{{ notes|linebreaksbr }}</div>
+      </div>
+      {% endif %}
+
+      {% if referrer %}
+      <div class="field">
+        <div class="field-label">Referrer:</div>
+        <div>{{ referrer }}</div>
+      </div>
+      {% endif %}
+
+      <div class="field">
+        <div class="field-label">Page URL:</div>
+        <div>{{ page_url }}</div>
+      </div>
+
+      {% if utm_source or utm_medium or utm_campaign or utm_content or utm_term %}
+      <div class="field">
+        <div class="field-label">UTM:</div>
+        <div>
+          {% if utm_source %}source: {{ utm_source }}<br>{% endif %}
+          {% if utm_medium %}medium: {{ utm_medium }}<br>{% endif %}
+          {% if utm_campaign %}campaign: {{ utm_campaign }}<br>{% endif %}
+          {% if utm_content %}content: {{ utm_content }}<br>{% endif %}
+          {% if utm_term %}term: {{ utm_term }}{% endif %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="footer">
+      <p>This email was sent from the Gobii pre-qualification form.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -26,6 +26,7 @@ export default defineConfig(({ mode }) => ({
     rollupOptions: {
       input: {
         main: resolve(projectRootDir, 'src/main.tsx'),
+        prequal: resolve(projectRootDir, 'src/prequal.ts'),
       },
     },
   },

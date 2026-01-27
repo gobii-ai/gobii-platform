@@ -102,7 +102,7 @@ Whether you’re exploring browser-use or ready to deploy production-grade AI ag
 
 🌐 **Try Gobii Cloud:** [gobii.ai](https://gobii.ai)  
 💻 **Run Gobii Open Source:** [GitHub Repository](https://github.com/gobii-ai/gobii-platform)  
-📞 **Explore Gobii Enterprise:** [Book a call with the founder](https://cal.com/andrew-gobii)  
+📞 **Explore Gobii Enterprise:** [Request a call](/qualify/)  
 
 ---
 
