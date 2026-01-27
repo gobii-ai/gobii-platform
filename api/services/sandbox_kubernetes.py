@@ -720,6 +720,8 @@ def _build_pod_manifest(
             "runtimeClassName": runtime_class,
             "terminationGracePeriodSeconds": 300,
             "securityContext": {
+                "fsGroup": 1000,
+                "fsGroupChangePolicy": "OnRootMismatch",
                 "seccompProfile": {"type": "RuntimeDefault"},
             },
             "containers": [container],
