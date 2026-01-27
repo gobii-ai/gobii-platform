@@ -13,6 +13,8 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 import requests
 
+from api.sandbox_utils import normalize_timeout as _normalize_timeout
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_ALLOWED_ENV_KEYS = {
@@ -120,18 +122,6 @@ def _python_max_timeout_seconds() -> int:
         except ValueError:
             pass
     return 120
-
-
-def _normalize_timeout(value: Any, *, default: int, maximum: Optional[int] = None) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    if parsed <= 0:
-        parsed = default
-    if maximum is not None:
-        return min(parsed, maximum)
-    return parsed
 
 
 def _agent_workspace(agent_id: str) -> Path:

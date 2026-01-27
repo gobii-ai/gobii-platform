@@ -2,15 +2,13 @@ import logging
 
 from django.conf import settings
 
+from api.services.sandbox_compute import sandbox_compute_enabled
+
 logger = logging.getLogger(__name__)
 
 
-def _sandbox_enabled() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
-
-
 def schedule_mcp_tool_discovery(config_id: str, *, reason: str) -> None:
-    if not config_id or not _sandbox_enabled():
+    if not config_id or not sandbox_compute_enabled():
         return
 
     if not getattr(settings, "CELERY_BROKER_URL", ""):

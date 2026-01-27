@@ -9,6 +9,7 @@ import requests
 from django.conf import settings
 
 from api.models import AgentComputeSession
+from api.sandbox_utils import normalize_timeout as _normalize_timeout
 from api.services.sandbox_compute import SandboxComputeBackend, SandboxComputeUnavailable, SandboxSessionUpdate
 
 logger = logging.getLogger(__name__)
@@ -552,18 +553,6 @@ def _resource_exists(client: KubernetesApiClient, path: str) -> bool:
         return client.request_json("GET", path, allow_404=True) is not None
     except KubernetesApiError:
         return False
-
-
-def _normalize_timeout(value: Any, *, default: int, maximum: Optional[int] = None) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    if parsed <= 0:
-        parsed = default
-    if maximum is not None:
-        return min(parsed, maximum)
-    return parsed
 
 
 def _slugify(value: str) -> str:

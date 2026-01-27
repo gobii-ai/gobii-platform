@@ -17,6 +17,7 @@ from django.utils import timezone
 from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
+from api.sandbox_utils import normalize_timeout as _normalize_timeout
 from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
@@ -523,16 +524,6 @@ def _truncate_streams(stdout: str, stderr: str, max_bytes: int) -> tuple[str, st
         truncated_stdout.decode("utf-8", errors="ignore"),
         truncated_stderr.decode("utf-8", errors="ignore"),
     )
-
-
-def _normalize_timeout(value: Any, *, default: int, maximum: int) -> int:
-    try:
-        parsed = int(value)
-    except (TypeError, ValueError):
-        parsed = default
-    if parsed <= 0:
-        parsed = default
-    return min(parsed, maximum)
 
 
 def _parse_sync_timestamp(value: Any) -> Optional[timezone.datetime]:

@@ -335,7 +335,7 @@ class MCPToolManagerTests(TestCase):
         async def _fake_fetch(*args, **kwargs):
             return []
 
-        with patch("api.agent.tools.mcp_manager._sandbox_enabled", return_value=False), \
+        with patch("api.agent.tools.mcp_manager.sandbox_compute_enabled_for_agent", return_value=False), \
                 patch.object(manager, "_ensure_event_loop", return_value=loop), \
                 patch.object(manager, "_select_discovery_proxy_url", return_value=None), \
                 patch.object(manager, "_fetch_server_tools", new=_fake_fetch):

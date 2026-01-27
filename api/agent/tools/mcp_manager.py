@@ -51,7 +51,12 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
-from ...services.sandbox_compute import sandbox_compute_enabled_for_agent
+from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
+from ...services.sandbox_compute import (
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+    sandbox_compute_enabled_for_agent,
+)
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
     get_cached_mcp_tool_definitions,
@@ -78,10 +83,6 @@ def _use_mcp_proxy(proxy_url: Optional[str]):
             _proxy_url_var.reset(token)
     else:
         yield
-
-
-def _sandbox_enabled(agent: Optional[PersistentAgent] = None) -> bool:
-    return sandbox_compute_enabled_for_agent(agent)
 
 
 def _sandbox_mcp_fallback_enabled() -> bool:
@@ -919,7 +920,7 @@ class MCPToolManager:
 
         if (
             server.scope != MCPServerConfig.Scope.PLATFORM
-            and _sandbox_enabled()
+            and sandbox_compute_enabled_for_agent(None)
             and not force_local
         ):
             cache_fingerprint = self._build_tool_cache_fingerprint(server)
@@ -936,8 +937,6 @@ class MCPToolManager:
                         server.config_id,
                     )
                     return
-            from api.services.mcp_tool_discovery import schedule_mcp_tool_discovery
-
             logger.info(
                 "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
                 server.name,
@@ -1430,8 +1429,13 @@ class MCPToolManager:
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
 
-        if runtime and runtime.scope != MCPServerConfig.Scope.PLATFORM and _sandbox_enabled(agent) and not force_local:
-            from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable
+        sandbox_fallback = False
+        if (
+            runtime
+            and runtime.scope != MCPServerConfig.Scope.PLATFORM
+            and sandbox_compute_enabled_for_agent(agent)
+            and not force_local
+        ):
 
             try:
                 service = SandboxComputeService()
@@ -1450,8 +1454,16 @@ class MCPToolManager:
                 and _sandbox_mcp_fallback_enabled()
             ):
                 logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
+                sandbox_fallback = True
             else:
                 return sandbox_result
+
+        if sandbox_fallback and runtime:
+            if not self._ensure_runtime_registered(runtime, force_local=True):
+                return {
+                    "status": "error",
+                    "message": f"MCP server '{server_name}' is not available",
+                }
 
         if server_name == "pipedream":
             app_slug, mode = self._pd_parse_tool(info.tool_name)
