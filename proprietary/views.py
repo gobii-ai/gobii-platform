@@ -10,7 +10,7 @@ from django.templatetags.static import static
 from django.utils.html import strip_tags, escape
 from django.views.generic import TemplateView
 from django.urls import reverse
-from django.core.mail import send_mail, BadHeaderError
+from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
@@ -329,15 +329,15 @@ class PrequalifyView(ProprietaryModeRequiredMixin, TemplateView):
         subject = f"Pre-qualification request: {cleaned['company'] or cleaned['name']}"
 
         try:
-            send_mail(
+            email = EmailMultiAlternatives(
                 subject,
                 plain_message,
                 settings.DEFAULT_FROM_EMAIL,
                 [support_email],
-                html_message=html_message,
-                fail_silently=False,
                 reply_to=[cleaned["email"]],
             )
+            email.attach_alternative(html_message, "text/html")
+            email.send(fail_silently=False)
         except (BadHeaderError, SMTPException) as exc:
             logger.exception("Error sending pre-qualification request email: %s", exc)
             message = "Sorry, there was an error sending your request. Please try again later."

@@ -17,7 +17,7 @@
 
   <div class="relative max-w-5xl mx-auto px-6">
     <div class="text-center max-w-3xl mx-auto">
-      <p class="text-xs uppercase tracking-[0.3em] text-blue-600 font-semibold">Enterprise pre-qualification</p>
+      <p class="text-xs uppercase tracking-[0.3em] text-blue-600 font-medium">Enterprise pre-qualification</p>
       <h1 class="mt-4 text-3xl sm:text-4xl font-semibold text-slate-900">Let's design your deployment.</h1>
       <p class="mt-4 text-lg text-slate-600">
         Share a few details about your team and goals. If it is a fit, we will send a scheduling link.
@@ -27,7 +27,7 @@
     <div class="mt-12 gobii-card-base p-8 sm:p-10">
       <div class="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p class="text-sm font-semibold text-slate-900">What happens next</p>
+          <p class="text-sm font-medium text-slate-900">What happens next</p>
           <p class="mt-3 text-sm text-slate-600">
             We use this to prioritize teams with clear production needs. Expect a response within 1-2 business days.
           </p>
@@ -46,11 +46,11 @@
             </div>
           </div>
           <div class="mt-8 text-sm text-slate-600">
-            <p class="font-semibold text-slate-900">Questions?</p>
+            <p class="font-medium text-slate-900">Questions?</p>
             {% if settings.PUBLIC_SUPPORT_EMAIL %}
-              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-semibold">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a>.</p>
+              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.PUBLIC_SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-medium">{{ settings.PUBLIC_SUPPORT_EMAIL }}</a>.</p>
             {% else %}
-              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-semibold">{{ settings.SUPPORT_EMAIL }}</a>.</p>
+              <p class="mt-2">Reach us anytime at <a href="mailto:{{ settings.SUPPORT_EMAIL }}" class="text-blue-600 hover:text-blue-700 font-medium">{{ settings.SUPPORT_EMAIL }}</a>.</p>
             {% endif %}
           </div>
         </div>
@@ -63,7 +63,7 @@
           {% endif %}
           {% if error_messages %}
             <div class="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 mb-6" role="alert">
-              <p class="font-semibold">Please correct the following:</p>
+              <p class="font-medium">Please correct the following:</p>
               <ul class="mt-2 list-disc list-inside">
                 {% for message in error_messages %}
                   <li>{{ message }}</li>
@@ -76,27 +76,27 @@
             {% csrf_token %}
             <div class="grid gap-4 sm:grid-cols-2">
               <div class="sm:col-span-1">
-                <label for="prequal-name" class="block text-sm font-semibold text-slate-700">Full name</label>
+                <label for="prequal-name" class="block text-sm font-medium text-slate-700">Full name</label>
                 <input type="text" id="prequal-name" name="name" autocomplete="name" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-email" class="block text-sm font-semibold text-slate-700">Work email</label>
+                <label for="prequal-email" class="block text-sm font-medium text-slate-700">Work email</label>
                 <input type="email" id="prequal-email" name="email" autocomplete="email" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-company" class="block text-sm font-semibold text-slate-700">Company</label>
+                <label for="prequal-company" class="block text-sm font-medium text-slate-700">Company</label>
                 <input type="text" id="prequal-company" name="company" autocomplete="organization" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-role" class="block text-sm font-semibold text-slate-700">Role or title</label>
+                <label for="prequal-role" class="block text-sm font-medium text-slate-700">Role or title</label>
                 <input type="text" id="prequal-role" name="role" autocomplete="organization-title" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-team-size" class="block text-sm font-semibold text-slate-700">Team size</label>
+                <label for="prequal-team-size" class="block text-sm font-medium text-slate-700">Team size</label>
                 <select id="prequal-team-size" name="team_size" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                   {% for value, label in form.TEAM_SIZE_CHOICES %}
@@ -105,7 +105,7 @@
                 </select>
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-volume" class="block text-sm font-semibold text-slate-700">Monthly automation volume</label>
+                <label for="prequal-volume" class="block text-sm font-medium text-slate-700">Monthly automation volume</label>
                 <select id="prequal-volume" name="monthly_volume" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                   {% for value, label in form.VOLUME_CHOICES %}
@@ -114,7 +114,7 @@
                 </select>
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-budget" class="block text-sm font-semibold text-slate-700">Budget range</label>
+                <label for="prequal-budget" class="block text-sm font-medium text-slate-700">Budget range</label>
                 <select id="prequal-budget" name="budget_range" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                   {% for value, label in form.BUDGET_CHOICES %}
@@ -123,7 +123,7 @@
                 </select>
               </div>
               <div class="sm:col-span-1">
-                <label for="prequal-timeline" class="block text-sm font-semibold text-slate-700">Timeline</label>
+                <label for="prequal-timeline" class="block text-sm font-medium text-slate-700">Timeline</label>
                 <select id="prequal-timeline" name="timeline" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
                   {% for value, label in form.TIMELINE_CHOICES %}
@@ -132,17 +132,17 @@
                 </select>
               </div>
               <div class="sm:col-span-2">
-                <label for="prequal-use-case" class="block text-sm font-semibold text-slate-700">Primary use case</label>
+                <label for="prequal-use-case" class="block text-sm font-medium text-slate-700">Primary use case</label>
                 <textarea id="prequal-use-case" name="use_case" rows="4" required
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></textarea>
               </div>
               <div class="sm:col-span-2">
-                <label for="prequal-website" class="block text-sm font-semibold text-slate-700">Website or LinkedIn (optional)</label>
+                <label for="prequal-website" class="block text-sm font-medium text-slate-700">Website or LinkedIn (optional)</label>
                 <input type="url" id="prequal-website" name="website" autocomplete="url"
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
               </div>
               <div class="sm:col-span-2">
-                <label for="prequal-notes" class="block text-sm font-semibold text-slate-700">Anything else we should know? (optional)</label>
+                <label for="prequal-notes" class="block text-sm font-medium text-slate-700">Anything else we should know? (optional)</label>
                 <textarea id="prequal-notes" name="notes" rows="3"
                   class="mt-2 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 focus:border-blue-500 focus:ring-2 focus:ring-blue-100"></textarea>
               </div>
@@ -156,7 +156,7 @@
 
             <div class="flex flex-col sm:flex-row sm:items-center gap-4">
               <button type="submit" data-prequal-submit
-                class="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-semibold text-white hover:bg-blue-700 transition">
+                class="inline-flex items-center justify-center rounded-xl bg-blue-600 px-6 py-3 text-sm font-medium text-white hover:bg-blue-700 transition">
                 Request a call
               </button>
               <p class="text-xs text-slate-500">We respond within 1-2 business days.</p>
