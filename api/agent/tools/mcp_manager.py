@@ -35,6 +35,7 @@ from mcp.types import Tool as MCPTool
 from opentelemetry import trace
 from django.conf import settings
 from django.contrib.sites.models import Site
+from django.db import DatabaseError
 from django.db.models import Max
 from django.urls import reverse
 from django.utils import timezone
@@ -50,6 +51,12 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
+from ...services.mcp_tool_discovery import schedule_mcp_tool_discovery
+from ...services.sandbox_compute import (
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+    sandbox_compute_enabled_for_agent,
+)
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
     get_cached_mcp_tool_definitions,
@@ -76,6 +83,10 @@ def _use_mcp_proxy(proxy_url: Optional[str]):
             _proxy_url_var.reset(token)
     else:
         yield
+
+
+def _sandbox_mcp_fallback_enabled() -> bool:
+    return bool(getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_MCP", True))
 
 
 MCP_WILL_CONTINUE_TOOL_NAMES = {
@@ -456,13 +467,13 @@ class MCPToolManager:
         if self._last_refresh_marker is None or marker > self._last_refresh_marker:
             self._last_refresh_marker = marker
 
-    def _ensure_runtime_registered(self, runtime: MCPServerRuntime) -> bool:
+    def _ensure_runtime_registered(self, runtime: MCPServerRuntime, *, force_local: bool = False) -> bool:
         """Ensure the given runtime has an active client and cached tool list."""
         config_id = runtime.config_id
         if config_id in self._clients and config_id in self._tools_cache:
             return True
         try:
-            self._register_server(runtime)
+            self._register_server(runtime, force_local=force_local)
         except Exception:
             logger.exception("Failed to register MCP server %s", runtime.name)
             return False
@@ -515,6 +526,32 @@ class MCPToolManager:
                 config_id,
             )
             self._safe_register_runtime(existing_runtime)
+
+    def discover_tools_for_server(self, config_id: str) -> bool:
+        """Fetch tool definitions for a server and populate the cache."""
+        if not config_id:
+            return False
+
+        try:
+            cfg = (
+                MCPServerConfig.objects.filter(id=config_id, is_active=True)
+                .select_related("oauth_credential")
+                .first()
+            )
+        except DatabaseError:
+            logger.exception("Failed to load MCP server %s during discovery", config_id)
+            return False
+
+        if not cfg:
+            return False
+
+        runtime = self._build_runtime_from_config(cfg)
+        try:
+            self._register_server(runtime, force_local=True, prefer_cache=False)
+        except (ValueError, RuntimeError):
+            logger.exception("Failed to discover MCP tools for %s", config_id)
+            return False
+        return True
 
     def remove_server(self, config_id: str) -> None:
         if not config_id:
@@ -878,8 +915,48 @@ class MCPToolManager:
             )
         return tools
     
-    def _register_server(self, server: MCPServerRuntime):
+    def _register_server(
+        self,
+        server: MCPServerRuntime,
+        *,
+        force_local: bool = False,
+        prefer_cache: bool = True,
+    ):
         """Register an MCP server and cache its tools."""
+
+        if (
+            server.scope != MCPServerConfig.Scope.PLATFORM
+            and sandbox_compute_enabled_for_agent(None)
+            and not force_local
+        ):
+            cache_fingerprint = self._build_tool_cache_fingerprint(server)
+            cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
+            if cached_payload:
+                cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
+                if cached_tools:
+                    self._tools_cache[server.config_id] = cached_tools
+                    self._clients.pop(server.config_id, None)
+                    logger.info(
+                        "Loaded %d MCP tools for '%s' (%s) from cache (sandbox)",
+                        len(cached_tools),
+                        server.name,
+                        server.config_id,
+                    )
+                    return
+            if not _sandbox_mcp_fallback_enabled():
+                logger.info(
+                    "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
+                    server.name,
+                    server.config_id,
+                )
+                schedule_mcp_tool_discovery(server.config_id, reason="cache_miss")
+                self._discard_client(server.config_id)
+                return
+            logger.info(
+                "No cached MCP tools for '%s' (%s); falling back to local discovery",
+                server.name,
+                server.config_id,
+            )
 
         if server.name == "pipedream":
             # Check Pipedream credentials before attempting registration
@@ -940,18 +1017,19 @@ class MCPToolManager:
         self._clients[server.config_id] = client
 
         cache_fingerprint = self._build_tool_cache_fingerprint(server)
-        cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
-        if cached_payload:
-            cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
-            if cached_tools:
-                self._tools_cache[server.config_id] = cached_tools
-                logger.info(
-                    "Loaded %d MCP tools for '%s' (%s) from cache",
-                    len(cached_tools),
-                    server.name,
-                    server.config_id,
-                )
-                return
+        if prefer_cache:
+            cached_payload = get_cached_mcp_tool_definitions(server.config_id, cache_fingerprint)
+            if cached_payload:
+                cached_tools = self._deserialize_tools_from_cache(server, cached_payload)
+                if cached_tools:
+                    self._tools_cache[server.config_id] = cached_tools
+                    logger.info(
+                        "Loaded %d MCP tools for '%s' (%s) from cache",
+                        len(cached_tools),
+                        server.name,
+                        server.config_id,
+                    )
+                    return
 
         loop = self._ensure_event_loop()
         proxy_url = self._select_discovery_proxy_url(server)
@@ -1288,7 +1366,14 @@ class MCPToolManager:
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
             return {"status": "error", "message": str(exc)}
 
-    def execute_mcp_tool(self, agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    def execute_mcp_tool(
+        self,
+        agent: PersistentAgent,
+        tool_name: str,
+        params: Dict[str, Any],
+        *,
+        force_local: bool = False,
+    ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
         import time
         
@@ -1324,7 +1409,7 @@ class MCPToolManager:
         server_name = info.server_name
         actual_tool_name = info.tool_name
         runtime = self._server_cache.get(info.config_id)
-        if runtime and not self._ensure_runtime_registered(runtime):
+        if runtime and not self._ensure_runtime_registered(runtime, force_local=force_local):
             return {
                 "status": "error",
                 "message": f"MCP server '{server_name}' is not available",
@@ -1355,6 +1440,42 @@ class MCPToolManager:
             proxy_url, proxy_error = self._select_agent_proxy_url(agent)
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
+
+        sandbox_fallback = False
+        if (
+            runtime
+            and runtime.scope != MCPServerConfig.Scope.PLATFORM
+            and sandbox_compute_enabled_for_agent(agent)
+            and not force_local
+        ):
+
+            try:
+                service = SandboxComputeService()
+            except SandboxComputeUnavailable as exc:
+                return {"status": "error", "message": str(exc)}
+            sandbox_result = service.mcp_request(
+                agent,
+                runtime.config_id,
+                actual_tool_name,
+                params,
+                full_tool_name=tool_name,
+            )
+            if (
+                isinstance(sandbox_result, dict)
+                and sandbox_result.get("error_code") == "sandbox_unsupported_mcp"
+                and _sandbox_mcp_fallback_enabled()
+            ):
+                logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
+                sandbox_fallback = True
+            else:
+                return sandbox_result
+
+        if sandbox_fallback and runtime:
+            if not self._ensure_runtime_registered(runtime, force_local=True):
+                return {
+                    "status": "error",
+                    "message": f"MCP server '{server_name}' is not available",
+                }
 
         if server_name == "pipedream":
             app_slug, mode = self._pd_parse_tool(info.tool_name)
@@ -1742,11 +1863,17 @@ class MCPToolManager:
 _mcp_manager = MCPToolManager()
 
 
-def execute_mcp_tool(agent: PersistentAgent, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_mcp_tool(
+    agent: PersistentAgent,
+    tool_name: str,
+    params: Dict[str, Any],
+    *,
+    force_local: bool = False,
+) -> Dict[str, Any]:
     """Execute any enabled MCP tool via the shared manager."""
     if not _mcp_manager._initialized:
         _mcp_manager.initialize()
-    return _mcp_manager.execute_mcp_tool(agent, tool_name, params)
+    return _mcp_manager.execute_mcp_tool(agent, tool_name, params, force_local=force_local)
 
 
 def execute_platform_mcp_tool(server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:

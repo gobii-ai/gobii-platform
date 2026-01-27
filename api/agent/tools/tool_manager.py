@@ -15,6 +15,11 @@ from django.conf import settings
 from django.db.models import F
 
 from ...models import PersistentAgent, PersistentAgentEnabledTool
+from ...services.sandbox_compute import (
+    SandboxComputeService,
+    SandboxComputeUnavailable,
+    sandbox_compute_enabled_for_agent,
+)
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool
@@ -25,6 +30,7 @@ from .create_file import get_create_file_tool, execute_create_file
 from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
+from .python_exec import get_python_exec_tool
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 
@@ -74,7 +80,15 @@ CREATE_FILE_TOOL_NAME = "create_file"
 CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
+PYTHON_EXEC_TOOL_NAME = "python_exec"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+
+
+def _sandbox_fallback_tools() -> Set[str]:
+    tools = getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS", [])
+    if isinstance(tools, (list, tuple, set)):
+        return {str(tool) for tool in tools if str(tool)}
+    return set()
 
 
 def is_sqlite_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
@@ -125,19 +139,28 @@ BUILTIN_TOOL_REGISTRY = {
     CREATE_FILE_TOOL_NAME: {
         "definition": get_create_file_tool,
         "executor": execute_create_file,
+        "sandboxed": True,
     },
     CREATE_CSV_TOOL_NAME: {
         "definition": get_create_csv_tool,
         "executor": execute_create_csv,
+        "sandboxed": True,
     },
     CREATE_PDF_TOOL_NAME: {
         "definition": get_create_pdf_tool,
         "executor": execute_create_pdf,
         "skip_auto_substitution": True,  # PDF does its own substitution (data URIs for embedded assets)
+        "sandboxed": True,
     },
     CREATE_CHART_TOOL_NAME: {
         "definition": get_create_chart_tool,
         "executor": execute_create_chart,
+        "sandboxed": True,
+    },
+    PYTHON_EXEC_TOOL_NAME: {
+        "definition": get_python_exec_tool,
+        "sandboxed": True,
+        "sandbox_only": True,
     },
 }
 
@@ -214,6 +237,8 @@ def _build_available_tool_index(agent: PersistentAgent) -> Dict[str, ToolCatalog
         )
 
     for name, info in BUILTIN_TOOL_REGISTRY.items():
+        if info.get("sandbox_only") and not sandbox_compute_enabled_for_agent(agent):
+            continue
         try:
             tool_def = info["definition"]()
         except Exception:
@@ -620,6 +645,8 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)
         if not registry_entry:
             continue
+        if registry_entry.get("sandbox_only") and not sandbox_compute_enabled_for_agent(agent):
+            continue
         try:
             tool_def = registry_entry["definition"]()
         except Exception:
@@ -840,7 +867,7 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)
         executor = registry_entry.get("executor") if registry_entry else None
-        if executor:
+        if registry_entry:
             try:
                 row = PersistentAgentEnabledTool.objects.filter(
                     agent=agent,
@@ -862,6 +889,28 @@ def execute_enabled_tool(agent: PersistentAgent, tool_name: str, params: Dict[st
                 except Exception:
                     logger.exception("Failed to record usage for builtin tool %s", resolved_name)
 
+            if registry_entry.get("sandbox_only") and not sandbox_compute_enabled_for_agent(agent):
+                return {
+                    "status": "error",
+                    "message": f"Tool '{resolved_name}' requires sandbox compute.",
+                }
+
+            if registry_entry.get("sandboxed") and sandbox_compute_enabled_for_agent(agent):
+                try:
+                    service = SandboxComputeService()
+                except SandboxComputeUnavailable as exc:
+                    return {"status": "error", "message": str(exc)}
+                sandbox_result = service.tool_request(agent, resolved_name, params)
+                if (
+                    isinstance(sandbox_result, dict)
+                    and sandbox_result.get("error_code") == "sandbox_unsupported_tool"
+                    and resolved_name in _sandbox_fallback_tools()
+                    and executor
+                ):
+                    return executor(agent, params)
+                return sandbox_result
+
+        if executor:
             return executor(agent, params)
 
     return {"status": "error", "message": f"Tool '{resolved_name}' has no execution handler"}

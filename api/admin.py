@@ -46,6 +46,8 @@ from .models import (
     IntelligenceTier,
     EvalRun,
     EvalRunTask,
+    AgentComputeSession,
+    ComputeSnapshot,
 )
 from django.contrib.auth import get_user_model
 from django.contrib.auth.admin import UserAdmin
@@ -4604,3 +4606,41 @@ class EvalRunAdmin(admin.ModelAdmin):
     raw_id_fields = ('agent', 'initiated_by')
     readonly_fields = ('created_at', 'updated_at', 'tokens_used', 'credits_cost', 'completion_count', 'step_count')
     inlines = [EvalRunTaskInline]
+
+
+@admin.register(AgentComputeSession)
+class AgentComputeSessionAdmin(admin.ModelAdmin):
+    list_display = (
+        "agent",
+        "state",
+        "pod_name",
+        "namespace",
+        "proxy_server",
+        "workspace_snapshot",
+        "last_activity_at",
+        "lease_expires_at",
+        "last_filespace_sync_at",
+        "updated_at",
+    )
+    list_filter = ("state", "namespace", "proxy_server", "created_at")
+    search_fields = (
+        "agent__name",
+        "agent__user__email",
+        "agent__organization__name",
+        "agent__id",
+        "pod_name",
+        "namespace",
+    )
+    raw_id_fields = ("agent", "proxy_server", "workspace_snapshot")
+    readonly_fields = ("created_at", "updated_at")
+    list_select_related = ("agent", "proxy_server", "workspace_snapshot")
+
+
+@admin.register(ComputeSnapshot)
+class ComputeSnapshotAdmin(admin.ModelAdmin):
+    list_display = ("id", "agent", "status", "k8s_snapshot_name", "size_bytes", "created_at")
+    list_filter = ("status", "created_at")
+    search_fields = ("id", "agent__name", "agent__user__email", "k8s_snapshot_name")
+    raw_id_fields = ("agent",)
+    readonly_fields = ("created_at",)
+    list_select_related = ("agent",)
