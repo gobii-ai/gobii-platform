@@ -92,24 +92,36 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
         return
     if not instance.owner_agent_id:
         return
-    if is_chat_hidden_message(instance):
+    owner_agent_id = instance.owner_agent_id
+    message_id = instance.id
+    is_hidden = is_chat_hidden_message(instance)
+
+    def _on_commit():
+        # Re-fetch to ensure we have committed data
         try:
-            audit_payload = serialize_message(instance)
-            _broadcast_audit_event(str(instance.owner_agent_id), audit_payload)
+            msg = PersistentAgentMessage.objects.get(id=message_id)
+        except PersistentAgentMessage.DoesNotExist:
+            return
+        if is_hidden:
+            try:
+                audit_payload = serialize_message(msg)
+                _broadcast_audit_event(str(owner_agent_id), audit_payload)
+            except Exception:
+                logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+            return
+        try:
+            payload = serialize_message_event(msg)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.exception("Failed to serialize agent message %s: %s", message_id, exc)
+            return
+        _send(_group_name(owner_agent_id), "timeline_event", payload)
+        try:
+            audit_payload = serialize_message(msg)
+            _broadcast_audit_event(str(owner_agent_id), audit_payload)
         except Exception:
-            logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
-        return
-    try:
-        payload = serialize_message_event(instance)
-    except Exception as exc:  # pragma: no cover - defensive logging
-        logger.exception("Failed to serialize agent message %s: %s", instance.id, exc)
-        return
-    _send(_group_name(instance.owner_agent_id), "timeline_event", payload)
-    try:
-        audit_payload = serialize_message(instance)
-        _broadcast_audit_event(str(instance.owner_agent_id), audit_payload)
-    except Exception:
-        logger.debug("Failed to broadcast audit message for %s", instance.id, exc_info=True)
+            logger.debug("Failed to broadcast audit message for %s", message_id, exc_info=True)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentStep)
