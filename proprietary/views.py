@@ -1,17 +1,18 @@
 import logging
 import json
+from smtplib import SMTPException
 
 from django.conf import settings
 from django.contrib import sitemaps
-from django.http import HttpResponse, Http404
+from django.http import HttpResponse, Http404, JsonResponse
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.utils.html import strip_tags, escape
 from django.views.generic import TemplateView
 from django.urls import reverse
-from django.core.mail import send_mail
+from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
-from proprietary.forms import SupportForm
+from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
 from util.subscription_helper import get_user_plan
 from constants.plans import PlanNames
@@ -215,6 +216,148 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         return context
 
+class PrequalifyView(ProprietaryModeRequiredMixin, TemplateView):
+    """Pre-qualification intake page."""
+
+    template_name = "prequalify.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context.setdefault("form", PrequalifyForm())
+        return context
+
+    @staticmethod
+    def _wants_json(request) -> bool:
+        accept = request.headers.get("accept", "")
+        return "application/json" in accept or (
+            request.content_type and "application/json" in request.content_type
+        )
+
+    @staticmethod
+    def _parse_payload(request):
+        if request.content_type and "application/json" in request.content_type:
+            if not request.body:
+                return {}, None
+            try:
+                payload = json.loads(request.body.decode("utf-8"))
+            except json.JSONDecodeError:
+                return None, "Invalid JSON payload."
+            if not isinstance(payload, dict):
+                return None, "Invalid JSON payload."
+            return payload, None
+        return request.POST, None
+
+    @staticmethod
+    def _format_form_errors(form: PrequalifyForm) -> list[str]:
+        errors: list[str] = []
+        for field, field_errors in form.errors.items():
+            label = ""
+            if field == "turnstile":
+                label = "Verification"
+            elif field in form.fields:
+                label = form.fields[field].label or ""
+            if not label:
+                label = field.replace("_", " ").title()
+            for error in field_errors:
+                errors.append(f"{label}: {error}" if label else str(error))
+        for error in form.non_field_errors():
+            errors.append(str(error))
+        return errors
+
+    def post(self, request, *args, **kwargs):
+        wants_json = self._wants_json(request)
+        payload, payload_error = self._parse_payload(request)
+        if payload_error:
+            if wants_json:
+                return JsonResponse({"ok": False, "message": payload_error}, status=400)
+            context = self.get_context_data()
+            context["error_messages"] = [payload_error]
+            return self.render_to_response(context, status=400)
+
+        form = PrequalifyForm(payload)
+        if not form.is_valid():
+            error_messages = self._format_form_errors(form)
+            if wants_json:
+                return JsonResponse({"ok": False, "errors": error_messages}, status=400)
+            context = self.get_context_data()
+            context["form"] = form
+            context["error_messages"] = error_messages
+            return self.render_to_response(context, status=400)
+
+        support_email = settings.SUPPORT_EMAIL
+        if not support_email:
+            message = "Support email is not configured."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=500)
+            context = self.get_context_data()
+            context["error_messages"] = [message]
+            return self.render_to_response(context, status=500)
+
+        cleaned = form.cleaned_data.copy()
+        cleaned.pop("turnstile", None)
+
+        def _choice_label(field_name: str) -> str:
+            field = form.fields.get(field_name)
+            value = cleaned.get(field_name, "")
+            if not field:
+                return value
+            return dict(field.choices).get(value, value)
+
+        context = {
+            "name": cleaned["name"],
+            "email": cleaned["email"],
+            "company": cleaned["company"],
+            "role": cleaned["role"],
+            "team_size": _choice_label("team_size"),
+            "monthly_volume": _choice_label("monthly_volume"),
+            "budget_range": _choice_label("budget_range"),
+            "timeline": _choice_label("timeline"),
+            "use_case": cleaned["use_case"],
+            "website": cleaned.get("website"),
+            "notes": cleaned.get("notes"),
+            "referrer": request.META.get("HTTP_REFERER", ""),
+            "page_url": request.build_absolute_uri(),
+            "utm_source": request.COOKIES.get("utm_source") or request.GET.get("utm_source", ""),
+            "utm_medium": request.COOKIES.get("utm_medium") or request.GET.get("utm_medium", ""),
+            "utm_campaign": request.COOKIES.get("utm_campaign") or request.GET.get("utm_campaign", ""),
+            "utm_content": request.COOKIES.get("utm_content") or request.GET.get("utm_content", ""),
+            "utm_term": request.COOKIES.get("utm_term") or request.GET.get("utm_term", ""),
+        }
+
+        html_message = render_to_string("emails/prequal_request.html", context)
+        plain_message = strip_tags(html_message)
+        subject = f"Pre-qualification request: {cleaned['company'] or cleaned['name']}"
+
+        try:
+            email = EmailMultiAlternatives(
+                subject,
+                plain_message,
+                settings.DEFAULT_FROM_EMAIL,
+                [support_email],
+                reply_to=[cleaned["email"]],
+            )
+            email.attach_alternative(html_message, "text/html")
+            email.send(fail_silently=False)
+        except (BadHeaderError, SMTPException) as exc:
+            logger.exception("Error sending pre-qualification request email: %s", exc)
+            message = "Sorry, there was an error sending your request. Please try again later."
+            if wants_json:
+                return JsonResponse({"ok": False, "message": message}, status=500)
+            context = self.get_context_data()
+            context["error_messages"] = [message]
+            return self.render_to_response(context, status=500)
+
+        success_message = (
+            "Thanks for sharing the details. We will review and follow up within 1-2 business days."
+        )
+        if wants_json:
+            return JsonResponse({"ok": True, "message": success_message})
+
+        context = self.get_context_data()
+        context["form"] = PrequalifyForm()
+        context["success_message"] = success_message
+        return self.render_to_response(context)
+
 class SupportView(ProprietaryModeRequiredMixin, TemplateView):
     """Static support page."""
 
@@ -262,7 +405,7 @@ class SupportView(ProprietaryModeRequiredMixin, TemplateView):
         # Send email
         try:
             send_mail(
-                f'Support Request: {cleaned['subject']}',
+                f"Support Request: {cleaned['subject']}",
                 plain_message,
                 settings.DEFAULT_FROM_EMAIL,
                 [settings.SUPPORT_EMAIL],  # Use a support email address
