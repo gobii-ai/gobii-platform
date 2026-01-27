@@ -937,14 +937,20 @@ class MCPToolManager:
                         server.config_id,
                     )
                     return
+            if not _sandbox_mcp_fallback_enabled():
+                logger.info(
+                    "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
+                    server.name,
+                    server.config_id,
+                )
+                schedule_mcp_tool_discovery(server.config_id, reason="cache_miss")
+                self._discard_client(server.config_id)
+                return
             logger.info(
-                "No cached MCP tools for '%s' (%s); scheduling sandbox discovery",
+                "No cached MCP tools for '%s' (%s); falling back to local discovery",
                 server.name,
                 server.config_id,
             )
-            schedule_mcp_tool_discovery(server.config_id, reason="cache_miss")
-            self._discard_client(server.config_id)
-            return
 
         if server.name == "pipedream":
             # Check Pipedream credentials before attempting registration
