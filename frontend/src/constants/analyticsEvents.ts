@@ -65,6 +65,14 @@ export const AnalyticsEvent = {
   UPGRADE_PLAN_SELECTED: 'Upgrade Plan Selected',
   /** User was redirected to checkout for an upgrade */
   UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
+
+  // ============================================
+  // Upsell Message Events
+  // ============================================
+  /** Upsell message was shown to the user */
+  UPSELL_MESSAGE_SHOWN: 'Upsell Message Shown',
+  /** User dismissed an upsell message */
+  UPSELL_MESSAGE_DISMISSED: 'Upsell Message Dismissed',
 } as const
 
 export type AnalyticsEventType = typeof AnalyticsEvent[keyof typeof AnalyticsEvent]
