@@ -918,6 +918,56 @@ def ingest_inbound_message(
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check")
 
+            # Check for out-of-credits on WEB channel (similar to EMAIL check above)
+            try:
+                if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.WEB:
+                    from tasks.services import TaskCreditService
+
+                    if agent_obj.is_sender_whitelisted(CommsChannel.WEB, parsed.sender):
+                        owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
+                        min_cost = get_tool_credit_cost_for_channel(channel_val)
+                        if available != TASKS_UNLIMITED and available < min_cost:
+                            should_skip_processing = True
+                            try:
+                                link = _build_agent_detail_url(agent_obj)
+                            except Exception:
+                                logging.exception(
+                                    "Failed building agent detail URL for agent %s",
+                                    agent_obj.id,
+                                )
+                                link = ""
+                            _send_daily_credit_notice(
+                                agent_obj,
+                                channel_val,
+                                parsed,
+                                sender_endpoint=from_ep,
+                                conversation=conv,
+                                link=link,
+                            )
+                            # Send credit_event via websocket to trigger frontend refresh
+                            def _send_credit_event():
+                                try:
+                                    from asgiref.sync import async_to_sync
+                                    from channels.layers import get_channel_layer
+                                    channel_layer = get_channel_layer()
+                                    if channel_layer is not None:
+                                        group_name = f"agent-chat-{agent_obj.id}"
+                                        payload = {
+                                            "kind": "task_credits_exhausted",
+                                            "status": "out_of_credits",
+                                            "available": float(available),
+                                        }
+                                        async_to_sync(channel_layer.group_send)(
+                                            group_name,
+                                            {"type": "credit_event", "payload": payload},
+                                        )
+                                except Exception:
+                                    logging.debug("Failed to send credit_event for agent %s", agent_obj.id, exc_info=True)
+                            transaction.on_commit(_send_credit_event)
+            except Exception:
+                logging.exception("Error during out-of-credits pre-processing check (WEB)")
+
             if not should_skip_processing and agent_obj:
                 try:
                     soft_target_value = agent_obj.get_daily_credit_soft_target()
