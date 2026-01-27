@@ -710,6 +710,8 @@ class MCPToolManager:
             headers: Optional[dict[str, str]] = None,
             timeout: Optional[httpx.Timeout] = None,
             auth: Optional[httpx.Auth] = None,
+            follow_redirects: Optional[bool] = None,
+            **extra_client_kwargs: Any,
         ) -> httpx.AsyncClient:
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
@@ -717,6 +719,10 @@ class MCPToolManager:
                 "auth": auth,
                 "trust_env": False,
             }
+            if follow_redirects is not None:
+                client_kwargs["follow_redirects"] = follow_redirects
+            if extra_client_kwargs:
+                client_kwargs.update(extra_client_kwargs)
             proxy_url = _proxy_url_var.get()
             if proxy_url:
                 client_kwargs["proxy"] = proxy_url
