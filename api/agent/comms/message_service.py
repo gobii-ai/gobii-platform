@@ -392,6 +392,23 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                     organization=getattr(agent, "organization", None),
                 ),
             )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": "sms",
+                        "recipient_type": "inbound_contact",
+                        "upsell_shown": True,
+                        "plan": plan_id,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
             return True
 
         if channel_value == CommsChannel.WEB.value:
@@ -450,6 +467,23 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                         "recipient": parsed.sender,
                         "plan_id": plan_id,
                         "plan_label": plan_label,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": "web_chat_message",
+                        "recipient_type": "inbound_contact",
+                        "upsell_shown": True,
+                        "plan": plan_id,
                     },
                     organization=getattr(agent, "organization", None),
                 ),
@@ -648,6 +682,30 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                     organization=getattr(agent, "organization", None),
                 ),
             )
+            # Determine medium based on channel
+            medium_map = {
+                CommsChannel.EMAIL: "email",
+                CommsChannel.SMS: "sms",
+                CommsChannel.WEB: "web_card",
+            }
+            medium = medium_map.get(channel_value, "email")
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": medium,
+                        "recipient_type": "owner",
+                        "upsell_shown": bool(upgrade_url or task_pack_url),
+                        "plan": plan_id,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
         except Exception:
             logging.exception(
                 "Failed to emit analytics for owner hard limit notice (agent %s)",
@@ -822,6 +880,30 @@ def ingest_inbound_message(
                                             "agent_name": agent_obj.name,
                                             "channel": channel_val,
                                             "sender": parsed.sender,
+                                        },
+                                        organization=getattr(agent_obj, "organization", None),
+                                    ),
+                                )
+                                # Track upsell message shown for out-of-credits email
+                                try:
+                                    ooc_owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                                    ooc_plan = get_owner_plan(ooc_owner) if ooc_owner else None
+                                    ooc_plan_id = str(ooc_plan.get("id", "")).strip() if ooc_plan else ""
+                                except Exception:
+                                    ooc_plan_id = ""
+                                Analytics.track_event(
+                                    user_id=str(agent_obj.user.id),
+                                    event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                                    source=AnalyticsSource.EMAIL,
+                                    properties=Analytics.with_org_properties(
+                                        {
+                                            "agent_id": str(agent_obj.id),
+                                            "agent_name": agent_obj.name,
+                                            "message_type": "task_credits_exhausted",
+                                            "medium": "email",
+                                            "recipient_type": "inbound_contact",
+                                            "upsell_shown": True,
+                                            "plan": ooc_plan_id,
                                         },
                                         organization=getattr(agent_obj, "organization", None),
                                     ),

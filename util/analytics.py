@@ -271,6 +271,10 @@ class AnalyticsEvent(StrEnum):
     REFERRAL_CREDITS_DEFERRED = 'Referral Credits Deferred'
     REFERRAL_LINK_GENERATED = 'Referral Link Generated'
 
+    # Upsell Events
+    UPSELL_MESSAGE_SHOWN = 'Upsell Message Shown'
+    UPSELL_MESSAGE_DISMISSED = 'Upsell Message Dismissed'
+
 class AnalyticsCTAs(StrEnum):
     CTA_CREATE_AGENT_CLICKED = 'CTA - Create Agent Clicked'
     CTA_EXAMPLE_AGENT_CLICKED = 'CTA - Example Agent Clicked'
