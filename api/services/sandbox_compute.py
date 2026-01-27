@@ -14,15 +14,49 @@ from django.utils.dateparse import parse_datetime
 from django.db import DatabaseError
 from django.utils import timezone
 
-from api.models import AgentComputeSession, ComputeSnapshot
+from api.models import AgentComputeSession, ComputeSnapshot, PersistentAgent
 from api.proxy_selection import select_proxy, select_proxy_for_persistent_agent
 from api.services.sandbox_filespace_sync import apply_filespace_push, build_filespace_pull_manifest
+from waffle import get_waffle_flag_model
 
 logger = logging.getLogger(__name__)
 
 
+SANDBOX_COMPUTE_WAFFLE_FLAG = "sandbox_compute"
+
+
 def sandbox_compute_enabled() -> bool:
     return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
+
+
+def sandbox_compute_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
+    if not sandbox_compute_enabled():
+        return False
+    if agent is None:
+        return True
+    if not getattr(agent, "user_id", None):
+        return False
+
+    try:
+        flag = get_waffle_flag_model().get(SANDBOX_COMPUTE_WAFFLE_FLAG)
+    except Exception:
+        logger.exception(
+            "Failed loading waffle flag '%s' when evaluating sandbox eligibility for agent %s",
+            SANDBOX_COMPUTE_WAFFLE_FLAG,
+            getattr(agent, "id", None),
+        )
+        return False
+
+    try:
+        return bool(flag.is_active_for_user(agent.user))
+    except Exception:
+        logger.exception(
+            "Error while evaluating waffle flag '%s' for user %s (agent %s)",
+            SANDBOX_COMPUTE_WAFFLE_FLAG,
+            getattr(agent, "user_id", None),
+            getattr(agent, "id", None),
+        )
+        return False
 
 
 def _idle_ttl_seconds() -> int:

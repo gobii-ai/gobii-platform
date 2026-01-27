@@ -51,6 +51,7 @@ from ...models import (
 )
 from ...proxy_selection import select_proxy_for_persistent_agent, select_proxy
 from ...services.mcp_servers import agent_accessible_server_configs
+from ...services.sandbox_compute import sandbox_compute_enabled_for_agent
 from ...services.mcp_tool_cache import (
     build_mcp_tool_cache_fingerprint,
     get_cached_mcp_tool_definitions,
@@ -79,8 +80,8 @@ def _use_mcp_proxy(proxy_url: Optional[str]):
         yield
 
 
-def _sandbox_enabled() -> bool:
-    return bool(getattr(settings, "SANDBOX_COMPUTE_ENABLED", False))
+def _sandbox_enabled(agent: Optional[PersistentAgent] = None) -> bool:
+    return sandbox_compute_enabled_for_agent(agent)
 
 
 def _sandbox_mcp_fallback_enabled() -> bool:
@@ -1429,7 +1430,7 @@ class MCPToolManager:
             if proxy_error:
                 return {"status": "error", "message": proxy_error}
 
-        if runtime and runtime.scope != MCPServerConfig.Scope.PLATFORM and _sandbox_enabled() and not force_local:
+        if runtime and runtime.scope != MCPServerConfig.Scope.PLATFORM and _sandbox_enabled(agent) and not force_local:
             from api.services.sandbox_compute import SandboxComputeService, SandboxComputeUnavailable
 
             try:
