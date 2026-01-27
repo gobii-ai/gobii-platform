@@ -686,7 +686,7 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             medium_map = {
                 CommsChannel.EMAIL: "email",
                 CommsChannel.SMS: "sms",
-                CommsChannel.WEB: "web_card",
+                CommsChannel.WEB: "web_chat_message",
             }
             medium = medium_map.get(channel_value, "email")
             Analytics.track_event(
