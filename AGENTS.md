@@ -31,6 +31,7 @@ Code quality:
 - Do things the right way.
 - Leave the codebase in a better state than when you started. If you can do light refactoring, cleanup, have a net negative lines of code, that is encouraged.
 - Avoid catching broad `Exception`; prefer specific exception classes so unrelated bugs are not masked.
+- Prefer direct settings access (e.g., `settings.MY_SETTING`) instead of `getattr`, since defaults are centralized in `settings.py`.
 
 Debugging:
 - Never guess what the issue is. Aim to *prove it* via running unit tests, adding new tests when needed (if it's something that should be covered by unit tests), running one off code with uv run django shell, etc.
