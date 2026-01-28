@@ -893,7 +893,8 @@ def ingest_inbound_message(
                                 except Exception:
                                     ooc_plan_id = ""
                                 Analytics.track_event(
-                                    user_id=str(agent_obj.user.id),
+                                    user_id=str(getattr(agent_obj.user, "id", "")),
+
                                     event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
                                     source=AnalyticsSource.EMAIL,
                                     properties=Analytics.with_org_properties(
