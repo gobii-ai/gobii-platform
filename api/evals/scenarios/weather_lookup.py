@@ -3,7 +3,7 @@ import json
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentToolCall
 
 
 @register_scenario

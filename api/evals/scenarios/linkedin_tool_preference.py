@@ -194,13 +194,13 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
             owner_agent_id=agent_id,
             is_outbound=True,
             timestamp__gt=inbound.timestamp,
-        ).order_by("-timestamp").last()
+        ).order_by("-timestamp").first()
 
         body_text = (response.body or "") if response else ""
         required_bits = [
             "will",
             "gobii",
-            "Cancer survivor",
+            "cancer survivor",
             "germantown",
         ]
         if response and all(bit in body_text.lower() for bit in required_bits):

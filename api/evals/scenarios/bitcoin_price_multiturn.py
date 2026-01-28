@@ -1,4 +1,5 @@
 import json
+from urllib.parse import parse_qs, urlparse
 
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
@@ -176,21 +177,48 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
-        expected_api_url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+        def is_expected_coingecko_url(url: str) -> bool:
+            if not url:
+                return False
+            parsed = urlparse(url)
+            if parsed.netloc != "api.coingecko.com":
+                return False
+
+            query = parse_qs(parsed.query)
+            if parsed.path == "/api/v3/simple/price":
+                ids = ",".join(query.get("ids", []))
+                vs = ",".join(query.get("vs_currencies", []))
+                return "bitcoin" in ids and "usd" in vs
+
+            if parsed.path == "/api/v3/coins/markets":
+                ids = ",".join(query.get("ids", []))
+                vs = ",".join(query.get("vs_currency", []))
+                return "bitcoin" in ids and "usd" in vs
+
+            return False
+
         http_request_to_expected_api = any(
-            (call.tool_params or {}).get('url', '') == expected_api_url
+            is_expected_coingecko_url((call.tool_params or {}).get("url", ""))
             for call in http_calls
         )
 
         if http_request_to_expected_api:
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_http_request_after_search",
-                observed_summary=f"Agent correctly made http_request to the expected API: {expected_api_url}"
+                observed_summary="Agent correctly made http_request to a supported Coingecko API endpoint."
             )
         else:
+            seen_urls = [
+                (call.tool_params or {}).get("url", "")
+                for call in http_calls
+                if (call.tool_params or {}).get("url", "")
+            ]
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.FAILED, task_name="verify_http_request_after_search",
-                observed_summary=f"Agent did not make http_request to the expected API: {expected_api_url}"
+                observed_summary=(
+                    "Agent did not make http_request to a supported Coingecko endpoint. "
+                    f"Seen URLs: {seen_urls}"
+                )
             )
             return
 
