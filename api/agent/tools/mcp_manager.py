@@ -1348,7 +1348,6 @@ class MCPToolManager:
                         client,
                         info.tool_name,
                         params,
-                        timeout_seconds=settings.MCP_REQUEST_TIMEOUT_SECONDS,
                     )
                 )
             with mcp_result_owner_context(None):
@@ -1504,7 +1503,6 @@ class MCPToolManager:
                         client,
                         actual_tool_name,
                         params,
-                        timeout_seconds=settings.MCP_REQUEST_TIMEOUT_SECONDS,
                     )
                 )
             with mcp_result_owner_context(owner):
