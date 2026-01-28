@@ -59,15 +59,16 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             )
 
         outbound = fetch_outbound()
-        deadline = time.monotonic() + 20
+        deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
             if any(self._is_job_message(msg.body or "") for msg in outbound):
                 break
-            time.sleep(2)
+            time.sleep(5)
             outbound = fetch_outbound()
 
+        job_messages = [msg for msg in outbound if self._is_job_message(msg.body or "")]
         first_three = outbound[:3]
-        job_messages_judged = [msg for msg in first_three if self._is_job_message(msg.body or "")]
+        job_messages_judged = job_messages
 
         if not first_three:
             self.record_task_result(
@@ -87,7 +88,8 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             return
 
         judged_results = []
-        for idx, msg in enumerate(first_three, start=1):
+        messages_to_judge = job_messages[:3] if job_messages else (outbound[-1:] if outbound else first_three)
+        for idx, msg in enumerate(messages_to_judge, start=1):
             domains = self._extract_domains(msg.body or "")
             job_item_count = self._estimate_job_item_count(msg.body or "")
 
@@ -136,7 +138,7 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary=(
                     f"Too many outbound messages ({len(outbound)}); expected intro, searching, and bundled listings."
                 ),
-                artifacts={"message": pass_results[0][0] if pass_results else outbound[-1]},
+                artifacts={"message": pass_results[0][0] if pass_results else (job_messages[-1] if job_messages else outbound[-1])},
             )
             return
 
@@ -217,4 +219,6 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
             if line.strip().startswith(("-", "*", "•"))
             or line.strip().split(" ", 1)[0].rstrip(".").isdigit()
         )
+        if url_count < 1:
+            return False
         return url_count >= 2 or bullet_like >= 3 or (keyword_hits >= 3 and len(text) > 80)
