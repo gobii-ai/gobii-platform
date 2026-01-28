@@ -392,6 +392,23 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                     organization=getattr(agent, "organization", None),
                 ),
             )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": "sms",
+                        "recipient_type": "inbound_contact",
+                        "upsell_shown": True,
+                        "plan": plan_id,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
             return True
 
         if channel_value == CommsChannel.WEB.value:
@@ -450,6 +467,23 @@ def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
                         "recipient": parsed.sender,
                         "plan_id": plan_id,
                         "plan_label": plan_label,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": "web_chat_message",
+                        "recipient_type": "inbound_contact",
+                        "upsell_shown": True,
+                        "plan": plan_id,
                     },
                     organization=getattr(agent, "organization", None),
                 ),
@@ -648,6 +682,30 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
                     organization=getattr(agent, "organization", None),
                 ),
             )
+            # Determine medium based on channel
+            medium_map = {
+                CommsChannel.EMAIL: "email",
+                CommsChannel.SMS: "sms",
+                CommsChannel.WEB: "web_chat_message",
+            }
+            medium = medium_map.get(channel_value, "email")
+            Analytics.track_event(
+                user_id=str(getattr(agent.user, "id", "")),
+                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                source=analytics_source,
+                properties=Analytics.with_org_properties(
+                    {
+                        "agent_id": str(agent.id),
+                        "agent_name": agent.name,
+                        "message_type": "daily_hard_limit",
+                        "medium": medium,
+                        "recipient_type": "owner",
+                        "upsell_shown": bool(upgrade_url or task_pack_url),
+                        "plan": plan_id,
+                    },
+                    organization=getattr(agent, "organization", None),
+                ),
+            )
         except Exception:
             logging.exception(
                 "Failed to emit analytics for owner hard limit notice (agent %s)",
@@ -759,7 +817,8 @@ def ingest_inbound_message(
                     if agent_obj.is_sender_whitelisted(CommsChannel.EMAIL, parsed.sender):
                         owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
                         available = TaskCreditService.calculate_available_tasks_for_owner(owner)
-                        if available != TASKS_UNLIMITED and available <= 0:
+                        min_cost = get_tool_credit_cost_for_channel(channel_val)
+                        if available != TASKS_UNLIMITED and available < min_cost:
                             # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:
                                 context = {
@@ -826,6 +885,31 @@ def ingest_inbound_message(
                                         organization=getattr(agent_obj, "organization", None),
                                     ),
                                 )
+                                # Track upsell message shown for out-of-credits email
+                                try:
+                                    ooc_owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                                    ooc_plan = get_owner_plan(ooc_owner) if ooc_owner else None
+                                    ooc_plan_id = str(ooc_plan.get("id", "")).strip() if ooc_plan else ""
+                                except Exception:
+                                    ooc_plan_id = ""
+                                Analytics.track_event(
+                                    user_id=str(getattr(agent_obj.user, "id", "")),
+
+                                    event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
+                                    source=AnalyticsSource.EMAIL,
+                                    properties=Analytics.with_org_properties(
+                                        {
+                                            "agent_id": str(agent_obj.id),
+                                            "agent_name": agent_obj.name,
+                                            "message_type": "task_credits_exhausted",
+                                            "medium": "email",
+                                            "recipient_type": "inbound_contact",
+                                            "upsell_shown": True,
+                                            "plan": ooc_plan_id,
+                                        },
+                                        organization=getattr(agent_obj, "organization", None),
+                                    ),
+                                )
                             except Exception:
                                 # Do not block on email failures
                                 logging.exception("Failed sending out-of-credits reply email")
@@ -834,6 +918,56 @@ def ingest_inbound_message(
                             should_skip_processing = True
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check")
+
+            # Check for out-of-credits on WEB channel (similar to EMAIL check above)
+            try:
+                if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.WEB:
+                    from tasks.services import TaskCreditService
+
+                    if agent_obj.is_sender_whitelisted(CommsChannel.WEB, parsed.sender):
+                        owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
+                        available = TaskCreditService.calculate_available_tasks_for_owner(owner)
+                        min_cost = get_tool_credit_cost_for_channel(channel_val)
+                        if available != TASKS_UNLIMITED and available < min_cost:
+                            should_skip_processing = True
+                            try:
+                                link = _build_agent_detail_url(agent_obj)
+                            except Exception:
+                                logging.exception(
+                                    "Failed building agent detail URL for agent %s",
+                                    agent_obj.id,
+                                )
+                                link = ""
+                            _send_daily_credit_notice(
+                                agent_obj,
+                                channel_val,
+                                parsed,
+                                sender_endpoint=from_ep,
+                                conversation=conv,
+                                link=link,
+                            )
+                            # Send credit_event via websocket to trigger frontend refresh
+                            def _send_credit_event():
+                                try:
+                                    from asgiref.sync import async_to_sync
+                                    from channels.layers import get_channel_layer
+                                    channel_layer = get_channel_layer()
+                                    if channel_layer is not None:
+                                        group_name = f"agent-chat-{agent_obj.id}"
+                                        payload = {
+                                            "kind": "task_credits_exhausted",
+                                            "status": "out_of_credits",
+                                            "available": float(available),
+                                        }
+                                        async_to_sync(channel_layer.group_send)(
+                                            group_name,
+                                            {"type": "credit_event", "payload": payload},
+                                        )
+                                except Exception:
+                                    logging.debug("Failed to send credit_event for agent %s", agent_obj.id, exc_info=True)
+                            transaction.on_commit(_send_credit_event)
+            except Exception:
+                logging.exception("Error during out-of-credits pre-processing check (WEB)")
 
             if not should_skip_processing and agent_obj:
                 try:

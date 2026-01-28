@@ -16,7 +16,6 @@ export function TaskCreditsCalloutCard({
   variant = 'low',
 }: TaskCreditsCalloutCardProps) {
   const { openUpgradeModal } = useSubscriptionStore()
-  const showActions = Boolean(onOpenPacks || showUpgrade)
   const isOutOfCredits = variant === 'out'
   const handleUpgradeClick = useCallback(() => {
     openUpgradeModal()
@@ -44,28 +43,28 @@ export function TaskCreditsCalloutCard({
           </p>
           <p className="hard-limit-callout-subtitle">
             {isOutOfCredits
-              ? `Your account is out of task credits${showUpgrade ? '.' : ' for this billing period.'}`
-              : `Your account is almost out of task credits${showUpgrade ? '.' : ' for this billing period.'}`}
+              ? 'Your account is out of task credits.'
+              : 'Your account is almost out of task credits.'}
+            {showUpgrade ? (
+              <>
+                {' Upgrade to allow your agents to do more work for you. '}
+                <button type="button" className="banner-upgrade banner-upgrade--text banner-upgrade--inline" onClick={handleUpgradeClick}>
+                  <Zap size={14} strokeWidth={2} />
+                  <span>Upgrade</span>
+                </button>
+              </>
+            ) : (
+              <span> for this billing period.</span>
+            )}
           </p>
         </div>
       </div>
-      {showActions ? (
+      {onOpenPacks ? (
         <div className="hard-limit-callout-actions">
-          {onOpenPacks ? (
-            <button type="button" className="hard-limit-callout-button" onClick={onOpenPacks}>
-              <PlusSquare size={16} />
-              Open add-ons
-            </button>
-          ) : null}
-          {showUpgrade ? (
-            <div className="hard-limit-callout-upsell">
-              <span>Upgrade to allow your agents to do more work for you.</span>
-              <button type="button" className="banner-upgrade banner-upgrade--text" onClick={handleUpgradeClick}>
-                <Zap size={14} strokeWidth={2} />
-                <span>Upgrade</span>
-              </button>
-            </div>
-          ) : null}
+          <button type="button" className="hard-limit-callout-button" onClick={onOpenPacks}>
+            <PlusSquare size={16} />
+            Open add-ons
+          </button>
         </div>
       ) : null}
     </div>

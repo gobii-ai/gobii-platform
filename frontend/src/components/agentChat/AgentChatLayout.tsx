@@ -1,6 +1,8 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import '../../styles/agentChatLegacy.css'
+import { track } from '../../util/analytics'
+import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import { AgentComposer } from './AgentComposer'
 import { TimelineEventList } from './TimelineEventList'
 import { ThinkingBubble } from './ThinkingBubble'
@@ -292,6 +294,58 @@ export function AgentChatLayout({
     taskCreditsStorageKeyRef.current = taskCreditsStorageKey
   }, [showTaskCreditsWarning, taskCreditsStorageKey])
 
+  // Track upsell message visibility with sessionStorage deduplication
+  useEffect(() => {
+    if (typeof window === 'undefined' || !agentId) return
+    const showHardLimit = Boolean(
+      (dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked) && onUpdateDailyCredits,
+    )
+    if (!showHardLimit) return
+    const storageKey = `upsell-tracked:${agentId}:daily_hard_limit`
+    if (window.sessionStorage.getItem(storageKey)) return
+    window.sessionStorage.setItem(storageKey, 'true')
+    track(AnalyticsEvent.UPSELL_MESSAGE_SHOWN, {
+      agent_id: agentId,
+      message_type: 'daily_hard_limit',
+      medium: 'web_card',
+      recipient_type: 'owner',
+      upsell_shown: hardLimitShowUpsell,
+    })
+  }, [agentId, dailyCreditsStatus?.hardLimitReached, dailyCreditsStatus?.hardLimitBlocked, onUpdateDailyCredits, hardLimitShowUpsell])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !agentId) return
+    const showTaskCredits = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+    if (!showTaskCredits) return
+    const messageType = taskCreditsWarningVariant === 'out' ? 'task_credits_exhausted' : 'task_credits_low'
+    const storageKey = `upsell-tracked:${agentId}:${messageType}`
+    if (window.sessionStorage.getItem(storageKey)) return
+    window.sessionStorage.setItem(storageKey, 'true')
+    track(AnalyticsEvent.UPSELL_MESSAGE_SHOWN, {
+      agent_id: agentId,
+      message_type: messageType,
+      medium: 'web_card',
+      recipient_type: 'owner',
+      upsell_shown: showTaskCreditsUpgrade,
+    })
+  }, [agentId, showTaskCreditsWarning, taskCreditsDismissed, taskCreditsWarningVariant, showTaskCreditsUpgrade])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !agentId) return
+    const showContactCap = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
+    if (!showContactCap) return
+    const storageKey = `upsell-tracked:${agentId}:contact_cap_reached`
+    if (window.sessionStorage.getItem(storageKey)) return
+    window.sessionStorage.setItem(storageKey, 'true')
+    track(AnalyticsEvent.UPSELL_MESSAGE_SHOWN, {
+      agent_id: agentId,
+      message_type: 'contact_cap_reached',
+      medium: 'web_card',
+      recipient_type: 'owner',
+      upsell_shown: contactPackShowUpgrade,
+    })
+  }, [agentId, contactCapStatus?.limitReached, contactCapDismissed, contactPackShowUpgrade])
+
   const isStreaming = Boolean(streaming && !streaming.done)
   const hasStreamingReasoning = Boolean(streaming?.reasoning?.trim())
   const hasStreamingContent = Boolean(streaming?.content?.trim())
@@ -325,21 +379,38 @@ export function AgentChatLayout({
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
 
   const handleContactCapDismiss = useCallback(() => {
+    if (agentId) {
+      track(AnalyticsEvent.UPSELL_MESSAGE_DISMISSED, {
+        agent_id: agentId,
+        message_type: 'contact_cap_reached',
+        medium: 'web_card',
+        recipient_type: 'owner',
+      })
+    }
     if (!contactCapDismissKey || typeof window === 'undefined') {
       setContactCapDismissed(true)
       return
     }
     window.localStorage.setItem(contactCapDismissKey, 'true')
     setContactCapDismissed(true)
-  }, [contactCapDismissKey])
+  }, [contactCapDismissKey, agentId])
   const handleTaskCreditsDismiss = useCallback(() => {
+    if (agentId) {
+      const messageType = taskCreditsWarningVariant === 'out' ? 'task_credits_exhausted' : 'task_credits_low'
+      track(AnalyticsEvent.UPSELL_MESSAGE_DISMISSED, {
+        agent_id: agentId,
+        message_type: messageType,
+        medium: 'web_card',
+        recipient_type: 'owner',
+      })
+    }
     if (!taskCreditsStorageKey || typeof window === 'undefined') {
       setTaskCreditsDismissed(true)
       return
     }
     window.localStorage.setItem(taskCreditsStorageKey, 'true')
     setTaskCreditsDismissed(true)
-  }, [taskCreditsStorageKey])
+  }, [taskCreditsStorageKey, agentId, taskCreditsWarningVariant])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 

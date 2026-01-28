@@ -1780,6 +1780,8 @@ def _ensure_credit_for_tool(
                 "agent_id": str(agent.id),
                 "agent_name": agent.name,
                 "tool_name": tool_name,
+                "message_type": "task_credits_low",
+                "medium": "backend",
             }
             if soft_target is not None:
                 analytics_props["soft_target"] = str(soft_target)
@@ -1873,6 +1875,8 @@ def _ensure_credit_for_tool(
                     "agent_id": str(agent.id),
                     "agent_name": agent.name,
                     "tool_name": tool_name,
+                    "message_type": "daily_hard_limit",
+                    "medium": "backend",
                 }
                 if hard_limit is not None:
                     analytics_props["hard_limit"] = str(hard_limit)

@@ -350,7 +350,8 @@ export function AgentChatPage({
 
   const handleCreditEvent = useCallback(() => {
     void refetchQuickSettings()
-  }, [refetchQuickSettings])
+    void queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
+  }, [refetchQuickSettings, queryClient])
   const socketSnapshot = useAgentChatSocket(liveAgentId, { onCreditEvent: handleCreditEvent })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
@@ -1081,8 +1082,8 @@ export function AgentChatPage({
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
   const taskPackOptions = addonsPayload?.taskPacks?.options ?? []
   const taskPackCanManageBilling = Boolean(addonsPayload?.taskPacks?.canManageBilling)
-  const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
-  const taskPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
+  const contactPackShowUpgrade = true
+  const taskPackShowUpgrade = true
   const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
@@ -1127,7 +1128,8 @@ export function AgentChatPage({
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
   const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
-  const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available <= 0)
+  // Use < 1 threshold to catch "dust credits" (e.g., 0.001) that aren't enough to do anything
+  const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available < 1)
   const showTaskCreditsWarning = Boolean(
     taskQuota
     && !hasUnlimitedQuota
