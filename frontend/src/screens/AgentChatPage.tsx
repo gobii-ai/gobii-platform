@@ -1082,8 +1082,8 @@ export function AgentChatPage({
   const contactPackCanManageBilling = Boolean(addonsPayload?.contactPacks?.canManageBilling)
   const taskPackOptions = addonsPayload?.taskPacks?.options ?? []
   const taskPackCanManageBilling = Boolean(addonsPayload?.taskPacks?.canManageBilling)
-  const contactPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
-  const taskPackShowUpgrade = Boolean(addonsPayload?.plan?.isFree)
+  const contactPackShowUpgrade = true
+  const taskPackShowUpgrade = true
   const contactPackManageUrl = addonsPayload?.manageBillingUrl ?? null
   const hardLimitUpsell = Boolean(quickSettingsPayload?.meta?.plan?.isFree)
   const hardLimitUpgradeUrl = quickSettingsPayload?.meta?.upgradeUrl ?? null
