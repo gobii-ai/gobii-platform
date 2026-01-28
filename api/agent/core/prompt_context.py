@@ -2062,7 +2062,9 @@ def build_prompt_context(
         "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
         "Clear schedule with schedule=NULL or ''. "
         "When in doubt, set a schedule (default '0 9 * * *'). "
-        "CRITICAL: Charter/schedule updates are NOT work. No kanban cards = no work = will_continue_work=false."
+        "CRITICAL: Charter/schedule updates are NOT work. "
+        "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
+        "(e.g., quick lookups) until you fetch and report the result."
     )
     variable_group.section_text(
         "agent_config_note",
@@ -2078,6 +2080,8 @@ def build_prompt_context(
         "Copy friendly_id exactly from the kanban_snapshot above—don't guess or assume values. "
         "Workflow: (1) INSERT new cards when starting work. (2) Do the work. (3) After verifying success, UPDATE to 'done'. (4) Repeat. "
         "Batch updates: fold kanban changes into the same sqlite_batch as your other queries. "
+        "If a card title implies delivery (\"report\", \"send\", \"deliver\", \"reply\"), you MUST send the message before marking it done. "
+        "Never mark a delivery card done without a send_* tool in the same turn or a prior delivered message. "
         "Create cards: INSERT INTO __kanban_cards (title, status) VALUES ('Step 1', 'doing'), ('Step 2', 'todo'); "
         "Mark done: UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1'; "
         "Archive: DELETE FROM __kanban_cards WHERE status='done'; "
@@ -3413,8 +3417,8 @@ def _get_system_instruction(
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**ALWAYS set will_continue_work explicitly on every tool call.** Be intentional.\n\n"
-        "**HARD RULE:** No kanban cards = no work. ALL tool calls (greetings, charter updates, everything) must use will_continue_work=false.\n\n"
-        "**STOP (will_continue_work=false)** — no kanban cards OR all work done AND marked done:\n"
+        "**HARD RULE:** No kanban cards = no multi-step work. For simple one-off tasks (quick lookup, single fetch), you may proceed WITHOUT kanban until you deliver the result.\n\n"
+        "**STOP (will_continue_work=false)** — no kanban cards AND no pending one-off result to deliver, OR all work done AND marked done:\n"
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
@@ -3434,6 +3438,8 @@ def _get_system_instruction(
         "1. Send your final report to the user\n"
         "2. Mark your last kanban card done with `will_continue_work=false` on that sqlite_batch\n"
         "3. You're done—no extra turn, no announcement\n\n"
+        "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
+        "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
         "**The rule:** New work = update charter + add kanban cards + adjust schedule, all in one batch.\n"
     )
 
