@@ -2393,13 +2393,18 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
 
     # Map endpoint -> extra context (e.g., last email subject or message snippet)
     recent_meta: dict[tuple[str, str], str] = {}
+    recent_web_endpoints: dict[UUID, PersistentAgentCommsEndpoint] = {}
     for msg in recent_messages:
+        endpoint = None
         if msg.is_outbound and msg.to_endpoint:
-            key = (msg.to_endpoint.channel, msg.to_endpoint.address)
+            endpoint = msg.to_endpoint
         elif not msg.is_outbound:
-            key = (msg.from_endpoint.channel, msg.from_endpoint.address)
-        else:
+            endpoint = msg.from_endpoint
+        if not endpoint:
             continue
+        key = (endpoint.channel, endpoint.address)
+        if endpoint.channel == CommsChannel.WEB:
+            recent_web_endpoints[endpoint.id] = endpoint
 
         # Prefer earlier (more recent in loop) context only if not already stored
         if key not in recent_meta:
@@ -2417,11 +2422,24 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                     meta_str = f" (recent msg: {body_preview}...)"
             recent_meta[key] = meta_str
 
+    recent_web_display_by_address: dict[str, str] = {}
+    if recent_web_endpoints:
+        web_user_display_map = _get_web_user_display_map(agent, list(recent_web_endpoints.values()))
+        for endpoint_id, display in web_user_display_map.items():
+            endpoint = recent_web_endpoints[endpoint_id]
+            recent_web_display_by_address.setdefault(endpoint.address, display)
+
     recent_contacts_text: str | None = None
     if recent_meta:
         recent_lines = []
         for ch, addr in sorted(recent_meta.keys()):
-            recent_lines.append(f"- {ch}: {addr}{recent_meta[(ch, addr)]}")
+            display_name = (
+                recent_web_display_by_address.get(addr)
+                if ch == CommsChannel.WEB
+                else None
+            )
+            suffix = f" - {display_name}" if display_name else ""
+            recent_lines.append(f"- {ch}: {addr}{suffix}{recent_meta[(ch, addr)]}")
 
         recent_contacts_text = "\n".join(recent_lines)
 
