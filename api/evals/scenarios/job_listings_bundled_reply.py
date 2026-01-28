@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Set
 from urllib.parse import urlsplit
 
@@ -48,13 +49,22 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         # Find the job-bearing outbound message and ensure it has 3 sources.
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_three_sources")
 
-        outbound = list(
-            PersistentAgentMessage.objects.filter(
-                owner_agent_id=agent_id,
-                is_outbound=True,
-                timestamp__gt=inbound.timestamp,
-            ).order_by("timestamp")
-        )
+        def fetch_outbound():
+            return list(
+                PersistentAgentMessage.objects.filter(
+                    owner_agent_id=agent_id,
+                    is_outbound=True,
+                    timestamp__gt=inbound.timestamp,
+                ).order_by("timestamp")
+            )
+
+        outbound = fetch_outbound()
+        deadline = time.monotonic() + 20
+        while time.monotonic() < deadline:
+            if any(self._is_job_message(msg.body or "") for msg in outbound):
+                break
+            time.sleep(2)
+            outbound = fetch_outbound()
 
         first_three = outbound[:3]
         job_messages_judged = [msg for msg in first_three if self._is_job_message(msg.body or "")]
