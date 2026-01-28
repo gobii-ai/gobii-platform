@@ -46,9 +46,13 @@
 
         {% elif wrong_account %}
           <div class="space-y-3">
-            <p class="text-sm text-slate-600">Please sign in with {{ invite.email }} to respond to this invitation.</p>
+            <p class="text-sm text-slate-600">This invitation was sent to a different account. Please sign in with the invited account to respond.</p>
             <div class="flex flex-wrap gap-3">
-              <a href="{% url 'account_login' %}?next={{ request.path }}" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Sign in</a>
+              <form method="post" action="{% url 'account_logout' %}">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{% url 'account_login' %}?next={{ request.path }}">
+                <button type="submit" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Sign out and sign in</button>
+              </form>
             </div>
           </div>
 
