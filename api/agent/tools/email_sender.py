@@ -171,7 +171,10 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 return {"status": "error", "message": "Agent has no configured email endpoint to send from."}
 
         if not agent.is_recipient_whitelisted(CommsChannel.EMAIL, to_address):
-            return {"status": "error", "message": "Recipient address not allowed for this agent."}
+            return {
+                "status": "error",
+                "message": "Recipient address not allowed for this agent. You can request access by calling the request_contact_permission tool.",
+            }
         
         # Check whitelist for CC addresses
         for cc_addr in cc_addresses:
