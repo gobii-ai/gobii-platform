@@ -2398,13 +2398,12 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         endpoint = None
         if msg.is_outbound and msg.to_endpoint:
             endpoint = msg.to_endpoint
-            key = (endpoint.channel, endpoint.address)
         elif not msg.is_outbound:
             endpoint = msg.from_endpoint
-            key = (endpoint.channel, endpoint.address)
-        else:
+        if not endpoint:
             continue
-        if endpoint and endpoint.channel == CommsChannel.WEB:
+        key = (endpoint.channel, endpoint.address)
+        if endpoint.channel == CommsChannel.WEB:
             recent_web_endpoints[endpoint.id] = endpoint
 
         # Prefer earlier (more recent in loop) context only if not already stored
@@ -2427,9 +2426,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
     if recent_web_endpoints:
         web_user_display_map = _get_web_user_display_map(agent, list(recent_web_endpoints.values()))
         for endpoint_id, display in web_user_display_map.items():
-            endpoint = recent_web_endpoints.get(endpoint_id)
-            if endpoint and display:
-                recent_web_display_by_address.setdefault(endpoint.address, display)
+            endpoint = recent_web_endpoints[endpoint_id]
+            recent_web_display_by_address.setdefault(endpoint.address, display)
 
     recent_contacts_text: str | None = None
     if recent_meta:
