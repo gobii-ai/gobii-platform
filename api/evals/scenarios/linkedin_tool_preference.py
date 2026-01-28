@@ -200,7 +200,7 @@ class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
         required_bits = [
             "will",
             "gobii",
-            "Cancer survivor",
+            "cancer survivor",
             "germantown",
         ]
         if response and all(bit in body_text.lower() for bit in required_bits):
