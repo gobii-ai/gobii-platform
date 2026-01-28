@@ -91,6 +91,8 @@ INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
 MAX_PREFERRED_PROVIDER_STREAK = env.int("MAX_PREFERRED_PROVIDER_STREAK", default=3)
 # Default timeout (seconds) for LiteLLM requests
 LITELLM_TIMEOUT_SECONDS = env.int("LITELLM_TIMEOUT_SECONDS", default=300)
+# Default timeout (seconds) for MCP tool execution over HTTP
+MCP_REQUEST_TIMEOUT_SECONDS = env.float("MCP_REQUEST_TIMEOUT_SECONDS", default=60.0)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)

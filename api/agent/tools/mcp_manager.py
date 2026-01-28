@@ -750,9 +750,10 @@ class MCPToolManager:
             follow_redirects: Optional[bool] = None,
             **extra_client_kwargs: Any,
         ) -> httpx.AsyncClient:
+            default_timeout_seconds = float(settings.MCP_REQUEST_TIMEOUT_SECONDS)
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
-                "timeout": timeout or httpx.Timeout(5.0),
+                "timeout": timeout or httpx.Timeout(default_timeout_seconds),
                 "auth": auth,
                 "trust_env": False,
             }
@@ -1342,7 +1343,14 @@ class MCPToolManager:
 
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
-                result = loop.run_until_complete(self._execute_async(client, info.tool_name, params))
+                result = loop.run_until_complete(
+                    self._execute_async(
+                        client,
+                        info.tool_name,
+                        params,
+                        timeout_seconds=settings.MCP_REQUEST_TIMEOUT_SECONDS,
+                    )
+                )
             with mcp_result_owner_context(None):
                 result = self._adapt_tool_result(runtime.name, info.tool_name, result)
 
@@ -1491,7 +1499,14 @@ class MCPToolManager:
         try:
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
-                result = loop.run_until_complete(self._execute_async(client, actual_tool_name, params))
+                result = loop.run_until_complete(
+                    self._execute_async(
+                        client,
+                        actual_tool_name,
+                        params,
+                        timeout_seconds=settings.MCP_REQUEST_TIMEOUT_SECONDS,
+                    )
+                )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
@@ -1664,10 +1679,28 @@ class MCPToolManager:
         """Run the tool response through any registered adapters."""
         return self._result_adapters.adapt(server_name, tool_name, result)
 
-    async def _execute_async(self, client: Client, tool_name: str, params: Dict[str, Any]):
+    async def _execute_async(
+        self,
+        client: Client,
+        tool_name: str,
+        params: Dict[str, Any],
+        *,
+        timeout_seconds: Optional[float] = None,
+    ):
         """Execute a tool asynchronously."""
         async with client:
-            return await client.call_tool(tool_name, params)
+            effective_timeout = timeout_seconds
+            if effective_timeout is None:
+                effective_timeout = float(settings.MCP_REQUEST_TIMEOUT_SECONDS)
+            try:
+                return await asyncio.wait_for(
+                    client.call_tool(tool_name, params),
+                    timeout=effective_timeout,
+                )
+            except asyncio.TimeoutError as exc:
+                raise asyncio.TimeoutError(
+                    f"MCP tool call timed out after {effective_timeout}s"
+                ) from exc
     
     def cleanup(self):
         """Clean up resources."""
