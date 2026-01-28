@@ -48,9 +48,10 @@
           <div class="space-y-3">
             <p class="text-sm text-slate-600">This invitation was sent to a different account. Please sign in with the invited account to respond.</p>
             <div class="flex flex-wrap gap-3">
-              <form method="post" action="{% url 'account_logout' %}?next={% url 'account_login' %}">
+              <form method="post" action="{% url 'account_logout' %}">
                 {% csrf_token %}
-                <button type="submit" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Sign out</button>
+                <input type="hidden" name="next" value="{% url 'account_login' %}?next={{ request.path }}">
+                <button type="submit" class="inline-flex items-center rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700">Sign out and sign in</button>
               </form>
             </div>
           </div>
