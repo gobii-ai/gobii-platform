@@ -452,7 +452,8 @@ when:
 
 do:
   # STOP: Is this a data file or API endpoint?
-  # .csv, .json, .xml, .txt, /api/, /feed → use http_request instead!
+  # .csv, .json, .xml, .txt, .pdf, /api/, /feed → use http_request instead!
+  # PDF rule: try http_request → read_file; if size limit/blocked, use spawn_web_task.
 
   mcp_brightdata_scrape_as_markdown(url="<url>", will_continue_work=true)
 
@@ -776,7 +777,7 @@ The `csv_parse` function uses Python's csv module internally—it handles edge c
 | `extract_emails(text)` | JSON array | **Use this for emails** (not regexp) |
 | `extract_urls(text)` | JSON array | **Use this for URLs** (not regexp) |
 | `grep_context_all(text, pat, chars, max)` | JSON array | Context around regex matches |
-| `regexp_extract(text, pattern)` | String | First regex match (escape `'` as `''`) |
+| `regexp_extract(text, pattern)` | String | First regex match (escape `'` as `''` and backslashes as `\\\\`) |
 | `split_sections(text, delim)` | JSON array | Split by delimiter |
 
 ```sql
@@ -3939,14 +3940,17 @@ def _get_system_instruction(
         "\n"
         "# URL → Tool Selection (critical)\n"
         "url.ext ∈ {.json, .csv, .xml, .rss, .atom, .txt}  → http_request\n"
+        "url.ext ∈ {.pdf}                                  → http_request (then read_file) | spawn_web_task if blocked/too large\n"
         "url.path contains {/api/, /feed, /rss, /data}     → http_request\n"
         "url.content_type ∈ {json, csv, xml, rss, text}    → http_request\n"
+        "url.content_type ∈ {pdf}                          → http_request (then read_file) | spawn_web_task if blocked/too large\n"
         "url = download_link | raw_data_url               → http_request\n"
         "url = html_page ∧ need(rendered_content)         → mcp_brightdata_scrape_as_markdown\n"
         "url = html_page ∧ need(structured_extraction)    → extractor | scrape\n"
         "\n"
         "# Examples:\n"
         "# example.com/data.csv           → http_request (data file)\n"
+        "# example.com/report.pdf         → http_request + read_file (or spawn_web_task if too large)\n"
         "# api.example.com/v1/users       → http_request (API)\n"
         "# example.com/about              → mcp_brightdata_scrape_as_markdown (HTML page)\n"
         "\n"
@@ -3964,6 +3968,8 @@ def _get_system_instruction(
         "# Selection\n"
         "interactive | auth_required  → spawn_web_task\n"
         "extractor(X) ∈ tools         → extractor\n"
+        "# Active task cap (spawn_web_task max active tasks)\n"
+        "active_browser_tasks >= 3    → do NOT spawn_web_task; wait for results or sleep_until_next_trigger\n"
         "\n"
         "# Flow (cyclical, no terminal)\n"
         "discover → use → have → [need → discover]∞\n"
