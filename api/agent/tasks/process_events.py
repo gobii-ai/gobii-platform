@@ -128,9 +128,10 @@ def process_agent_events_task(
     # Make the agent ID available to downstream spans/processors
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
 
-    redelivered = bool(getattr(self.request, "redelivered", False))
-    delivery_info = getattr(self.request, "delivery_info", None) or {}
-    redelivered = redelivered or bool(delivery_info.get("redelivered"))
+    delivery_info = getattr(self.request, "delivery_info", {}) or {}
+    redelivered = bool(getattr(self.request, "redelivered", False)) or bool(
+        delivery_info.get("redelivered")
+    )
     if redelivered:
         logger.warning(
             "process_agent_events_task redelivered for agent %s (task_id=%s)",
