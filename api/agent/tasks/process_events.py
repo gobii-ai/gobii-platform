@@ -100,7 +100,13 @@ class ProcessAgentEventsTaskBase(Task):
         return super().apply_async(args=args, kwargs=kwargs, **options)
 
 
-@shared_task(bind=True, base=ProcessAgentEventsTaskBase, name="api.agent.tasks.process_agent_events")
+@shared_task(
+    bind=True,
+    base=ProcessAgentEventsTaskBase,
+    name="api.agent.tasks.process_agent_events",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def process_agent_events_task(
     self,
     persistent_agent_id: str,
@@ -121,6 +127,17 @@ def process_agent_events_task(
 
     # Make the agent ID available to downstream spans/processors
     baggage.set_baggage("persistent_agent.id", str(persistent_agent_id))
+
+    redelivered = bool(getattr(self.request, "redelivered", False))
+    delivery_info = getattr(self.request, "delivery_info", None) or {}
+    redelivered = redelivered or bool(delivery_info.get("redelivered"))
+    if redelivered:
+        logger.warning(
+            "process_agent_events_task redelivered for agent %s (task_id=%s)",
+            persistent_agent_id,
+            getattr(self.request, "id", None),
+        )
+        span.set_attribute("celery.redelivered", True)
 
     # Look up and set the routing profile from the eval run (if any)
     # This is needed because context variables don't propagate across Celery tasks

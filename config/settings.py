@@ -628,6 +628,13 @@ CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
 CELERY_TASK_TIME_LIMIT = 14400  # 4 hours for web task processing
 CELERY_TASK_SOFT_TIME_LIMIT = 12600  # 3.5 hours soft limit
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    # Redis visibility timeout must exceed the longest-running task.
+    "visibility_timeout": env.int(
+        "CELERY_REDIS_VISIBILITY_TIMEOUT_SECONDS",
+        default=CELERY_TASK_TIME_LIMIT + 600,
+    ),
+}
 CELERY_BEAT_SCHEDULE = {
     # Daily task to grant monthly free credits to users. Subscription users are updated when stripe pushes to webhook
     "grant_monthly_free_credits": {
