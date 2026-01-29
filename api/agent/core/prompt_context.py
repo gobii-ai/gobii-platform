@@ -2286,8 +2286,6 @@ def _get_web_user_display_map(
     User = get_user_model()
     users = User.objects.filter(id__in=set(endpoint_user_ids.values())).only(
         "id",
-        "email",
-        "username",
         "first_name",
         "last_name",
     )
