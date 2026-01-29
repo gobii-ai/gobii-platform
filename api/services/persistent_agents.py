@@ -242,8 +242,9 @@ def maybe_sync_agent_email_display_name(agent: PersistentAgent, previous_name: s
         return False
 
     endpoint = (
-        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
-        or agent.comms_endpoints.filter(channel=CommsChannel.EMAIL).first()
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+        .order_by("-is_primary")
+        .first()
     )
     if not endpoint:
         return False

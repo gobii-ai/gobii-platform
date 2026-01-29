@@ -176,7 +176,7 @@ class AgentTransferService:
 
             agent.full_clean()
             agent.save(update_fields=update_fields)
-            if previous_name and agent.name != previous_name:
+            if agent.name != previous_name:
                 maybe_sync_agent_email_display_name(agent, previous_name=previous_name)
 
             if browser_agent:

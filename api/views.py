@@ -763,11 +763,8 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         instance = serializer.instance
         prev_name = instance.name if instance else None
         agent = serializer.save()
-        if prev_name and agent.name != prev_name:
+        if agent.name != prev_name:
             maybe_sync_agent_email_display_name(agent, previous_name=prev_name)
-
-    def perform_update(self, serializer):
-        agent = serializer.save()
         self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
 
     def destroy(self, request, *args, **kwargs):

@@ -13,6 +13,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
     PersistentAgentWebSession,
     UserQuota,
@@ -138,6 +139,39 @@ class AgentTransferServiceTests(TestCase):
         self.assertIsNotNone(invite.accepted_at)
         self.process_events_mock.delay.assert_called_once_with(str(self.agent.id))
         self.process_events_mock.delay.reset_mock()
+
+    def test_accept_transfer_syncs_email_display_name(self):
+        recipient_browser = _create_browser(self.recipient, "Recipient Browser")
+        recipient_agent = PersistentAgent.objects.create(
+            user=self.recipient,
+            name="Primary Agent",
+            charter="Recipient agent",
+            browser_use_agent=recipient_browser,
+        )
+        AgentFileSpace.objects.filter(
+            owner_user=self.recipient,
+            name=f"{recipient_agent.name} Files",
+        ).update(name="Recipient Default Files")
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent-primary@example.com",
+            is_primary=True,
+        )
+        email_meta = PersistentAgentEmailEndpoint.objects.create(
+            endpoint=endpoint,
+            display_name=self.agent.name,
+        )
+
+        invite = self._initiate(self.recipient.email)
+        AgentTransferService.accept_invite(invite, self.recipient)
+
+        self.agent.refresh_from_db()
+        email_meta.refresh_from_db()
+
+        self.assertNotEqual(self.agent.name, "Primary Agent")
+        self.assertEqual(email_meta.display_name, self.agent.name)
 
     def test_accept_transfer_pauses_agent_when_no_capacity(self):
         UserQuota.objects.filter(user=self.recipient).update(agent_limit=1)

@@ -11,6 +11,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentEmailEndpoint,
     UserPhoneNumber,
     UserQuota,
 )
@@ -374,6 +375,50 @@ class PersistentAgentAPITests(TestCase):
         agent = PersistentAgent.objects.get(id=agent_id)
         self.assertEqual(agent.charter, 'Refine outreach list')
         self.assertFalse(agent.is_active)
+
+    def test_update_agent_name_syncs_blank_email_display_name(self):
+        payload = self._create_agent_via_api({'name': 'Original Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address='agent@example.com',
+            is_primary=True,
+        )
+        email_meta = PersistentAgentEmailEndpoint.objects.create(endpoint=endpoint, display_name='')
+
+        update_response = self.client.patch(
+            f'{PERSISTENT_AGENT_BASE_URL}{agent.id}/',
+            data=json.dumps({'name': 'Renamed Agent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+
+        email_meta.refresh_from_db()
+        self.assertEqual(email_meta.display_name, 'Renamed Agent')
+
+    def test_update_agent_name_preserves_custom_email_display_name(self):
+        payload = self._create_agent_via_api({'name': 'Original Agent'})
+        agent = PersistentAgent.objects.get(id=payload['id'])
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address='custom-agent@example.com',
+            is_primary=True,
+        )
+        email_meta = PersistentAgentEmailEndpoint.objects.create(endpoint=endpoint, display_name='Custom Name')
+
+        update_response = self.client.patch(
+            f'{PERSISTENT_AGENT_BASE_URL}{agent.id}/',
+            data=json.dumps({'name': 'Renamed Agent'}),
+            content_type='application/json',
+        )
+        self.assertEqual(update_response.status_code, 200, update_response.content)
+
+        email_meta.refresh_from_db()
+        self.assertEqual(email_meta.display_name, 'Custom Name')
 
     def test_update_agent_preferred_endpoint_to_sms(self):
         payload = self._create_agent_via_api({'preferred_contact_endpoint': 'email'})
