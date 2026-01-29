@@ -14,16 +14,30 @@ Instead, they are granted after the referred user completes their first task.
 This ensures the referrer only gets rewarded for bringing real, active users.
 """
 import logging
+from datetime import timedelta
+from decimal import Decimal
 from typing import Optional, Tuple
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, BrowserUseAgentTask, PersistentAgentStep
+from api.models import (
+    UserReferral,
+    UserAttribution,
+    PersistentAgentTemplate,
+    BrowserUseAgentTask,
+    PersistentAgentStep,
+    TaskCredit,
+    ReferralIncentiveConfig,
+    ReferralGrant,
+)
 from constants.grant_types import GrantTypeChoices
+from constants.plans import PlanNamesChoices
+from api.services.email_verification import has_verified_email
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.subscription_helper import get_user_plan
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
@@ -130,23 +144,24 @@ class ReferralService:
                 if referral_type == ReferralType.TEMPLATE
                 else GrantTypeChoices.REFERRAL
             )
-            cls._grant_referral_credits(
+            grant = cls._grant_referral_credits(
                 referring_user=referring_user,
                 new_user=new_user,
                 grant_type=grant_type,
                 template_code=template_code if referral_type == ReferralType.TEMPLATE else None,
             )
-            # Mark as granted to prevent duplicate grants from deferred check
-            try:
-                UserAttribution.objects.filter(user=new_user).update(
-                    referral_credit_granted_at=timezone.now()
-                )
-            except Exception:
-                logger.warning(
-                    "Failed to mark referral as granted for user %s",
-                    new_user.id,
-                    exc_info=True,
-                )
+            if grant:
+                # Mark as granted to prevent duplicate grants from deferred check
+                try:
+                    UserAttribution.objects.filter(user=new_user).update(
+                        referral_credit_granted_at=timezone.now()
+                    )
+                except Exception:
+                    logger.warning(
+                        "Failed to mark referral as granted for user %s",
+                        new_user.id,
+                        exc_info=True,
+                    )
         else:
             # Track that credits are deferred
             Analytics.track_event(
@@ -209,6 +224,15 @@ class ReferralService:
         if not cls._user_has_completed_task(user):
             return False
 
+        if not has_verified_email(user):
+            return False
+
+        if ReferralGrant.objects.filter(referred=user).exists():
+            UserAttribution.objects.filter(user=user, referral_credit_granted_at__isnull=True).update(
+                referral_credit_granted_at=timezone.now()
+            )
+            return False
+
         # Now do the actual grant with proper locking
         with transaction.atomic():
             # Re-fetch with lock to prevent race conditions
@@ -219,6 +243,14 @@ class ReferralService:
 
             # Double-check after acquiring lock (another process may have granted)
             if attribution.referral_credit_granted_at is not None:
+                return False
+
+            if not has_verified_email(user):
+                return False
+
+            if ReferralGrant.objects.filter(referred=user).exists():
+                attribution.referral_credit_granted_at = timezone.now()
+                attribution.save(update_fields=['referral_credit_granted_at'])
                 return False
 
             # Determine referral type and find referrer
@@ -266,13 +298,16 @@ class ReferralService:
                 return False
 
             # Grant the credits
-            cls._grant_referral_credits(
+            grant = cls._grant_referral_credits(
                 referring_user=referring_user,
                 new_user=user,
                 grant_type=grant_type,
                 template_code=template_code,
                 deferred=True,
             )
+
+            if not grant:
+                return False
 
             # Mark as granted
             attribution.referral_credit_granted_at = timezone.now()
@@ -297,6 +332,7 @@ class ReferralService:
                 'template_code': template_code or '',
                 'deferred': True,
                 'trigger': 'first_task_completion',
+                'referral_grant_id': str(grant.id),
             },
         )
 
@@ -399,6 +435,15 @@ class ReferralService:
         return (ReferralType.TEMPLATE, referring_user)
 
     @classmethod
+    def _resolve_plan_choice(cls, user: User) -> PlanNamesChoices:
+        plan = get_user_plan(user) or {}
+        plan_id = plan.get("id") if plan else PlanNamesChoices.FREE
+        try:
+            return PlanNamesChoices(plan_id)
+        except ValueError:
+            return PlanNamesChoices.FREE
+
+    @classmethod
     def _grant_referral_credits(
         cls,
         referring_user: User,
@@ -406,11 +451,9 @@ class ReferralService:
         grant_type: str,
         template_code: Optional[str] = None,
         deferred: bool = False,
-    ) -> None:
+    ) -> Optional[ReferralGrant]:
         """
-        Grant credits to the referring user.
-
-        TODO: Implement when credit amounts and rules are defined.
+        Grant credits for a referral, creating TaskCredits and a ReferralGrant audit record.
 
         Args:
             referring_user: User who made the referral
@@ -419,12 +462,113 @@ class ReferralService:
             template_code: Template code if this was a template referral
             deferred: Whether this is a deferred grant (after first task)
         """
-        # TODO: Implement credit granting
-        # - Determine credit amount based on plan/config
-        # - Create TaskCredit record with appropriate grant_type
-        # - Optionally grant welcome credits to new_user
+        if not has_verified_email(new_user):
+            logger.info(
+                "Referral credit blocked: referred user email not verified user=%s",
+                new_user.id,
+            )
+            return None
+
+        config = ReferralIncentiveConfig.get_solo()
+        referral_type = ReferralType.TEMPLATE if template_code else ReferralType.DIRECT
+
+        if referral_type == ReferralType.TEMPLATE:
+            referrer_credits = config.referrer_template_credits
+            referred_credits = config.referred_template_credits
+            referrer_cap = config.template_referral_cap
+            referred_grant_type = GrantTypeChoices.REFERRAL_SHARED_REDEEMED
+        else:
+            referrer_credits = config.referrer_direct_credits
+            referred_credits = config.referred_direct_credits
+            referrer_cap = config.direct_referral_cap
+            referred_grant_type = GrantTypeChoices.REFERRAL_REDEEMED
+
+        now = timezone.now()
+        expiration_days = config.expiration_days or 30
+        expiration_date = now + timedelta(days=expiration_days)
+
+        referrer_credit_allowed = False
+        if referrer_credits and referrer_credits > 0:
+            if referrer_cap is None:
+                referrer_credit_allowed = True
+            elif referrer_cap <= 0:
+                referrer_credit_allowed = False
+            else:
+                referrer_grant_count = ReferralGrant.objects.filter(
+                    referrer=referring_user,
+                    referral_type=referral_type,
+                    referrer_task_credit__isnull=False,
+                    referrer_task_credit__voided=False,
+                ).count()
+                referrer_credit_allowed = referrer_grant_count < referrer_cap
+
+        config_snapshot = {
+            "referral_type": referral_type,
+            "referrer_credits": str(Decimal(referrer_credits)),
+            "referred_credits": str(Decimal(referred_credits)),
+            "referrer_cap": referrer_cap,
+            "expiration_days": expiration_days,
+        }
+
+        try:
+            with transaction.atomic():
+                if ReferralGrant.objects.select_for_update().filter(referred=new_user).exists():
+                    logger.info(
+                        "Referral grant skipped: existing grant for user=%s",
+                        new_user.id,
+                    )
+                    return None
+
+                grant = ReferralGrant.objects.create(
+                    referrer=referring_user,
+                    referred=new_user,
+                    referral_type=referral_type,
+                    template_code=template_code or "",
+                    granted_at=now,
+                    config_snapshot=config_snapshot,
+                )
+
+                comment = f"ReferralGrant:{grant.id}"
+                referrer_credit = None
+                if referrer_credit_allowed and referrer_credits and referrer_credits > 0:
+                    referrer_credit = TaskCredit.objects.create(
+                        user_id=referring_user.id,
+                        credits=referrer_credits,
+                        credits_used=0,
+                        expiration_date=expiration_date,
+                        granted_date=now,
+                        plan=cls._resolve_plan_choice(referring_user),
+                        grant_type=grant_type,
+                        additional_task=False,
+                        comments=comment,
+                    )
+
+                referred_credit = None
+                if referred_credits and referred_credits > 0:
+                    referred_credit = TaskCredit.objects.create(
+                        user_id=new_user.id,
+                        credits=referred_credits,
+                        credits_used=0,
+                        expiration_date=expiration_date,
+                        granted_date=now,
+                        plan=cls._resolve_plan_choice(new_user),
+                        grant_type=referred_grant_type,
+                        additional_task=False,
+                        comments=comment,
+                    )
+
+                grant.referrer_task_credit = referrer_credit
+                grant.referred_task_credit = referred_credit
+                grant.save(update_fields=["referrer_task_credit", "referred_task_credit"])
+        except IntegrityError:
+            logger.info(
+                "Referral grant skipped: duplicate grant for user=%s",
+                new_user.id,
+            )
+            return None
+
         logger.info(
-            "Referral credit grant (TODO): referrer=%s new_user=%s type=%s template=%s deferred=%s",
+            "Referral credit granted: referrer=%s new_user=%s type=%s template=%s deferred=%s",
             referring_user.id,
             new_user.id,
             grant_type,
@@ -439,14 +583,17 @@ class ReferralService:
                 event=AnalyticsEvent.REFERRAL_CREDITS_GRANTED,
                 source=AnalyticsSource.WEB,
                 properties={
-                    'referral_type': ReferralType.TEMPLATE if template_code else ReferralType.DIRECT,
+                    'referral_type': referral_type,
                     'referrer_user_id': str(referring_user.id),
                     'grant_type': grant_type,
                     'template_code': template_code or '',
                     'deferred': False,
                     'trigger': 'signup',
+                    'referral_grant_id': str(grant.id),
                 },
             )
+
+        return grant
 
     @classmethod
     def get_or_create_referral_code(cls, user: User) -> str:
@@ -508,6 +655,8 @@ class ReferralService:
             return False
 
         if attribution.referral_credit_granted_at is not None:
+            return False
+        if ReferralGrant.objects.filter(referred=user).exists():
             return False
 
         has_referral = bool(attribution.referrer_code or attribution.signup_template_code)
