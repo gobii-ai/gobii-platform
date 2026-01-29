@@ -21,6 +21,7 @@ import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
+import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { storeConsoleContext } from '../util/consoleContextStorage'
@@ -1091,6 +1092,33 @@ export function AgentChatPage({
       (insight) => !dismissedInsightIds.has(insight.insightId)
     )
   }, [insights, dismissedInsightIds])
+  const hydratedInsights = useMemo(() => {
+    if (!resolvedAgentEmail && !resolvedAgentSms) {
+      return availableInsights
+    }
+    return availableInsights.map((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return insight
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      const nextEmail = resolvedAgentEmail ?? metadata.agentEmail ?? null
+      const nextSms = resolvedAgentSms ?? metadata.sms?.agentNumber ?? null
+      if (nextEmail === metadata.agentEmail && nextSms === metadata.sms?.agentNumber) {
+        return insight
+      }
+      return {
+        ...insight,
+        metadata: {
+          ...metadata,
+          agentEmail: nextEmail,
+          sms: {
+            ...metadata.sms,
+            agentNumber: nextSms,
+          },
+        },
+      }
+    })
+  }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
 
   useEffect(() => {
     if (!allowAgentRefresh || !streaming || streaming.done) {
@@ -1512,7 +1540,7 @@ export function AgentChatPage({
         loadingOlder={isNewAgent ? false : loadingOlder}
         loadingNewer={isNewAgent ? false : loadingNewer}
         initialLoading={initialLoading}
-        insights={isNewAgent ? [] : availableInsights}
+        insights={isNewAgent ? [] : hydratedInsights}
         currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
         onInsightIndexChange={setCurrentInsightIndex}
