@@ -174,6 +174,8 @@ spec:
               app: sandbox-egress-proxy
 ```
 
+DNS resolution still works because we explicitly allow egress to kube‑dns/coredns (TCP/UDP 53); everything else is denied.
+
 Because egress is default‑deny, direct access to metadata endpoints is blocked. The proxy is the only path out.
 
 ## 9) MCP servers run inside the sandbox
