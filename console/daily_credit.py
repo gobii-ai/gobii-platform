@@ -7,6 +7,10 @@ from django.utils import timezone
 from django.utils.formats import date_format
 
 from api.models import PersistentAgentSystemStep
+from api.services.daily_credit_limits import (
+    calculate_daily_credit_slider_bounds,
+    get_agent_credit_multiplier,
+)
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 
 
@@ -23,34 +27,23 @@ def _percent(value: Decimal, total: Decimal | None) -> float | None:
     return min(pct, 100.0)
 
 
-def get_daily_credit_slider_bounds(credit_settings) -> dict[str, Decimal]:
-    slider_min = credit_settings.slider_min
-    if slider_min < Decimal("1"):
-        slider_min = Decimal("1")
-
-    slider_step = credit_settings.slider_step
-    if slider_step <= Decimal("0"):
-        slider_step = Decimal("1")
-
-    slider_limit_max = credit_settings.slider_max
-    if slider_limit_max < slider_min:
-        slider_limit_max = slider_min
-
-    slider_unlimited_value = slider_limit_max + slider_step
-
-    return {
-        "slider_min": slider_min,
-        "slider_limit_max": slider_limit_max,
-        "slider_step": slider_step,
-        "slider_unlimited_value": slider_unlimited_value,
-    }
+def get_daily_credit_slider_bounds(
+    credit_settings,
+    *,
+    tier_multiplier: Decimal | None = None,
+) -> dict[str, Decimal]:
+    return calculate_daily_credit_slider_bounds(
+        credit_settings,
+        tier_multiplier=tier_multiplier,
+    )
 
 
 def build_agent_daily_credit_context(agent, owner=None) -> dict[str, Any]:
     if owner is None:
         owner = agent.organization or agent.user
     credit_settings = get_daily_credit_settings_for_owner(owner)
-    slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+    tier_multiplier = get_agent_credit_multiplier(agent)
+    slider_bounds = get_daily_credit_slider_bounds(credit_settings, tier_multiplier=tier_multiplier)
     blocked_today = False
 
     context = {
@@ -212,7 +205,12 @@ def build_daily_credit_status(context: dict[str, Any]) -> dict[str, bool]:
     }
 
 
-def parse_daily_credit_limit(payload: dict[str, Any], credit_settings) -> tuple[int | None, str | None]:
+def parse_daily_credit_limit(
+    payload: dict[str, Any],
+    credit_settings,
+    *,
+    tier_multiplier: Decimal | None = None,
+) -> tuple[int | None, str | None]:
     raw_limit = payload.get("daily_credit_limit", None)
     if raw_limit is None or (isinstance(raw_limit, str) and not raw_limit.strip()):
         return None, None
@@ -229,7 +227,7 @@ def parse_daily_credit_limit(payload: dict[str, Any], credit_settings) -> tuple[
     if parsed_limit <= Decimal("0"):
         return None, None
 
-    slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+    slider_bounds = get_daily_credit_slider_bounds(credit_settings, tier_multiplier=tier_multiplier)
     slider_min = slider_bounds["slider_min"]
     slider_max = slider_bounds["slider_limit_max"]
     if parsed_limit < slider_min:

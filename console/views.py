@@ -55,6 +55,11 @@ from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_llm_tier_mul
 from api.agent.short_description import build_listing_description, build_mini_description, \
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
+from api.services.daily_credit_limits import (
+    get_agent_credit_multiplier,
+    get_tier_credit_multiplier,
+    scale_daily_credit_limit_for_tier_change,
+)
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from console.daily_credit import (
     build_agent_daily_credit_context,
@@ -2493,7 +2498,10 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
             return redirect(redirect_url)
         owner = agent.organization or agent.user
         credit_settings = get_daily_credit_settings_for_owner(owner)
-        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
+        slider_bounds = get_daily_credit_slider_bounds(
+            credit_settings,
+            tier_multiplier=get_agent_credit_multiplier(agent),
+        )
         max_limit = int(slider_bounds["slider_limit_max"])
         current_limit = agent.daily_credit_limit
 
@@ -4133,41 +4141,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
 
         raw_limit = (request.POST.get('daily_credit_limit') or '').strip()
         slider_value = (request.POST.get('daily_credit_limit_slider') or '').strip()
-        slider_bounds = get_daily_credit_slider_bounds(credit_settings)
         limit_source = raw_limit
-
-        if not limit_source and slider_value:
-            try:
-                parsed_slider = Decimal(slider_value)
-            except InvalidOperation:
-                return _general_error("Enter a whole number for the daily credit soft target.")
-            if parsed_slider >= slider_bounds["slider_unlimited_value"]:
-                limit_source = ""
-            else:
-                limit_source = slider_value
-
-        if not limit_source:
-            new_daily_limit = None
-        else:
-            try:
-                parsed_limit = Decimal(limit_source)
-            except InvalidOperation:
-                return _general_error("Enter a whole number for the daily credit soft target.")
-
-            if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
-                return _general_error("Enter a whole number for the daily credit soft target.")
-
-            parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
-            if parsed_limit <= Decimal("0"):
-                new_daily_limit = None
-            else:
-                slider_min = slider_bounds["slider_min"]
-                slider_max = slider_bounds["slider_limit_max"]
-                if parsed_limit < slider_min:
-                    parsed_limit = slider_min
-                if parsed_limit > slider_max:
-                    parsed_limit = slider_max
-                new_daily_limit = int(parsed_limit)
 
         if not new_name:
             return _general_error("Agent name cannot be empty.")
@@ -4244,6 +4218,61 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         resolved_preferred_tier = IntelligenceTier.objects.filter(key=requested_preferred_tier.value).first()
         if resolved_preferred_tier is None:
             return _general_error("Select a valid intelligence level.")
+
+        new_tier_multiplier = get_tier_credit_multiplier(resolved_preferred_tier)
+        slider_bounds = get_daily_credit_slider_bounds(
+            credit_settings,
+            tier_multiplier=new_tier_multiplier,
+        )
+        if not limit_source and slider_value:
+            try:
+                parsed_slider = Decimal(slider_value)
+            except InvalidOperation:
+                return _general_error("Enter a whole number for the daily credit soft target.")
+            if parsed_slider >= slider_bounds["slider_unlimited_value"]:
+                limit_source = ""
+            else:
+                limit_source = slider_value
+
+        if not limit_source:
+            new_daily_limit = None
+        else:
+            try:
+                parsed_limit = Decimal(limit_source)
+            except InvalidOperation:
+                return _general_error("Enter a whole number for the daily credit soft target.")
+
+            if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
+                return _general_error("Enter a whole number for the daily credit soft target.")
+
+            parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
+            if parsed_limit <= Decimal("0"):
+                new_daily_limit = None
+            else:
+                slider_min = slider_bounds["slider_min"]
+                slider_max = slider_bounds["slider_limit_max"]
+                if parsed_limit < slider_min:
+                    parsed_limit = slider_min
+                if parsed_limit > slider_max:
+                    parsed_limit = slider_max
+                new_daily_limit = int(parsed_limit)
+
+        if preferred_tier_changed:
+            if new_daily_limit == prev_daily_limit:
+                new_daily_limit = scale_daily_credit_limit_for_tier_change(
+                    prev_daily_limit,
+                    from_multiplier=get_tier_credit_multiplier(agent.preferred_llm_tier),
+                    to_multiplier=new_tier_multiplier,
+                    slider_min=slider_bounds["slider_min"],
+                    slider_max=slider_bounds["slider_limit_max"],
+                )
+            elif new_daily_limit is not None:
+                slider_min = slider_bounds["slider_min"]
+                slider_max = slider_bounds["slider_limit_max"]
+                if new_daily_limit < slider_min:
+                    new_daily_limit = int(slider_min)
+                if new_daily_limit > slider_max:
+                    new_daily_limit = int(slider_max)
 
         if dedicated_proxy_id:
             if owner is None:
