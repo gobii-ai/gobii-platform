@@ -928,7 +928,6 @@
 }
 
 .composer-shortcut-hint {
-  margin-top: 0.25rem;
   font-size: 0.65rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -942,6 +941,201 @@
 .composer-input-surface:focus-within .composer-shortcut-hint {
   opacity: 1;
   color: rgba(99, 102, 241, 0.5);
+}
+
+.composer-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-top: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.composer-intelligence {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.composer-intelligence-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-weight: 600;
+  color: rgba(100, 116, 139, 0.65);
+}
+
+.composer-intelligence-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  padding: 0.35rem 0.7rem;
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  color: #1e293b;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.composer-intelligence-trigger:hover:not([data-busy="true"]) {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.composer-intelligence-trigger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.composer-intelligence-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: rgba(99, 102, 241, 0.8);
+}
+
+.composer-intelligence-trigger-label {
+  text-transform: lowercase;
+}
+
+.composer-intelligence-trigger-multiplier {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: rgba(71, 85, 105, 0.8);
+}
+
+.composer-intelligence-trigger-chevron {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: rgba(99, 102, 241, 0.7);
+}
+
+.composer-intelligence-popover {
+  width: min(20rem, 92vw);
+  margin-top: 0.5rem;
+  z-index: 60;
+}
+
+.composer-intelligence-menu {
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  padding: 0.75rem;
+}
+
+.composer-intelligence-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.6rem;
+}
+
+.composer-intelligence-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #0f172a;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.composer-intelligence-caption {
+  font-size: 0.72rem;
+  color: rgba(100, 116, 139, 0.8);
+}
+
+.composer-intelligence-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.composer-intelligence-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.75rem;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.composer-intelligence-option:hover {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.composer-intelligence-option[data-locked="true"] {
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.composer-intelligence-option-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.composer-intelligence-option-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.composer-intelligence-option-multiplier {
+  font-size: 0.7rem;
+  color: rgba(71, 85, 105, 0.8);
+}
+
+.composer-intelligence-option-selected {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(15, 23, 42, 0.7);
+}
+
+.composer-intelligence-option-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(99, 102, 241, 0.9);
+}
+
+.composer-intelligence-note {
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: rgba(100, 116, 139, 0.8);
+}
+
+.composer-intelligence-error {
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  color: #ef4444;
+}
+
+.composer-intelligence-pack {
+  margin-top: 0.6rem;
+  width: 100%;
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  background: rgba(99, 102, 241, 0.08);
+  color: #4338ca;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.composer-intelligence-pack:hover {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(99, 102, 241, 0.35);
 }
 
 /* ==========================================================================

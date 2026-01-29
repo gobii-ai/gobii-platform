@@ -37,22 +37,9 @@ import {
 } from 'react-aria-components'
 import { Modal } from '../components/common/Modal'
 import { useModal } from '../hooks/useModal'
+import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
-type IntelligenceTierKey = 'standard' | 'premium' | 'max'
-
-type LlmIntelligenceOption = {
-  key: IntelligenceTierKey
-  label: string
-  description: string
-  multiplier: number
-}
-
-type LlmIntelligenceConfig = {
-  options: LlmIntelligenceOption[]
-  canEdit: boolean
-  disabledReason: string | null
-  upgradeUrl: string | null
-}
+type IntelligenceTierKey = 'standard' | 'premium' | 'max' | 'ultra' | 'ultra_max'
 
 type PrimaryEndpoint = {
   address: string

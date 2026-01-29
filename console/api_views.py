@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.conf import settings
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
@@ -21,7 +22,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
@@ -63,6 +64,7 @@ from api.models import (
     PersistentAgentPromptArchive,
     AgentFileSpaceAccess,
     AgentFsNode,
+    Organization,
     OrganizationMembership,
     AgentCollaborator,
     build_web_agent_address,
@@ -108,6 +110,7 @@ from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.views import build_llm_intelligence_props
 from console.agent_addons import (
     build_agent_addons_payload,
     update_contact_pack_quantities,
@@ -1328,6 +1331,24 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             override=override,
         )
 
+        upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse("proprietary:pricing")
+            except NoReverseMatch:
+                upgrade_url = None
+
+        owner = request.user
+        owner_type = "user"
+        organization = None
+        if context_info.current_context.type == "organization":
+            organization = Organization.objects.filter(id=context_info.current_context.id).first()
+            if organization:
+                owner = organization
+                owner_type = "organization"
+
+        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
+
         agents_qs = (
             agent_queryset_for(request.user, context_info.current_context)
             .select_related("agent_color")
@@ -1376,6 +1397,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     or agent.user_id == user.id
                     or (agent.organization_id and agent.organization_id in admin_org_ids)
                 ),
+                "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
             }
             for agent in agents
         ]
@@ -1387,6 +1409,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "name": context_info.current_context.name,
                 },
                 "agents": payload,
+                "llmIntelligence": llm_intelligence,
             }
         )
 
@@ -1408,6 +1431,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         initial_message = (body.get("message") or "").strip()
         if not initial_message:
             return JsonResponse({"error": "Message is required"}, status=400)
+        preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
 
         contact_email = (request.user.email or "").strip()
         if not contact_email:
@@ -1421,6 +1445,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 email_enabled=True,
                 sms_enabled=False,
                 preferred_contact_method="email",
+                preferred_llm_tier_key=preferred_llm_tier_key,
             )
         except ValidationError as exc:
             error_messages = []
@@ -1431,7 +1456,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
             return JsonResponse({"error": error_messages[0]}, status=400)
-        except Exception:
+        except IntegrityError:
             logger.exception("Error creating persistent agent via API")
             return JsonResponse({"error": "We ran into a problem creating your agent. Please try again."}, status=500)
 

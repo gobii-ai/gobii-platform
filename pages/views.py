@@ -45,8 +45,9 @@ from .utils_markdown import (
 from .homepage_cache import get_homepage_pretrained_payload
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
+from console.views import build_llm_intelligence_props
 from django.contrib import sitemaps
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
 from django.utils.html import escape, strip_tags
 from opentelemetry import trace
@@ -54,6 +55,7 @@ from marketing_events.api import capi
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+PREFERRED_LLM_TIER_SESSION_KEY = "agent_preferred_llm_tier"
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -248,6 +250,7 @@ class HomePage(TemplateView):
         from console.forms import PersistentAgentCharterForm
 
         initial = {}
+        resolved = None
 
         # If 'spawn=1' parameter is present, clear any stored charter to start fresh
         if self.request.GET.get('spawn') == '1':
@@ -255,6 +258,8 @@ class HomePage(TemplateView):
                 del self.request.session['agent_charter']
             if 'agent_charter_source' in self.request.session:
                 del self.request.session['agent_charter_source']
+            if PREFERRED_LLM_TIER_SESSION_KEY in self.request.session:
+                del self.request.session[PREFERRED_LLM_TIER_SESSION_KEY]
             initial['charter'] = ''
         # If the GET parameter 'dc' (default charter) is present, use it in the initial data
         elif 'dc' in self.request.GET:
@@ -327,6 +332,32 @@ class HomePage(TemplateView):
                 .select_related('org')
                 .order_by('org__name')
             )
+
+        preferred_llm_tier = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or 'standard'
+        context['preferred_llm_tier'] = preferred_llm_tier
+        intelligence_upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                intelligence_upgrade_url = reverse('proprietary:startup_checkout')
+            except NoReverseMatch:
+                intelligence_upgrade_url = None
+
+        owner = None
+        owner_type = 'user'
+        organization = None
+        if self.request.user.is_authenticated:
+            owner = self.request.user
+            if resolved and resolved.current_context.type == 'organization' and resolved.current_membership is not None:
+                organization = resolved.current_membership.org
+                owner = organization
+                owner_type = 'organization'
+
+        context['llm_intelligence'] = build_llm_intelligence_props(
+            owner,
+            owner_type,
+            organization,
+            intelligence_upgrade_url,
+        )
 
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
@@ -438,6 +469,10 @@ class HomeAgentSpawnView(TemplateView):
             # Store charter in session for later use
             request.session['agent_charter'] = form.cleaned_data['charter']
             request.session['agent_charter_source'] = 'user'
+            preferred_llm_tier = (request.POST.get("preferred_llm_tier") or "").strip()
+            if preferred_llm_tier:
+                request.session[PREFERRED_LLM_TIER_SESSION_KEY] = preferred_llm_tier
+                request.session.modified = True
 
             # Track analytics for home page agent creation start (only for authenticated users)
             if request.user.is_authenticated:

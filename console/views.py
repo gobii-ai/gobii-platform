@@ -265,13 +265,10 @@ def _coerce_decimal_to_float(value) -> float | None:
 def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_url: str | None) -> dict[str, Any]:
     plan = None
     if owner is not None:
-        try:
-            if owner_type == 'organization':
-                plan = get_organization_plan(organization)
-            else:
-                plan = get_user_plan(owner)
-        except Exception:
-            plan = None
+        if owner_type == 'organization':
+            plan = get_organization_plan(organization) if organization is not None else None
+        else:
+            plan = get_user_plan(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
     can_edit = bool(
@@ -2309,6 +2306,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         sms_enabled = form.cleaned_data.get('sms_enabled', False)
         email_enabled = form.cleaned_data.get('email_enabled', False)
         preferred_contact_method = form.cleaned_data['preferred_contact_method']
+        preferred_llm_tier_key = request.session.get("agent_preferred_llm_tier")
 
         try:
             result = create_persistent_agent_from_charter(
@@ -2318,7 +2316,11 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                 email_enabled=email_enabled,
                 sms_enabled=sms_enabled,
                 preferred_contact_method=preferred_contact_method,
+                preferred_llm_tier_key=preferred_llm_tier_key,
             )
+            if preferred_llm_tier_key:
+                request.session.pop("agent_preferred_llm_tier", None)
+                request.session.modified = True
             return redirect('agent_welcome', pk=result.agent.id)
         except ValidationError as exc:
             error_messages = []
@@ -2387,6 +2389,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
                 email_enabled=True,
                 sms_enabled=False,
                 preferred_contact_method='email',
+                preferred_llm_tier_key=request.session.get("agent_preferred_llm_tier"),
             )
         except ValidationError as exc:
             error_messages = []
@@ -2405,7 +2408,11 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             return redirect('agents')
 
         session_return_to = request.session.pop(IMMERSIVE_RETURN_TO_SESSION_KEY, None)
-        if session_return_to is not None:
+        popped_intelligence = False
+        if "agent_preferred_llm_tier" in request.session:
+            request.session.pop("agent_preferred_llm_tier", None)
+            popped_intelligence = True
+        if session_return_to is not None or popped_intelligence:
             request.session.modified = True
         embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
         # Default return_to to agents list so closing the chat doesn't redirect back

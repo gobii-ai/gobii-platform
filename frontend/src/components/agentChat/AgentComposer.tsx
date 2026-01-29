@@ -3,11 +3,14 @@ import { memo, useCallback, useEffect, useId, useRef, useState } from 'react'
 import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
+import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import type { ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
+import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
+import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
@@ -109,6 +112,13 @@ type AgentComposerProps = {
   isInsightsPaused?: boolean
   onCollaborate?: () => void
   hideInsightsPanel?: boolean
+  intelligenceConfig?: LlmIntelligenceConfig | null
+  intelligenceTier?: string | null
+  onIntelligenceChange?: (tier: string) => void
+  intelligenceBusy?: boolean
+  intelligenceError?: string | null
+  onOpenTaskPacks?: () => void
+  canManageAgent?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -129,12 +139,20 @@ export const AgentComposer = memo(function AgentComposer({
   isInsightsPaused = false,
   onCollaborate,
   hideInsightsPanel = false,
+  intelligenceConfig = null,
+  intelligenceTier = null,
+  onIntelligenceChange,
+  intelligenceBusy = false,
+  intelligenceError = null,
+  onOpenTaskPacks,
+  canManageAgent = true,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
+  const { isProprietaryMode, openUpgradeModal } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const focusScrollTimeoutRef = useRef<number | null>(null)
@@ -187,6 +205,17 @@ export const AgentComposer = memo(function AgentComposer({
   }, [isProcessing, isWorkingExpanded])
 
   const MAX_COMPOSER_HEIGHT = 320
+
+  const showIntelligenceSelector = Boolean(intelligenceConfig && intelligenceTier && onIntelligenceChange)
+  const handleIntelligenceUpsell = useCallback(() => {
+    if (isProprietaryMode) {
+      openUpgradeModal()
+      return
+    }
+    if (intelligenceConfig?.upgradeUrl) {
+      window.open(intelligenceConfig.upgradeUrl, '_top')
+    }
+  }, [intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
 
   // Insight carousel logic
   const totalInsights = insights.length
@@ -710,7 +739,24 @@ export const AgentComposer = memo(function AgentComposer({
                 ))}
               </div>
             ) : null}
-            <p className="composer-shortcut-hint">Cmd/Ctrl+Enter to send</p>
+            <div className="composer-meta-row">
+              {showIntelligenceSelector ? (
+                <div className="composer-intelligence">
+                  <span className="composer-intelligence-label">Intelligence</span>
+                  <AgentIntelligenceSelector
+                    config={intelligenceConfig as LlmIntelligenceConfig}
+                    currentTier={intelligenceTier ?? 'standard'}
+                    onSelect={(tier) => onIntelligenceChange?.(tier)}
+                    onUpsell={handleIntelligenceUpsell}
+                    onOpenTaskPacks={onOpenTaskPacks}
+                    disabled={!canManageAgent}
+                    busy={intelligenceBusy}
+                    error={intelligenceError}
+                  />
+                </div>
+              ) : null}
+              <p className="composer-shortcut-hint">Cmd/Ctrl+Enter to send</p>
+            </div>
           </div>
         </form>
       </div>

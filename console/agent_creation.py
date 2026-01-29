@@ -12,8 +12,10 @@ from agents.services import PretrainedWorkerTemplateService
 from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
 from api.agent.tasks import process_agent_events_task
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
+from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, max_allowed_tier_for_plan
 from api.models import (
     CommsChannel,
+    IntelligenceTier,
     Organization,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -28,6 +30,7 @@ from console.context_helpers import build_console_context
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.sms import find_unused_number, get_user_primary_sms_number
+from util.subscription_helper import get_owner_plan
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +87,7 @@ def create_persistent_agent_from_charter(
     email_enabled: bool,
     sms_enabled: bool,
     preferred_contact_method: str,
+    preferred_llm_tier_key: str | None = None,
 ) -> AgentCreationResult:
     initial_message = (initial_message or "").strip()
     if not initial_message:
@@ -135,6 +139,26 @@ def create_persistent_agent_from_charter(
     user_contact_sms = None
     sms_preferred = preferred_contact_method == "sms"
 
+    preferred_llm_tier = None
+    if preferred_llm_tier_key:
+        tier_key = preferred_llm_tier_key.strip().lower()
+        try:
+            tier = AgentLLMTier(tier_key)
+        except ValueError as exc:
+            raise ValidationError("Unsupported intelligence tier selection.") from exc
+
+        owner = organization or request.user
+        plan = get_owner_plan(owner) if owner else None
+        allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
+        if TIER_ORDER[tier] > TIER_ORDER[allowed]:
+            if settings.GOBII_PROPRIETARY_MODE:
+                raise ValidationError("Upgrade your plan to choose this intelligence tier.")
+            raise ValidationError("Selected intelligence tier is not available for this deployment.")
+
+        preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
+        if preferred_llm_tier is None:
+            raise ValidationError("Unsupported intelligence tier selection.")
+
     with transaction.atomic():
         try:
             provisioning = PersistentAgentProvisioningService.provision(
@@ -142,6 +166,7 @@ def create_persistent_agent_from_charter(
                 organization=organization,
                 template_code=template_code,
                 charter=initial_message,
+                preferred_llm_tier=preferred_llm_tier,
             )
         except PersistentAgentProvisioningError as exc:
             error_payload = exc.args[0] if exc.args else "Unable to create agent."

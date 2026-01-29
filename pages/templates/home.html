@@ -200,7 +200,7 @@
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
               <!-- Unified input + button container -->
-              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-3xl overflow-hidden relative shadow-2xl transition-all duration-300">
+              <div class="backdrop-blur-2xl bg-white/50 border border-white/60 focus-within:border-indigo-500 rounded-3xl overflow-visible relative shadow-2xl transition-all duration-300">
                 <!-- Typing prompt overlay -->
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
@@ -213,22 +213,93 @@
                 {{ agent_charter_form.charter }}
 
                 <!-- Button row -->
-                <div class="flex flex-col sm:flex-row sm:justify-end items-stretch sm:items-center gap-3 p-3">
-                  {% if user.is_authenticated %}
-                    {% load waffle_tags %}
-                    {% flag "persistent_agents" %}
-                      {% if account.usage.agents_in_use > 0 %}
-                        <a href="{% url 'agents' %}" class="py-3 px-4 inline-flex items-center justify-center gap-x-2 text-sm font-medium rounded-xl border border-blue-600 bg-white text-blue-600 hover:bg-blue-50 focus:outline-none focus:bg-blue-50 transition-colors duration-200">
-                          <span class="hidden sm:inline">Manage your {{ account.usage.agents_in_use }} always-on agent{{ account.usage.agents_in_use|pluralize }}</span>
-                          <span class="sm:hidden">Manage {{ account.usage.agents_in_use }} agent{{ account.usage.agents_in_use|pluralize }}</span>
-                          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                          </svg>
-                        </a>
-                      {% endif %}
-                    {% endflag %}
+                <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                  {% if llm_intelligence %}
+                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+                    <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Intelligence</span>
+                    <div
+                      class="relative w-full sm:w-auto"
+                      data-intelligence-selector
+                      data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
+                      data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
+                      data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
+                    >
+                      <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
+                      <button
+                        type="button"
+                        class="flex w-full items-center justify-between gap-3 rounded-full border border-indigo-200/70 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-white sm:w-auto"
+                        data-intelligence-trigger
+                        aria-expanded="false"
+                      >
+                        <span class="inline-flex items-center gap-2">
+                          <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600">
+                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3a7 7 0 00-4 12.74V17a1 1 0 001 1h1v2h4v-2h1a1 1 0 001-1v-1.26A7 7 0 0012 3z"></path>
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 21h6"></path>
+                            </svg>
+                          </span>
+                          <span data-intelligence-current>smol brain</span>
+                        </span>
+                        <span class="text-xs font-medium text-slate-500" data-intelligence-multiplier>1× credits</span>
+                        <svg class="h-4 w-4 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"></path>
+                        </svg>
+                      </button>
+                      <div
+                        class="absolute left-0 right-0 z-30 mt-2 hidden rounded-2xl border border-indigo-100/80 bg-white/95 p-3 backdrop-blur-2xl sm:left-auto sm:right-0 sm:w-72"
+                        data-intelligence-menu
+                      >
+                        <div class="flex items-start justify-between gap-2">
+                          <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Intelligence</p>
+                            <p class="text-xs text-slate-500">Higher tiers burn credits faster.</p>
+                          </div>
+                          <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-500">Per agent</span>
+                        </div>
+                        <div class="mt-3 flex flex-col gap-2">
+                          {% for option in llm_intelligence.options %}
+                          {% with is_selected=option.key == preferred_llm_tier %}
+                          {% with is_locked=not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
+                          <button
+                            type="button"
+                            class="flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-left transition hover:border-indigo-200/70 hover:bg-indigo-500/5 {% if is_selected %}border-indigo-200/60 bg-indigo-500/10{% endif %}"
+                            data-intelligence-option
+                            data-tier="{{ option.key }}"
+                            data-label="{% if option.key == 'standard' %}smol brain{% elif option.key == 'premium' %}mid brain{% elif option.key == 'max' %}big brain{% elif option.key == 'ultra' %}giga brain{% elif option.key == 'ultra_max' %}galaxy brain{% else %}{{ option.label }}{% endif %}"
+                            data-multiplier="{{ option.multiplier|floatformat:-1 }}"
+                            data-locked="{% if is_locked %}true{% else %}false{% endif %}"
+                          >
+                            <div class="flex flex-col">
+                              <span class="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                                {% if option.key == 'ultra_max' %}
+                                <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l2.6 5.2 5.7.8-4.1 4 1 5.7L12 16.8 6.8 18.7l1-5.7-4.1-4 5.7-.8L12 3z"></path>
+                                </svg>
+                                {% endif %}
+                                {% if option.key == 'standard' %}smol brain{% elif option.key == 'premium' %}mid brain{% elif option.key == 'max' %}big brain{% elif option.key == 'ultra' %}giga brain{% elif option.key == 'ultra_max' %}galaxy brain{% else %}{{ option.label }}{% endif %}
+                              </span>
+                              <span class="text-xs text-slate-500">{% if option.multiplier %}{{ option.multiplier|floatformat:-1 }}× credits{% endif %}</span>
+                            </div>
+                            <span class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 {% if not is_locked %}hidden{% endif %}" data-intelligence-lock>
+                              <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.66 0 3 1.34 3 3v3H9v-3c0-1.66 1.34-3 3-3zm6-1V8a6 6 0 10-12 0v2"></path>
+                              </svg>
+                              Upgrade
+                            </span>
+                            <span class="text-xs font-semibold text-slate-500 {% if not is_selected %}hidden{% endif %}" data-intelligence-selected>Selected</span>
+                          </button>
+                          {% endwith %}
+                          {% endwith %}
+                          {% endfor %}
+                        </div>
+                        {% if llm_intelligence.disabledReason %}
+                        <p class="mt-3 text-xs text-slate-500">{{ llm_intelligence.disabledReason }}</p>
+                        {% endif %}
+                      </div>
+                    </div>
+                  </div>
                   {% endif %}
-                  
+
                   <button
                     type="submit"
                     class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
@@ -521,6 +592,111 @@
 
       setTimeout(typeLoop, 400);
     });
+  </script>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      const selector = document.querySelector('[data-intelligence-selector]')
+      if (!selector) {
+        return
+      }
+      const trigger = selector.querySelector('[data-intelligence-trigger]')
+      const menu = selector.querySelector('[data-intelligence-menu]')
+      const input = selector.querySelector('input[name="preferred_llm_tier"]')
+      const currentLabel = selector.querySelector('[data-intelligence-current]')
+      const currentMultiplier = selector.querySelector('[data-intelligence-multiplier]')
+      const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
+
+      if (!trigger || !menu || !input || !currentLabel || !currentMultiplier || options.length === 0) {
+        return
+      }
+
+      const labelMap = {
+        standard: 'smol brain',
+        premium: 'mid brain',
+        max: 'big brain',
+        ultra: 'giga brain',
+        ultra_max: 'galaxy brain',
+      }
+
+      const formatMultiplier = (value) => {
+        const numeric = Number(value)
+        if (!Number.isFinite(numeric)) {
+          return '× credits'
+        }
+        const rounded = numeric % 1 === 0 ? numeric.toFixed(0) : numeric.toFixed(1)
+        return `${rounded}× credits`
+      }
+
+      const applySelection = (tier) => {
+        const option = options.find((item) => item.dataset.tier === tier)
+        const label = (option && option.dataset.label) || labelMap[tier] || tier.replace('_', ' ')
+        currentLabel.textContent = label
+        currentMultiplier.textContent = formatMultiplier(option ? option.dataset.multiplier : null)
+        options.forEach((item) => {
+          const isSelected = item.dataset.tier === tier
+          const selectedBadge = item.querySelector('[data-intelligence-selected]')
+          if (selectedBadge) {
+            selectedBadge.classList.toggle('hidden', !isSelected)
+          }
+          item.classList.toggle('border-indigo-200/60', isSelected)
+          item.classList.toggle('bg-indigo-500/10', isSelected)
+        })
+      }
+
+      const openMenu = () => {
+        menu.classList.remove('hidden')
+        trigger.setAttribute('aria-expanded', 'true')
+      }
+
+      const closeMenu = () => {
+        menu.classList.add('hidden')
+        trigger.setAttribute('aria-expanded', 'false')
+      }
+
+      trigger.addEventListener('click', (event) => {
+        event.preventDefault()
+        if (menu.classList.contains('hidden')) {
+          openMenu()
+        } else {
+          closeMenu()
+        }
+      })
+
+      document.addEventListener('click', (event) => {
+        if (!selector.contains(event.target)) {
+          closeMenu()
+        }
+      })
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          closeMenu()
+        }
+      })
+
+      options.forEach((option) => {
+        option.addEventListener('click', (event) => {
+          event.preventDefault()
+          const tier = option.dataset.tier
+          if (!tier) {
+            return
+          }
+          if (option.dataset.locked === 'true') {
+            const upgradeUrl = selector.dataset.intelligenceUpgrade
+            if (upgradeUrl) {
+              window.open(upgradeUrl, '_top')
+            }
+            return
+          }
+          input.value = tier
+          applySelection(tier)
+          closeMenu()
+        })
+      })
+
+      applySelection(input.value || 'standard')
+    })
   </script>
 
   <!-- Employee Directory Section -->

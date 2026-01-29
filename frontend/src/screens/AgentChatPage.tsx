@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
-import { createAgent } from '../api/agents'
+import { createAgent, updateAgent } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
@@ -711,6 +711,11 @@ export function AgentChatPage({
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const llmIntelligence = rosterQuery.data?.llmIntelligence ?? null
+  const [draftIntelligenceTier, setDraftIntelligenceTier] = useState<string>('standard')
+  const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
+  const [intelligenceBusy, setIntelligenceBusy] = useState(false)
+  const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -744,6 +749,23 @@ export function AgentChatPage({
     },
     [isNewAgent, sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
+
+  useEffect(() => {
+    if (isNewAgent) {
+      setDraftIntelligenceTier('standard')
+    }
+    setIntelligenceError(null)
+  }, [isNewAgent, activeAgentId])
+
+  const resolvedIntelligenceTier = useMemo(() => {
+    if (isNewAgent) {
+      return draftIntelligenceTier
+    }
+    if (activeAgentId && intelligenceOverrides[activeAgentId]) {
+      return intelligenceOverrides[activeAgentId]
+    }
+    return activeRosterMeta?.preferredLlmTier ?? 'standard'
+  }, [activeAgentId, activeRosterMeta?.preferredLlmTier, draftIntelligenceTier, intelligenceOverrides, isNewAgent])
 
   // Update document title when agent changes
   useEffect(() => {
@@ -907,6 +929,32 @@ export function AgentChatPage({
     window.open(checkoutUrl, '_top')
   }, [])
 
+  const handleIntelligenceChange = useCallback(
+    async (tier: string) => {
+      if (isNewAgent) {
+        setDraftIntelligenceTier(tier)
+        return
+      }
+      if (!activeAgentId) {
+        return
+      }
+      const previousTier = resolvedIntelligenceTier
+      setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: tier }))
+      setIntelligenceBusy(true)
+      setIntelligenceError(null)
+      try {
+        await updateAgent(activeAgentId, { preferred_llm_tier: tier })
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      } catch (err) {
+        setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: previousTier }))
+        setIntelligenceError('Unable to update intelligence level.')
+      } finally {
+        setIntelligenceBusy(false)
+      }
+    },
+    [activeAgentId, isNewAgent, queryClient, resolvedIntelligenceTier],
+  )
+
 
   const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
@@ -915,7 +963,7 @@ export function AgentChatPage({
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
       try {
-        const result = await createAgent(body)
+        const result = await createAgent(body, resolvedIntelligenceTier)
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
@@ -941,7 +989,15 @@ export function AgentChatPage({
     await sendMessage(body, attachments)
     if (!autoScrollPinnedRef.current) return
     scrollToBottom()
-  }, [activeAgentId, isNewAgent, onAgentCreated, queryClient, scrollToBottom, sendMessage])
+  }, [
+    activeAgentId,
+    isNewAgent,
+    onAgentCreated,
+    queryClient,
+    resolvedIntelligenceTier,
+    scrollToBottom,
+    sendMessage,
+  ])
 
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
@@ -1243,6 +1299,11 @@ export function AgentChatPage({
         onPauseChange={setInsightsPaused}
         isInsightsPaused={insightsPaused}
         onUpgrade={handleUpgrade}
+        llmIntelligence={llmIntelligence}
+        currentLlmTier={resolvedIntelligenceTier}
+        onLlmTierChange={handleIntelligenceChange}
+        llmTierSaving={intelligenceBusy}
+        llmTierError={intelligenceError}
       />
     </div>
   )

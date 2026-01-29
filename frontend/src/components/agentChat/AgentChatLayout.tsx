@@ -24,6 +24,7 @@ import type { PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus } from '../../types/agentAddons'
+import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
 type TaskQuotaInfo = {
   available: number
@@ -111,6 +112,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
   onUpgrade?: (plan: PlanTier) => void
+  llmIntelligence?: LlmIntelligenceConfig | null
+  currentLlmTier?: string | null
+  onLlmTierChange?: (tier: string) => void
+  llmTierSaving?: boolean
+  llmTierError?: string | null
+  onOpenTaskPacks?: () => void
 }
 
 export function AgentChatLayout({
@@ -197,6 +204,12 @@ export function AgentChatLayout({
   onPauseChange,
   isInsightsPaused,
   onUpgrade,
+  llmIntelligence = null,
+  currentLlmTier = null,
+  onLlmTierChange,
+  llmTierSaving = false,
+  llmTierError = null,
+  onOpenTaskPacks,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -206,7 +219,6 @@ export function AgentChatLayout({
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
-
   const contactCapDismissKey = useMemo(() => {
     return agentId ? `agent-chat-contact-cap-dismissed:${agentId}` : null
   }, [agentId])
@@ -238,6 +250,15 @@ export function AgentChatLayout({
   const handleAddonsClose = useCallback(() => {
     setAddonsMode(null)
   }, [])
+
+  const resolvedOpenTaskPacks = useMemo(
+    () =>
+      onOpenTaskPacks ??
+      (taskPackCanManageBilling && taskPackOptions.length > 0
+        ? () => handleAddonsOpen('tasks')
+        : undefined),
+    [handleAddonsOpen, onOpenTaskPacks, taskPackCanManageBilling, taskPackOptions.length],
+  )
 
   useEffect(() => {
     setSettingsOpen(false)
@@ -627,6 +648,13 @@ export function AgentChatLayout({
             isInsightsPaused={isInsightsPaused}
             onCollaborate={onShare}
             hideInsightsPanel={hideInsightsPanel}
+            intelligenceConfig={llmIntelligence}
+            intelligenceTier={currentLlmTier}
+            onIntelligenceChange={onLlmTierChange}
+            intelligenceBusy={llmTierSaving}
+            intelligenceError={llmTierError}
+            onOpenTaskPacks={resolvedOpenTaskPacks}
+            canManageAgent={canManageAgent}
           />
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
