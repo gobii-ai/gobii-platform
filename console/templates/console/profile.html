@@ -59,6 +59,34 @@
       </div>
     </form>
 
+    <!-- Referral Link Section -->
+    <div class="space-y-3">
+      <div class="flex items-center justify-between border-b border-gray-200 pb-2">
+        <h2 class="text-lg font-medium text-gray-800">Referral Link</h2>
+      </div>
+      <p class="text-sm text-slate-600">
+        Share your link to invite friends and earn task credits when they get started.
+      </p>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <input
+          id="referral-link-input"
+          type="text"
+          readonly
+          value="{{ referral_link }}"
+          class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 sm:flex-1 sm:min-w-0"
+        >
+        <button
+          id="referral-link-copy"
+          type="button"
+          class="inline-flex items-center justify-center rounded-md bg-blue-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:shrink-0"
+        >
+          <i aria-hidden="true" data-lucide="copy" class="w-4 h-4 mr-2"></i>
+          Copy link
+        </button>
+      </div>
+      <p id="referral-link-status" class="text-xs text-emerald-700 hidden">Copied to clipboard.</p>
+    </div>
+
     <!-- Phone Numbers Section -->
     <div class="space-y-4">
       <div class="flex items-center justify-between border-b border-gray-200 pb-2">
@@ -68,4 +96,40 @@
       {% include "partials/_sms_form.html" with phone=phone add_form=add_form verify_form=verify_form post_url=post_url %}
     </div>
   </div>
+
+  <script>
+    (() => {
+      const copyBtn = document.getElementById('referral-link-copy');
+      const input = document.getElementById('referral-link-input');
+      const status = document.getElementById('referral-link-status');
+      if (!copyBtn || !input) return;
+
+      const showCopied = () => {
+        if (!status) return;
+        status.classList.remove('hidden');
+        clearTimeout(status._t);
+        status._t = setTimeout(() => status.classList.add('hidden'), 2000);
+      };
+
+      copyBtn.addEventListener('click', async () => {
+        const text = input.value || '';
+        try {
+          await navigator.clipboard.writeText(text);
+          showCopied();
+        } catch (err) {
+          input.focus();
+          input.select();
+          input.setSelectionRange(0, text.length);
+          try {
+            const successful = document.execCommand('copy');
+            if (successful) {
+              showCopied();
+            }
+          } catch (copyErr) {
+            console.error('Failed to copy referral link', copyErr);
+          }
+        }
+      });
+    })();
+  </script>
 {% endblock %}

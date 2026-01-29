@@ -750,6 +750,76 @@ class TaskCreditConfig(models.Model):
         return "Task credit configuration"
 
 
+class ReferralIncentiveConfig(models.Model):
+    """Singleton configuration for referral incentive grants."""
+
+    singleton_id = models.PositiveSmallIntegerField(
+        primary_key=True,
+        default=1,
+        editable=False,
+    )
+    referrer_direct_credits = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        default=Decimal("100"),
+        help_text="Credits granted to the referrer for direct account referrals.",
+    )
+    referred_direct_credits = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        default=Decimal("100"),
+        help_text="Credits granted to the referred user for direct account referrals.",
+    )
+    referrer_template_credits = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        default=Decimal("100"),
+        help_text="Credits granted to the referrer for shared template referrals.",
+    )
+    referred_template_credits = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        validators=[MinValueValidator(Decimal("0"))],
+        default=Decimal("100"),
+        help_text="Credits granted to the referred user for shared template referrals.",
+    )
+    direct_referral_cap = models.PositiveIntegerField(
+        default=25,
+        help_text="Lifetime cap on the number of direct referral grants per referrer.",
+    )
+    template_referral_cap = models.PositiveIntegerField(
+        default=25,
+        help_text="Lifetime cap on the number of template referral grants per referrer.",
+    )
+    expiration_days = models.PositiveIntegerField(
+        default=30,
+        help_text="Number of days before referral credits expire.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Referral incentive configuration"
+        verbose_name_plural = "Referral incentive configuration"
+
+    @classmethod
+    def get_solo(cls):
+        return cls.objects.get_or_create(singleton_id=1)[0]
+
+    def save(self, *args, **kwargs):  # pragma: no cover - simple singleton guard
+        self.singleton_id = 1
+        return super().save(*args, **kwargs)
+
+    def delete(self, using=None, keep_parents=False):  # pragma: no cover - deletion discouraged
+        raise ValidationError("ReferralIncentiveConfig cannot be deleted.")
+
+    def __str__(self):
+        return "Referral incentive configuration"
+
+
 class Plan(models.Model):
     """Stable plan identity (e.g., free, startup, scale)."""
 
@@ -3517,6 +3587,69 @@ class UserAttribution(models.Model):
 
     def __str__(self):
         return f"Attribution for user {self.user_id}"
+
+
+class ReferralGrant(models.Model):
+    """Audit record for referral credit grants."""
+
+    class ReferralTypeChoices(models.TextChoices):
+        DIRECT = "direct", "Direct"
+        TEMPLATE = "template", "Template"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    referrer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referral_grants_made",
+    )
+    referred = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="referral_grant",
+        help_text="User who received the referral incentive.",
+    )
+    referral_type = models.CharField(
+        max_length=16,
+        choices=ReferralTypeChoices.choices,
+        help_text="Referral source type (direct or template).",
+    )
+    template_code = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        help_text="Template code if this was a shared-template referral.",
+    )
+    referrer_task_credit = models.ForeignKey(
+        "TaskCredit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referrer_referral_grants",
+    )
+    referred_task_credit = models.ForeignKey(
+        "TaskCredit",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="referred_referral_grants",
+    )
+    granted_at = models.DateTimeField(help_text="When the referral grant was processed.")
+    config_snapshot = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Referral incentive configuration snapshot used for this grant.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-granted_at"]
+        verbose_name = "Referral grant"
+        verbose_name_plural = "Referral grants"
+
+    def __str__(self):
+        return f"ReferralGrant<{self.referred_id}:{self.referral_type}>"
 
 
 class OrganizationBilling(models.Model):

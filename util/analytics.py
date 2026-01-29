@@ -270,6 +270,12 @@ class AnalyticsEvent(StrEnum):
     REFERRAL_CREDITS_GRANTED = 'Referral Credits Granted'
     REFERRAL_CREDITS_DEFERRED = 'Referral Credits Deferred'
     REFERRAL_LINK_GENERATED = 'Referral Link Generated'
+    REFERRAL_ACCOUNT_CREATED = 'Referral Account Created'
+    REFERRAL_TEMPLATE_ACCOUNT_CREATED = 'Referral Template Account Created'
+    REFERRAL_GRANT_RECEIVED = 'Referral Grant Received'
+    REFERRAL_TEMPLATE_GRANT_RECEIVED = 'Referral Template Grant Received'
+    REFERRAL_REDEEMED_GRANT_RECEIVED = 'Referral Redeemed Grant Received'
+    REFERRAL_TEMPLATE_REDEEMED_GRANT_RECEIVED = 'Referral Template Redeemed Grant Received'
 
     # Upsell Events
     UPSELL_MESSAGE_SHOWN = 'Upsell Message Shown'

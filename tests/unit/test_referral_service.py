@@ -3,7 +3,21 @@ from django.test import TestCase, RequestFactory, tag, override_settings
 from django.contrib.auth import get_user_model
 from unittest.mock import patch, MagicMock
 
-from api.models import UserReferral, UserAttribution, PersistentAgentTemplate, PublicProfile, BrowserUseAgentTask, BrowserUseAgent, PersistentAgent, PersistentAgentStep
+from allauth.account.models import EmailAddress
+
+from api.models import (
+    UserReferral,
+    UserAttribution,
+    PersistentAgentTemplate,
+    PublicProfile,
+    BrowserUseAgentTask,
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentStep,
+    ReferralGrant,
+    ReferralIncentiveConfig,
+    TaskCredit,
+)
 from api.services.referral_service import ReferralService, ReferralType
 from middleware.utm_capture import UTMTrackingMiddleware
 
@@ -71,6 +85,7 @@ class ReferralServiceTests(TestCase):
             password='testpass123',
         )
         self.referrer_referral = UserReferral.get_or_create_for_user(self.referrer)
+        EmailAddress.objects.create(user=self.new_user, email=self.new_user.email, verified=True, primary=True)
 
     def test_process_direct_referral_valid(self):
         """Test processing a valid direct referral."""
@@ -148,6 +163,33 @@ class ReferralServiceTests(TestCase):
         # Verify deferred grant check won't grant again
         result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
         self.assertFalse(result)
+        self.assertTrue(ReferralGrant.objects.filter(referred=self.new_user).exists())
+
+    @override_settings(REFERRAL_DEFERRED_GRANT=False)
+    def test_immediate_grant_retries_after_email_confirmation(self):
+        """Test that immediate grants retry after email verification."""
+        EmailAddress.objects.filter(user=self.new_user).update(verified=False)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+
+        result = ReferralService.process_signup_referral(
+            new_user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        self.assertIsNotNone(result)
+
+        self.assertFalse(ReferralGrant.objects.filter(referred=self.new_user).exists())
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNone(attribution.referral_credit_granted_at)
+
+        EmailAddress.objects.filter(user=self.new_user).update(verified=True)
+        retry = ReferralService.check_and_grant_immediate_referral_credits(self.new_user)
+        self.assertTrue(retry)
+        self.assertTrue(ReferralGrant.objects.filter(referred=self.new_user).exists())
+        attribution.refresh_from_db()
+        self.assertIsNotNone(attribution.referral_credit_granted_at)
 
 
 @tag('referral_batch')
@@ -166,6 +208,7 @@ class DeferredReferralGrantTests(TestCase):
             password='testpass123',
         )
         self.referrer_referral = UserReferral.get_or_create_for_user(self.referrer)
+        EmailAddress.objects.create(user=self.new_user, email=self.new_user.email, verified=True, primary=True)
 
     def _create_completed_task(self, user):
         """Helper to create a completed browser task for a user."""
@@ -246,6 +289,8 @@ class DeferredReferralGrantTests(TestCase):
         # Verify it was marked as granted
         attribution = UserAttribution.objects.get(user=self.new_user)
         self.assertIsNotNone(attribution.referral_credit_granted_at)
+        grant = ReferralGrant.objects.get(referred=self.new_user)
+        self.assertIn(str(grant.id), grant.referred_task_credit.comments)
 
     def test_check_and_grant_deferred_credits_no_completed_task(self):
         """Test that credits aren't granted without a completed task."""
@@ -273,6 +318,7 @@ class DeferredReferralGrantTests(TestCase):
         # Verify it was marked as granted
         attribution = UserAttribution.objects.get(user=self.new_user)
         self.assertIsNotNone(attribution.referral_credit_granted_at)
+        self.assertTrue(ReferralGrant.objects.filter(referred=self.new_user).exists())
 
     def test_check_and_grant_deferred_credits_already_granted(self):
         """Test that credits aren't granted twice."""
@@ -319,6 +365,41 @@ class DeferredReferralGrantTests(TestCase):
         # Should still be marked as processed to avoid repeated lookups
         attribution = UserAttribution.objects.get(user=self.new_user)
         self.assertIsNotNone(attribution.referral_credit_granted_at)
+
+    def test_check_and_grant_deferred_credits_requires_verified_email(self):
+        """Test that credits aren't granted without a verified email."""
+        EmailAddress.objects.filter(user=self.new_user).update(verified=False)
+        self._create_completed_task(self.new_user)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertFalse(result)
+
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNone(attribution.referral_credit_granted_at)
+        self.assertFalse(ReferralGrant.objects.filter(referred=self.new_user).exists())
+
+    def test_referrer_cap_skips_referrer_credit(self):
+        """Test that referrer credits respect the lifetime cap but referred still receives credits."""
+        config = ReferralIncentiveConfig.get_solo()
+        config.direct_referral_cap = 0
+        config.save(update_fields=["direct_referral_cap"])
+
+        self._create_completed_task(self.new_user)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        result = ReferralService.check_and_grant_deferred_referral_credits(self.new_user)
+        self.assertTrue(result)
+
+        grant = ReferralGrant.objects.get(referred=self.new_user)
+        self.assertIsNone(grant.referrer_task_credit)
+        self.assertIsNotNone(grant.referred_task_credit)
+        self.assertTrue(TaskCredit.objects.filter(id=grant.referred_task_credit_id).exists())
+        self.assertIn(str(grant.id), grant.referred_task_credit.comments)
 
 
 class MockSession(dict):

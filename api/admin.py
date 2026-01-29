@@ -35,7 +35,7 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
     AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
-    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, Plan, PlanVersion, PlanVersionPrice,
+    AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
     MeteringBatch,
@@ -732,6 +732,63 @@ class TaskCreditConfigAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
         return False
+
+
+@admin.register(ReferralIncentiveConfig)
+class ReferralIncentiveConfigAdmin(admin.ModelAdmin):
+    list_display = (
+        "referrer_direct_credits",
+        "referred_direct_credits",
+        "referrer_template_credits",
+        "referred_template_credits",
+        "direct_referral_cap",
+        "template_referral_cap",
+        "expiration_days",
+        "updated_at",
+    )
+    readonly_fields = ("singleton_id", "created_at", "updated_at")
+    fieldsets = (
+        ("Direct Referral Credits", {
+            "fields": ("referrer_direct_credits", "referred_direct_credits", "direct_referral_cap"),
+        }),
+        ("Template Referral Credits", {
+            "fields": ("referrer_template_credits", "referred_template_credits", "template_referral_cap"),
+        }),
+        ("Expiration", {"fields": ("expiration_days",)}),
+        ("Metadata", {"fields": ("singleton_id", "created_at", "updated_at")}),
+    )
+
+    def has_add_permission(self, request):
+        if ReferralIncentiveConfig.objects.exists():
+            return False
+        return super().has_add_permission(request)
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover - defensive guard
+        return False
+
+
+@admin.register(ReferralGrant)
+class ReferralGrantAdmin(admin.ModelAdmin):
+    list_display = ("referral_type", "referrer_email", "referred_email", "granted_at")
+    list_filter = ("referral_type",)
+    search_fields = ("referrer__email", "referred__email", "template_code", "referrer__id", "referred__id")
+    raw_id_fields = ("referrer", "referred", "referrer_task_credit", "referred_task_credit")
+    readonly_fields = ("id", "granted_at", "created_at", "config_snapshot")
+    list_select_related = ("referrer", "referred")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):  # pragma: no cover - audit log
+        return False
+
+    @admin.display(description="Referrer")
+    def referrer_email(self, obj):
+        return obj.referrer.email if obj.referrer else "-"
+
+    @admin.display(description="Referred")
+    def referred_email(self, obj):
+        return obj.referred.email if obj.referred else "-"
 
 
 @admin.register(UserReferral)
