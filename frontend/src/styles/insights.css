@@ -898,6 +898,16 @@
   color: #10b981;
 }
 
+.collab-row__icon--blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: #3b82f6;
+}
+
+.collab-row__icon--cyan {
+  background: rgba(14, 165, 233, 0.15);
+  color: #0ea5e9;
+}
+
 .collab-row__main {
   grid-column: 2;
   grid-row: 1;
@@ -1044,6 +1054,44 @@
 
 .collab-row__btn--ghost:hover:not(:disabled) {
   background: rgba(0, 0, 0, 0.05);
+}
+
+.collab-row__btn--cyan {
+  background: linear-gradient(135deg, #0ea5e9, #0284c7);
+  color: white;
+  text-decoration: none;
+}
+
+.collab-row__btn--cyan:hover {
+  background: linear-gradient(135deg, #0284c7, #0369a1);
+}
+
+.collab-row__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.375rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.collab-row__status--active {
+  background: rgba(16, 185, 129, 0.12);
+  color: #059669;
+}
+
+.collab-row__status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: #10b981;
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 .collab-row__btn:disabled {

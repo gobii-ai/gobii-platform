@@ -473,52 +473,61 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
   const renderAlwaysOn = () => {
     const hasContact = agentEmail || agentNumber
     return (
-      <motion.div
-        className="always-on-hero"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Left visual - animated rings */}
-        <motion.div className="always-on-hero__visual" variants={visualVariants}>
-          <div className="always-on-hero__ring always-on-hero__ring--outer" />
-          <div className="always-on-hero__ring always-on-hero__ring--middle" />
-          <div className="always-on-hero__ring always-on-hero__ring--inner" />
-          <div className="always-on-hero__icon">
-            <Sparkles size={28} strokeWidth={2} />
-          </div>
+      <div className="collab-grid">
+        {/* Status panel */}
+        <motion.div
+          className="collab-row"
+          variants={containerVariants}
+          initial="hidden"
+          animate="visible"
+        >
+          <motion.div className="collab-row__icon collab-row__icon--blue" variants={visualVariants}>
+            <Sparkles size={18} strokeWidth={2} />
+          </motion.div>
+          <motion.div className="collab-row__main" variants={itemVariants}>
+            <span className="collab-row__title">Always on — safe to close</span>
+            <span className="collab-row__desc">Your agent keeps working in the background</span>
+          </motion.div>
+          <motion.div className="collab-row__actions" variants={badgeVariants}>
+            <span className="collab-row__status collab-row__status--active">
+              <span className="collab-row__status-dot" />
+              Active
+            </span>
+          </motion.div>
         </motion.div>
 
-        {/* Center content */}
-        <motion.div className="always-on-hero__content" variants={itemVariants}>
-          <h3 className="always-on-hero__title">{metadata.alwaysOn.title}</h3>
-          <p className="always-on-hero__body">{metadata.alwaysOn.body}</p>
-          {hasContact ? (
-            <div className="always-on-hero__contact">
-              <span className="always-on-hero__contact-label">Reach {agentDisplayName}:</span>
+        {/* Contact panel */}
+        {hasContact ? (
+          <motion.div
+            className="collab-row"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            <motion.div className="collab-row__icon collab-row__icon--cyan" variants={visualVariants}>
+              {agentEmail ? <Mail size={18} strokeWidth={2} /> : <MessageSquare size={18} strokeWidth={2} />}
+            </motion.div>
+            <motion.div className="collab-row__main" variants={itemVariants}>
+              <span className="collab-row__title">Contact {agentDisplayName}</span>
+              <span className="collab-row__desc">Reach this agent anytime</span>
+            </motion.div>
+            <motion.div className="collab-row__actions" variants={badgeVariants}>
               {agentEmail ? (
-                <a href={`mailto:${agentEmail}`} className="always-on-hero__contact-link">
-                  <Mail size={13} strokeWidth={2} />
-                  <span>{agentEmail}</span>
+                <a href={`mailto:${agentEmail}`} className="collab-row__btn collab-row__btn--cyan">
+                  <Mail size={14} />
+                  <span>Email</span>
                 </a>
               ) : null}
-              {agentEmail && agentNumber ? <span className="always-on-hero__contact-sep">·</span> : null}
               {agentNumber ? (
-                <a href={`sms:${agentNumber}`} className="always-on-hero__contact-link">
-                  <MessageSquare size={13} strokeWidth={2} />
-                  <span>{agentNumberDisplay}</span>
+                <a href={`sms:${agentNumber}`} className="collab-row__btn collab-row__btn--cyan">
+                  <MessageSquare size={14} />
+                  <span>Text</span>
                 </a>
               ) : null}
-            </div>
-          ) : null}
-        </motion.div>
-
-        {/* Right badge */}
-        <motion.div className="always-on-hero__badge" variants={badgeVariants}>
-          <span className="always-on-hero__badge-dot" />
-          <span>Always On</span>
-        </motion.div>
-      </motion.div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </div>
     )
   }
 
