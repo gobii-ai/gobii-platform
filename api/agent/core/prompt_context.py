@@ -2260,15 +2260,9 @@ def build_prompt_context(
 
 def _build_user_display_name(user: Any) -> str | None:
     full_name = (getattr(user, "get_full_name", lambda: "")() or "").strip()
-    email = (getattr(user, "email", "") or "").strip()
-    username = (getattr(user, "username", "") or "").strip()
     if full_name:
-        if email:
-            return f"{full_name} ({email})"
         return full_name
-    if email:
-        return email
-    return username or None
+    return None
 
 
 def _get_web_user_display_map(
