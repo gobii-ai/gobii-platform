@@ -7,24 +7,28 @@ business logic to the event processing module.
 """
 
 import logging
+import os
+import time
 from uuid import UUID
 from typing import Any, Dict, Optional, Sequence
 
 from celery import Task, shared_task
 from opentelemetry import baggage, trace
+import redis
 from waffle import switch_is_active
 from django.conf import settings
 from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
-from ..core.event_processing import process_agent_events
+from ..core.event_processing import process_agent_events, _lock_storage_keys
 from ...services.referral_service import ReferralService
 from ..core.processing_flags import (
     claim_pending_drain_slot,
     clear_pending_drain_slot,
     clear_processing_queued_flag,
     count_pending_agents,
+    get_processing_heartbeat,
     get_pending_drain_settings,
     is_agent_pending,
     pop_pending_agents,
@@ -132,6 +136,7 @@ def process_agent_events_task(
     redelivered = bool(getattr(self.request, "redelivered", False)) or bool(
         delivery_info.get("redelivered")
     )
+    current_worker_pid = os.getpid()
     if redelivered:
         logger.warning(
             "process_agent_events_task redelivered for agent %s (task_id=%s)",
@@ -139,6 +144,62 @@ def process_agent_events_task(
             getattr(self.request, "id", None),
         )
         span.set_attribute("celery.redelivered", True)
+        stale_threshold_seconds = int(settings.AGENT_EVENT_PROCESSING_REDELIVERY_STALE_THRESHOLD_SECONDS)
+        pid_grace_seconds = max(
+            0,
+            int(settings.AGENT_EVENT_PROCESSING_REDELIVERY_PID_GRACE_SECONDS),
+        )
+        if stale_threshold_seconds > 0 or pid_grace_seconds > 0:
+            heartbeat = get_processing_heartbeat(persistent_agent_id)
+            last_seen = None
+            heartbeat_worker_pid = None
+            if isinstance(heartbeat, dict):
+                last_seen = heartbeat.get("last_seen")
+                heartbeat_worker_pid = heartbeat.get("worker_pid")
+            try:
+                last_seen = float(last_seen) if last_seen is not None else None
+            except (TypeError, ValueError):
+                last_seen = None
+
+            now = time.time()
+            should_clear = False
+            try:
+                heartbeat_worker_pid = (
+                    int(heartbeat_worker_pid) if heartbeat_worker_pid is not None else None
+                )
+            except (TypeError, ValueError):
+                heartbeat_worker_pid = None
+
+            if heartbeat_worker_pid is not None and heartbeat_worker_pid != current_worker_pid:
+                if last_seen is None or pid_grace_seconds == 0:
+                    should_clear = True
+                elif (now - last_seen) > pid_grace_seconds:
+                    should_clear = True
+            elif (
+                stale_threshold_seconds > 0
+                and (last_seen is None or (now - last_seen) > stale_threshold_seconds)
+            ):
+                should_clear = True
+
+            if should_clear:
+                lock_key = f"agent-event-processing:{persistent_agent_id}"
+                try:
+                    redis_client = get_redis_client()
+                    deleted = 0
+                    for storage_key in _lock_storage_keys(lock_key):
+                        deleted += int(redis_client.delete(storage_key) or 0)
+                    if deleted:
+                        logger.warning(
+                            "Cleared stale lock(s) for redelivered agent %s (threshold=%ss)",
+                            persistent_agent_id,
+                            stale_threshold_seconds,
+                        )
+                        span.add_event("Cleared stale lock for redelivered task")
+                except redis.exceptions.RedisError:
+                    logger.exception(
+                        "Failed to clear stale lock for redelivered agent %s",
+                        persistent_agent_id,
+                    )
 
     # Look up and set the routing profile from the eval run (if any)
     # This is needed because context variables don't propagate across Celery tasks
@@ -164,6 +225,7 @@ def process_agent_events_task(
             eval_run_id=eval_run_id,
             mock_config=mock_config,
             burn_follow_up_token=burn_follow_up_token,
+            worker_pid=current_worker_pid,
         )
     finally:
         set_current_eval_routing_profile(None)

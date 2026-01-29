@@ -8,6 +8,7 @@ loop with LLM‑powered reasoning and tool execution using tiered failover.
 from __future__ import annotations
 
 import json
+import os
 import logging
 import time
 from dataclasses import dataclass
@@ -497,6 +498,7 @@ class _ProcessingHeartbeat:
     started_at: float
     redis_client: Any | None = None
     run_id: str | None = None
+    worker_pid: int | None = None
 
     def touch(self, stage: str) -> None:
         if self.ttl_seconds <= 0:
@@ -505,6 +507,7 @@ class _ProcessingHeartbeat:
             self.agent_id,
             ttl=self.ttl_seconds,
             run_id=self.run_id,
+            worker_pid=self.worker_pid,
             stage=stage,
             started_at=self.started_at,
             client=self.redis_client,
@@ -2076,6 +2079,7 @@ def process_agent_events(
     eval_run_id: Optional[str] = None,
     mock_config: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
+    worker_pid: Optional[int] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
     normalized_agent_id = _normalize_persistent_agent_id(persistent_agent_id)
@@ -2296,11 +2300,14 @@ def process_agent_events(
         lock_acquired = True
         clear_processing_queued_flag(persistent_agent_id)
         if lock_settings.heartbeat_ttl_seconds > 0:
+            if worker_pid is None:
+                worker_pid = os.getpid()
             heartbeat = _ProcessingHeartbeat(
                 agent_id=str(persistent_agent_id),
                 ttl_seconds=lock_settings.heartbeat_ttl_seconds,
                 started_at=time.time(),
                 redis_client=redis_client,
+                worker_pid=worker_pid,
             )
             heartbeat.touch("lock_acquired")
 
