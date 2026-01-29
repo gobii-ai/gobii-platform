@@ -750,7 +750,7 @@ class MCPToolManager:
             follow_redirects: Optional[bool] = None,
             **extra_client_kwargs: Any,
         ) -> httpx.AsyncClient:
-            default_timeout_seconds = float(settings.MCP_REQUEST_TIMEOUT_SECONDS)
+            default_timeout_seconds = float(settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS)
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
                 "timeout": timeout or httpx.Timeout(default_timeout_seconds),
@@ -837,6 +837,16 @@ class MCPToolManager:
             return None, "No proxy server available"
 
         return (proxy.proxy_url if proxy else None, None)
+
+    def _get_timeout_for_runtime(self, runtime: Optional[MCPServerRuntime]) -> float:
+        """Get the appropriate request timeout based on the runtime's transport."""
+        is_http = bool(runtime and runtime.url)
+        timeout_setting = (
+            settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
+            if is_http
+            else settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS
+        )
+        return float(timeout_setting)
 
     def _effective_prefetch_apps(self, server: MCPServerRuntime) -> List[str]:
         if server.prefetch_apps:
@@ -1341,6 +1351,7 @@ class MCPToolManager:
                 except Exception as exc:
                     return {"status": "error", "message": str(exc)}
 
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(
@@ -1348,6 +1359,7 @@ class MCPToolManager:
                         client,
                         info.tool_name,
                         params,
+                        timeout_seconds=timeout_seconds,
                     )
                 )
             with mcp_result_owner_context(None):
@@ -1496,6 +1508,7 @@ class MCPToolManager:
                 }
         
         try:
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(
@@ -1503,6 +1516,7 @@ class MCPToolManager:
                         client,
                         actual_tool_name,
                         params,
+                        timeout_seconds=timeout_seconds,
                     )
                 )
             with mcp_result_owner_context(owner):
@@ -1689,7 +1703,7 @@ class MCPToolManager:
         async with client:
             effective_timeout = timeout_seconds
             if effective_timeout is None:
-                effective_timeout = float(settings.MCP_REQUEST_TIMEOUT_SECONDS)
+                effective_timeout = float(settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS)
             try:
                 return await asyncio.wait_for(
                     client.call_tool(tool_name, params),

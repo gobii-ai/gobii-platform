@@ -92,7 +92,15 @@ MAX_PREFERRED_PROVIDER_STREAK = env.int("MAX_PREFERRED_PROVIDER_STREAK", default
 # Default timeout (seconds) for LiteLLM requests
 LITELLM_TIMEOUT_SECONDS = env.int("LITELLM_TIMEOUT_SECONDS", default=300)
 # Default timeout (seconds) for MCP tool execution over HTTP
-MCP_REQUEST_TIMEOUT_SECONDS = env.float("MCP_REQUEST_TIMEOUT_SECONDS", default=60.0)
+MCP_HTTP_REQUEST_TIMEOUT_SECONDS = env.float(
+    "MCP_HTTP_REQUEST_TIMEOUT_SECONDS",
+    default=60.0,
+)
+# Default timeout (seconds) for MCP tool execution over stdio (command-based)
+MCP_STDIO_REQUEST_TIMEOUT_SECONDS = env.float(
+    "MCP_STDIO_REQUEST_TIMEOUT_SECONDS",
+    default=300.0,
+)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)
