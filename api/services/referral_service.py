@@ -435,12 +435,13 @@ class ReferralService:
         return (ReferralType.TEMPLATE, referring_user)
 
     @classmethod
+    @classmethod
     def _resolve_plan_choice(cls, user: User) -> PlanNamesChoices:
-        plan = get_user_plan(user) or {}
-        plan_id = plan.get("id") if plan else PlanNamesChoices.FREE
+        plan = get_user_plan(user)
+        plan_id = plan.get("id") if plan else None
         try:
             return PlanNamesChoices(plan_id)
-        except ValueError:
+        except (ValueError, TypeError):
             return PlanNamesChoices.FREE
 
     @classmethod
