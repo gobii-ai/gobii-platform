@@ -73,3 +73,16 @@
 .contact-option-card.is-disabled .contact-option-card__accent {
     opacity: 0.2 !important;
 }
+
+/* Allow long URLs in prose content (e.g., blog references) to wrap on mobile. */
+.prose {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.prose a,
+.prose li,
+.prose p {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
