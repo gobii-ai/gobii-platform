@@ -1333,23 +1333,23 @@
   height: 100%;
 }
 
-@media (max-width: 640px) {
+@media (max-width: 700px) {
+  .composer-working-content {
+    height: 8rem;
+  }
+  .composer-working-insight {
+    min-height: 8rem;
+    height: 8rem;
+  }
+}
+
+@media (max-width: 480px) {
   .composer-working-content {
     height: 7rem;
   }
   .composer-working-insight {
     min-height: 7rem;
     height: 7rem;
-  }
-}
-
-@media (max-width: 420px) {
-  .composer-working-content {
-    height: 6.5rem;
-  }
-  .composer-working-insight {
-    min-height: 6.5rem;
-    height: 6.5rem;
   }
 }
 
