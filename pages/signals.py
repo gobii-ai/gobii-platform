@@ -1031,9 +1031,12 @@ def handle_email_confirmed(sender, request, email_address, **kwargs):
     user = getattr(email_address, "user", None)
     if not user:
         return
-    if not settings.DEFERRED_REFERRAL_CREDITS_ENABLED:
-        return
-    ReferralService.check_and_grant_deferred_referral_credits(user)
+    if ReferralService.is_deferred_granting_enabled():
+        if not settings.DEFERRED_REFERRAL_CREDITS_ENABLED:
+            return
+        ReferralService.check_and_grant_deferred_referral_credits(user)
+    else:
+        ReferralService.check_and_grant_immediate_referral_credits(user)
 
 @receiver(user_logged_in)
 def handle_user_logged_in(sender, request, user, **kwargs):

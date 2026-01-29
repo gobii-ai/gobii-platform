@@ -165,6 +165,32 @@ class ReferralServiceTests(TestCase):
         self.assertFalse(result)
         self.assertTrue(ReferralGrant.objects.filter(referred=self.new_user).exists())
 
+    @override_settings(REFERRAL_DEFERRED_GRANT=False)
+    def test_immediate_grant_retries_after_email_confirmation(self):
+        """Test that immediate grants retry after email verification."""
+        EmailAddress.objects.filter(user=self.new_user).update(verified=False)
+        UserAttribution.objects.create(
+            user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+
+        result = ReferralService.process_signup_referral(
+            new_user=self.new_user,
+            referrer_code=self.referrer_referral.referral_code,
+        )
+        self.assertIsNotNone(result)
+
+        self.assertFalse(ReferralGrant.objects.filter(referred=self.new_user).exists())
+        attribution = UserAttribution.objects.get(user=self.new_user)
+        self.assertIsNone(attribution.referral_credit_granted_at)
+
+        EmailAddress.objects.filter(user=self.new_user).update(verified=True)
+        retry = ReferralService.check_and_grant_immediate_referral_credits(self.new_user)
+        self.assertTrue(retry)
+        self.assertTrue(ReferralGrant.objects.filter(referred=self.new_user).exists())
+        attribution.refresh_from_db()
+        self.assertIsNotNone(attribution.referral_credit_granted_at)
+
 
 @tag('referral_batch')
 class DeferredReferralGrantTests(TestCase):

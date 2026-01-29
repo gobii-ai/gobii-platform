@@ -452,6 +452,7 @@ class ReferralService:
         grant_type: str,
         template_code: Optional[str] = None,
         deferred: bool = False,
+        trigger: str = "signup",
     ) -> Optional[ReferralGrant]:
         """
         Grant credits for a referral, creating TaskCredits and a ReferralGrant audit record.
@@ -485,23 +486,8 @@ class ReferralService:
             referred_grant_type = GrantTypeChoices.REFERRAL_REDEEMED
 
         now = timezone.now()
-        expiration_days = config.expiration_days or 30
+        expiration_days = config.expiration_days if config.expiration_days is not None else 30
         expiration_date = now + timedelta(days=expiration_days)
-
-        referrer_credit_allowed = False
-        if referrer_credits and referrer_credits > 0:
-            if referrer_cap is None:
-                referrer_credit_allowed = True
-            elif referrer_cap <= 0:
-                referrer_credit_allowed = False
-            else:
-                referrer_grant_count = ReferralGrant.objects.filter(
-                    referrer=referring_user,
-                    referral_type=referral_type,
-                    referrer_task_credit__isnull=False,
-                    referrer_task_credit__voided=False,
-                ).count()
-                referrer_credit_allowed = referrer_grant_count < referrer_cap
 
         config_snapshot = {
             "referral_type": referral_type,
@@ -519,6 +505,23 @@ class ReferralService:
                         new_user.id,
                     )
                     return None
+
+                User.objects.select_for_update().filter(id=referring_user.id).exists()
+
+                referrer_credit_allowed = False
+                if referrer_credits and referrer_credits > 0:
+                    if referrer_cap is None:
+                        referrer_credit_allowed = True
+                    elif referrer_cap <= 0:
+                        referrer_credit_allowed = False
+                    else:
+                        referrer_grant_count = ReferralGrant.objects.filter(
+                            referrer=referring_user,
+                            referral_type=referral_type,
+                            referrer_task_credit__isnull=False,
+                            referrer_task_credit__voided=False,
+                        ).count()
+                        referrer_credit_allowed = referrer_grant_count < referrer_cap
 
                 grant = ReferralGrant.objects.create(
                     referrer=referring_user,
@@ -589,12 +592,95 @@ class ReferralService:
                     'grant_type': grant_type,
                     'template_code': template_code or '',
                     'deferred': False,
-                    'trigger': 'signup',
+                    'trigger': trigger,
                     'referral_grant_id': str(grant.id),
                 },
             )
 
         return grant
+
+    @classmethod
+    def check_and_grant_immediate_referral_credits(cls, user: User) -> bool:
+        """
+        Retry referral grant for immediate-granting deployments after email verification.
+
+        Only grants if:
+        - User has referral attribution (referrer_code or signup_template_code)
+        - Credits haven't already been granted (referral_credit_granted_at is null)
+        - Referred user has verified email
+        """
+        try:
+            attribution = UserAttribution.objects.get(user=user)
+        except UserAttribution.DoesNotExist:
+            return False
+
+        if attribution.referral_credit_granted_at is not None:
+            return False
+        if not attribution.referrer_code and not attribution.signup_template_code:
+            return False
+        if not has_verified_email(user):
+            return False
+
+        if ReferralGrant.objects.filter(referred=user).exists():
+            UserAttribution.objects.filter(user=user, referral_credit_granted_at__isnull=True).update(
+                referral_credit_granted_at=timezone.now()
+            )
+            return False
+
+        referring_user = None
+        grant_type = None
+        template_code = None
+
+        if attribution.signup_template_code:
+            try:
+                template = PersistentAgentTemplate.objects.select_related(
+                    'created_by'
+                ).get(code=attribution.signup_template_code)
+                referring_user = template.created_by
+                grant_type = GrantTypeChoices.REFERRAL_SHARED
+                template_code = attribution.signup_template_code
+            except PersistentAgentTemplate.DoesNotExist:
+                logger.warning(
+                    "Immediate grant retry: template not found code=%s user=%s",
+                    attribution.signup_template_code,
+                    user.id,
+                )
+
+        if not referring_user and attribution.referrer_code:
+            referring_user = UserReferral.get_user_by_code(attribution.referrer_code)
+            grant_type = GrantTypeChoices.REFERRAL
+
+        if not referring_user:
+            logger.warning(
+                "Immediate grant retry: referrer not found user=%s ref_code=%s template_code=%s",
+                user.id,
+                attribution.referrer_code,
+                attribution.signup_template_code,
+            )
+            attribution.referral_credit_granted_at = timezone.now()
+            attribution.save(update_fields=['referral_credit_granted_at'])
+            return False
+
+        if referring_user.id == user.id:
+            attribution.referral_credit_granted_at = timezone.now()
+            attribution.save(update_fields=['referral_credit_granted_at'])
+            return False
+
+        grant = cls._grant_referral_credits(
+            referring_user=referring_user,
+            new_user=user,
+            grant_type=grant_type,
+            template_code=template_code,
+            deferred=False,
+            trigger="email_confirmed",
+        )
+
+        if not grant:
+            return False
+
+        attribution.referral_credit_granted_at = timezone.now()
+        attribution.save(update_fields=['referral_credit_granted_at'])
+        return True
 
     @classmethod
     def get_or_create_referral_code(cls, user: User) -> str:
