@@ -27,7 +27,7 @@ https://github.com/gobii-ai/gobii-platform
 
 ## 1) What “agents in prod” actually means
 
-The moment agents touch the real world, the threat surface explodes: untrusted code, arbitrary URLs, filesystem mutation, and long‑lived state. If you treat that like a standard container workload, you’re betting your infrastructure on “nothing ever goes wrong.” The core security problem is not an isolated one‑off exploit. It’s death by a thousand paper cuts: weak isolation, leaky egress, non‑deterministic filesync, and missing audit trails.
+The moment agents touch the real world, the threat surface explodes: untrusted code, arbitrary URLs, filesystem mutation, and long‑lived state. If you treat that like a standard container workload, you’re betting your infrastructure on “nothing ever goes wrong.” The core security problem is not a single exploit. It is a chain of small weaknesses: weak isolation, leaky egress, non‑deterministic filesync, and missing audit trails.
 
 Security here is not a single feature. It’s a system. An isolation boundary without network controls is insufficient. Network controls without audit logs are insufficient. Sync without determinism is insufficient. Every layer has to hold.
 
@@ -42,7 +42,7 @@ These were the non‑negotiables for production:
 - Full audit trail
 - Cost/latency ceilings that still let the product scale
 
-If you get one of these wrong, the system becomes unsafe or unusable. The difficult part is not building any single component — it’s making the whole stack hold under adversarial inputs.
+If you get one of these wrong, the system becomes unsafe or unusable. The difficult part is not building any single component. It is making the whole stack hold under adversarial inputs.
 
 ## 3) Why give agents real capabilities at all?
 
@@ -53,7 +53,7 @@ If you get one of these wrong, the system becomes unsafe or unusable. The diffic
 - File manipulation for durable outputs and handoff
 - Code execution for data transformation and automation
 
-We don’t grant these capabilities for novelty. We grant them because real work requires them — and then we put them inside a sandbox by default.
+We don’t grant these capabilities for novelty. We grant them because real work requires them, then we put them inside a sandbox by default.
 
 <figure>
   <img src="/static/images/blog/sandbox-capabilities.svg" alt="Flowchart showing production tasks requiring browser, MCP, files, and code capabilities that route into a sandbox with guardrails." style="max-width: 100%;">
@@ -83,7 +83,7 @@ The security model therefore focuses on:
 - **Deterministic sync**: file conflicts resolve in a predictable way
 - **Auditability**: every tool call is logged with a params hash
 
-These risks aren’t theoretical — they’re now codified in LLM threat frameworks. OWASP’s LLM Top 10 documents prompt injection and excessive agency as first‑class risks, and MITRE’s ATLAS work calls out real‑world prompt injection and data exfiltration patterns. That’s the exact surface we’re constraining. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/), [MITRE ATLAS](https://www.mitre.org/news-insights/news-release/mitre-and-microsoft-collaborate-address-generative-ai-security-risks).
+These risks are documented in LLM security frameworks. OWASP's LLM Top 10 lists prompt injection and excessive agency, and MITRE ATLAS highlights real-world prompt injection and data exfiltration patterns. That is the exact surface we constrain. [OWASP LLM Top 10](https://owasp.org/www-project-top-10-for-large-language-model-applications/), [MITRE ATLAS](https://www.mitre.org/news-insights/news-release/mitre-and-microsoft-collaborate-address-generative-ai-security-risks).
 
 ## 5) Architecture overview
 
@@ -278,3 +278,7 @@ We accept those tradeoffs intentionally, because the alternative is an unbounded
    https://owasp.org/www-project-top-10-for-large-language-model-applications/  
 8. MITRE ATLAS / Generative AI security risks (real‑world AI attack cases):  
    https://www.mitre.org/news-insights/news-release/mitre-and-microsoft-collaborate-address-generative-ai-security-risks
+9. Diagram tooling: Mermaid (also backed by Open Core Ventures, like Garak):  
+   https://mermaid.ai/
+10. Open Core Ventures (background reference):  
+    https://www.opencoreventures.com/
