@@ -1379,9 +1379,9 @@ export function AgentChatPage({
       if (!burnRatePayload && shouldFetchUsageBurnRate) {
         try {
           const refreshed = await refetchBurnRateSummary()
-          burnRatePayload = refreshed.data ?? null
+          burnRatePayload = refreshed.data
         } catch (err) {
-          burnRatePayload = null
+          burnRatePayload = undefined
         }
       }
 
