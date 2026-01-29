@@ -6,6 +6,7 @@ import { createAgent, updateAgent } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
@@ -16,11 +17,12 @@ import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import type { PlanTier } from '../stores/subscriptionStore'
+import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { UsageSummaryResponse } from '../components/usage'
+import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { track, AnalyticsEvent } from '../util/analytics'
 
@@ -28,6 +30,18 @@ function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
   return first || 'Agent'
+}
+
+const LOW_CREDIT_TASK_THRESHOLD = 3
+
+type IntelligenceGateReason = 'plan' | 'credits' | 'both'
+
+type IntelligenceGateState = {
+  reason: IntelligenceGateReason
+  selectedTier: IntelligenceTierKey
+  allowedTier: IntelligenceTierKey
+  multiplier: number | null
+  estimatedRemaining: number | null
 }
 
 function buildAgentChatPath(pathname: string, agentId: string): string {
@@ -263,9 +277,12 @@ export function AgentChatPage({
     updating: addonsUpdating,
   } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
+  const { openUpgradeModal, isProprietaryMode } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey } | null>(null)
+  const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const [resolvedContext, setResolvedContext] = useState<ConsoleContext | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -935,6 +952,34 @@ export function AgentChatPage({
     window.open(checkoutUrl, '_top')
   }, [])
 
+  const createNewAgent = useCallback(
+    async (body: string, tier: IntelligenceTierKey) => {
+      try {
+        const result = await createAgent(body, tier)
+        const createdAgentName = result.agent_name?.trim() || 'Agent'
+        pendingAgentMetaRef.current = {
+          agentId: result.agent_id,
+          agentName: createdAgentName,
+        }
+        queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
+          mergeRosterEntry(current, {
+            id: result.agent_id,
+            name: createdAgentName,
+            avatarUrl: null,
+            displayColorHex: null,
+            isActive: true,
+            shortDescription: '',
+          }),
+        )
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+        onAgentCreated?.(result.agent_id)
+      } catch (err) {
+        console.error('Failed to create agent:', err)
+      }
+    },
+    [onAgentCreated, queryClient],
+  )
+
   const handleIntelligenceChange = useCallback(
     async (tier: string) => {
       if (isNewAgent) {
@@ -961,49 +1006,6 @@ export function AgentChatPage({
     [activeAgentId, isNewAgent, queryClient, resolvedIntelligenceTier],
   )
 
-
-  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
-    if (!activeAgentId && !isNewAgent) {
-      return
-    }
-    // If this is a new agent, create it first then navigate to it
-    if (isNewAgent) {
-      try {
-        const result = await createAgent(body, resolvedIntelligenceTier)
-        const createdAgentName = result.agent_name?.trim() || 'Agent'
-        pendingAgentMetaRef.current = {
-          agentId: result.agent_id,
-          agentName: createdAgentName,
-        }
-        queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
-          mergeRosterEntry(current, {
-            id: result.agent_id,
-            name: createdAgentName,
-            avatarUrl: null,
-            displayColorHex: null,
-            isActive: true,
-            shortDescription: '',
-          }),
-        )
-        void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-        onAgentCreated?.(result.agent_id)
-      } catch (err) {
-        console.error('Failed to create agent:', err)
-      }
-      return
-    }
-    await sendMessage(body, attachments)
-    if (!autoScrollPinnedRef.current) return
-    scrollToBottom()
-  }, [
-    activeAgentId,
-    isNewAgent,
-    onAgentCreated,
-    queryClient,
-    resolvedIntelligenceTier,
-    scrollToBottom,
-    sendMessage,
-  ])
 
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
@@ -1174,7 +1176,7 @@ export function AgentChatPage({
     [queryClient, updateAddons],
   )
 
-  const shouldFetchUsageSummary = Boolean(activeAgentId && !isNewAgent && !isSelectionView)
+  const shouldFetchUsageSummary = Boolean(contextReady && !isSelectionView && (activeAgentId || isNewAgent))
   const usageContextKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
@@ -1207,11 +1209,127 @@ export function AgentChatPage({
   const taskCreditsDismissKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
+  const billingUrl = useMemo(() => {
+    if (!effectiveContext) {
+      return '/console/billing/'
+    }
+    if (effectiveContext.type === 'organization') {
+      return `/console/billing/?org_id=${effectiveContext.id}`
+    }
+    return '/console/billing/'
+  }, [effectiveContext])
+
+  const handleGateClose = useCallback(() => {
+    pendingCreateRef.current = null
+    setIntelligenceGate(null)
+  }, [])
+
+  const handleGateUpgrade = useCallback(() => {
+    handleGateClose()
+    if (isProprietaryMode) {
+      openUpgradeModal()
+    }
+  }, [handleGateClose, isProprietaryMode, openUpgradeModal])
+
+  const handleGateAddPack = useCallback(() => {
+    handleGateClose()
+    if (typeof window !== 'undefined') {
+      window.open(billingUrl, '_top')
+    }
+  }, [billingUrl, handleGateClose])
+
+  const handleGateContinue = useCallback(() => {
+    const pending = pendingCreateRef.current
+    if (!pending || !intelligenceGate) {
+      handleGateClose()
+      return
+    }
+    const needsPlanUpgrade = intelligenceGate.reason === 'plan' || intelligenceGate.reason === 'both'
+    const tierToUse = needsPlanUpgrade ? intelligenceGate.allowedTier : pending.tier
+    if (needsPlanUpgrade) {
+      setDraftIntelligenceTier(tierToUse)
+    }
+    handleGateClose()
+    void createNewAgent(pending.body, tierToUse)
+  }, [createNewAgent, handleGateClose, intelligenceGate])
+
+  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
+    if (!activeAgentId && !isNewAgent) {
+      return
+    }
+    // If this is a new agent, create it first then navigate to it
+    if (isNewAgent) {
+      const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
+      const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
+      const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
+      const allowedRank = llmIntelligence?.maxAllowedTierRank ?? null
+      const selectedRank = option?.rank ?? null
+      const isLocked = typeof allowedRank === 'number' && typeof selectedRank === 'number'
+        ? selectedRank > allowedRank
+        : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
+      const multiplier = option?.multiplier ?? 1
+      let estimatedRemaining: number | null = null
+      let lowCredits = false
+      if (taskQuota && !hasUnlimitedQuota && !extraTasksEnabled) {
+        const available = taskQuota.available
+        if (Number.isFinite(available) && Number.isFinite(multiplier) && multiplier > 0) {
+          estimatedRemaining = available / multiplier
+          lowCredits = estimatedRemaining <= LOW_CREDIT_TASK_THRESHOLD
+        }
+      }
+      if (isLocked || lowCredits) {
+        pendingCreateRef.current = { body, attachments, tier: selectedTier }
+        setIntelligenceGate({
+          reason: isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits',
+          selectedTier,
+          allowedTier,
+          multiplier: Number.isFinite(multiplier) ? multiplier : null,
+          estimatedRemaining,
+        })
+        return
+      }
+      await createNewAgent(body, selectedTier)
+      return
+    }
+    await sendMessage(body, attachments)
+    if (!autoScrollPinnedRef.current) return
+    scrollToBottom()
+  }, [
+    activeAgentId,
+    createNewAgent,
+    extraTasksEnabled,
+    hasUnlimitedQuota,
+    isNewAgent,
+    llmIntelligence?.canEdit,
+    llmIntelligence?.maxAllowedTier,
+    llmIntelligence?.maxAllowedTierRank,
+    llmIntelligence?.options,
+    resolvedIntelligenceTier,
+    scrollToBottom,
+    sendMessage,
+    taskQuota,
+  ])
 
   return (
     <div className="agent-chat-page">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
+      ) : null}
+      {intelligenceGate ? (
+        <AgentIntelligenceGateModal
+          open={Boolean(intelligenceGate)}
+          reason={intelligenceGate.reason}
+          selectedTier={intelligenceGate.selectedTier}
+          allowedTier={intelligenceGate.allowedTier}
+          multiplier={intelligenceGate.multiplier}
+          estimatedRemaining={intelligenceGate.estimatedRemaining}
+          showUpgrade={isProprietaryMode}
+          showAddPack={isProprietaryMode && Boolean(billingUrl)}
+          onUpgrade={handleGateUpgrade}
+          onAddPack={handleGateAddPack}
+          onContinue={handleGateContinue}
+          onClose={handleGateClose}
+        />
       ) : null}
       <CollaboratorInviteDialog
         open={collaboratorInviteOpen}
@@ -1310,6 +1428,7 @@ export function AgentChatPage({
         llmIntelligence={llmIntelligence}
         currentLlmTier={resolvedIntelligenceTier}
         onLlmTierChange={handleIntelligenceChange}
+        allowLockedIntelligenceSelection={isNewAgent}
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
       />

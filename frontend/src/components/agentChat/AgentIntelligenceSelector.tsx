@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Brain, ChevronDown } from 'lucide-react'
+import { Brain, ChevronDown, Lock } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -43,6 +43,7 @@ type IntelligenceSelectorProps = {
   onSelect: (tier: string) => void
   onUpsell?: () => void
   onOpenTaskPacks?: () => void
+  allowLockedSelection?: boolean
   disabled?: boolean
   busy?: boolean
   error?: string | null
@@ -54,20 +55,29 @@ export function AgentIntelligenceSelector({
   onSelect,
   onUpsell,
   onOpenTaskPacks,
+  allowLockedSelection = false,
   disabled = false,
   busy = false,
   error,
 }: IntelligenceSelectorProps) {
   const [open, setOpen] = useState(false)
-  const options = useMemo(
-    () =>
-      config.options.map((option) => ({
+  const options = useMemo(() => {
+    const resolvedMaxRank = typeof config.maxAllowedTierRank === 'number'
+      ? config.maxAllowedTierRank
+      : null
+    const fallbackLocked = !config.canEdit
+    return config.options.map((option) => {
+      const normalizedLabel = LABEL_OVERRIDES[option.key] ?? option.label
+      const optionRank = typeof option.rank === 'number' ? option.rank : null
+      const lockedByRank = resolvedMaxRank !== null && optionRank !== null && optionRank > resolvedMaxRank
+      const locked = lockedByRank || (fallbackLocked && option.key !== currentTier)
+      return {
         ...option,
-        label: LABEL_OVERRIDES[option.key] ?? option.label,
-        locked: !config.canEdit && option.key !== currentTier,
-      })),
-    [config.canEdit, config.options, currentTier],
-  )
+        label: normalizedLabel,
+        locked,
+      }
+    })
+  }, [config.canEdit, config.maxAllowedTierRank, config.options, currentTier])
   const selectedOption = options.find((option) => option.key === currentTier) ?? options[0]
   const selectedKey = selectedOption?.key ?? options[0]?.key ?? 'standard'
   const selectedKeys = useMemo(() => new Set<Key>([selectedKey]), [selectedKey])
@@ -91,7 +101,7 @@ export function AgentIntelligenceSelector({
     if (!option) {
       return
     }
-    if (option.locked) {
+    if (option.locked && !allowLockedSelection) {
       onUpsell?.()
       setOpen(false)
       return
@@ -149,6 +159,12 @@ export function AgentIntelligenceSelector({
                     <span className="composer-intelligence-option-multiplier">
                       {option.multiplier ? `${option.multiplier}×` : ''}
                     </span>
+                    {option.locked ? (
+                      <span className="composer-intelligence-option-lock">
+                        <Lock size={12} strokeWidth={2} />
+                        <span>Upgrade</span>
+                      </span>
+                    ) : null}
                   </>
                 )}
               </ListBoxItem>

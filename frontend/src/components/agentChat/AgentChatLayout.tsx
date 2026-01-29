@@ -117,6 +117,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmIntelligence?: LlmIntelligenceConfig | null
   currentLlmTier?: string | null
   onLlmTierChange?: (tier: string) => void
+  allowLockedIntelligenceSelection?: boolean
   llmTierSaving?: boolean
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
@@ -211,6 +212,7 @@ export function AgentChatLayout({
   llmIntelligence = null,
   currentLlmTier = null,
   onLlmTierChange,
+  allowLockedIntelligenceSelection = false,
   llmTierSaving = false,
   llmTierError = null,
   onOpenTaskPacks,
@@ -657,6 +659,7 @@ export function AgentChatLayout({
             intelligenceConfig={llmIntelligence}
             intelligenceTier={currentLlmTier}
             onIntelligenceChange={onLlmTierChange}
+            allowLockedIntelligenceSelection={allowLockedIntelligenceSelection}
             intelligenceBusy={llmTierSaving}
             intelligenceError={llmTierError}
             onOpenTaskPacks={resolvedOpenTaskPacks}

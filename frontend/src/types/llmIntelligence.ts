@@ -5,6 +5,7 @@ export type LlmIntelligenceOption = {
   label: string
   description: string
   multiplier: number
+  rank?: number | null
 }
 
 export type LlmIntelligenceConfig = {
@@ -12,4 +13,6 @@ export type LlmIntelligenceConfig = {
   canEdit: boolean
   disabledReason: string | null
   upgradeUrl: string | null
+  maxAllowedTier?: IntelligenceTierKey | null
+  maxAllowedTierRank?: number | null
 }

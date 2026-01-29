@@ -1116,6 +1116,19 @@
   color: rgba(148, 163, 184, 0.9);
 }
 
+.composer-intelligence-option-lock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  border: 1px solid rgba(251, 146, 60, 0.35);
+  background: rgba(251, 146, 60, 0.12);
+  color: #f97316;
+  font-size: 0.6rem;
+  font-weight: 600;
+}
+
 .composer-intelligence-option-indicator {
   display: none;
 }

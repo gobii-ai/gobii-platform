@@ -121,6 +121,7 @@ type AgentComposerProps = {
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
   onIntelligenceChange?: (tier: string) => void
+  allowLockedIntelligenceSelection?: boolean
   intelligenceBusy?: boolean
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
@@ -148,6 +149,7 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceConfig = null,
   intelligenceTier = null,
   onIntelligenceChange,
+  allowLockedIntelligenceSelection = false,
   intelligenceBusy = false,
   intelligenceError = null,
   onOpenTaskPacks,
@@ -704,8 +706,9 @@ export const AgentComposer = memo(function AgentComposer({
                   config={intelligenceConfig as LlmIntelligenceConfig}
                   currentTier={intelligenceTier ?? 'standard'}
                   onSelect={(tier) => onIntelligenceChange?.(tier)}
-                  onUpsell={handleIntelligenceUpsell}
+                  onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
                   onOpenTaskPacks={onOpenTaskPacks}
+                  allowLockedSelection={allowLockedIntelligenceSelection}
                   disabled={!canManageAgent}
                   busy={intelligenceBusy}
                   error={intelligenceError}

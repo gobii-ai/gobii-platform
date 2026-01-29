@@ -338,9 +338,12 @@ class HomePage(TemplateView):
         intelligence_upgrade_url = None
         if settings.GOBII_PROPRIETARY_MODE:
             try:
-                intelligence_upgrade_url = reverse('proprietary:startup_checkout')
+                intelligence_upgrade_url = reverse('proprietary:pricing')
             except NoReverseMatch:
-                intelligence_upgrade_url = None
+                try:
+                    intelligence_upgrade_url = reverse('proprietary:startup_checkout')
+                except NoReverseMatch:
+                    intelligence_upgrade_url = None
 
         owner = None
         owner_type = 'user'
@@ -358,6 +361,13 @@ class HomePage(TemplateView):
             organization,
             intelligence_upgrade_url,
         )
+        try:
+            billing_url = reverse('billing')
+            if organization is not None:
+                billing_url = f"{billing_url}?org_id={organization.id}"
+        except NoReverseMatch:
+            billing_url = ""
+        context['billing_url'] = billing_url
 
         # Examples data
         context["simple_examples"] = SIMPLE_EXAMPLES
