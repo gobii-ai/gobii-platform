@@ -56,6 +56,7 @@ from api.agent.short_description import build_listing_description, build_mini_de
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.referral_service import ReferralService
 from console.daily_credit import (
     build_agent_daily_credit_context,
     get_daily_credit_slider_bounds,
@@ -1379,6 +1380,12 @@ class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         context = super().get_context_data(**kwargs)
         user = self.request.user
         context["profile_form"] = UserProfileForm(instance=user)
+        base_url = self.request.build_absolute_uri("/").rstrip("/")
+        context["referral_link"] = ReferralService.get_referral_link(
+            user,
+            base_url=base_url,
+            track=False,
+        )
 
         return context
 
