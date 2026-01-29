@@ -209,6 +209,8 @@ export type AgentChatPageProps = {
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
+  agentEmail?: string | null
+  agentSms?: string | null
   collaboratorInviteUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
@@ -232,6 +234,8 @@ export function AgentChatPage({
   agentName,
   agentColor,
   agentAvatarUrl,
+  agentEmail,
+  agentSms,
   collaboratorInviteUrl,
   viewerUserId,
   viewerEmail,
@@ -707,6 +711,8 @@ export function AgentChatPage({
   const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
+  const resolvedAgentEmail = activeRosterMeta?.email ?? agentEmail ?? null
+  const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
@@ -1219,6 +1225,8 @@ export function AgentChatPage({
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
+        agentEmail={resolvedAgentEmail}
+        agentSms={resolvedAgentSms}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         agentIsOrgOwned={resolvedIsOrgOwned}
         isCollaborator={isCollaboratorOnly}

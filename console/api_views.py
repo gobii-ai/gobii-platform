@@ -1349,12 +1349,28 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
 
+        # Prefetch primary email and SMS endpoints for header display
+        email_prefetch = models.Prefetch(
+            "comms_endpoints",
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL, is_primary=True),
+            to_attr="primary_email_endpoints",
+        )
+        sms_prefetch = models.Prefetch(
+            "comms_endpoints",
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS),
+            to_attr="primary_sms_endpoints",
+        )
         agents_qs = (
             agent_queryset_for(request.user, context_info.current_context)
             .select_related("agent_color")
+            .prefetch_related(email_prefetch, sms_prefetch)
             .order_by("name")
         )
-        shared_qs = shared_agent_queryset_for(request.user).select_related("agent_color")
+        shared_qs = (
+            shared_agent_queryset_for(request.user)
+            .select_related("agent_color")
+            .prefetch_related(email_prefetch, sms_prefetch)
+        )
         agent_ids = list(agents_qs.values_list("id", flat=True))
         if agent_ids:
             shared_qs = shared_qs.exclude(id__in=agent_ids)
@@ -1377,6 +1393,18 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             ).values_list("org_id", flat=True)
         )
         is_staff = bool(user.is_staff)
+        def get_primary_email(agent: PersistentAgent) -> str | None:
+            endpoints = getattr(agent, "primary_email_endpoints", None)
+            if endpoints:
+                return endpoints[0].address if endpoints else None
+            return None
+
+        def get_primary_sms(agent: PersistentAgent) -> str | None:
+            endpoints = getattr(agent, "primary_sms_endpoints", None)
+            if endpoints:
+                return endpoints[0].address if endpoints else None
+            return None
+
         payload = [
             {
                 "id": str(agent.id),
@@ -1398,6 +1426,8 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     or (agent.organization_id and agent.organization_id in admin_org_ids)
                 ),
                 "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                "email": get_primary_email(agent),
+                "sms": get_primary_sms(agent),
             }
             for agent in agents
         ]

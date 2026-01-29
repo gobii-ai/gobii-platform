@@ -48,14 +48,6 @@ type IntelligenceSelectorProps = {
   error?: string | null
 }
 
-function formatMultiplier(multiplier: number | null | undefined): string {
-  if (!Number.isFinite(multiplier)) {
-    return '× credits'
-  }
-  const normalized = Number(multiplier)
-  return `${normalized % 1 === 0 ? normalized.toFixed(0) : normalized.toFixed(1)}× credits`
-}
-
 export function AgentIntelligenceSelector({
   config,
   currentTier,

@@ -27,6 +27,8 @@ type AgentRosterPayload = {
     can_manage_agent: boolean
     can_manage_collaborators: boolean
     preferred_llm_tier: string | null
+    email: string | null
+    sms: string | null
   }[]
 }
 
@@ -47,6 +49,8 @@ export async function fetchAgentRoster(
     canManageAgent: agent.can_manage_agent,
     canManageCollaborators: agent.can_manage_collaborators,
     preferredLlmTier: agent.preferred_llm_tier,
+    email: agent.email,
+    sms: agent.sms,
   }))
   return { context: payload.context, agents, llmIntelligence: payload.llmIntelligence }
 }

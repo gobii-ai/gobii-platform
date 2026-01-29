@@ -5007,12 +5007,20 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        agent = self.object
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
         context["can_manage_collaborators"] = self.can_manage_collaborators
         context["is_collaborator"] = self.is_collaborator
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
+
+        # Get agent contact info for header display
+        agent_email_ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
+        agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
+        context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
+
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

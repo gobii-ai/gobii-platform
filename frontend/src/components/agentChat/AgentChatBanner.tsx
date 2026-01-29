@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
-import { Check, Settings, UserPlus, X, Zap } from 'lucide-react'
+import { Check, Mail, MessageSquare, Settings, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -18,6 +18,8 @@ type AgentChatBannerProps = {
   agentName: string
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
+  agentEmail?: string | null
+  agentSms?: string | null
   isOrgOwned?: boolean
   canManageAgent?: boolean
   isCollaborator?: boolean
@@ -51,6 +53,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   agentName,
   agentAvatarUrl,
   agentColorHex,
+  agentEmail,
+  agentSms,
   isOrgOwned = false,
   canManageAgent = true,
   isCollaborator = false,
@@ -201,6 +205,30 @@ export const AgentChatBanner = memo(function AgentChatBanner({
           <div className="banner-info">
             <div className="banner-top-row">
               <span className="banner-name">{trimmedName}</span>
+              {(agentEmail || agentSms) ? (
+                <span className="banner-contact-icons">
+                  {agentEmail ? (
+                    <a
+                      href={`mailto:${agentEmail}`}
+                      className="banner-contact-link"
+                      title={agentEmail}
+                    >
+                      <Mail size={12} strokeWidth={2} />
+                      <span className="banner-contact-text">{agentEmail}</span>
+                    </a>
+                  ) : null}
+                  {agentSms ? (
+                    <a
+                      href={`sms:${agentSms}`}
+                      className="banner-contact-link"
+                      title={agentSms}
+                    >
+                      <MessageSquare size={12} strokeWidth={2} />
+                      <span className="banner-contact-text">{agentSms}</span>
+                    </a>
+                  ) : null}
+                </span>
+              ) : null}
               <ConnectionBadge status={connectionStatus} label={connectionLabel} />
             </div>
             {hasKanban && currentTask ? (

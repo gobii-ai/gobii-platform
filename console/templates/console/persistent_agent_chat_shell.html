@@ -13,6 +13,8 @@
        data-agent-name="{{ agent.name|default:'' }}"
        data-agent-color="{{ agent.get_display_color|default_if_none:'' }}"
        data-agent-avatar-url="{{ agent.get_avatar_url|default_if_none:'' }}"
+       data-agent-email="{{ agent_email }}"
+       data-agent-sms="{{ agent_sms }}"
        data-user-plan="{{ user_plan|default:'' }}"
        data-is-proprietary-mode="{% if settings.GOBII_PROPRIETARY_MODE %}true{% else %}false{% endif %}"
        data-viewer-user-id="{{ request.user.id }}"

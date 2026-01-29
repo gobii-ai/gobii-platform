@@ -10,4 +10,6 @@ export type AgentRosterEntry = {
   canManageAgent?: boolean
   canManageCollaborators?: boolean
   preferredLlmTier?: string | null
+  email?: string | null
+  sms?: string | null
 }

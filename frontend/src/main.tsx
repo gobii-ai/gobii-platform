@@ -44,6 +44,8 @@ const agentId = mountNode.dataset.agentId || null
 const agentName = mountNode.dataset.agentName || null
 const agentColor = mountNode.dataset.agentColor || null
 const agentAvatarUrl = mountNode.dataset.agentAvatarUrl || null
+const agentEmail = mountNode.dataset.agentEmail || null
+const agentSms = mountNode.dataset.agentSms || null
 const collaboratorInviteUrl = mountNode.dataset.collaboratorInviteUrl || null
 const viewerUserIdRaw = mountNode.dataset.viewerUserId
 const viewerUserIdValue = viewerUserIdRaw ? Number(viewerUserIdRaw) : null
@@ -100,6 +102,8 @@ switch (appName) {
         agentName={agentName}
         agentColor={agentColor}
         agentAvatarUrl={agentAvatarUrl}
+        agentEmail={agentEmail}
+        agentSms={agentSms}
         collaboratorInviteUrl={collaboratorInviteUrl}
         canManageCollaborators={canManageCollaborators}
         isCollaborator={isCollaborator}
