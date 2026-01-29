@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, ExternalLink, Globe, Link2, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, Globe, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
@@ -742,66 +742,58 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
 
   const renderTemplate = () => {
     const hasProfile = Boolean(metadata.publicProfile?.handle)
-    const handleValue = metadata.publicProfile?.handle ?? templateHandle
     const hasTemplate = Boolean(templateUrl)
     const showHandleForm = !hasProfile && templatePanelOpen
+    const shortDisplayUrl = templateUrl?.replace(/^https?:\/\//, '') ?? ''
 
-    // Extract display URL - show full URL or construct from handle
-    const displayUrl = templateUrl || (handleValue ? `gobii.ai/${handleValue}` : '')
-    const shortDisplayUrl = displayUrl.replace(/^https?:\/\//, '')
-
-
-    const getTitle = () => {
-      if (hasTemplate) return 'Your Agent is Live!'
-      if (showHandleForm) return 'Choose Your Handle'
-      return 'Share Your Agent'
-    }
-
-    const getSubtitle = () => {
-      if (templateError) return templateError
-      if (hasTemplate) return 'Anyone with this link can spawn their own copy of your agent.'
-      if (showHandleForm) return 'This will be your public URL that anyone can visit.'
-      return 'Create a public template that others can clone and customize.'
-    }
-
-    const renderCollaborate = () => {
-      if (!onCollaborate) {
-        return null
-      }
-
+    // Handle form state - full width
+    if (showHandleForm) {
       return (
         <motion.div
-          className="share-hero"
+          className="collab-row"
           variants={containerVariants}
           initial="hidden"
           animate="visible"
         >
-          <motion.div className="share-hero__visual" variants={visualVariants}>
-            <div className="share-hero__ring share-hero__ring--1" />
-            <div className="share-hero__ring share-hero__ring--2" />
-            <div className="share-hero__icon share-hero__icon--collab">
-              <UserPlus size={20} strokeWidth={2} />
+          <motion.div className="collab-row__icon collab-row__icon--purple" variants={visualVariants}>
+            <Globe size={18} strokeWidth={2} />
+          </motion.div>
+          <motion.div className="collab-row__main" variants={itemVariants}>
+            <span className="collab-row__title">Create public link</span>
+            <div className="collab-row__form">
+              <div className="collab-row__input-wrap">
+                <span className="collab-row__input-prefix">gobii.ai/</span>
+                <input
+                  className="collab-row__input"
+                  type="text"
+                  value={templateHandle}
+                  onChange={(e) => {
+                    setTemplateHandle(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
+                    setTemplateHandleDirty(true)
+                  }}
+                  placeholder="your-handle"
+                  autoFocus
+                />
+              </div>
+              {templateError && <span className="collab-row__error">{templateError}</span>}
             </div>
           </motion.div>
-
-          <motion.div className="share-hero__content" variants={itemVariants}>
-            <div className="share-hero__header">
-              <h3 className="share-hero__title">Collaborate</h3>
-            </div>
-            <p className="share-hero__body">
-              Invite teammates to view and message with this agent.
-            </p>
-          </motion.div>
-
-          <motion.div className="share-hero__action" variants={badgeVariants}>
+          <motion.div className="collab-row__actions" variants={badgeVariants}>
             <button
               type="button"
-              className="share-hero__button share-hero__button--collab"
-              onClick={onCollaborate}
-              aria-label="Invite collaborators"
+              className="collab-row__btn collab-row__btn--primary"
+              onClick={handleCreateTemplate}
+              disabled={templateBusy || !templateHandle.trim()}
             >
-              <UserPlus size={16} />
-              <span>Invite</span>
+              {templateBusy ? <Loader2 size={14} className="collab-row__spinner" /> : null}
+              <span>Publish</span>
+            </button>
+            <button
+              type="button"
+              className="collab-row__btn collab-row__btn--ghost"
+              onClick={() => setTemplatePanelOpen(false)}
+            >
+              Cancel
             </button>
           </motion.div>
         </motion.div>
@@ -809,161 +801,78 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
     }
 
     return (
-      <div className="share-hero-grid">
+      <div className="collab-grid">
+        {/* Share panel */}
         <motion.div
-          className={`share-hero${hasTemplate ? ' share-hero--live' : ''}`}
+          className="collab-row"
           variants={containerVariants}
           initial="hidden"
           animate="visible"
         >
-          {/* Left visual */}
-          <motion.div className="share-hero__visual" variants={visualVariants}>
-            <div className={`share-hero__ring share-hero__ring--1${hasTemplate ? ' share-hero__ring--active' : ''}`} />
-            <div className={`share-hero__ring share-hero__ring--2${hasTemplate ? ' share-hero__ring--active' : ''}`} />
-            <div className={`share-hero__icon${hasTemplate ? ' share-hero__icon--live' : ''}`}>
-              {hasTemplate ? <CheckCircle2 size={20} strokeWidth={2} /> : <Globe size={20} strokeWidth={2} />}
-            </div>
+          <motion.div className={`collab-row__icon ${hasTemplate ? 'collab-row__icon--green' : 'collab-row__icon--purple'}`} variants={visualVariants}>
+            {hasTemplate ? <CheckCircle2 size={18} strokeWidth={2} /> : <Globe size={18} strokeWidth={2} />}
           </motion.div>
-
-          {/* Center content */}
-          <motion.div className="share-hero__content" variants={itemVariants}>
-            <div className="share-hero__header">
-              <h3 className="share-hero__title">{getTitle()}</h3>
-              {hasTemplate && (
-                <motion.span
-                  className="share-hero__badge"
-                  initial={{ scale: 0 }}
-                  animate={{ scale: 1 }}
-                  transition={{ type: 'spring', stiffness: 500, damping: 25 }}
-                >
-                  LIVE
-                </motion.span>
-              )}
-            </div>
-            <p className={`share-hero__body${templateError ? ' share-hero__body--error' : ''}`}>
-              {getSubtitle()}
-            </p>
-
-            {showHandleForm ? (
-              <div className="share-hero__form share-hero__form--input">
-                <div className="share-hero__input-wrapper">
-                  <div className="share-hero__input-group">
-                    <div className="share-hero__input-icon">
-                      <Link2 size={14} strokeWidth={2.5} />
-                    </div>
-                    <span className="share-hero__input-domain">gobii.ai/</span>
-                    <input
-                      className="share-hero__input"
-                      type="text"
-                      value={templateHandle}
-                      onChange={(event) => {
-                        setTemplateHandle(event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
-                        setTemplateHandleDirty(true)
-                      }}
-                      placeholder="your-handle"
-                      autoFocus
-                    />
-                  </div>
-                  <span className="share-hero__input-hint">Lowercase letters, numbers, and hyphens</span>
-                </div>
-                <div className="share-hero__form-actions">
-                  <button
-                    type="button"
-                    className={`share-hero__button share-hero__button--primary${templateBusy ? ' share-hero__button--loading' : ''}`}
-                    onClick={handleCreateTemplate}
-                    disabled={templateBusy || !templateHandle.trim()}
-                  >
-                    {templateBusy ? (
-                      <>
-                        <Loader2 size={14} className="share-hero__spinner" />
-                        <span>Creating</span>
-                      </>
-                    ) : (
-                      <>
-                        <Globe size={14} />
-                        <span>Go Live</span>
-                      </>
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    className="share-hero__cancel"
-                    onClick={() => setTemplatePanelOpen(false)}
-                    disabled={templateBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : hasTemplate ? (
-              <motion.div
-                className={`share-hero__live-url${templateCopied ? ' share-hero__live-url--copied' : ''}`}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
+          <motion.div className="collab-row__main" variants={itemVariants}>
+            <span className="collab-row__title">{hasTemplate ? 'Public link active' : 'Share publicly'}</span>
+            {hasTemplate ? (
+              <a href={templateUrl ?? '#'} className="collab-row__link" target="_blank" rel="noreferrer">
+                {shortDisplayUrl}
+              </a>
+            ) : (
+              <span className="collab-row__desc">Anyone with the link can copy this agent</span>
+            )}
+          </motion.div>
+          <motion.div className="collab-row__actions" variants={badgeVariants}>
+            {hasTemplate ? (
+              <button
+                type="button"
+                className={`collab-row__btn ${templateCopied ? 'collab-row__btn--success' : 'collab-row__btn--secondary'}`}
+                onClick={() => handleTemplateCopy(templateUrl ?? '')}
               >
-                <div className="share-hero__url-display">
-                  <Link2 size={14} className="share-hero__url-icon" />
-                  <span className="share-hero__url-text">{shortDisplayUrl}</span>
-                </div>
-                <button
-                  type="button"
-                  className={`share-hero__copy-btn${templateCopied ? ' share-hero__copy-btn--copied' : ''}`}
-                  onClick={() => handleTemplateCopy(templateUrl ?? '')}
-                >
-                  {templateCopied ? (
-                    <>
-                      <CheckCircle2 size={14} />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy size={14} />
-                      <span>Copy</span>
-                    </>
-                  )}
-                </button>
-              </motion.div>
-            ) : null}
+                {templateCopied ? <Check size={14} /> : <Copy size={14} />}
+                <span>{templateCopied ? 'Copied!' : 'Copy'}</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="collab-row__btn collab-row__btn--primary"
+                onClick={handleCreateTemplate}
+                disabled={templateBusy}
+              >
+                {templateBusy ? <Loader2 size={14} className="collab-row__spinner" /> : <Globe size={14} />}
+                <span>Create shareable template</span>
+              </button>
+            )}
           </motion.div>
-
-          {/* Right action */}
-          {!showHandleForm && (
-            <motion.div className="share-hero__action" variants={badgeVariants}>
-              {hasTemplate && templateUrl ? (
-                <a
-                  className="share-hero__cta share-hero__cta--live"
-                  href={templateUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  <span>Open</span>
-                  <ExternalLink size={14} strokeWidth={2.2} />
-                </a>
-              ) : (
-                <button
-                  type="button"
-                  className={`share-hero__button share-hero__button--primary share-hero__button--large${templateBusy ? ' share-hero__button--loading' : ''}`}
-                  onClick={handleCreateTemplate}
-                  disabled={templateBusy}
-                >
-                  {templateBusy ? (
-                    <>
-                      <Loader2 size={16} className="share-hero__spinner" />
-                      <span>Creating</span>
-                    </>
-                  ) : (
-                    <>
-                      <Globe size={16} />
-                      <span>Share Agent</span>
-                    </>
-                  )}
-                </button>
-              )}
-            </motion.div>
-          )}
         </motion.div>
-        {renderCollaborate()}
+
+        {/* Collaborate panel */}
+        {onCollaborate ? (
+          <motion.div
+            className="collab-row"
+            variants={containerVariants}
+            initial="hidden"
+            animate="visible"
+          >
+            <motion.div className="collab-row__icon collab-row__icon--green" variants={visualVariants}>
+              <UserPlus size={18} strokeWidth={2} />
+            </motion.div>
+            <motion.div className="collab-row__main" variants={itemVariants}>
+              <span className="collab-row__title">Collaborate</span>
+              <span className="collab-row__desc">Invite teammates to work on this agent</span>
+            </motion.div>
+            <motion.div className="collab-row__actions" variants={badgeVariants}>
+              <button
+                type="button"
+                className="collab-row__btn collab-row__btn--green"
+                onClick={onCollaborate}
+              >
+                <UserPlus size={14} />
+                <span>Invite</span>
+              </button>
+            </motion.div>
+          </motion.div>
+        ) : null}
       </div>
     )
   }

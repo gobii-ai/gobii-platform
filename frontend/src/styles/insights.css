@@ -616,8 +616,8 @@
 
 .sms-hero__title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.125rem;
+  font-weight: 500;
   color: #0f172a;
   letter-spacing: -0.01em;
 }
@@ -845,7 +845,241 @@
 }
 
 /* ==========================================================================
-   Share Hero Panel - Public sharing template styling
+   Collab Grid - Two compact panels side by side
+   ========================================================================== */
+
+.collab-grid {
+  display: flex;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem 1rem;
+}
+
+.collab-row {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex: 1;
+  min-width: 0;
+  padding: 0.5rem 0.75rem;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 0.5rem;
+  border: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.collab-row__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.375rem;
+  flex-shrink: 0;
+}
+
+.collab-row__icon--purple {
+  background: rgba(139, 92, 246, 0.12);
+  color: #8b5cf6;
+}
+
+.collab-row__icon--green {
+  background: rgba(16, 185, 129, 0.12);
+  color: #10b981;
+}
+
+.collab-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.collab-row__title {
+  display: block;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #1e293b;
+  line-height: 1.2;
+}
+
+.collab-row__desc {
+  display: block;
+  font-size: 0.6875rem;
+  color: #64748b;
+  line-height: 1.3;
+  margin-top: 0.0625rem;
+}
+
+.collab-row__link {
+  display: block;
+  font-size: 0.6875rem;
+  color: #6366f1;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 0.0625rem;
+}
+
+.collab-row__link:hover {
+  text-decoration: underline;
+}
+
+.collab-row__form {
+  margin-top: 0.25rem;
+}
+
+.collab-row__input-wrap {
+  display: inline-flex;
+  align-items: center;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+}
+
+.collab-row__input-wrap:focus-within {
+  border-color: #a5b4fc;
+  box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.1);
+}
+
+.collab-row__input-prefix {
+  padding: 0.3125rem 0.125rem 0.3125rem 0.5rem;
+  color: #64748b;
+  background: #f8fafc;
+  font-size: 0.6875rem;
+}
+
+.collab-row__input {
+  width: 80px;
+  padding: 0.3125rem 0.5rem 0.3125rem 0.125rem;
+  border: none;
+  background: transparent;
+  font-size: 0.75rem;
+  color: #1e293b;
+  outline: none;
+}
+
+.collab-row__input::placeholder {
+  color: #94a3b8;
+}
+
+.collab-row__error {
+  display: block;
+  margin-top: 0.125rem;
+  font-size: 0.625rem;
+  color: #dc2626;
+}
+
+.collab-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+}
+
+.collab-row__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.375rem 0.625rem;
+  border-radius: 0.375rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.collab-row__btn--primary {
+  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  color: white;
+}
+
+.collab-row__btn--primary:hover:not(:disabled) {
+  background: linear-gradient(135deg, #7c3aed, #6d28d9);
+}
+
+.collab-row__btn--green {
+  background: linear-gradient(135deg, #10b981, #059669);
+  color: white;
+}
+
+.collab-row__btn--green:hover:not(:disabled) {
+  background: linear-gradient(135deg, #059669, #047857);
+}
+
+.collab-row__btn--secondary {
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.collab-row__btn--secondary:hover:not(:disabled) {
+  background: #e2e8f0;
+}
+
+.collab-row__btn--success {
+  background: #ecfdf5;
+  color: #059669;
+}
+
+.collab-row__btn--ghost {
+  background: transparent;
+  color: #64748b;
+  padding: 0.375rem 0.5rem;
+}
+
+.collab-row__btn--ghost:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.collab-row__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.collab-row__spinner {
+  animation: collab-spin 0.8s linear infinite;
+}
+
+@keyframes collab-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 700px) {
+  .collab-grid {
+    flex-direction: column;
+    gap: 0.375rem;
+    padding: 0.375rem 0.75rem;
+  }
+
+  .collab-row {
+    padding: 0.5rem 0.625rem;
+  }
+
+  .collab-row__desc {
+    display: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .collab-row__icon {
+    width: 1.75rem;
+    height: 1.75rem;
+  }
+
+  .collab-row__icon svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .collab-row__title {
+    font-size: 0.75rem;
+  }
+}
+
+/* ==========================================================================
+   Share Hero Panel (Legacy) - Public sharing template styling
    ========================================================================== */
 
 .share-hero {
@@ -1775,7 +2009,7 @@
 
 .org-hero__title {
   margin: 0;
-  font-size: 1rem;
+  font-size: 1.125rem;
   font-weight: 500;
   color: #0f172a;
   letter-spacing: -0.01em;
@@ -2030,8 +2264,8 @@
 
 .upsell-hero__title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
+  font-size: 1.125rem;
+  font-weight: 500;
   color: #0f172a;
   letter-spacing: -0.01em;
 }
