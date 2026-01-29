@@ -36,12 +36,50 @@ export type UsageSummaryResponse = {
       total: number
       used: number
       used_pct: number
+      unlimited?: boolean
     }
   }
   extra_tasks?: {
     enabled: boolean
   }
 }
+
+export type UsageBurnRateSnapshot = {
+  scope_type: 'user' | 'organization' | 'agent'
+  scope_id: string
+  window_minutes: number
+  window_start: string
+  window_end: string
+  window_total: number
+  burn_rate_per_hour: number
+  burn_rate_per_day: number
+  computed_at: string
+}
+
+export type UsageBurnRateProjection = {
+  tier: string
+  multiplier: number
+  available: number
+  projected_days_remaining: number | null
+  window_minutes: number
+}
+
+export type UsageBurnRateResponse = {
+  snapshot: UsageBurnRateSnapshot | null
+  projection: UsageBurnRateProjection | null
+  quota: {
+    available: number
+    total: number
+    used: number
+    used_pct: number
+    unlimited: boolean
+  }
+  extra_tasks: {
+    enabled: boolean
+  }
+}
+
+export type UsageBurnRateQueryInput = { tier?: string; window?: number }
 
 export type MetricDefinition = {
   id: 'tasks' | 'tasks_per_day' | 'credits' | 'quota'

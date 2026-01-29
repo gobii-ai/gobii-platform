@@ -839,31 +839,20 @@
           let estimatedDaysRemaining = null
           if (isAuthenticated) {
             try {
-              const response = await fetch('/console/api/usage/summary/', { credentials: 'same-origin' })
+              const tierKey = input.value || 'standard'
+              const response = await fetch(`/console/api/usage/burn-rate/?tier=${encodeURIComponent(tierKey)}`, { credentials: 'same-origin' })
               if (response.ok) {
                 const payload = await response.json()
-                const quota = payload && payload.metrics ? payload.metrics.quota : null
-                const available = quota && typeof quota.available === 'number' ? quota.available : null
-                const multiplier = parseFloat(selectedOption && selectedOption.dataset.multiplier ? selectedOption.dataset.multiplier : '1')
-                const hasUnlimited = quota && (quota.total < 0 || quota.available < 0)
+                const quota = payload ? payload.quota : null
+                const projection = payload ? payload.projection : null
+                const hasUnlimited = quota ? Boolean(quota.unlimited) : false
                 const extraEnabled = Boolean(payload && payload.extra_tasks && payload.extra_tasks.enabled)
-                const used = quota && typeof quota.used === 'number' ? quota.used : null
-                const periodStart = payload && payload.period ? payload.period.start : null
-                if (!hasUnlimited && !extraEnabled && available !== null && Number.isFinite(multiplier) && multiplier > 0) {
-                  if (available < 1) {
-                    estimatedDaysRemaining = 0
-                    lowCredits = true
-                  } else if (used !== null && used > 0 && periodStart) {
-                    const startedAt = new Date(`${periodStart}T00:00:00`)
-                    const now = new Date()
-                    const elapsedMs = now.getTime() - startedAt.getTime()
-                    const elapsedDays = Math.max(1, Math.ceil(elapsedMs / (1000 * 60 * 60 * 24)))
-                    const burnRate = used / elapsedDays
-                    if (burnRate > 0) {
-                      estimatedDaysRemaining = available / (burnRate * multiplier)
-                      lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
-                    }
-                  }
+                const projectedDays = projection && typeof projection.projected_days_remaining === 'number'
+                  ? projection.projected_days_remaining
+                  : null
+                if (!hasUnlimited && !extraEnabled && projectedDays !== null) {
+                  estimatedDaysRemaining = projectedDays
+                  lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
                 }
               }
             } catch (err) {

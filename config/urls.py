@@ -115,6 +115,7 @@ from console.api_views import (
 )
 from console.usage_views import (
     UsageSummaryAPIView,
+    UsageBurnRateSnapshotAPIView,
     UsageTrendAPIView,
     UsageToolBreakdownAPIView,
     UsageAgentLeaderboardAPIView,
@@ -336,6 +337,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
+    path("console/api/usage/burn-rate/", UsageBurnRateSnapshotAPIView.as_view(), name="console_usage_burn_rate"),
     path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
     path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
     path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),

@@ -4,7 +4,7 @@ import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
 import type { ConsoleContext } from '../api/context'
-import { fetchUsageSummary } from '../components/usage/api'
+import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
@@ -21,7 +21,7 @@ import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
-import type { UsageSummaryResponse } from '../components/usage'
+import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { track, AnalyticsEvent } from '../util/analytics'
@@ -1178,6 +1178,7 @@ export function AgentChatPage({
   )
 
   const shouldFetchUsageSummary = Boolean(contextReady && !isSelectionView && (activeAgentId || isNewAgent))
+  const shouldFetchUsageBurnRate = Boolean(contextReady && !isSelectionView && isNewAgent)
   const usageContextKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
@@ -1189,6 +1190,17 @@ export function AgentChatPage({
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     enabled: shouldFetchUsageSummary,
+  })
+  const burnRateTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
+  const {
+    data: burnRateSummary,
+    refetch: refetchBurnRateSummary,
+  } = useQuery<UsageBurnRateResponse, Error>({
+    queryKey: ['usage-burn-rate', 'agent-chat', usageContextKey, burnRateTier],
+    queryFn: ({ signal }) => fetchUsageBurnRate({ tier: burnRateTier }, signal),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    enabled: shouldFetchUsageBurnRate,
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
@@ -1272,24 +1284,25 @@ export function AgentChatPage({
       let estimatedDaysRemaining: number | null = null
       let burnRatePerDay: number | null = null
       let lowCredits = false
-      if (taskQuota && !hasUnlimitedQuota && !extraTasksEnabled) {
-        const available = taskQuota.available
-        const used = taskQuota.used
-        const periodStart = usageSummary?.period?.start
-        if (Number.isFinite(available) && available < 1) {
-          estimatedDaysRemaining = 0
-          lowCredits = true
-        } else if (Number.isFinite(available) && Number.isFinite(used) && used > 0 && periodStart) {
-          const startedAt = new Date(`${periodStart}T00:00:00`)
-          const now = new Date()
-          const elapsedMs = now.getTime() - startedAt.getTime()
-          const elapsedDays = Math.max(1, Math.ceil(elapsedMs / (1000 * 60 * 60 * 24)))
-          burnRatePerDay = used / elapsedDays
-          if (burnRatePerDay > 0 && Number.isFinite(multiplier) && multiplier > 0) {
-            estimatedDaysRemaining = available / (burnRatePerDay * multiplier)
-            lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
-          }
+      let burnRatePayload = burnRateSummary
+      if (!burnRatePayload && shouldFetchUsageBurnRate) {
+        try {
+          const refreshed = await refetchBurnRateSummary()
+          burnRatePayload = refreshed.data ?? null
+        } catch (err) {
+          burnRatePayload = null
         }
+      }
+
+      const burnRateQuota = burnRatePayload?.quota ?? null
+      const burnRateUnlimited = burnRateQuota?.unlimited ?? hasUnlimitedQuota
+      const burnRateExtraEnabled = burnRatePayload?.extra_tasks?.enabled ?? extraTasksEnabled
+      const projectedDays = burnRatePayload?.projection?.projected_days_remaining ?? null
+      burnRatePerDay = burnRatePayload?.snapshot?.burn_rate_per_day ?? null
+
+      if (!burnRateUnlimited && !burnRateExtraEnabled && projectedDays !== null) {
+        estimatedDaysRemaining = projectedDays
+        lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
       }
       if (isLocked || lowCredits) {
         pendingCreateRef.current = { body, attachments, tier: selectedTier }
@@ -1311,6 +1324,7 @@ export function AgentChatPage({
     scrollToBottom()
   }, [
     activeAgentId,
+    burnRateSummary,
     createNewAgent,
     extraTasksEnabled,
     hasUnlimitedQuota,
@@ -1320,10 +1334,10 @@ export function AgentChatPage({
     llmIntelligence?.maxAllowedTierRank,
     llmIntelligence?.options,
     resolvedIntelligenceTier,
+    refetchBurnRateSummary,
     scrollToBottom,
     sendMessage,
-    taskQuota,
-    usageSummary?.period?.start,
+    shouldFetchUsageBurnRate,
   ])
 
   return (

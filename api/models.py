@@ -750,6 +750,62 @@ class TaskCreditConfig(models.Model):
         return "Task credit configuration"
 
 
+class BurnRateSnapshot(models.Model):
+    """Cached burn-rate metrics for owners and agents."""
+
+    class ScopeType(models.TextChoices):
+        USER = "user", "User"
+        ORGANIZATION = "organization", "Organization"
+        AGENT = "agent", "Agent"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    scope_type = models.CharField(max_length=32, choices=ScopeType.choices)
+    scope_id = models.CharField(max_length=64)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="burn_rate_snapshots",
+        null=True,
+        blank=True,
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        related_name="burn_rate_snapshots",
+        null=True,
+        blank=True,
+    )
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="burn_rate_snapshots",
+        null=True,
+        blank=True,
+    )
+    window_minutes = models.PositiveIntegerField()
+    window_start = models.DateTimeField()
+    window_end = models.DateTimeField()
+    window_total = models.DecimalField(max_digits=20, decimal_places=6)
+    burn_rate_per_hour = models.DecimalField(max_digits=20, decimal_places=6)
+    burn_rate_per_day = models.DecimalField(max_digits=20, decimal_places=6)
+    computed_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["scope_type", "scope_id", "window_minutes"],
+                name="burn_rate_snapshot_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["scope_type", "scope_id", "window_minutes"],
+                name="burn_rate_snapshot_scope_idx",
+            ),
+        ]
+        ordering = ["-computed_at"]
+
+
 class ReferralIncentiveConfig(models.Model):
     """Singleton configuration for referral incentive grants."""
 
