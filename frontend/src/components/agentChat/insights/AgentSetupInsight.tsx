@@ -830,7 +830,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
                 onClick={() => handleTemplateCopy(templateUrl ?? '')}
               >
                 {templateCopied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{templateCopied ? 'Copied!' : 'Copy'}</span>
+                <span>{templateCopied ? 'Copied!' : 'Copy link'}</span>
               </button>
             ) : (
               <button
@@ -868,7 +868,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
                 onClick={onCollaborate}
               >
                 <UserPlus size={14} />
-                <span>Invite</span>
+                <span>Add people</span>
               </button>
             </motion.div>
           </motion.div>
