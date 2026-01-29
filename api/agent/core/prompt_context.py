@@ -5,7 +5,7 @@ import logging
 import math
 import re
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from functools import partial
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
@@ -1398,17 +1398,18 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         window_minutes=credit_settings.burn_rate_window_minutes,
     )
     burn_threshold = credit_settings.burn_rate_threshold_per_hour
+    scaled_threshold = burn_threshold
     try:
-        scaled_threshold = apply_tier_credit_multiplier(agent, burn_threshold)
-    except Exception:
+        result = apply_tier_credit_multiplier(agent, burn_threshold)
+    except InvalidOperation:
         logger.debug(
             "Failed to apply tier multiplier to burn-rate threshold for agent %s",
             agent.id,
             exc_info=True,
         )
-        scaled_threshold = burn_threshold
-    if scaled_threshold is None:
-        scaled_threshold = burn_threshold
+    else:
+        if result is not None:
+            scaled_threshold = result
     state = {
         "date": today,
         "soft_target": soft_target,
