@@ -1397,6 +1397,18 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         agent,
         window_minutes=credit_settings.burn_rate_window_minutes,
     )
+    burn_threshold = credit_settings.burn_rate_threshold_per_hour
+    try:
+        scaled_threshold = apply_tier_credit_multiplier(agent, burn_threshold)
+    except Exception:
+        logger.debug(
+            "Failed to apply tier multiplier to burn-rate threshold for agent %s",
+            agent.id,
+            exc_info=True,
+        )
+        scaled_threshold = burn_threshold
+    if scaled_threshold is None:
+        scaled_threshold = burn_threshold
     state = {
         "date": today,
         "soft_target": soft_target,
@@ -1411,7 +1423,7 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         ),
         "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
         "burn_rate_window_minutes": burn_details.get("window_minutes"),
-        "burn_rate_threshold_per_hour": credit_settings.burn_rate_threshold_per_hour,
+        "burn_rate_threshold_per_hour": scaled_threshold,
     }
     return state
 
