@@ -12,6 +12,12 @@ import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
+// Detect if user is on macOS
+function isMacOS(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+}
+
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'time_saved') {
@@ -654,7 +660,7 @@ export const AgentComposer = memo(function AgentComposer({
               <div className="agent-chat-drop-overlay__panel">Drop files to upload</div>
             </div>
           ) : null}
-          <div className="composer-input-surface flex flex-col gap-2 rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3.5 transition">
+          <div className="composer-input-surface flex flex-col rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3 transition">
             <div className="flex items-center gap-3">
               <input
                 ref={fileInputRef}
@@ -667,7 +673,7 @@ export const AgentComposer = memo(function AgentComposer({
               />
               <label
                 htmlFor={attachmentInputId}
-                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all duration-200 hover:border-indigo-200 hover:bg-indigo-50/50 hover:text-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-1"
+                className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all hover:border-slate-300 hover:text-slate-500"
                 aria-label="Attach file"
                 title="Attach file"
               >
@@ -678,7 +684,7 @@ export const AgentComposer = memo(function AgentComposer({
                 rows={1}
                 required={attachments.length === 0}
                 className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
-                placeholder="Send a message..."
+                placeholder={`Message · ${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`}
                 value={body}
                 onChange={(event) => setBody(event.target.value)}
                 onKeyDown={handleKeyDown}
@@ -693,12 +699,24 @@ export const AgentComposer = memo(function AgentComposer({
                 disabled={disabled}
                 ref={textareaRef}
               />
+              {showIntelligenceSelector ? (
+                <AgentIntelligenceSelector
+                  config={intelligenceConfig as LlmIntelligenceConfig}
+                  currentTier={intelligenceTier ?? 'standard'}
+                  onSelect={(tier) => onIntelligenceChange?.(tier)}
+                  onUpsell={handleIntelligenceUpsell}
+                  onOpenTaskPacks={onOpenTaskPacks}
+                  disabled={!canManageAgent}
+                  busy={intelligenceBusy}
+                  error={intelligenceError}
+                />
+              ) : null}
               <button
                 type="submit"
                 className="composer-send-button"
                 disabled={disabled || isSending || (!body.trim() && attachments.length === 0)}
-                title={isSending ? 'Sending' : 'Send (Cmd/Ctrl+Enter)'}
-                aria-label={isSending ? 'Sending message' : 'Send message (Cmd/Ctrl+Enter)'}
+                title={isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`}
+                aria-label={isSending ? 'Sending message' : 'Send message'}
               >
                 {isSending ? (
                   <span className="inline-flex items-center justify-center">
@@ -739,24 +757,6 @@ export const AgentComposer = memo(function AgentComposer({
                 ))}
               </div>
             ) : null}
-            <div className="composer-meta-row">
-              {showIntelligenceSelector ? (
-                <div className="composer-intelligence">
-                  <span className="composer-intelligence-label">Intelligence</span>
-                  <AgentIntelligenceSelector
-                    config={intelligenceConfig as LlmIntelligenceConfig}
-                    currentTier={intelligenceTier ?? 'standard'}
-                    onSelect={(tier) => onIntelligenceChange?.(tier)}
-                    onUpsell={handleIntelligenceUpsell}
-                    onOpenTaskPacks={onOpenTaskPacks}
-                    disabled={!canManageAgent}
-                    busy={intelligenceBusy}
-                    error={intelligenceError}
-                  />
-                </div>
-              ) : null}
-              <p className="composer-shortcut-hint">Cmd/Ctrl+Enter to send</p>
-            </div>
           </div>
         </form>
       </div>
