@@ -25,6 +25,12 @@ Running AI agents in production means untrusted code, real files, and real netwo
 https://github.com/gobii-ai/gobii-platform
 ```
 
+We also publish the minimal sandbox compute supervisor used inside the pods:
+
+```
+https://github.com/gobii-ai/sandbox-compute-server
+```
+
 ## 1) What “agents in prod” actually means
 
 The moment agents touch the real world, the threat surface explodes: untrusted code, arbitrary URLs, filesystem mutation, and long‑lived state. If you treat that like a standard container workload, you’re betting your infrastructure on “nothing ever goes wrong.” The core security problem is not a single exploit. It is a chain of small weaknesses: weak isolation, leaky egress, non‑deterministic filesync, and missing audit trails.
@@ -168,6 +174,8 @@ spec:
               app: sandbox-egress-proxy
 ```
 
+DNS resolution still works because we explicitly allow egress to kube‑dns/coredns (TCP/UDP 53); everything else is denied.
+
 Because egress is default‑deny, direct access to metadata endpoints is blocked. The proxy is the only path out.
 
 ## 9) MCP servers run inside the sandbox
@@ -282,3 +290,5 @@ We accept those tradeoffs intentionally, because the alternative is an unbounded
    https://mermaid.ai/
 10. Open Core Ventures (background reference):  
     https://www.opencoreventures.com/
+11. Minimal sandbox compute server (pod supervisor):  
+    https://github.com/gobii-ai/sandbox-compute-server
