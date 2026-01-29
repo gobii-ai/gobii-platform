@@ -1304,6 +1304,15 @@
   flex-direction: column;
   gap: 0;
   position: relative;
+  height: 7.5rem;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.composer-working-content::-webkit-scrollbar {
+  display: none; /* Chrome/Safari/Opera */
 }
 
 .composer-working-label {
@@ -1314,23 +1323,33 @@
   display: flex;
   align-items: center;
   overflow: visible;
-  min-height: 100px;
+  min-height: 7.5rem;
+  height: 7.5rem;
   animation: composerInsightFadeIn 0.25s ease-out;
 }
 
 .composer-working-insight .insight-card-v2 {
   width: 100%;
+  height: 100%;
 }
 
 @media (max-width: 640px) {
+  .composer-working-content {
+    height: 7rem;
+  }
   .composer-working-insight {
-    min-height: 100px;
+    min-height: 7rem;
+    height: 7rem;
   }
 }
 
 @media (max-width: 420px) {
+  .composer-working-content {
+    height: 6.5rem;
+  }
   .composer-working-insight {
-    min-height: 90px;
+    min-height: 6.5rem;
+    height: 6.5rem;
   }
 }
 
