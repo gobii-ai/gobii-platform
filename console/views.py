@@ -50,6 +50,7 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
     is_multi_assign_enabled,
 )
+from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_llm_tier_multipliers, max_allowed_tier_for_plan
 from api.agent.short_description import build_listing_description, build_mini_description, \
     maybe_schedule_short_description
@@ -4350,6 +4351,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                         agent_fields_to_update.append('updated_at')
                     agent.save(update_fields=agent_fields_to_update)
                     logger.info("Updated agent %s fields: %s", agent.id, ", ".join(agent_fields_to_update))
+                    if 'name' in agent_fields_to_update:
+                        maybe_sync_agent_email_display_name(agent, previous_name=prev_name)
                 if browser_agent is not None and browser_agent_fields_to_update:
                     browser_agent.save(update_fields=browser_agent_fields_to_update)
 

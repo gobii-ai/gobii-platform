@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from agents.services import AgentService
 from api.agent.tasks import process_agent_events_task
+from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.models import (
     AgentFileSpace,
     AgentPeerLink,
@@ -141,6 +142,7 @@ class AgentTransferService:
 
             agent = PersistentAgent.objects.select_for_update().get(pk=invite.agent_id)
             original_owner = agent.user
+            previous_name = agent.name
             allowance = AgentTransferService.allow_transfer(agent, recipient)
             if not allowance.allowed:
                 raise AgentTransferDenied(allowance.reason or "Transfer is not allowed.")
@@ -174,6 +176,8 @@ class AgentTransferService:
 
             agent.full_clean()
             agent.save(update_fields=update_fields)
+            if previous_name and agent.name != previous_name:
+                maybe_sync_agent_email_display_name(agent, previous_name=previous_name)
 
             if browser_agent:
                 browser_agent.user = recipient
