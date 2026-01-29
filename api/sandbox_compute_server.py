@@ -127,9 +127,7 @@ def _python_max_timeout_seconds() -> int:
 def _agent_workspace(agent_id: str) -> Path:
     root = _workspace_root()
     root.mkdir(parents=True, exist_ok=True)
-    agent_root = root / agent_id
-    agent_root.mkdir(parents=True, exist_ok=True)
-    return agent_root
+    return root
 
 
 def _manifest_path(agent_root: Path) -> Path:
