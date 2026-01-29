@@ -470,36 +470,57 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
     }
   }, [metadata.agentId, selectedOrgId])
 
-  const renderAlwaysOn = () => (
-    <motion.div
-      className="always-on-hero"
-      variants={containerVariants}
-      initial="hidden"
-      animate="visible"
-    >
-      {/* Left visual - animated rings */}
-      <motion.div className="always-on-hero__visual" variants={visualVariants}>
-        <div className="always-on-hero__ring always-on-hero__ring--outer" />
-        <div className="always-on-hero__ring always-on-hero__ring--middle" />
-        <div className="always-on-hero__ring always-on-hero__ring--inner" />
-        <div className="always-on-hero__icon">
-          <Sparkles size={28} strokeWidth={2} />
-        </div>
-      </motion.div>
+  const renderAlwaysOn = () => {
+    const hasContact = agentEmail || agentNumber
+    return (
+      <motion.div
+        className="always-on-hero"
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        {/* Left visual - animated rings */}
+        <motion.div className="always-on-hero__visual" variants={visualVariants}>
+          <div className="always-on-hero__ring always-on-hero__ring--outer" />
+          <div className="always-on-hero__ring always-on-hero__ring--middle" />
+          <div className="always-on-hero__ring always-on-hero__ring--inner" />
+          <div className="always-on-hero__icon">
+            <Sparkles size={28} strokeWidth={2} />
+          </div>
+        </motion.div>
 
-      {/* Center content */}
-      <motion.div className="always-on-hero__content" variants={itemVariants}>
-        <h3 className="always-on-hero__title">{metadata.alwaysOn.title}</h3>
-        <p className="always-on-hero__body">{metadata.alwaysOn.body}</p>
-      </motion.div>
+        {/* Center content */}
+        <motion.div className="always-on-hero__content" variants={itemVariants}>
+          <h3 className="always-on-hero__title">{metadata.alwaysOn.title}</h3>
+          <p className="always-on-hero__body">{metadata.alwaysOn.body}</p>
+          {hasContact ? (
+            <div className="always-on-hero__contact">
+              <span className="always-on-hero__contact-label">Reach {agentDisplayName}:</span>
+              {agentEmail ? (
+                <a href={`mailto:${agentEmail}`} className="always-on-hero__contact-link">
+                  <Mail size={13} strokeWidth={2} />
+                  <span>{agentEmail}</span>
+                </a>
+              ) : null}
+              {agentEmail && agentNumber ? <span className="always-on-hero__contact-sep">·</span> : null}
+              {agentNumber ? (
+                <a href={`sms:${agentNumber}`} className="always-on-hero__contact-link">
+                  <MessageSquare size={13} strokeWidth={2} />
+                  <span>{agentNumberDisplay}</span>
+                </a>
+              ) : null}
+            </div>
+          ) : null}
+        </motion.div>
 
-      {/* Right badge */}
-      <motion.div className="always-on-hero__badge" variants={badgeVariants}>
-        <span className="always-on-hero__badge-dot" />
-        <span>Always On</span>
+        {/* Right badge */}
+        <motion.div className="always-on-hero__badge" variants={badgeVariants}>
+          <span className="always-on-hero__badge-dot" />
+          <span>Always On</span>
+        </motion.div>
       </motion.div>
-    </motion.div>
-  )
+    )
+  }
 
   const renderSms = () => {
     const emailVerified = metadata.sms.emailVerified !== false
