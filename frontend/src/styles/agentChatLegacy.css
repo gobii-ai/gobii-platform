@@ -1321,7 +1321,7 @@
 
 .composer-working-insight {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   overflow: visible;
   min-height: 7.5rem;
   height: 7.5rem;
