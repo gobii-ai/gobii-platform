@@ -32,7 +32,7 @@ function deriveFirstName(agentName?: string | null): string {
   return first || 'Agent'
 }
 
-const LOW_CREDIT_TASK_THRESHOLD = 3
+const LOW_CREDIT_DAY_THRESHOLD = 2
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -41,7 +41,8 @@ type IntelligenceGateState = {
   selectedTier: IntelligenceTierKey
   allowedTier: IntelligenceTierKey
   multiplier: number | null
-  estimatedRemaining: number | null
+  estimatedDaysRemaining: number | null
+  burnRatePerDay: number | null
 }
 
 function buildAgentChatPath(pathname: string, agentId: string): string {
@@ -1268,13 +1269,26 @@ export function AgentChatPage({
         ? selectedRank > allowedRank
         : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
       const multiplier = option?.multiplier ?? 1
-      let estimatedRemaining: number | null = null
+      let estimatedDaysRemaining: number | null = null
+      let burnRatePerDay: number | null = null
       let lowCredits = false
       if (taskQuota && !hasUnlimitedQuota && !extraTasksEnabled) {
         const available = taskQuota.available
-        if (Number.isFinite(available) && Number.isFinite(multiplier) && multiplier > 0) {
-          estimatedRemaining = available / multiplier
-          lowCredits = estimatedRemaining <= LOW_CREDIT_TASK_THRESHOLD
+        const used = taskQuota.used
+        const periodStart = usageSummary?.period?.start
+        if (Number.isFinite(available) && available < 1) {
+          estimatedDaysRemaining = 0
+          lowCredits = true
+        } else if (Number.isFinite(available) && Number.isFinite(used) && used > 0 && periodStart) {
+          const startedAt = new Date(`${periodStart}T00:00:00`)
+          const now = new Date()
+          const elapsedMs = now.getTime() - startedAt.getTime()
+          const elapsedDays = Math.max(1, Math.ceil(elapsedMs / (1000 * 60 * 60 * 24)))
+          burnRatePerDay = used / elapsedDays
+          if (burnRatePerDay > 0 && Number.isFinite(multiplier) && multiplier > 0) {
+            estimatedDaysRemaining = available / (burnRatePerDay * multiplier)
+            lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
+          }
         }
       }
       if (isLocked || lowCredits) {
@@ -1284,7 +1298,8 @@ export function AgentChatPage({
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,
-          estimatedRemaining,
+          estimatedDaysRemaining,
+          burnRatePerDay,
         })
         return
       }
@@ -1308,6 +1323,7 @@ export function AgentChatPage({
     scrollToBottom,
     sendMessage,
     taskQuota,
+    usageSummary?.period?.start,
   ])
 
   return (
@@ -1322,7 +1338,8 @@ export function AgentChatPage({
           selectedTier={intelligenceGate.selectedTier}
           allowedTier={intelligenceGate.allowedTier}
           multiplier={intelligenceGate.multiplier}
-          estimatedRemaining={intelligenceGate.estimatedRemaining}
+          estimatedDaysRemaining={intelligenceGate.estimatedDaysRemaining}
+          burnRatePerDay={intelligenceGate.burnRatePerDay}
           showUpgrade={isProprietaryMode}
           showAddPack={isProprietaryMode && Boolean(billingUrl)}
           onUpgrade={handleGateUpgrade}

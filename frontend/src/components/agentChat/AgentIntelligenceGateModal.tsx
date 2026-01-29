@@ -11,7 +11,8 @@ type AgentIntelligenceGateModalProps = {
   selectedTier: IntelligenceTierKey
   allowedTier: IntelligenceTierKey
   multiplier?: number | null
-  estimatedRemaining?: number | null
+  estimatedDaysRemaining?: number | null
+  burnRatePerDay?: number | null
   showUpgrade?: boolean
   showAddPack?: boolean
   onUpgrade?: () => void
@@ -34,11 +35,11 @@ function formatTierLabel(tier: IntelligenceTierKey): string {
 
 function formatRemaining(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) {
-    return 'a few'
+    return 'a few days'
   }
   if (value < 1) return 'less than 1'
-  if (value < 10) return value.toFixed(1)
-  return Math.round(value).toString()
+  if (value < 10) return `${value.toFixed(1)}`
+  return `${Math.round(value)}`
 }
 
 export function AgentIntelligenceGateModal({
@@ -47,7 +48,8 @@ export function AgentIntelligenceGateModal({
   selectedTier,
   allowedTier,
   multiplier,
-  estimatedRemaining,
+  estimatedDaysRemaining,
+  burnRatePerDay,
   showUpgrade = false,
   showAddPack = false,
   onUpgrade,
@@ -63,14 +65,17 @@ export function AgentIntelligenceGateModal({
   const creditsTight = reason === 'credits' || reason === 'both'
   const selectedLabel = formatTierLabel(selectedTier)
   const allowedLabel = formatTierLabel(allowedTier)
-  const remainingLabel = formatRemaining(estimatedRemaining)
+  const remainingLabel = formatRemaining(estimatedDaysRemaining)
+  const burnRateLabel = burnRatePerDay && Number.isFinite(burnRatePerDay)
+    ? burnRatePerDay.toFixed(1)
+    : null
 
   const title = needsPlanUpgrade
     ? `Unlock ${selectedLabel}`
     : 'Credits running low'
   const subtitle = needsPlanUpgrade
     ? `Your plan does not include ${selectedLabel}.`
-    : `At ${selectedLabel}, you have about ${remainingLabel} task${remainingLabel === '1' ? '' : 's'} left.`
+    : `At ${selectedLabel}, you have about ${remainingLabel} day${remainingLabel === '1' ? '' : 's'} left.`
 
   const continueLabel = needsPlanUpgrade ? `Use ${allowedLabel}` : 'Continue anyway'
 
@@ -98,6 +103,9 @@ export function AgentIntelligenceGateModal({
           <div className="flex items-start gap-2">
             <Zap className="mt-0.5 h-4 w-4 text-indigo-500" aria-hidden="true" />
             <span>
+              {burnRateLabel
+                ? `Current burn rate is ~${burnRateLabel} credits/day. `
+                : ''}
               Higher tiers burn credits faster
               {multiplier && Number.isFinite(multiplier) ? ` (${multiplier}× credits).` : '.'}
             </span>

@@ -729,7 +729,7 @@
       const billingUrl = selector.dataset.billingUrl || '/console/billing/'
       const upgradeUrl = selector.dataset.intelligenceUpgrade || ''
       const maxAllowedTier = selector.dataset.intelligenceMaxTier || 'standard'
-      const LOW_CREDIT_TASK_THRESHOLD = 3
+      const LOW_CREDIT_DAY_THRESHOLD = 2
       let bypassGate = false
       const submitForm = () => {
         if (!form) return
@@ -746,11 +746,11 @@
         gateModal.setAttribute('aria-hidden', 'true')
       }
 
-      const openGate = ({ locked, lowCredits, estimatedRemaining, selectedLabel, allowedLabel }) => {
+      const openGate = ({ locked, lowCredits, estimatedDaysRemaining, selectedLabel, allowedLabel }) => {
         if (!gateModal || !gateTitle || !gateMessage || !gateContinue) return
         const reason = locked && lowCredits ? 'both' : locked ? 'plan' : 'credits'
-        const remainingLabel = estimatedRemaining !== null
-          ? (estimatedRemaining < 1 ? 'less than 1' : estimatedRemaining.toFixed(1))
+        const remainingLabel = estimatedDaysRemaining !== null
+          ? (estimatedDaysRemaining < 1 ? 'less than 1' : estimatedDaysRemaining.toFixed(1))
           : 'a few'
 
         if (reason === 'plan') {
@@ -758,10 +758,10 @@
           gateMessage.textContent = `Your plan does not include ${selectedLabel}.`
         } else if (reason === 'credits') {
           gateTitle.textContent = 'Credits running low'
-          gateMessage.textContent = `At ${selectedLabel}, you have about ${remainingLabel} tasks left.`
+          gateMessage.textContent = `At ${selectedLabel}, you have about ${remainingLabel} days left.`
         } else {
           gateTitle.textContent = `Unlock ${selectedLabel}`
-          gateMessage.textContent = `Your plan does not include ${selectedLabel}, and you have about ${remainingLabel} tasks left.`
+          gateMessage.textContent = `Your plan does not include ${selectedLabel}, and you have about ${remainingLabel} days left.`
         }
 
         if (gateDetail) {
@@ -836,7 +836,7 @@
           const locked = selectedOption ? selectedOption.dataset.locked === 'true' : false
 
           let lowCredits = false
-          let estimatedRemaining = null
+          let estimatedDaysRemaining = null
           if (isAuthenticated) {
             try {
               const response = await fetch('/console/api/usage/summary/', { credentials: 'same-origin' })
@@ -847,9 +847,23 @@
                 const multiplier = parseFloat(selectedOption && selectedOption.dataset.multiplier ? selectedOption.dataset.multiplier : '1')
                 const hasUnlimited = quota && (quota.total < 0 || quota.available < 0)
                 const extraEnabled = Boolean(payload && payload.extra_tasks && payload.extra_tasks.enabled)
+                const used = quota && typeof quota.used === 'number' ? quota.used : null
+                const periodStart = payload && payload.period ? payload.period.start : null
                 if (!hasUnlimited && !extraEnabled && available !== null && Number.isFinite(multiplier) && multiplier > 0) {
-                  estimatedRemaining = available / multiplier
-                  lowCredits = estimatedRemaining <= LOW_CREDIT_TASK_THRESHOLD
+                  if (available < 1) {
+                    estimatedDaysRemaining = 0
+                    lowCredits = true
+                  } else if (used !== null && used > 0 && periodStart) {
+                    const startedAt = new Date(`${periodStart}T00:00:00`)
+                    const now = new Date()
+                    const elapsedMs = now.getTime() - startedAt.getTime()
+                    const elapsedDays = Math.max(1, Math.ceil(elapsedMs / (1000 * 60 * 60 * 24)))
+                    const burnRate = used / elapsedDays
+                    if (burnRate > 0) {
+                      estimatedDaysRemaining = available / (burnRate * multiplier)
+                      lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
+                    }
+                  }
                 }
               }
             } catch (err) {
@@ -863,7 +877,7 @@
             return
           }
 
-          openGate({ locked, lowCredits, estimatedRemaining, selectedLabel, allowedLabel })
+          openGate({ locked, lowCredits, estimatedDaysRemaining, selectedLabel, allowedLabel })
         })
       }
 
