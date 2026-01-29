@@ -12,7 +12,13 @@ from agents.services import PretrainedWorkerTemplateService, AgentService
 from api.agent.core.llm_config import default_preferred_tier_for_owner
 from api.agent.short_description import maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
-from api.models import BrowserUseAgent, IntelligenceTier, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    CommsChannel,
+    IntelligenceTier,
+    PersistentAgent,
+    PersistentAgentEmailEndpoint,
+)
 from config import settings
 from constants.plans import PlanNamesChoices
 
@@ -225,3 +231,41 @@ class PersistentAgentProvisioningService:
                 message_dict[cls.NAME_ERROR_KEY] = message_dict.pop("__all__")
             return message_dict
         return exc.messages
+
+
+def maybe_sync_agent_email_display_name(agent: PersistentAgent, previous_name: str | None = None) -> bool:
+    """Update the agent email display name if it matches the previous name or is blank."""
+    if agent is None:
+        return False
+    desired_name = (agent.name or "").strip()
+    if not desired_name:
+        return False
+
+    endpoint = (
+        agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+        .order_by("-is_primary")
+        .first()
+    )
+    if not endpoint:
+        return False
+
+    try:
+        email_meta = endpoint.email_meta
+    except PersistentAgentEmailEndpoint.DoesNotExist:
+        return False
+
+    current_display = (email_meta.display_name or "").strip()
+    previous_display = (previous_name or "").strip()
+
+    if current_display:
+        if not previous_display:
+            return False
+        if current_display.lower() != previous_display.lower():
+            return False
+
+    if current_display == desired_name:
+        return False
+
+    email_meta.display_name = desired_name
+    email_meta.save(update_fields=["display_name"])
+    return True

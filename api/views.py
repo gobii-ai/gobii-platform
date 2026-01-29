@@ -38,6 +38,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from .tasks import process_browser_use_task
 from .services.task_webhooks import trigger_task_webhook
+from .services.persistent_agents import maybe_sync_agent_email_display_name
 from opentelemetry import baggage, context, trace
 from tasks.services import TaskCreditService
 import logging
@@ -759,7 +760,11 @@ class PersistentAgentViewSet(viewsets.ModelViewSet):
         )
 
     def perform_update(self, serializer):
+        instance = serializer.instance
+        prev_name = instance.name if instance else None
         agent = serializer.save()
+        if agent.name != prev_name:
+            maybe_sync_agent_email_display_name(agent, previous_name=prev_name)
         self._track_agent_event(agent, AnalyticsEvent.PERSISTENT_AGENT_UPDATED)
 
     def destroy(self, request, *args, **kwargs):
