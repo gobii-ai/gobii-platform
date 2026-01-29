@@ -191,7 +191,7 @@
 
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
-      <div class="max-w-4xl mx-auto">
+      <div class="max-w-4xl mx-auto relative z-20">
           <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-immersive-form>
             {% csrf_token %}
             <input type="hidden" name="return_to" id="agent-return-to" value="">
@@ -213,89 +213,71 @@
                 {{ agent_charter_form.charter }}
 
                 <!-- Button row -->
-                <div class="flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+                <div class="flex items-center justify-end gap-3 p-3 relative z-[200]">
                   {% if llm_intelligence %}
-                  <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-                    <span class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Intelligence</span>
-                    <div
-                      class="relative w-full sm:w-auto"
-                      data-intelligence-selector
-                      data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
-                      data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
-                      data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
+                  <div
+                    class="relative"
+                    data-intelligence-selector
+                    data-intelligence-upgrade="{{ llm_intelligence.upgradeUrl|default_if_none:'' }}"
+                    data-intelligence-can-edit="{{ llm_intelligence.canEdit|yesno:'true,false' }}"
+                    data-intelligence-disabled="{{ llm_intelligence.disabledReason|default_if_none:''|escape }}"
+                  >
+                    <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
+                    <button
+                      type="button"
+                      class="group flex items-center gap-1.5 rounded-lg bg-transparent px-2 py-1.5 text-xs font-medium text-slate-500 transition-all hover:text-indigo-600"
+                      data-intelligence-trigger
+                      aria-expanded="false"
+                      aria-label="Select intelligence level"
                     >
-                      <input type="hidden" name="preferred_llm_tier" id="preferred-llm-tier" value="{{ preferred_llm_tier }}">
+                      <svg class="h-4 w-4 text-indigo-400 group-hover:text-indigo-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path>
+                        <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path>
+                        <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4"></path>
+                        <path d="M17.599 6.5a3 3 0 0 0 .399-1.375"></path>
+                        <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5"></path>
+                        <path d="M3.477 10.896a4 4 0 0 1 .585-.396"></path>
+                        <path d="M19.938 10.5a4 4 0 0 1 .585.396"></path>
+                        <path d="M6 18a4 4 0 0 1-1.967-.516"></path>
+                        <path d="M19.967 17.484A4 4 0 0 1 18 18"></path>
+                      </svg>
+                      <span data-intelligence-current>Smol Brain</span>
+                      <svg class="h-3 w-3 text-slate-400 transition-transform group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-chevron>
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                      </svg>
+                    </button>
+                    <div
+                      class="absolute top-full right-0 z-[100] mt-2 hidden w-52 origin-top-right rounded-xl border border-slate-200/80 bg-white p-1.5 shadow-lg shadow-slate-200/50"
+                      data-intelligence-menu
+                    >
+                      <div class="mb-1.5 px-2 pt-1">
+                        <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Intelligence</p>
+                      </div>
+                      {% for option in llm_intelligence.options %}
                       <button
                         type="button"
-                        class="flex w-full items-center justify-between gap-3 rounded-full border border-indigo-200/70 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-900 transition hover:border-indigo-300 hover:bg-white sm:w-auto"
-                        data-intelligence-trigger
-                        aria-expanded="false"
+                        class="flex w-full items-center rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-indigo-50 {% if option.key == preferred_llm_tier %}bg-indigo-50/70{% endif %}"
+                        data-intelligence-option
+                        data-tier="{{ option.key }}"
+                        data-label="{% if option.key == 'standard' %}Smol Brain{% elif option.key == 'premium' %}Mid Brain{% elif option.key == 'max' %}Big Brain{% elif option.key == 'ultra' %}Giga Brain{% elif option.key == 'ultra_max' %}Galaxy Brain{% else %}{{ option.label }}{% endif %}"
+                        data-multiplier="{{ option.multiplier|floatformat:-1 }}"
+                        data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
                       >
-                        <span class="inline-flex items-center gap-2">
-                          <span class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-indigo-500/10 text-indigo-600">
-                            <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3a7 7 0 00-4 12.74V17a1 1 0 001 1h1v2h4v-2h1a1 1 0 001-1v-1.26A7 7 0 0012 3z"></path>
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 21h6"></path>
-                            </svg>
-                          </span>
-                          <span data-intelligence-current>smol brain</span>
+                        <span class="flex-1 text-xs font-medium text-slate-700">{% if option.key == 'standard' %}🌱 Smol Brain{% elif option.key == 'premium' %}💭 Mid Brain{% elif option.key == 'max' %}💡 Big Brain{% elif option.key == 'ultra' %}⚡ Giga Brain{% elif option.key == 'ultra_max' %}🤯 Galaxy Brain{% else %}{{ option.label }}{% endif %}</span>
+                        <span class="w-8 text-right text-[10px] text-slate-400">{{ option.multiplier|floatformat:-1 }}×</span>
+                        <span class="w-4 flex justify-center">
+                          {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
+                          <svg class="h-2.5 w-2.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-lock>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m7-7V7a5 5 0 00-10 0v4h10z"></path>
+                          </svg>
+                          {% elif option.key == preferred_llm_tier %}
+                          <svg class="h-3 w-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-check>
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
+                          </svg>
+                          {% endif %}
                         </span>
-                        <span class="text-xs font-medium text-slate-500" data-intelligence-multiplier>1× credits</span>
-                        <svg class="h-4 w-4 text-indigo-500/70" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 9l6 6 6-6"></path>
-                        </svg>
                       </button>
-                      <div
-                        class="absolute left-0 right-0 z-30 mt-2 hidden rounded-2xl border border-indigo-100/80 bg-white/95 p-3 backdrop-blur-2xl sm:left-auto sm:right-0 sm:w-72"
-                        data-intelligence-menu
-                      >
-                        <div class="flex items-start justify-between gap-2">
-                          <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500">Intelligence</p>
-                            <p class="text-xs text-slate-500">Higher tiers burn credits faster.</p>
-                          </div>
-                          <span class="text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-500">Per agent</span>
-                        </div>
-                        <div class="mt-3 flex flex-col gap-2">
-                          {% for option in llm_intelligence.options %}
-                          {% with is_selected=option.key == preferred_llm_tier %}
-                          {% with is_locked=not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
-                          <button
-                            type="button"
-                            class="flex w-full items-center justify-between gap-3 rounded-xl border border-transparent px-3 py-2 text-left transition hover:border-indigo-200/70 hover:bg-indigo-500/5 {% if is_selected %}border-indigo-200/60 bg-indigo-500/10{% endif %}"
-                            data-intelligence-option
-                            data-tier="{{ option.key }}"
-                            data-label="{% if option.key == 'standard' %}smol brain{% elif option.key == 'premium' %}mid brain{% elif option.key == 'max' %}big brain{% elif option.key == 'ultra' %}giga brain{% elif option.key == 'ultra_max' %}galaxy brain{% else %}{{ option.label }}{% endif %}"
-                            data-multiplier="{{ option.multiplier|floatformat:-1 }}"
-                            data-locked="{% if is_locked %}true{% else %}false{% endif %}"
-                          >
-                            <div class="flex flex-col">
-                              <span class="flex items-center gap-2 text-sm font-semibold text-slate-900">
-                                {% if option.key == 'ultra_max' %}
-                                <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l2.6 5.2 5.7.8-4.1 4 1 5.7L12 16.8 6.8 18.7l1-5.7-4.1-4 5.7-.8L12 3z"></path>
-                                </svg>
-                                {% endif %}
-                                {% if option.key == 'standard' %}smol brain{% elif option.key == 'premium' %}mid brain{% elif option.key == 'max' %}big brain{% elif option.key == 'ultra' %}giga brain{% elif option.key == 'ultra_max' %}galaxy brain{% else %}{{ option.label }}{% endif %}
-                              </span>
-                              <span class="text-xs text-slate-500">{% if option.multiplier %}{{ option.multiplier|floatformat:-1 }}× credits{% endif %}</span>
-                            </div>
-                            <span class="inline-flex items-center gap-1 text-xs font-semibold text-indigo-600 {% if not is_locked %}hidden{% endif %}" data-intelligence-lock>
-                              <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 11c1.66 0 3 1.34 3 3v3H9v-3c0-1.66 1.34-3 3-3zm6-1V8a6 6 0 10-12 0v2"></path>
-                              </svg>
-                              Upgrade
-                            </span>
-                            <span class="text-xs font-semibold text-slate-500 {% if not is_selected %}hidden{% endif %}" data-intelligence-selected>Selected</span>
-                          </button>
-                          {% endwith %}
-                          {% endwith %}
-                          {% endfor %}
-                        </div>
-                        {% if llm_intelligence.disabledReason %}
-                        <p class="mt-3 text-xs text-slate-500">{{ llm_intelligence.disabledReason }}</p>
-                        {% endif %}
-                      </div>
+                      {% endfor %}
                     </div>
                   </div>
                   {% endif %}
@@ -328,7 +310,7 @@
       </div>
 
       {% if user.is_authenticated and recent_agents_total|default:0 > 0 %}
-      <div class="max-w-4xl mx-auto mt-16 pb-0 px-6">
+      <div class="max-w-4xl mx-auto mt-16 pb-0 px-6 relative z-10">
         <div class="backdrop-blur-2xl bg-white/50 border border-white/60 shadow-sm rounded-3xl overflow-hidden">
           <div class="px-8 py-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-6">
             <div class="text-left">
@@ -604,54 +586,47 @@
       const menu = selector.querySelector('[data-intelligence-menu]')
       const input = selector.querySelector('input[name="preferred_llm_tier"]')
       const currentLabel = selector.querySelector('[data-intelligence-current]')
-      const currentMultiplier = selector.querySelector('[data-intelligence-multiplier]')
       const options = Array.from(selector.querySelectorAll('[data-intelligence-option]'))
 
-      if (!trigger || !menu || !input || !currentLabel || !currentMultiplier || options.length === 0) {
+      if (!trigger || !menu || !input || options.length === 0) {
         return
       }
 
       const labelMap = {
-        standard: 'smol brain',
-        premium: 'mid brain',
-        max: 'big brain',
-        ultra: 'giga brain',
-        ultra_max: 'galaxy brain',
-      }
-
-      const formatMultiplier = (value) => {
-        const numeric = Number(value)
-        if (!Number.isFinite(numeric)) {
-          return '× credits'
-        }
-        const rounded = numeric % 1 === 0 ? numeric.toFixed(0) : numeric.toFixed(1)
-        return `${rounded}× credits`
+        standard: 'Smol Brain',
+        premium: 'Mid Brain',
+        max: 'Big Brain',
+        ultra: 'Giga Brain',
+        ultra_max: 'Galaxy Brain',
       }
 
       const applySelection = (tier) => {
         const option = options.find((item) => item.dataset.tier === tier)
         const label = (option && option.dataset.label) || labelMap[tier] || tier.replace('_', ' ')
         currentLabel.textContent = label
-        currentMultiplier.textContent = formatMultiplier(option ? option.dataset.multiplier : null)
         options.forEach((item) => {
           const isSelected = item.dataset.tier === tier
-          const selectedBadge = item.querySelector('[data-intelligence-selected]')
-          if (selectedBadge) {
-            selectedBadge.classList.toggle('hidden', !isSelected)
+          const checkIcon = item.querySelector('[data-intelligence-check]')
+          if (checkIcon) {
+            checkIcon.classList.toggle('hidden', !isSelected)
           }
-          item.classList.toggle('border-indigo-200/60', isSelected)
-          item.classList.toggle('bg-indigo-500/10', isSelected)
+          item.classList.toggle('bg-indigo-50/70', isSelected)
+          item.classList.remove('bg-indigo-50')
         })
       }
+
+      const chevron = selector.querySelector('[data-intelligence-chevron]')
 
       const openMenu = () => {
         menu.classList.remove('hidden')
         trigger.setAttribute('aria-expanded', 'true')
+        if (chevron) chevron.style.transform = 'rotate(180deg)'
       }
 
       const closeMenu = () => {
         menu.classList.add('hidden')
         trigger.setAttribute('aria-expanded', 'false')
+        if (chevron) chevron.style.transform = ''
       }
 
       trigger.addEventListener('click', (event) => {

@@ -290,7 +290,12 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
         AgentLLMTier.ULTRA_MAX.value: "Highest tier for maximum reasoning depth.",
     }
     tiers = list(IntelligenceTier.objects.order_by("credit_multiplier", "rank"))
-    if tiers:
+    expected_keys = {tier.value for tier in AgentLLMTier}
+    tier_keys = {tier.key for tier in tiers}
+    use_db_tiers = bool(tiers) and (
+        settings.GOBII_PROPRIETARY_MODE or expected_keys.issubset(tier_keys)
+    )
+    if use_db_tiers:
         options = [
             {
                 "key": tier.key,

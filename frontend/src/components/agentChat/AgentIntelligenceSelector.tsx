@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Brain, ChevronDown, Lock, Sparkles } from 'lucide-react'
+import { Brain, ChevronDown, Lock } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -14,11 +14,19 @@ import {
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
 const LABEL_OVERRIDES: Record<string, string> = {
-  standard: 'smol brain',
-  premium: 'mid brain',
-  max: 'big brain',
-  ultra: 'giga brain',
-  ultra_max: 'galaxy brain',
+  standard: 'Smol Brain',
+  premium: 'Mid Brain',
+  max: 'Big Brain',
+  ultra: 'Giga Brain',
+  ultra_max: 'Galaxy Brain',
+}
+
+const EMOJI_MAP: Record<string, string> = {
+  standard: '🌱',
+  premium: '💭',
+  max: '💡',
+  ultra: '⚡',
+  ultra_max: '🤯',
 }
 
 type IntelligenceSelectorProps = {
@@ -100,15 +108,12 @@ export function AgentIntelligenceSelector({
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
         className="composer-intelligence-trigger"
-        aria-label={`Intelligence (${selectedOption?.label ?? 'smol brain'})`}
+        aria-label={`Intelligence (${selectedOption?.label ?? 'Smol Brain'})`}
         data-busy={busy ? 'true' : 'false'}
         isDisabled={disabled}
       >
         <Brain className="composer-intelligence-icon" aria-hidden="true" />
-        <span className="composer-intelligence-trigger-label">{selectedOption?.label ?? 'smol brain'}</span>
-        <span className="composer-intelligence-trigger-multiplier">
-          {formatMultiplier(selectedOption?.multiplier)}
-        </span>
+        <span className="composer-intelligence-trigger-label">{selectedOption?.label ?? 'Smol Brain'}</span>
         <ChevronDown className="composer-intelligence-trigger-chevron" aria-hidden="true" />
       </Button>
       <Popover className="composer-intelligence-popover">
@@ -137,23 +142,22 @@ export function AgentIntelligenceSelector({
               >
                 {({ isSelected }) => (
                   <>
-                    <div className="composer-intelligence-option-text">
-                      <span className="composer-intelligence-option-label">
-                        {option.key === 'ultra_max' ? <Sparkles className="h-3.5 w-3.5" aria-hidden="true" /> : null}
-                        {option.label}
-                      </span>
-                      <span className="composer-intelligence-option-multiplier">
-                        {formatMultiplier(option.multiplier)}
-                      </span>
-                    </div>
-                    {option.locked ? (
-                      <span className="composer-intelligence-option-lock">
-                        <Lock className="h-3.5 w-3.5" aria-hidden="true" />
-                        Upgrade
-                      </span>
-                    ) : isSelected ? (
-                      <span className="composer-intelligence-option-selected">Selected</span>
-                    ) : null}
+                    <span className="composer-intelligence-option-label">
+                      {EMOJI_MAP[option.key] ? `${EMOJI_MAP[option.key]} ` : ''}
+                      {option.label}
+                    </span>
+                    <span className="composer-intelligence-option-multiplier">
+                      {option.multiplier ? `${option.multiplier}×` : ''}
+                    </span>
+                    <span className="composer-intelligence-option-indicator">
+                      {option.locked ? (
+                        <Lock className="composer-intelligence-option-lock-icon" aria-hidden="true" />
+                      ) : isSelected ? (
+                        <svg className="composer-intelligence-option-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : null}
+                    </span>
                   </>
                 )}
               </ListBoxItem>
