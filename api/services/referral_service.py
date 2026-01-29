@@ -137,6 +137,22 @@ class ReferralService:
             },
         )
 
+        Analytics.track_event(
+            user_id=new_user.id,
+            event=(
+                AnalyticsEvent.REFERRAL_TEMPLATE_ACCOUNT_CREATED
+                if referral_type == ReferralType.TEMPLATE
+                else AnalyticsEvent.REFERRAL_ACCOUNT_CREATED
+            ),
+            source=AnalyticsSource.WEB,
+            properties={
+                'referral_type': referral_type,
+                'referrer_user_id': str(referring_user.id),
+                'referrer_code': referrer_code or '',
+                'template_code': template_code or '',
+            },
+        )
+
         # If deferred granting is disabled, grant credits immediately
         if not cls.is_deferred_granting_enabled():
             grant_type = (
@@ -579,6 +595,46 @@ class ReferralService:
             template_code or '(none)',
             deferred,
         )
+
+        if referrer_credit is not None:
+            Analytics.track_event(
+                user_id=referring_user.id,
+                event=(
+                    AnalyticsEvent.REFERRAL_TEMPLATE_GRANT_RECEIVED
+                    if referral_type == ReferralType.TEMPLATE
+                    else AnalyticsEvent.REFERRAL_GRANT_RECEIVED
+                ),
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referral_type': referral_type,
+                    'referrer_user_id': str(referring_user.id),
+                    'referred_user_id': str(new_user.id),
+                    'template_code': template_code or '',
+                    'referrer_credit_amount': str(referrer_credit.credits),
+                    'referred_credit_amount': str(referred_credits),
+                    'referral_grant_id': str(grant.id),
+                },
+            )
+
+        if referred_credit is not None:
+            Analytics.track_event(
+                user_id=new_user.id,
+                event=(
+                    AnalyticsEvent.REFERRAL_TEMPLATE_REDEEMED_GRANT_RECEIVED
+                    if referral_type == ReferralType.TEMPLATE
+                    else AnalyticsEvent.REFERRAL_REDEEMED_GRANT_RECEIVED
+                ),
+                source=AnalyticsSource.WEB,
+                properties={
+                    'referral_type': referral_type,
+                    'referrer_user_id': str(referring_user.id),
+                    'referred_user_id': str(new_user.id),
+                    'template_code': template_code or '',
+                    'referrer_credit_amount': str(referrer_credits),
+                    'referred_credit_amount': str(referred_credit.credits),
+                    'referral_grant_id': str(grant.id),
+                },
+            )
 
         # Track the grant (for immediate grants; deferred grants tracked separately)
         if not deferred:
