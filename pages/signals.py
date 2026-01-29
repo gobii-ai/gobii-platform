@@ -13,7 +13,7 @@ from django.conf import settings
 from django.db import transaction
 from django.apps import apps
 
-from allauth.account.signals import user_signed_up, user_logged_in, user_logged_out
+from allauth.account.signals import email_confirmed, user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
 
 from djstripe.models import Subscription, Customer, Invoice
@@ -1025,6 +1025,15 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         logger.info("Analytics tracking successful for signup.")
     except Exception as e:
         logger.exception("Analytics tracking failed during signup.")
+
+@receiver(email_confirmed)
+def handle_email_confirmed(sender, request, email_address, **kwargs):
+    user = getattr(email_address, "user", None)
+    if not user:
+        return
+    if not settings.DEFERRED_REFERRAL_CREDITS_ENABLED:
+        return
+    ReferralService.check_and_grant_deferred_referral_credits(user)
 
 @receiver(user_logged_in)
 def handle_user_logged_in(sender, request, user, **kwargs):
