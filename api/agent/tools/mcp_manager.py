@@ -838,6 +838,16 @@ class MCPToolManager:
 
         return (proxy.proxy_url if proxy else None, None)
 
+    def _get_timeout_for_runtime(self, runtime: Optional[MCPServerRuntime]) -> float:
+        """Get the appropriate request timeout based on the runtime's transport."""
+        is_http = bool(runtime and runtime.url)
+        timeout_setting = (
+            settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
+            if is_http
+            else settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS
+        )
+        return float(timeout_setting)
+
     def _effective_prefetch_apps(self, server: MCPServerRuntime) -> List[str]:
         if server.prefetch_apps:
             return [s.strip() for s in server.prefetch_apps if s.strip()]
@@ -1341,11 +1351,7 @@ class MCPToolManager:
                 except Exception as exc:
                     return {"status": "error", "message": str(exc)}
 
-            timeout_seconds = float(
-                settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
-                if runtime.url
-                else settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS
-            )
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(
@@ -1502,11 +1508,7 @@ class MCPToolManager:
                 }
         
         try:
-            timeout_seconds = float(
-                settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
-                if runtime and runtime.url
-                else settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS
-            )
+            timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 result = loop.run_until_complete(
