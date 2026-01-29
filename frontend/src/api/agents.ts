@@ -10,6 +10,7 @@ export type UpdateAgentPayload = {
 export type CreateAgentResponse = {
   agent_id: string
   agent_name: string
+  agent_email?: string | null
 }
 
 type AgentRosterPayload = {

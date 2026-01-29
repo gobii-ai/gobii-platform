@@ -1490,9 +1490,19 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             logger.exception("Error creating persistent agent via API")
             return JsonResponse({"error": "We ran into a problem creating your agent. Please try again."}, status=500)
 
+        agent_email = None
+        agent_email_endpoint = (
+            result.agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+            .order_by("-is_primary")
+            .first()
+        )
+        if agent_email_endpoint:
+            agent_email = agent_email_endpoint.address
+
         return JsonResponse({
             "agent_id": str(result.agent.id),
             "agent_name": result.agent.name,
+            "agent_email": agent_email,
         })
 
 

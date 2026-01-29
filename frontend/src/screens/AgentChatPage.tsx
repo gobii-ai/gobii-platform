@@ -92,6 +92,12 @@ type ConnectionIndicator = {
   detail?: string | null
 }
 
+function hasAgentResponse(events: TimelineEvent[]): boolean {
+  return events.some((event) => {
+    return event.kind === 'message' && Boolean(event.message.isOutbound)
+  })
+}
+
 type AgentSwitchMeta = {
   agentId: string
   agentName?: string | null
@@ -316,6 +322,8 @@ export function AgentChatPage({
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
+  const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = resolvedContext ?? contextData?.context ?? null
   const contextReady = Boolean(effectiveContext)
   const liveAgentId = contextSwitching || !contextReady ? null : activeAgentId
@@ -729,12 +737,62 @@ export function AgentChatPage({
   const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
-  const resolvedAgentEmail = activeRosterMeta?.email ?? agentEmail ?? null
+  const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
+  const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const hasAgentReply = useMemo(() => hasAgentResponse(events), [events])
+  useEffect(() => {
+    if (!activeAgentId || !activeRosterMeta?.email) {
+      return
+    }
+    setPendingAgentEmails((current) => {
+      if (!current[activeAgentId]) {
+        return current
+      }
+      const next = { ...current }
+      delete next[activeAgentId]
+      return next
+    })
+  }, [activeAgentId, activeRosterMeta?.email])
+
+  useEffect(() => {
+    if (!activeAgentId || !resolvedAgentEmail) {
+      return
+    }
+    if (contactRefreshAttemptsRef.current[activeAgentId]) {
+      delete contactRefreshAttemptsRef.current[activeAgentId]
+    }
+  }, [activeAgentId, resolvedAgentEmail])
+
+  useEffect(() => {
+    if (!activeAgentId || isNewAgent || resolvedAgentEmail || !hasAgentReply) {
+      return
+    }
+    if (rosterQuery.isFetching) {
+      return
+    }
+    const attempts = contactRefreshAttemptsRef.current[activeAgentId] ?? 0
+    if (attempts >= 3) {
+      return
+    }
+    contactRefreshAttemptsRef.current[activeAgentId] = attempts + 1
+    const delayMs = attempts === 0 ? 500 : 2000
+    const timeout = window.setTimeout(() => {
+      void rosterQuery.refetch()
+    }, delayMs)
+    return () => window.clearTimeout(timeout)
+  }, [
+    activeAgentId,
+    hasAgentReply,
+    isNewAgent,
+    resolvedAgentEmail,
+    rosterQuery.isFetching,
+    rosterQuery.refetch,
+  ])
   const llmIntelligence = rosterQuery.data?.llmIntelligence ?? null
   const [draftIntelligenceTier, setDraftIntelligenceTier] = useState<string>('standard')
   const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
@@ -958,9 +1016,13 @@ export function AgentChatPage({
       try {
         const result = await createAgent(body, tier)
         const createdAgentName = result.agent_name?.trim() || 'Agent'
+        const createdAgentEmail = result.agent_email?.trim() || null
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
+        }
+        if (createdAgentEmail) {
+          setPendingAgentEmails((current) => ({ ...current, [result.agent_id]: createdAgentEmail }))
         }
         queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
           mergeRosterEntry(current, {
@@ -970,6 +1032,7 @@ export function AgentChatPage({
             displayColorHex: null,
             isActive: true,
             shortDescription: '',
+            email: createdAgentEmail,
           }),
         )
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
@@ -978,7 +1041,7 @@ export function AgentChatPage({
         console.error('Failed to create agent:', err)
       }
     },
-    [onAgentCreated, queryClient],
+    [onAgentCreated, queryClient, setPendingAgentEmails],
   )
 
   const handleIntelligenceChange = useCallback(

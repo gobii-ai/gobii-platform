@@ -632,7 +632,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         const oldestCursor = events.length ? events[0].cursor : current.oldestCursor
         const newestCursor = events.length ? events[events.length - 1].cursor : current.newestCursor
         const trimmedOlder = merged.length > events.length
-        const hasMoreOlder = incoming.length === 0 ? current.hasMoreOlder : snapshot.has_more_older || trimmedOlder
+        // "newer" responses report has_more_older relative to their own window;
+        // only surface older availability if we already had it or we trimmed.
+        const hasMoreOlder = trimmedOlder || current.hasMoreOlder
         return {
           events,
           oldestCursor,
@@ -679,7 +681,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const trimmedNewer = merged.length > events.length
-      const hasMoreNewer = incoming.length === 0 ? state.hasMoreNewer : snapshot.has_more_newer || trimmedNewer
+      // "older" responses report has_more_newer relative to their own window;
+      // keep existing state unless we trimmed newer items.
+      const hasMoreNewer = trimmedNewer || state.hasMoreNewer
       set((current) => ({
         events,
         oldestCursor,
@@ -717,7 +721,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const oldestCursor = events.length ? events[0].cursor : null
       const newestCursor = events.length ? events[events.length - 1].cursor : null
       const trimmedOlder = merged.length > events.length
-      const hasMoreOlder = incoming.length === 0 ? state.hasMoreOlder : snapshot.has_more_older || trimmedOlder
+      // "newer" responses report has_more_older relative to their own window;
+      // only surface older availability if we already had it or we trimmed.
+      const hasMoreOlder = trimmedOlder || state.hasMoreOlder
       const processingSnapshot = normalizeProcessingUpdate(
         snapshot.processing_snapshot ?? { active: snapshot.processing_active, webTasks: [] },
       )
