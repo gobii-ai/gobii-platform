@@ -16,6 +16,7 @@ export type DailyCreditsInfo = {
   sliderStep: number
   sliderValue: number
   sliderEmptyValue: number
+  standardSliderLimit: number
 }
 
 export type DailyCreditsStatus = {

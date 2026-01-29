@@ -116,6 +116,7 @@ type DailyCreditsInfo = {
   sliderStep: number
   sliderValue: number
   sliderEmptyValue: number
+  standardSliderLimit: number
 }
 
 type DedicatedIpOption = {
@@ -358,8 +359,14 @@ function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 }
 
 export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
-  const sliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? initialData.dailyCredits.sliderMax
-  const sliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? initialData.dailyCredits.sliderMax
+  const fallbackSliderMax = initialData.dailyCredits.sliderMax
+  const fallbackSliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? fallbackSliderMax
+  const fallbackSliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? fallbackSliderMax
+  const sliderMin = initialData.dailyCredits.sliderMin
+  const sliderStep = initialData.dailyCredits.sliderStep
+  const standardSliderLimit = Number.isFinite(initialData.dailyCredits.standardSliderLimit)
+    ? initialData.dailyCredits.standardSliderLimit
+    : 20
 
   const initialFormState = useMemo<FormState>(
     () => ({
@@ -370,7 +377,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
         typeof initialData.dailyCredits.limit === 'number' && Number.isFinite(initialData.dailyCredits.limit)
           ? String(Math.round(initialData.dailyCredits.limit))
           : '',
-      sliderValue: initialData.dailyCredits.sliderValue ?? sliderEmptyValue,
+      sliderValue: initialData.dailyCredits.sliderValue ?? fallbackSliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
       preferredTier: initialData.agent.preferredLlmTier ?? 'standard',
       agentColorHex: resolveAgentColorHex(initialData.agent.agentColorHex, initialData.agentColors),
@@ -385,7 +392,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
       initialData.dailyCredits.limit,
       initialData.dailyCredits.sliderValue,
       initialData.dedicatedIps.selectedId,
-      sliderEmptyValue,
+      fallbackSliderEmptyValue,
     ],
   )
 
@@ -418,6 +425,30 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const [peerLinkCandidates, setPeerLinkCandidates] = useState(initialData.peerLinks.candidates)
   const [peerLinkDefaults, setPeerLinkDefaults] = useState(initialData.peerLinks.defaults)
   const [pendingPeerActions, setPendingPeerActions] = useState<PendingPeerLinkAction[]>([])
+  const tierMultiplierByKey = useMemo(() => {
+    const map = new Map<IntelligenceTierKey, number>()
+    for (const option of initialData.llmIntelligence?.options ?? []) {
+      map.set(option.key, option.multiplier)
+    }
+    return map
+  }, [initialData.llmIntelligence?.options])
+  const hasTierMultipliers = tierMultiplierByKey.size > 0
+  const getTierMultiplier = useCallback(
+    (tier: IntelligenceTierKey) => {
+      const value = tierMultiplierByKey.get(tier)
+      if (!Number.isFinite(value) || !value || value <= 0) {
+        return 1
+      }
+      return value
+    },
+    [tierMultiplierByKey],
+  )
+  const currentMultiplier = hasTierMultipliers ? getTierMultiplier(formState.preferredTier) : 1
+  const sliderLimitMax = hasTierMultipliers
+    ? Math.max(sliderMin, Math.round(standardSliderLimit * currentMultiplier))
+    : fallbackSliderLimitMax
+  const sliderMax = hasTierMultipliers ? sliderLimitMax + sliderStep : fallbackSliderMax
+  const sliderEmptyValue = hasTierMultipliers ? sliderMax : fallbackSliderEmptyValue
 
   const clearAvatarPreviewUrl = useCallback(() => {
     if (avatarPreviewObjectUrlRef.current) {
@@ -885,9 +916,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
   const clampSlider = useCallback(
     (value: number) => {
-      return Math.min(Math.max(Number.isFinite(value) ? value : sliderEmptyValue, initialData.dailyCredits.sliderMin), initialData.dailyCredits.sliderMax)
+      return Math.min(Math.max(Number.isFinite(value) ? value : sliderEmptyValue, sliderMin), sliderMax)
     },
-    [initialData.dailyCredits.sliderMax, initialData.dailyCredits.sliderMin, sliderEmptyValue],
+    [sliderEmptyValue, sliderMax, sliderMin],
   )
 
   const updateSliderValue = useCallback(
@@ -902,6 +933,69 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [clampSlider, sliderEmptyValue],
   )
 
+  const handleTierChange = useCallback(
+    (tier: IntelligenceTierKey) => {
+      setFormState((prev) => {
+        if (tier === prev.preferredTier) {
+          return prev
+        }
+        const previousMultiplier = hasTierMultipliers ? getTierMultiplier(prev.preferredTier) : 1
+        const nextMultiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
+        const nextSliderLimitMax = hasTierMultipliers
+          ? Math.max(sliderMin, Math.round(standardSliderLimit * nextMultiplier))
+          : fallbackSliderLimitMax
+        const nextSliderMax = hasTierMultipliers ? nextSliderLimitMax + sliderStep : fallbackSliderMax
+        const nextSliderEmptyValue = hasTierMultipliers ? nextSliderMax : fallbackSliderEmptyValue
+        const isUnlimited = prev.sliderValue >= sliderEmptyValue || !prev.dailyCreditInput.trim()
+
+        if (isUnlimited) {
+          return {
+            ...prev,
+            preferredTier: tier,
+            sliderValue: nextSliderEmptyValue,
+            dailyCreditInput: '',
+          }
+        }
+
+        let scaledValue = prev.sliderValue
+        if (previousMultiplier > 0 && nextMultiplier > 0 && Number.isFinite(prev.sliderValue)) {
+          scaledValue = Math.round((prev.sliderValue * nextMultiplier) / previousMultiplier)
+        }
+
+        if (!Number.isFinite(scaledValue) || scaledValue <= 0 || scaledValue > nextSliderLimitMax) {
+          return {
+            ...prev,
+            preferredTier: tier,
+            sliderValue: nextSliderEmptyValue,
+            dailyCreditInput: '',
+          }
+        }
+
+        if (scaledValue < sliderMin) {
+          scaledValue = sliderMin
+        }
+
+        return {
+          ...prev,
+          preferredTier: tier,
+          sliderValue: scaledValue,
+          dailyCreditInput: String(Math.round(scaledValue)),
+        }
+      })
+    },
+    [
+      fallbackSliderEmptyValue,
+      fallbackSliderLimitMax,
+      fallbackSliderMax,
+      getTierMultiplier,
+      hasTierMultipliers,
+      sliderEmptyValue,
+      sliderMin,
+      sliderStep,
+      standardSliderLimit,
+    ],
+  )
+
   const handleDailyCreditInputChange = useCallback(
     (value: string) => {
       setFormState((prev) => ({ ...prev, dailyCreditInput: value }))
@@ -914,10 +1008,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         updateSliderValue(sliderEmptyValue)
         return
       }
-      const clamped = Math.min(Math.max(Math.round(numeric), initialData.dailyCredits.sliderMin), sliderLimitMax)
+      const clamped = Math.min(Math.max(Math.round(numeric), sliderMin), sliderLimitMax)
       updateSliderValue(clamped)
     },
-    [initialData.dailyCredits.sliderMin, sliderEmptyValue, sliderLimitMax, updateSliderValue],
+    [sliderEmptyValue, sliderLimitMax, sliderMin, updateSliderValue],
   )
 
   const formatNumber = useCallback((value: number | null, fractionDigits = 0) => {
@@ -1393,7 +1487,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                     <AgentIntelligenceSlider
                       currentTier={formState.preferredTier}
                       config={initialData.llmIntelligence}
-                      onTierChange={(tier) => setFormState((prev) => ({ ...prev, preferredTier: tier }))}
+                      onTierChange={handleTierChange}
                     />
                   </div>
                 </>
@@ -1484,9 +1578,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                       aria-label="Soft target slider"
                       id="daily-credit-limit-slider"
                       className="mt-2 space-y-3"
-                      minValue={initialData.dailyCredits.sliderMin}
-                      maxValue={initialData.dailyCredits.sliderMax}
-                      step={initialData.dailyCredits.sliderStep}
+                      minValue={sliderMin}
+                      maxValue={sliderMax}
+                      step={sliderStep}
                       value={formState.sliderValue}
                       onChange={(value: number | number[]) => {
                         const numeric = Array.isArray(value) ? value[0] : value
@@ -1524,7 +1618,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         name="daily_credit_limit"
                         type="number"
                         step="1"
-                        min={initialData.dailyCredits.sliderMin}
+                        min={sliderMin}
                         max={sliderLimitMax}
                         value={formState.dailyCreditInput}
                         onChange={(event) => handleDailyCreditInputChange(event.target.value)}

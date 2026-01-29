@@ -13,6 +13,12 @@ from django.db.models.expressions import OuterRef, Exists
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.agent.tasks import process_agent_events_task
 from api.services.proactive_activation import ProactiveActivationService
+from api.services.daily_credit_limits import (
+    calculate_daily_credit_slider_bounds,
+    get_tier_credit_multiplier,
+    scale_daily_credit_limit_for_tier_change,
+)
+from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from api.services.schedule_enforcement import (
     agents_for_plan,
     enforce_minimum_for_agents,
@@ -2217,11 +2223,22 @@ class CommsAllowlistEntryInline(admin.TabularInline):
     classes = ("collapse",)
 
 
+class PersistentAgentMessageInlineForm(forms.ModelForm):
+    class Meta:
+        model = PersistentAgentMessage
+        fields = "__all__"
+
+    def _post_clean(self):
+        # Read-only inline: skip model validation so legacy rows don't block saves.
+        return
+
+
 class AgentMessageInline(admin.TabularInline):
     """Inline for viewing agent conversation history."""
     model = PersistentAgentMessage
     fk_name = 'owner_agent'
     extra = 0
+    form = PersistentAgentMessageInlineForm
     fields = ('timestamp', 'direction_display', 'from_to_display', 'body_preview', 'status_display', 'message_link')
     readonly_fields = ('timestamp', 'direction_display', 'from_to_display', 'body_preview', 'status_display', 'message_link')
     # Show newest messages first so the most relevant information is immediately visible.
@@ -2468,6 +2485,38 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             )
             org_field.help_text = f"{org_field.help_text} {extra_org}" if org_field.help_text else extra_org
         return form
+
+    def save_model(self, request, obj, form, change):
+        if change and obj.pk and 'preferred_llm_tier' in form.changed_data:
+            previous = (
+                PersistentAgent.objects.select_related('preferred_llm_tier')
+                .only('preferred_llm_tier_id', 'daily_credit_limit')
+                .filter(pk=obj.pk)
+                .first()
+            )
+            if previous is not None:
+                owner = obj.organization or obj.user
+                credit_settings = get_daily_credit_settings_for_owner(owner)
+                new_multiplier = get_tier_credit_multiplier(obj.preferred_llm_tier)
+                slider_bounds = calculate_daily_credit_slider_bounds(
+                    credit_settings,
+                    tier_multiplier=new_multiplier,
+                )
+                if 'daily_credit_limit' not in form.changed_data:
+                    obj.daily_credit_limit = scale_daily_credit_limit_for_tier_change(
+                        previous.daily_credit_limit,
+                        from_multiplier=get_tier_credit_multiplier(previous.preferred_llm_tier),
+                        to_multiplier=new_multiplier,
+                        slider_min=slider_bounds['slider_min'],
+                        slider_max=slider_bounds['slider_limit_max'],
+                    )
+                elif obj.daily_credit_limit is not None:
+                    if obj.daily_credit_limit < slider_bounds['slider_min']:
+                        obj.daily_credit_limit = int(slider_bounds['slider_min'])
+                    if obj.daily_credit_limit > slider_bounds['slider_limit_max']:
+                        obj.daily_credit_limit = int(slider_bounds['slider_limit_max'])
+
+        super().save_model(request, obj, form, change)
 
     @admin.display(description='Browser Use Agent')
     def browser_use_agent_link(self, obj):

@@ -137,6 +137,7 @@ from api.llm.utils import normalize_model_name
 from api.openrouter import DEFAULT_API_BASE, get_attribution_headers
 from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
+from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from constants.plans import PlanNamesChoices
 from util.integrations import stripe_status
@@ -4266,7 +4267,11 @@ class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        new_daily_limit, error = parse_daily_credit_limit(payload, credit_settings)
+        new_daily_limit, error = parse_daily_credit_limit(
+            payload,
+            credit_settings,
+            tier_multiplier=get_agent_credit_multiplier(agent),
+        )
         if error:
             return JsonResponse({"error": error}, status=400)
 
@@ -4304,7 +4309,11 @@ class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
         if daily_payload is not None:
             if not isinstance(daily_payload, dict):
                 return HttpResponseBadRequest("dailyCredits must be an object")
-            new_daily_limit, error = parse_daily_credit_limit(daily_payload, credit_settings)
+            new_daily_limit, error = parse_daily_credit_limit(
+                daily_payload,
+                credit_settings,
+                tier_multiplier=get_agent_credit_multiplier(agent),
+            )
             if error:
                 return JsonResponse({"error": error}, status=400)
             if agent.daily_credit_limit != new_daily_limit:
