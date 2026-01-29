@@ -3209,6 +3209,7 @@ def _get_formatting_guidance(
             "    <tr><td style='padding: 8px;'>BTC</td><td style='padding: 8px;'><strong>$67,000</strong></td><td style='padding: 8px; color: green;'>+2.3%</td></tr>\n"
             "    <tr><td style='padding: 8px;'>ETH</td><td style='padding: 8px;'><strong>$3,400</strong></td><td style='padding: 8px; color: green;'>+1.8%</td></tr>\n"
             "  </table>\n"
+            "  <br />"
             "  <p>🔥 <strong>Notable:</strong> BTC broke through resistance at $66k.</p>\n"
             '  <p>Want me to alert you on specific price levels? Just reply!</p>"\n'
             "Charts: paste path from create_chart result.inline—never construct the path yourself."
