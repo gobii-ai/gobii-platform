@@ -1,6 +1,6 @@
 import json
 import mimetypes
-from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
 import stripe
@@ -64,6 +64,7 @@ from api.services.daily_credit_settings import get_daily_credit_settings_for_own
 from console.daily_credit import (
     build_agent_daily_credit_context,
     get_daily_credit_slider_bounds,
+    parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
 from console.home_metrics import get_console_home_metrics
@@ -4234,28 +4235,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
             else:
                 limit_source = slider_value
 
-        if not limit_source:
-            new_daily_limit = None
-        else:
-            try:
-                parsed_limit = Decimal(limit_source)
-            except InvalidOperation:
-                return _general_error("Enter a whole number for the daily credit soft target.")
-
-            if parsed_limit != parsed_limit.to_integral_value(rounding=ROUND_DOWN):
-                return _general_error("Enter a whole number for the daily credit soft target.")
-
-            parsed_limit = parsed_limit.to_integral_value(rounding=ROUND_HALF_UP)
-            if parsed_limit <= Decimal("0"):
-                new_daily_limit = None
-            else:
-                slider_min = slider_bounds["slider_min"]
-                slider_max = slider_bounds["slider_limit_max"]
-                if parsed_limit < slider_min:
-                    parsed_limit = slider_min
-                if parsed_limit > slider_max:
-                    parsed_limit = slider_max
-                new_daily_limit = int(parsed_limit)
+        new_daily_limit, error = parse_daily_credit_limit(
+            {"daily_credit_limit": limit_source},
+            credit_settings,
+            tier_multiplier=new_tier_multiplier,
+        )
+        if error:
+            return _general_error(error)
 
         if preferred_tier_changed:
             if new_daily_limit == prev_daily_limit:

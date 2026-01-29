@@ -116,6 +116,7 @@ type DailyCreditsInfo = {
   sliderStep: number
   sliderValue: number
   sliderEmptyValue: number
+  standardSliderLimit: number
 }
 
 type DedicatedIpOption = {
@@ -363,7 +364,9 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
   const fallbackSliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? fallbackSliderMax
   const sliderMin = initialData.dailyCredits.sliderMin
   const sliderStep = initialData.dailyCredits.sliderStep
-  const standardSliderLimit = 20
+  const standardSliderLimit = Number.isFinite(initialData.dailyCredits.standardSliderLimit)
+    ? initialData.dailyCredits.standardSliderLimit
+    : 20
 
   const initialFormState = useMemo<FormState>(
     () => ({
