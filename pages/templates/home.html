@@ -247,35 +247,22 @@
                       </svg>
                     </button>
                     <div
-                      class="absolute top-full right-0 z-[100] mt-2 hidden w-52 origin-top-right rounded-xl border border-slate-200/80 bg-white p-1.5 shadow-lg shadow-slate-200/50"
+                      class="absolute top-full right-0 z-[100] mt-1.5 hidden w-44 origin-top-right rounded-lg border border-slate-200/60 bg-white py-1 shadow-xl shadow-slate-900/10"
                       data-intelligence-menu
                     >
-                      <div class="mb-1.5 px-2 pt-1">
-                        <p class="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Intelligence</p>
-                      </div>
                       {% for option in llm_intelligence.options %}
                       <button
                         type="button"
-                        class="flex w-full items-center rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-indigo-50 {% if option.key == preferred_llm_tier %}bg-indigo-50/70{% endif %}"
+                        class="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-50 {% if option.key == preferred_llm_tier %}bg-indigo-50/50{% endif %}"
                         data-intelligence-option
                         data-tier="{{ option.key }}"
                         data-label="{% if option.key == 'standard' %}Smol Brain{% elif option.key == 'premium' %}Mid Brain{% elif option.key == 'max' %}Big Brain{% elif option.key == 'ultra' %}Giga Brain{% elif option.key == 'ultra_max' %}Galaxy Brain{% else %}{{ option.label }}{% endif %}"
                         data-multiplier="{{ option.multiplier|floatformat:-1 }}"
                         data-locked="{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}true{% else %}false{% endif %}"
                       >
-                        <span class="flex-1 text-xs font-medium text-slate-700">{% if option.key == 'standard' %}🌱 Smol Brain{% elif option.key == 'premium' %}💭 Mid Brain{% elif option.key == 'max' %}💡 Big Brain{% elif option.key == 'ultra' %}⚡ Giga Brain{% elif option.key == 'ultra_max' %}🤯 Galaxy Brain{% else %}{{ option.label }}{% endif %}</span>
-                        <span class="w-8 text-right text-[10px] text-slate-400">{{ option.multiplier|floatformat:-1 }}×</span>
-                        <span class="w-4 flex justify-center">
-                          {% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}
-                          <svg class="h-2.5 w-2.5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-lock>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m7-7V7a5 5 0 00-10 0v4h10z"></path>
-                          </svg>
-                          {% elif option.key == preferred_llm_tier %}
-                          <svg class="h-3 w-3 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-check>
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path>
-                          </svg>
-                          {% endif %}
-                        </span>
+                        <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
+                        <span class="flex-1 text-[13px] font-medium {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{% if option.key == 'standard' %}Smol{% elif option.key == 'premium' %}Mid{% elif option.key == 'max' %}Big{% elif option.key == 'ultra' %}Giga{% elif option.key == 'ultra_max' %}Galaxy{% else %}{{ option.label }}{% endif %}</span>
+                        <span class="text-[11px] tabular-nums {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
                       </button>
                       {% endfor %}
                     </div>

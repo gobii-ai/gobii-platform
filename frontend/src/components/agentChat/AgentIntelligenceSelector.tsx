@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Brain, ChevronDown, Lock } from 'lucide-react'
+import { Brain, ChevronDown } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -19,6 +19,14 @@ const LABEL_OVERRIDES: Record<string, string> = {
   max: 'Big Brain',
   ultra: 'Giga Brain',
   ultra_max: 'Galaxy Brain',
+}
+
+const SHORT_LABELS: Record<string, string> = {
+  standard: 'Smol',
+  premium: 'Mid',
+  max: 'Big',
+  ultra: 'Giga',
+  ultra_max: 'Galaxy',
 }
 
 const EMOJI_MAP: Record<string, string> = {
@@ -140,23 +148,14 @@ export function AgentIntelligenceSelector({
                 data-tier={option.key}
                 data-locked={option.locked ? 'true' : 'false'}
               >
-                {({ isSelected }) => (
+                {() => (
                   <>
                     <span className="composer-intelligence-option-label">
                       {EMOJI_MAP[option.key] ? `${EMOJI_MAP[option.key]} ` : ''}
-                      {option.label}
+                      {SHORT_LABELS[option.key] ?? option.label}
                     </span>
                     <span className="composer-intelligence-option-multiplier">
                       {option.multiplier ? `${option.multiplier}×` : ''}
-                    </span>
-                    <span className="composer-intelligence-option-indicator">
-                      {option.locked ? (
-                        <Lock className="composer-intelligence-option-lock-icon" aria-hidden="true" />
-                      ) : isSelected ? (
-                        <svg className="composer-intelligence-option-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : null}
                     </span>
                   </>
                 )}
