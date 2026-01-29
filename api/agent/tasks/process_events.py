@@ -171,15 +171,13 @@ def process_agent_events_task(
                 heartbeat_worker_pid = None
 
             if heartbeat_worker_pid is not None and heartbeat_worker_pid != current_worker_pid:
-                if last_seen is None or pid_grace_seconds == 0:
+                # Different worker, check against grace period
+                if pid_grace_seconds == 0 or last_seen is None or (now - last_seen) > pid_grace_seconds:
                     should_clear = True
-                elif (now - last_seen) > pid_grace_seconds:
+            elif stale_threshold_seconds > 0:
+                # Same worker or no PID, check against stale threshold
+                if last_seen is None or (now - last_seen) > stale_threshold_seconds:
                     should_clear = True
-            elif (
-                stale_threshold_seconds > 0
-                and (last_seen is None or (now - last_seen) > stale_threshold_seconds)
-            ):
-                should_clear = True
 
             if should_clear:
                 lock_key = f"agent-event-processing:{persistent_agent_id}"
