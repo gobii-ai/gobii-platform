@@ -500,17 +500,16 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         except ValueError:
             raise serializers.ValidationError("Unsupported intelligence tier selection.")
 
-        plan = None
-        if owner is not None:
-            try:
-                plan = get_owner_plan(owner)
-            except Exception:
-                plan = None
-        allowed = max_allowed_tier_for_plan(plan, is_organization=is_org)
-        if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-            if settings.GOBII_PROPRIETARY_MODE:
+        if settings.GOBII_PROPRIETARY_MODE:
+            plan = None
+            if owner is not None:
+                try:
+                    plan = get_owner_plan(owner)
+                except Exception:
+                    plan = None
+            allowed = max_allowed_tier_for_plan(plan, is_organization=is_org)
+            if TIER_ORDER[tier] > TIER_ORDER[allowed]:
                 raise serializers.ValidationError("Upgrade your plan to choose this intelligence tier.")
-            raise serializers.ValidationError("Selected intelligence tier is not available for this deployment.")
         resolved_tier = IntelligenceTier.objects.filter(key=tier.value).first()
         if resolved_tier is None:
             raise serializers.ValidationError("Unsupported intelligence tier selection.")

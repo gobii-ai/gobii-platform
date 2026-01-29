@@ -147,13 +147,12 @@ def create_persistent_agent_from_charter(
         except ValueError as exc:
             raise ValidationError("Unsupported intelligence tier selection.") from exc
 
-        owner = organization or request.user
-        plan = get_owner_plan(owner) if owner else None
-        allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
-        if TIER_ORDER[tier] > TIER_ORDER[allowed]:
-            if settings.GOBII_PROPRIETARY_MODE:
+        if settings.GOBII_PROPRIETARY_MODE:
+            owner = organization or request.user
+            plan = get_owner_plan(owner) if owner else None
+            allowed = max_allowed_tier_for_plan(plan, is_organization=organization is not None)
+            if TIER_ORDER[tier] > TIER_ORDER[allowed]:
                 raise ValidationError("Upgrade your plan to choose this intelligence tier.")
-            raise ValidationError("Selected intelligence tier is not available for this deployment.")
 
         preferred_llm_tier = IntelligenceTier.objects.filter(key=tier.value).first()
         if preferred_llm_tier is None:

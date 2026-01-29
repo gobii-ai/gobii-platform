@@ -271,17 +271,16 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
             plan = get_user_plan(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
-    can_edit = bool(
-        settings.GOBII_PROPRIETARY_MODE
-        and owner is not None
-        and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
-    )
+    if settings.GOBII_PROPRIETARY_MODE:
+        can_edit = bool(
+            owner is not None
+            and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
+        )
+    else:
+        can_edit = True
     disabled_reason = None
-    if not can_edit:
-        if settings.GOBII_PROPRIETARY_MODE:
-            disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
-        else:
-            disabled_reason = "Intelligence levels are managed by deployment settings."
+    if not can_edit and settings.GOBII_PROPRIETARY_MODE:
+        disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
 
     tier_descriptions = {
         AgentLLMTier.STANDARD.value: "Balanced routing that uses 1× credits.",
@@ -4202,11 +4201,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 plan = None
 
         allowed_llm_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
-        can_edit_intelligence = bool(
-            settings.GOBII_PROPRIETARY_MODE
-            and owner is not None
-            and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
-        )
+        if settings.GOBII_PROPRIETARY_MODE:
+            can_edit_intelligence = bool(
+                owner is not None
+                and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
+            )
+        else:
+            can_edit_intelligence = True
         current_preferred_tier_value = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         try:
             AgentLLMTier(current_preferred_tier_value)
@@ -4224,10 +4225,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
         if preferred_tier_changed:
             if not can_edit_intelligence:
-                if settings.GOBII_PROPRIETARY_MODE:
-                    return _general_error("Upgrade your plan to adjust intelligence levels.")
-                return _general_error("Intelligence levels are locked by deployment settings.")
-            if TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
+                return _general_error("Upgrade your plan to adjust intelligence levels.")
+            if settings.GOBII_PROPRIETARY_MODE and TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
                 return _general_error("That intelligence level isn't available for this plan.")
 
         resolved_preferred_tier = IntelligenceTier.objects.filter(key=requested_preferred_tier.value).first()
