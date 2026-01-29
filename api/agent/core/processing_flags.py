@@ -71,6 +71,7 @@ def set_processing_heartbeat(
     *,
     ttl: int = _DEFAULT_HEARTBEAT_TTL_SECONDS,
     run_id: str | None = None,
+    worker_pid: int | None = None,
     stage: str | None = None,
     started_at: float | None = None,
     client=None,
@@ -82,6 +83,7 @@ def set_processing_heartbeat(
     payload = {
         "agent_id": str(agent_id),
         "run_id": run_id,
+        "worker_pid": worker_pid,
         "stage": stage,
         "started_at": started_at if started_at is not None else now,
         "last_seen": now,
