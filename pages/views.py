@@ -36,7 +36,13 @@ from util.subscription_helper import (
 )
 from util.integrations import stripe_status, IntegrationDisabledError
 from constants.plans import PlanNames
-from util.urls import IMMERSIVE_RETURN_TO_SESSION_KEY, build_immersive_chat_url, normalize_return_to
+from util.urls import (
+    IMMERSIVE_APP_BASE_PATH,
+    IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_query_params,
+    build_immersive_chat_url,
+    normalize_return_to,
+)
 from .utils_markdown import (
     load_page,
     get_prev_next,
@@ -470,6 +476,8 @@ class HomeAgentSpawnView(TemplateView):
         
         if form.is_valid():
             return_to = normalize_return_to(request, request.POST.get("return_to"))
+            if not return_to:
+                return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
             embed = (request.POST.get("embed") or "").lower() in {"1", "true", "yes", "on"}
             if return_to:
                 request.session[IMMERSIVE_RETURN_TO_SESSION_KEY] = return_to
@@ -508,9 +516,13 @@ class HomeAgentSpawnView(TemplateView):
             if request.user.is_authenticated:
                 # User is already logged in, go directly to agent creation
                 return redirect(next_url)
-            # User needs to log in first, then continue to agent creation
+            # User needs to log in first, then continue to agent creation in the app
+            app_next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                redirect_params,
+            )
             return redirect_to_login(
-                next=next_url,
+                next=app_next_url,
                 login_url=_login_url_with_utms(request),
             )
         
@@ -632,8 +644,16 @@ class PretrainedWorkerHireView(View):
 
         from django.contrib.auth.views import redirect_to_login
 
+        app_next_url = next_url
+        if flow != "pro":
+            return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
+            app_next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                {"return_to": return_to} if return_to else {},
+            )
+
         response = redirect_to_login(
-            next=next_url,
+            next=app_next_url,
             login_url=_login_url_with_utms(request),
         )
 
@@ -771,8 +791,16 @@ class PublicTemplateHireView(View):
 
         from django.contrib.auth.views import redirect_to_login
 
+        app_next_url = next_url
+        if flow != "pro":
+            return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
+            app_next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                {"return_to": return_to} if return_to else {},
+            )
+
         response = redirect_to_login(
-            next=next_url,
+            next=app_next_url,
             login_url=_login_url_with_utms(request),
         )
 

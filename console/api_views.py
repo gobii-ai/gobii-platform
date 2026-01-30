@@ -13,6 +13,7 @@ import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
@@ -72,6 +73,8 @@ from api.models import (
     UserPhoneNumber,
 )
 from django.core.files.storage import default_storage
+from agents.services import PretrainedWorkerTemplateService
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
@@ -205,6 +208,38 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "email": request.user.email,
             }
         )
+
+
+class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        restored_cookie = False
+        if "agent_charter" not in request.session:
+            cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
+            if cookie_value:
+                try:
+                    stashed = signing.loads(cookie_value, max_age=3600)
+                    for key in (
+                        "agent_charter",
+                        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
+                        "agent_charter_source",
+                    ):
+                        if key in stashed:
+                            request.session[key] = stashed[key]
+                    request.session.modified = True
+                    restored_cookie = True
+                except (signing.BadSignature, signing.SignatureExpired):
+                    logger.debug("Invalid or expired OAuth charter cookie")
+
+        payload = {
+            "charter": request.session.get("agent_charter"),
+            "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
+        }
+        response = JsonResponse(payload)
+        if restored_cookie:
+            response.delete_cookie(OAUTH_CHARTER_COOKIE)
+        return response
 
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:

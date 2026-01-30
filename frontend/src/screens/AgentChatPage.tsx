@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
+import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
@@ -800,6 +801,9 @@ export function AgentChatPage({
   const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
+  const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
+  const spawnIntentFetchedRef = useRef(false)
+  const spawnIntentAutoSubmittedRef = useRef(false)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -840,6 +844,35 @@ export function AgentChatPage({
     }
     setIntelligenceError(null)
   }, [isNewAgent, activeAgentId])
+
+  useEffect(() => {
+    if (!isNewAgent) {
+      spawnIntentFetchedRef.current = false
+      spawnIntentAutoSubmittedRef.current = false
+      setSpawnIntent(null)
+      return
+    }
+    if (spawnIntentFetchedRef.current) {
+      return
+    }
+    spawnIntentFetchedRef.current = true
+    let isActive = true
+    const loadSpawnIntent = async () => {
+      try {
+        const intent = await fetchAgentSpawnIntent()
+        if (!isActive || !intent?.charter?.trim()) {
+          return
+        }
+        setSpawnIntent(intent)
+      } catch (err) {
+        // If we can't load a spawn intent, just fall back to manual entry.
+      }
+    }
+    void loadSpawnIntent()
+    return () => {
+      isActive = false
+    }
+  }, [isNewAgent])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -1472,6 +1505,42 @@ export function AgentChatPage({
     scrollToBottom,
     sendMessage,
     shouldFetchUsageBurnRate,
+  ])
+
+  useEffect(() => {
+    if (!isNewAgent || !spawnIntent?.charter?.trim()) {
+      return
+    }
+    if (!contextReady || rosterQuery.isLoading) {
+      return
+    }
+    if (spawnIntentAutoSubmittedRef.current) {
+      return
+    }
+
+    const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
+    if (preferredTierRaw) {
+      let resolvedTier = preferredTierRaw
+      if (llmIntelligence) {
+        const isKnownTier = llmIntelligence.options.some((option) => option.key === preferredTierRaw)
+        resolvedTier = isKnownTier ? preferredTierRaw : 'standard'
+      }
+      if (resolvedTier !== draftIntelligenceTier) {
+        setDraftIntelligenceTier(resolvedTier)
+        return
+      }
+    }
+
+    spawnIntentAutoSubmittedRef.current = true
+    void handleSend(spawnIntent.charter)
+  }, [
+    contextReady,
+    draftIntelligenceTier,
+    handleSend,
+    isNewAgent,
+    llmIntelligence,
+    rosterQuery.isLoading,
+    spawnIntent,
   ])
 
   return (

@@ -826,6 +826,12 @@
             return
           }
 
+          if (!isAuthenticated) {
+            bypassGate = true
+            submitForm()
+            return
+          }
+
           event.preventDefault()
 
           const selectedOption = options.find((item) => item.dataset.tier === input.value) || options[0]
