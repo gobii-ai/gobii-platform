@@ -507,6 +507,7 @@ AUTHENTICATION_BACKENDS = (
 )
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
+ACCOUNT_ALLOW_REGISTRATION = env.bool("ACCOUNT_ALLOW_REGISTRATION", default=True)
 
 # Domains declined during signup (lowercase, comma separated via env override)
 SIGNUP_BLOCKED_EMAIL_DOMAINS = [
