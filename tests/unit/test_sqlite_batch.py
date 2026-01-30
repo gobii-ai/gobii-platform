@@ -479,7 +479,7 @@ class SqliteBatchToolTests(TestCase):
             results = out.get("results", [])
             self.assertTrue(results[2].get("warning"))
             self.assertEqual(results[2].get("warning_code"), "zero_rows_affected")
-            self.assertIn("0 rows affected", results[2].get("message", ""))
+            self.assertIn("No match", results[2].get("message", ""))
 
     def test_autocorrect_insert_value_keyword(self):
         with self._with_temp_db():
