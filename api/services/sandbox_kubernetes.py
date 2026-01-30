@@ -319,9 +319,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             return {"status": "error", "message": "Discovery pod did not become ready in time."}
 
         payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
-        response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
-        self._delete_pod(pod_name)
-        return response
+        try:
+            response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
+            return response
+        finally:
+            self._delete_pod(pod_name)
 
     def _proxy_post(
         self,
