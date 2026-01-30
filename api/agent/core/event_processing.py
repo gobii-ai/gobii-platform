@@ -816,6 +816,7 @@ def _persist_tool_call_step(
     tool_name: str,
     tool_params: Dict[str, Any],
     result_content: str,
+    execution_duration_ms: Optional[int],
     credits_consumed: Any,
     consumed_credit: Any,
     attach_completion: Any,
@@ -860,6 +861,7 @@ def _persist_tool_call_step(
             tool_name=safe_tool_name,
             tool_params=tool_params,
             result=normalized_result,
+            execution_duration_ms=execution_duration_ms,
         )
         try:
             from console.agent_chat.signals import emit_tool_call_realtime
@@ -3372,6 +3374,8 @@ def _run_agent_loop(
 
                     logger.info("Agent %s: executing %s now", agent.id, tool_name)
 
+                    tool_started_at = time.monotonic()
+                    tool_duration_ms: Optional[int] = None
                     try:
                         # Check for eval mock before real execution (mock_config passed via BudgetContext)
                         mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
@@ -3444,6 +3448,8 @@ def _run_agent_loop(
                             error_type=type(exc).__name__,
                             retryable=_infer_retryable_from_text(str(exc)),
                         )
+                    finally:
+                        tool_duration_ms = int(round((time.monotonic() - tool_started_at) * 1000))
 
                     if _is_error_status(result):
                         result = _normalize_error_result(result)
@@ -3496,6 +3502,7 @@ def _run_agent_loop(
                         tool_name=tool_name,
                         tool_params=tool_params,
                         result_content=result_content,
+                        execution_duration_ms=tool_duration_ms,
                         credits_consumed=credits_consumed,
                         consumed_credit=consumed_credit,
                         attach_completion=_attach_completion,

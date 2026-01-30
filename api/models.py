@@ -8471,6 +8471,11 @@ class PersistentAgentToolCall(models.Model):
     tool_name = models.CharField(max_length=256)
     tool_params = models.JSONField(null=True, blank=True)
     result = models.TextField(blank=True, help_text="Raw result or output from the tool call (may be large)")
+    execution_duration_ms = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Elapsed time in milliseconds for executing the tool call.",
+    )
 
     class Meta:
         ordering = ["-step__created_at"]  # newest first via step timestamp
