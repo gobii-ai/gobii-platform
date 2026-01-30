@@ -35,7 +35,7 @@ def sandbox_compute_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
     if not sandbox_compute_enabled():
         return False
     if agent is None:
-        return True
+        return False
     if not getattr(agent, "user_id", None):
         return False
 
