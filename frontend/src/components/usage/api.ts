@@ -2,6 +2,8 @@ import type {
   UsageAgentsResponse,
   UsageSummaryQueryInput,
   UsageSummaryResponse,
+  UsageBurnRateQueryInput,
+  UsageBurnRateResponse,
   UsageTrendQueryInput,
   UsageTrendResponse,
   UsageToolBreakdownQueryInput,
@@ -38,6 +40,33 @@ export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: 
 
   if (!response.ok) {
     throw new Error(`Usage summary request failed (${response.status})`)
+  }
+
+  return response.json()
+}
+
+export const fetchUsageBurnRate = async (params: UsageBurnRateQueryInput, signal: AbortSignal): Promise<UsageBurnRateResponse> => {
+  const search = new URLSearchParams()
+
+  if (params.tier) {
+    search.set('tier', params.tier)
+  }
+
+  if (params.window) {
+    search.set('window', `${params.window}`)
+  }
+
+  const suffix = search.toString()
+  const response = await fetch(`/console/api/usage/burn-rate/${suffix ? `?${suffix}` : ''}`, {
+    method: 'GET',
+    headers: {
+      Accept: 'application/json',
+    },
+    signal,
+  })
+
+  if (!response.ok) {
+    throw new Error(`Usage burn rate request failed (${response.status})`)
   }
 
   return response.json()

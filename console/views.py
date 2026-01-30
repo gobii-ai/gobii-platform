@@ -51,7 +51,13 @@ from api.services.dedicated_proxy_service import (
     is_multi_assign_enabled,
 )
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
-from api.agent.core.llm_config import AgentLLMTier, TIER_ORDER, get_llm_tier_multipliers, max_allowed_tier_for_plan
+from api.agent.core.llm_config import (
+    AgentLLMTier,
+    TIER_ORDER,
+    get_llm_tier_multipliers,
+    get_llm_tier_ranks,
+    max_allowed_tier_for_plan,
+)
 from api.agent.short_description import build_listing_description, build_mini_description, \
     maybe_schedule_short_description
 from api.agent.tags import maybe_schedule_agent_tags
@@ -265,26 +271,26 @@ def _coerce_decimal_to_float(value) -> float | None:
 def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_url: str | None) -> dict[str, Any]:
     plan = None
     if owner is not None:
-        try:
-            if owner_type == 'organization':
-                plan = get_organization_plan(organization)
-            else:
-                plan = get_user_plan(owner)
-        except Exception:
-            plan = None
+        if owner_type == 'organization':
+            plan = get_organization_plan(organization) if organization is not None else None
+        else:
+            plan = get_user_plan(owner)
 
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
-    can_edit = bool(
-        settings.GOBII_PROPRIETARY_MODE
-        and owner is not None
-        and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
-    )
+    tier_ranks = get_llm_tier_ranks()
+    allowed_rank = tier_ranks.get(allowed_tier.value)
+    if allowed_rank is None:
+        allowed_rank = TIER_ORDER.get(allowed_tier, 0)
+    if settings.GOBII_PROPRIETARY_MODE:
+        can_edit = bool(
+            owner is not None
+            and (owner_type == 'organization' or allowed_tier != AgentLLMTier.STANDARD)
+        )
+    else:
+        can_edit = True
     disabled_reason = None
-    if not can_edit:
-        if settings.GOBII_PROPRIETARY_MODE:
-            disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
-        else:
-            disabled_reason = "Intelligence levels are managed by deployment settings."
+    if not can_edit and settings.GOBII_PROPRIETARY_MODE:
+        disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
 
     tier_descriptions = {
         AgentLLMTier.STANDARD.value: "Balanced routing that uses 1× credits.",
@@ -294,33 +300,60 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
         AgentLLMTier.ULTRA_MAX.value: "Highest tier for maximum reasoning depth.",
     }
     tiers = list(IntelligenceTier.objects.order_by("credit_multiplier", "rank"))
-    if tiers:
-        options = [
-            {
-                "key": tier.key,
-                "label": tier.display_name,
-                "description": tier_descriptions.get(tier.key, ""),
-                "multiplier": float(tier.credit_multiplier),
-            }
-            for tier in tiers
-        ]
+    expected_keys = {tier.value for tier in AgentLLMTier}
+    tier_keys = {tier.key for tier in tiers}
+    use_db_tiers = bool(tiers) and (
+        settings.GOBII_PROPRIETARY_MODE or expected_keys.issubset(tier_keys)
+    )
+    if use_db_tiers:
+        options = []
+        for tier in tiers:
+            rank_value = getattr(tier, "rank", None)
+            if rank_value is None:
+                rank_value = tier_ranks.get(tier.key)
+            try:
+                rank_value = int(rank_value) if rank_value is not None else None
+            except (TypeError, ValueError):
+                rank_value = None
+            options.append(
+                {
+                    "key": tier.key,
+                    "label": tier.display_name,
+                    "description": tier_descriptions.get(tier.key, ""),
+                    "multiplier": float(tier.credit_multiplier),
+                    "rank": rank_value,
+                }
+            )
     else:
         multipliers = get_llm_tier_multipliers()
-        options = [
-            {
-                "key": tier.value,
-                "label": tier.value.replace("_", " ").title(),
-                "description": tier_descriptions.get(tier.value, ""),
-                "multiplier": float(multipliers.get(tier.value, 1)),
-            }
-            for tier in sorted(TIER_ORDER.keys(), key=lambda entry: TIER_ORDER[entry])
-        ]
+        options = []
+        for tier in sorted(TIER_ORDER.keys(), key=lambda entry: TIER_ORDER[entry]):
+            options.append(
+                {
+                    "key": tier.value,
+                    "label": tier.value.replace("_", " ").title(),
+                    "description": tier_descriptions.get(tier.value, ""),
+                    "multiplier": float(multipliers.get(tier.value, 1)),
+                    "rank": TIER_ORDER.get(tier),
+                }
+            )
+
+    max_allowed_rank = allowed_rank
+    max_allowed_tier_key = allowed_tier.value
+    if not settings.GOBII_PROPRIETARY_MODE and options:
+        ranked = [option for option in options if isinstance(option.get("rank"), int)]
+        if ranked:
+            top_option = max(ranked, key=lambda option: option["rank"])
+            max_allowed_rank = top_option["rank"]
+            max_allowed_tier_key = top_option["key"]
 
     return {
         "options": options,
         "canEdit": can_edit,
         "disabledReason": disabled_reason,
         "upgradeUrl": upgrade_url,
+        "maxAllowedTier": max_allowed_tier_key,
+        "maxAllowedTierRank": max_allowed_rank,
     }
 
 
@@ -2309,6 +2342,7 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
         sms_enabled = form.cleaned_data.get('sms_enabled', False)
         email_enabled = form.cleaned_data.get('email_enabled', False)
         preferred_contact_method = form.cleaned_data['preferred_contact_method']
+        preferred_llm_tier_key = request.session.get("agent_preferred_llm_tier")
 
         try:
             result = create_persistent_agent_from_charter(
@@ -2318,7 +2352,11 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
                 email_enabled=email_enabled,
                 sms_enabled=sms_enabled,
                 preferred_contact_method=preferred_contact_method,
+                preferred_llm_tier_key=preferred_llm_tier_key,
             )
+            if preferred_llm_tier_key:
+                request.session.pop("agent_preferred_llm_tier", None)
+                request.session.modified = True
             return redirect('agent_welcome', pk=result.agent.id)
         except ValidationError as exc:
             error_messages = []
@@ -2387,6 +2425,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
                 email_enabled=True,
                 sms_enabled=False,
                 preferred_contact_method='email',
+                preferred_llm_tier_key=request.session.get("agent_preferred_llm_tier"),
             )
         except ValidationError as exc:
             error_messages = []
@@ -2405,7 +2444,11 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             return redirect('agents')
 
         session_return_to = request.session.pop(IMMERSIVE_RETURN_TO_SESSION_KEY, None)
-        if session_return_to is not None:
+        popped_intelligence = False
+        if "agent_preferred_llm_tier" in request.session:
+            request.session.pop("agent_preferred_llm_tier", None)
+            popped_intelligence = True
+        if session_return_to is not None or popped_intelligence:
             request.session.modified = True
         embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
         # Default return_to to agents list so closing the chat doesn't redirect back
@@ -4195,11 +4238,13 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 plan = None
 
         allowed_llm_tier = max_allowed_tier_for_plan(plan, is_organization=(owner_type == 'organization'))
-        can_edit_intelligence = bool(
-            settings.GOBII_PROPRIETARY_MODE
-            and owner is not None
-            and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
-        )
+        if settings.GOBII_PROPRIETARY_MODE:
+            can_edit_intelligence = bool(
+                owner is not None
+                and (owner_type == 'organization' or allowed_llm_tier != AgentLLMTier.STANDARD)
+            )
+        else:
+            can_edit_intelligence = True
         current_preferred_tier_value = getattr(getattr(agent, "preferred_llm_tier", None), "key", AgentLLMTier.STANDARD.value)
         try:
             AgentLLMTier(current_preferred_tier_value)
@@ -4217,10 +4262,8 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         preferred_tier_changed = requested_preferred_tier.value != current_preferred_tier_value
         if preferred_tier_changed:
             if not can_edit_intelligence:
-                if settings.GOBII_PROPRIETARY_MODE:
-                    return _general_error("Upgrade your plan to adjust intelligence levels.")
-                return _general_error("Intelligence levels are locked by deployment settings.")
-            if TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
+                return _general_error("Upgrade your plan to adjust intelligence levels.")
+            if settings.GOBII_PROPRIETARY_MODE and TIER_ORDER[requested_preferred_tier] > TIER_ORDER[allowed_llm_tier]:
                 return _general_error("That intelligence level isn't available for this plan.")
 
         resolved_preferred_tier = IntelligenceTier.objects.filter(key=requested_preferred_tier.value).first()
@@ -4996,12 +5039,20 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        agent = self.object
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
         context["can_manage_collaborators"] = self.can_manage_collaborators
         context["is_collaborator"] = self.is_collaborator
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
+
+        # Get agent contact info for header display
+        agent_email_ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
+        agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
+        context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
+        context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
+
         return context
 
     def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only

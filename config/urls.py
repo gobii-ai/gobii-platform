@@ -18,6 +18,7 @@ from console.api_views import (
     AgentMessageCreateAPIView,
     AgentChatRosterAPIView,
     AgentQuickCreateAPIView,
+    AgentSpawnIntentAPIView,
     AgentCollaboratorLeaveAPIView,
     AgentProcessingStatusAPIView,
     AgentDailyCreditsAPIView,
@@ -115,6 +116,7 @@ from console.api_views import (
 )
 from console.usage_views import (
     UsageSummaryAPIView,
+    UsageBurnRateSnapshotAPIView,
     UsageTrendAPIView,
     UsageToolBreakdownAPIView,
     UsageAgentLeaderboardAPIView,
@@ -245,6 +247,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("console/api/agents/roster/", AgentChatRosterAPIView.as_view(), name="console_agent_roster"),
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),
+    path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
     path("console/api/agents/<uuid:agent_id>/messages/", AgentMessageCreateAPIView.as_view(), name="console_agent_message_create"),
@@ -336,6 +339,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
+    path("console/api/usage/burn-rate/", UsageBurnRateSnapshotAPIView.as_view(), name="console_usage_burn_rate"),
     path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
     path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
     path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),

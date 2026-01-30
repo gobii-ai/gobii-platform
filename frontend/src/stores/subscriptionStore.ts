@@ -1,32 +1,94 @@
 import { create } from 'zustand'
 
+import { HttpError, jsonFetch, scheduleLoginRedirect } from '../api/http'
+import { track, AnalyticsEvent } from '../util/analytics'
+
 export type PlanTier = 'free' | 'startup' | 'scale'
+export type UpgradeModalSource =
+  | 'banner'
+  | 'task_credits_callout'
+  | 'contact_cap_callout'
+  | 'intelligence_selector'
+  | 'unknown'
 
 type SubscriptionState = {
   currentPlan: PlanTier | null
   isLoading: boolean
   isUpgradeModalOpen: boolean
+  upgradeModalSource: UpgradeModalSource | null
   isProprietaryMode: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
-  openUpgradeModal: () => void
+  openUpgradeModal: (source?: UpgradeModalSource) => void
   closeUpgradeModal: () => void
+  ensureAuthenticated: () => Promise<boolean>
 }
 
 export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   currentPlan: null,
   isLoading: false,
   isUpgradeModalOpen: false,
+  upgradeModalSource: null,
   isProprietaryMode: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
-  openUpgradeModal: () => set({ isUpgradeModalOpen: true }),
-  closeUpgradeModal: () => set({ isUpgradeModalOpen: false }),
+  openUpgradeModal: (source = 'unknown') => set((state) => {
+    const resolvedSource = source ?? 'unknown'
+    if (!state.isUpgradeModalOpen && typeof window !== 'undefined') {
+      track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
+        currentPlan: state.currentPlan,
+        source: resolvedSource,
+        isProprietaryMode: state.isProprietaryMode,
+      })
+    }
+    return { isUpgradeModalOpen: true, upgradeModalSource: resolvedSource }
+  }),
+  closeUpgradeModal: () => set({ isUpgradeModalOpen: false, upgradeModalSource: null }),
+  ensureAuthenticated: async () => {
+    if (typeof window === 'undefined') {
+      return false
+    }
+    try {
+      const data = await jsonFetch<UserPlanPayload>('/api/v1/user/plan/', {
+        method: 'GET',
+      })
+      if (!data || typeof data !== 'object') {
+        scheduleLoginRedirect()
+        return false
+      }
+      const plan = normalizePlan(data?.plan)
+      set({
+        currentPlan: plan,
+        isProprietaryMode: Boolean(data?.is_proprietary_mode),
+        isLoading: false,
+      })
+      return true
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 401) {
+        scheduleLoginRedirect()
+        return false
+      }
+      return true
+    }
+  },
 }))
+
+type UserPlanPayload = {
+  plan?: string | null
+  is_proprietary_mode?: boolean
+}
 
 type UserPlanResponse = {
   plan: PlanTier | null
   isProprietaryMode: boolean
+  authenticated: boolean
+}
+
+function normalizePlan(plan: unknown): PlanTier | null {
+  if (plan && ['free', 'startup', 'scale'].includes(String(plan))) {
+    return plan as PlanTier
+  }
+  return null
 }
 
 /**
@@ -34,20 +96,23 @@ type UserPlanResponse = {
  */
 async function fetchUserPlan(): Promise<UserPlanResponse> {
   try {
-    const response = await fetch('/api/v1/user/plan/', {
-      credentials: 'same-origin',
+    const data = await jsonFetch<UserPlanPayload>('/api/v1/user/plan/', {
+      method: 'GET',
     })
-    if (!response.ok) return { plan: null, isProprietaryMode: false }
-    const data = await response.json()
-    const plan = data.plan && ['free', 'startup', 'scale'].includes(data.plan)
-      ? (data.plan as PlanTier)
-      : null
+    if (!data || typeof data !== 'object') {
+      return { plan: null, isProprietaryMode: false, authenticated: false }
+    }
+    const plan = normalizePlan(data?.plan)
     return {
       plan,
-      isProprietaryMode: Boolean(data.is_proprietary_mode),
+      isProprietaryMode: Boolean(data?.is_proprietary_mode),
+      authenticated: true,
     }
-  } catch {
-    return { plan: null, isProprietaryMode: false }
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 401) {
+      return { plan: null, isProprietaryMode: false, authenticated: false }
+    }
+    return { plan: null, isProprietaryMode: false, authenticated: true }
   }
 }
 

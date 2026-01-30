@@ -9,6 +9,8 @@ from redbeat import RedBeatSchedulerEntry
 from celery import current_app as celery_app
 import logging
 
+from django.conf import settings
+
 logger = logging.getLogger(__name__)
 
 # ---------- STATIC TASKS ----------
@@ -65,6 +67,12 @@ def add_dynamic_schedules():
     beat_schedule["meter-usage-rollup-daily"] = {
         "task": "gobii_platform.api.tasks.rollup_and_meter_usage",
         "schedule": crontab(hour="*", minute=11),  # 11 minutes after every hour
+        "args": [],
+    }
+
+    beat_schedule["burn-rate-snapshot-refresh"] = {
+        "task": "api.tasks.refresh_burn_rate_snapshots",
+        "schedule": crontab(minute=f"*/{settings.BURN_RATE_SNAPSHOT_REFRESH_MINUTES}"),
         "args": [],
     }
 

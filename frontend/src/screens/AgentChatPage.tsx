@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
-import { createAgent } from '../api/agents'
+import { createAgent, updateAgent } from '../api/agents'
+import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import type { ConsoleContext } from '../api/context'
-import { fetchUsageSummary } from '../components/usage/api'
+import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
@@ -16,18 +18,34 @@ import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import type { PlanTier } from '../stores/subscriptionStore'
+import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
 import type { AgentRosterEntry } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
-import type { UsageSummaryResponse } from '../components/usage'
+import type { AgentSetupMetadata } from '../types/insight'
+import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
+import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { track, AnalyticsEvent } from '../util/analytics'
+import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
   const [first] = agentName.trim().split(/\s+/, 1)
   return first || 'Agent'
+}
+
+const LOW_CREDIT_DAY_THRESHOLD = 2
+
+type IntelligenceGateReason = 'plan' | 'credits' | 'both'
+
+type IntelligenceGateState = {
+  reason: IntelligenceGateReason
+  selectedTier: IntelligenceTierKey
+  allowedTier: IntelligenceTierKey
+  multiplier: number | null
+  estimatedDaysRemaining: number | null
+  burnRatePerDay: number | null
 }
 
 function buildAgentChatPath(pathname: string, agentId: string): string {
@@ -75,6 +93,12 @@ type ConnectionIndicator = {
   status: ConnectionStatusTone
   label: string
   detail?: string | null
+}
+
+function hasAgentResponse(events: TimelineEvent[]): boolean {
+  return events.some((event) => {
+    return event.kind === 'message' && Boolean(event.message.isOutbound)
+  })
 }
 
 type AgentSwitchMeta = {
@@ -209,6 +233,8 @@ export type AgentChatPageProps = {
   agentName?: string | null
   agentColor?: string | null
   agentAvatarUrl?: string | null
+  agentEmail?: string | null
+  agentSms?: string | null
   collaboratorInviteUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
@@ -232,6 +258,8 @@ export function AgentChatPage({
   agentName,
   agentColor,
   agentAvatarUrl,
+  agentEmail,
+  agentSms,
   collaboratorInviteUrl,
   viewerUserId,
   viewerEmail,
@@ -259,9 +287,12 @@ export function AgentChatPage({
     updating: addonsUpdating,
   } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
+  const { currentPlan, isProprietaryMode, ensureAuthenticated, upgradeModalSource } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
+  const pendingCreateRef = useRef<{ body: string; attachments: File[]; tier: IntelligenceTierKey } | null>(null)
+  const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const [resolvedContext, setResolvedContext] = useState<ConsoleContext | null>(null)
 
   const handleContextSwitched = useCallback(
@@ -294,6 +325,8 @@ export function AgentChatPage({
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
+  const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = resolvedContext ?? contextData?.context ?? null
   const contextReady = Boolean(effectiveContext)
   const liveAgentId = contextSwitching || !contextReady ? null : activeAgentId
@@ -707,10 +740,70 @@ export function AgentChatPage({
   const resolvedAvatarUrl = (isStoreSynced ? storedAgentAvatarUrl : activeRosterMeta?.avatarUrl) ?? agentAvatarUrl ?? null
   const resolvedAgentColorHex =
     (isStoreSynced ? agentColorHex : activeRosterMeta?.displayColorHex) ?? agentColor ?? null
+  const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
+  const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
+  const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
   const activeCanManageCollaborators = activeRosterMeta?.canManageCollaborators ?? (canManageCollaborators ?? true)
+  const hasAgentReply = useMemo(() => hasAgentResponse(events), [events])
+  useEffect(() => {
+    if (!activeAgentId || !activeRosterMeta?.email) {
+      return
+    }
+    setPendingAgentEmails((current) => {
+      if (!current[activeAgentId]) {
+        return current
+      }
+      const next = { ...current }
+      delete next[activeAgentId]
+      return next
+    })
+  }, [activeAgentId, activeRosterMeta?.email])
+
+  useEffect(() => {
+    if (!activeAgentId || !resolvedAgentEmail) {
+      return
+    }
+    if (contactRefreshAttemptsRef.current[activeAgentId]) {
+      delete contactRefreshAttemptsRef.current[activeAgentId]
+    }
+  }, [activeAgentId, resolvedAgentEmail])
+
+  useEffect(() => {
+    if (!activeAgentId || isNewAgent || resolvedAgentEmail || !hasAgentReply) {
+      return
+    }
+    if (rosterQuery.isFetching) {
+      return
+    }
+    const attempts = contactRefreshAttemptsRef.current[activeAgentId] ?? 0
+    if (attempts >= 3) {
+      return
+    }
+    contactRefreshAttemptsRef.current[activeAgentId] = attempts + 1
+    const delayMs = attempts === 0 ? 500 : 2000
+    const timeout = window.setTimeout(() => {
+      void rosterQuery.refetch()
+    }, delayMs)
+    return () => window.clearTimeout(timeout)
+  }, [
+    activeAgentId,
+    hasAgentReply,
+    isNewAgent,
+    resolvedAgentEmail,
+    rosterQuery.isFetching,
+    rosterQuery.refetch,
+  ])
+  const llmIntelligence = rosterQuery.data?.llmIntelligence ?? null
+  const [draftIntelligenceTier, setDraftIntelligenceTier] = useState<string>('standard')
+  const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
+  const [intelligenceBusy, setIntelligenceBusy] = useState(false)
+  const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
+  const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
+  const spawnIntentFetchedRef = useRef(false)
+  const spawnIntentAutoSubmittedRef = useRef(false)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -744,6 +837,52 @@ export function AgentChatPage({
     },
     [isNewAgent, sessionError, sessionStatus, socketSnapshot.lastError, socketSnapshot.status],
   )
+
+  useEffect(() => {
+    if (isNewAgent) {
+      setDraftIntelligenceTier('standard')
+    }
+    setIntelligenceError(null)
+  }, [isNewAgent, activeAgentId])
+
+  useEffect(() => {
+    if (!isNewAgent) {
+      spawnIntentFetchedRef.current = false
+      spawnIntentAutoSubmittedRef.current = false
+      setSpawnIntent(null)
+      return
+    }
+    if (spawnIntentFetchedRef.current) {
+      return
+    }
+    spawnIntentFetchedRef.current = true
+    let isActive = true
+    const loadSpawnIntent = async () => {
+      try {
+        const intent = await fetchAgentSpawnIntent()
+        if (!isActive || !intent?.charter?.trim()) {
+          return
+        }
+        setSpawnIntent(intent)
+      } catch (err) {
+        // If we can't load a spawn intent, just fall back to manual entry.
+      }
+    }
+    void loadSpawnIntent()
+    return () => {
+      isActive = false
+    }
+  }, [isNewAgent])
+
+  const resolvedIntelligenceTier = useMemo(() => {
+    if (isNewAgent) {
+      return draftIntelligenceTier
+    }
+    if (activeAgentId && intelligenceOverrides[activeAgentId]) {
+      return intelligenceOverrides[activeAgentId]
+    }
+    return activeRosterMeta?.preferredLlmTier ?? 'standard'
+  }, [activeAgentId, activeRosterMeta?.preferredLlmTier, draftIntelligenceTier, intelligenceOverrides, isNewAgent])
 
   // Update document title when agent changes
   useEffect(() => {
@@ -898,28 +1037,32 @@ export function AgentChatPage({
     }, 180)
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
-  const handleUpgrade = useCallback((plan: PlanTier) => {
-    track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
-      plan,
-      source: 'agent_chat_upgrade_modal',
-    })
-    const checkoutUrl = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
-    window.open(checkoutUrl, '_top')
-  }, [])
-
-
-  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
-    if (!activeAgentId && !isNewAgent) {
+  const handleUpgrade = useCallback(async (plan: PlanTier, source?: string) => {
+    const resolvedSource = source ?? upgradeModalSource ?? 'upgrade_modal'
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
       return
     }
-    // If this is a new agent, create it first then navigate to it
-    if (isNewAgent) {
+    track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
+      plan,
+      source: resolvedSource,
+    })
+    const checkoutUrl = appendReturnTo(plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/')
+    window.open(checkoutUrl, '_top')
+  }, [ensureAuthenticated, upgradeModalSource])
+
+  const createNewAgent = useCallback(
+    async (body: string, tier: IntelligenceTierKey) => {
       try {
-        const result = await createAgent(body)
+        const result = await createAgent(body, tier)
         const createdAgentName = result.agent_name?.trim() || 'Agent'
+        const createdAgentEmail = result.agent_email?.trim() || null
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
+        }
+        if (createdAgentEmail) {
+          setPendingAgentEmails((current) => ({ ...current, [result.agent_id]: createdAgentEmail }))
         }
         queryClient.setQueryData<AgentRosterEntry[]>(['agent-roster'], (current) =>
           mergeRosterEntry(current, {
@@ -929,6 +1072,7 @@ export function AgentChatPage({
             displayColorHex: null,
             isActive: true,
             shortDescription: '',
+            email: createdAgentEmail,
           }),
         )
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
@@ -936,12 +1080,36 @@ export function AgentChatPage({
       } catch (err) {
         console.error('Failed to create agent:', err)
       }
-      return
-    }
-    await sendMessage(body, attachments)
-    if (!autoScrollPinnedRef.current) return
-    scrollToBottom()
-  }, [activeAgentId, isNewAgent, onAgentCreated, queryClient, scrollToBottom, sendMessage])
+    },
+    [onAgentCreated, queryClient, setPendingAgentEmails],
+  )
+
+  const handleIntelligenceChange = useCallback(
+    async (tier: string) => {
+      if (isNewAgent) {
+        setDraftIntelligenceTier(tier)
+        return
+      }
+      if (!activeAgentId) {
+        return
+      }
+      const previousTier = resolvedIntelligenceTier
+      setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: tier }))
+      setIntelligenceBusy(true)
+      setIntelligenceError(null)
+      try {
+        await updateAgent(activeAgentId, { preferred_llm_tier: tier })
+        void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+      } catch (err) {
+        setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: previousTier }))
+        setIntelligenceError('Unable to update intelligence level.')
+      } finally {
+        setIntelligenceBusy(false)
+      }
+    },
+    [activeAgentId, isNewAgent, queryClient, resolvedIntelligenceTier],
+  )
+
 
   const handleToggleStreamingThinking = useCallback(() => {
     setStreamingThinkingCollapsed(!streamingThinkingCollapsed)
@@ -963,6 +1131,33 @@ export function AgentChatPage({
       (insight) => !dismissedInsightIds.has(insight.insightId)
     )
   }, [insights, dismissedInsightIds])
+  const hydratedInsights = useMemo(() => {
+    if (!resolvedAgentEmail && !resolvedAgentSms) {
+      return availableInsights
+    }
+    return availableInsights.map((insight) => {
+      if (insight.insightType !== 'agent_setup') {
+        return insight
+      }
+      const metadata = insight.metadata as AgentSetupMetadata
+      const nextEmail = resolvedAgentEmail ?? metadata.agentEmail ?? null
+      const nextSms = resolvedAgentSms ?? metadata.sms?.agentNumber ?? null
+      if (nextEmail === metadata.agentEmail && nextSms === metadata.sms?.agentNumber) {
+        return insight
+      }
+      return {
+        ...insight,
+        metadata: {
+          ...metadata,
+          agentEmail: nextEmail,
+          sms: {
+            ...metadata.sms,
+            agentNumber: nextSms,
+          },
+        },
+      }
+    })
+  }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
 
   useEffect(() => {
     if (!allowAgentRefresh || !streaming || streaming.done) {
@@ -1112,7 +1307,8 @@ export function AgentChatPage({
     [queryClient, updateAddons],
   )
 
-  const shouldFetchUsageSummary = Boolean(activeAgentId && !isNewAgent && !isSelectionView)
+  const shouldFetchUsageSummary = Boolean(contextReady && !isSelectionView && (activeAgentId || isNewAgent))
+  const shouldFetchUsageBurnRate = Boolean(contextReady && !isSelectionView && isNewAgent)
   const usageContextKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
@@ -1124,6 +1320,17 @@ export function AgentChatPage({
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     enabled: shouldFetchUsageSummary,
+  })
+  const burnRateTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
+  const {
+    data: burnRateSummary,
+    refetch: refetchBurnRateSummary,
+  } = useQuery<UsageBurnRateResponse, Error>({
+    queryKey: ['usage-burn-rate', 'agent-chat', usageContextKey, burnRateTier],
+    queryFn: ({ signal }) => fetchUsageBurnRate({ tier: burnRateTier }, signal),
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    enabled: shouldFetchUsageBurnRate,
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
@@ -1145,11 +1352,219 @@ export function AgentChatPage({
   const taskCreditsDismissKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
+  const billingUrl = useMemo(() => {
+    if (!effectiveContext) {
+      return '/console/billing/'
+    }
+    if (effectiveContext.type === 'organization') {
+      return `/console/billing/?org_id=${effectiveContext.id}`
+    }
+    return '/console/billing/'
+  }, [effectiveContext])
+
+  const closeGate = useCallback(() => {
+    pendingCreateRef.current = null
+    setIntelligenceGate(null)
+  }, [])
+
+  const buildGateAnalytics = useCallback((overrides: Record<string, unknown> = {}) => {
+    if (!intelligenceGate) {
+      return overrides
+    }
+    return {
+      reason: intelligenceGate.reason,
+      selectedTier: intelligenceGate.selectedTier,
+      allowedTier: intelligenceGate.allowedTier,
+      multiplier: intelligenceGate.multiplier,
+      estimatedDaysRemaining: intelligenceGate.estimatedDaysRemaining,
+      burnRatePerDay: intelligenceGate.burnRatePerDay,
+      currentPlan,
+      ...overrides,
+    }
+  }, [currentPlan, intelligenceGate])
+
+  const handleGateDismiss = useCallback(() => {
+    track(AnalyticsEvent.INTELLIGENCE_GATE_DISMISSED, buildGateAnalytics())
+    closeGate()
+  }, [buildGateAnalytics, closeGate])
+
+  const handleGateUpgrade = useCallback((plan: PlanTier) => {
+    closeGate()
+    void handleUpgrade(plan, 'intelligence_gate')
+  }, [closeGate, handleUpgrade])
+
+  const handleGateAddPack = useCallback(() => {
+    track(AnalyticsEvent.INTELLIGENCE_GATE_ADD_PACK_CLICKED, buildGateAnalytics())
+    closeGate()
+    if (typeof window !== 'undefined') {
+      window.open(billingUrl, '_top')
+    }
+  }, [billingUrl, buildGateAnalytics, closeGate])
+
+  const handleGateContinue = useCallback(() => {
+    const pending = pendingCreateRef.current
+    if (!pending || !intelligenceGate) {
+      closeGate()
+      return
+    }
+    const needsPlanUpgrade = intelligenceGate.reason === 'plan' || intelligenceGate.reason === 'both'
+    const tierToUse = needsPlanUpgrade ? intelligenceGate.allowedTier : pending.tier
+    track(AnalyticsEvent.INTELLIGENCE_GATE_CONTINUED, buildGateAnalytics({ chosenTier: tierToUse }))
+    if (needsPlanUpgrade) {
+      setDraftIntelligenceTier(tierToUse)
+    }
+    closeGate()
+    void createNewAgent(pending.body, tierToUse)
+  }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
+
+  const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
+    if (!activeAgentId && !isNewAgent) {
+      return
+    }
+    // If this is a new agent, create it first then navigate to it
+    if (isNewAgent) {
+      const authenticated = await ensureAuthenticated()
+      if (!authenticated) {
+        return
+      }
+      const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
+      const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
+      const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
+      const allowedRank = llmIntelligence?.maxAllowedTierRank ?? null
+      const selectedRank = option?.rank ?? null
+      const isLocked = typeof allowedRank === 'number' && typeof selectedRank === 'number'
+        ? selectedRank > allowedRank
+        : Boolean(llmIntelligence && !llmIntelligence.canEdit && selectedTier !== allowedTier)
+      const multiplier = option?.multiplier ?? 1
+      let estimatedDaysRemaining: number | null = null
+      let burnRatePerDay: number | null = null
+      let lowCredits = false
+      let burnRatePayload = burnRateSummary
+      if (!burnRatePayload && shouldFetchUsageBurnRate) {
+        try {
+          const refreshed = await refetchBurnRateSummary()
+          burnRatePayload = refreshed.data
+        } catch (err) {
+          burnRatePayload = undefined
+        }
+      }
+
+      const burnRateQuota = burnRatePayload?.quota ?? null
+      const burnRateUnlimited = burnRateQuota?.unlimited ?? hasUnlimitedQuota
+      const burnRateExtraEnabled = burnRatePayload?.extra_tasks?.enabled ?? extraTasksEnabled
+      const projectedDays = burnRatePayload?.projection?.projected_days_remaining ?? null
+      burnRatePerDay = burnRatePayload?.snapshot?.burn_rate_per_day ?? null
+
+      if (!burnRateUnlimited && !burnRateExtraEnabled && projectedDays !== null) {
+        estimatedDaysRemaining = projectedDays
+        lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
+      }
+      if (isLocked || lowCredits) {
+        const gateReason: IntelligenceGateReason = isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits'
+        track(AnalyticsEvent.INTELLIGENCE_GATE_SHOWN, {
+          reason: gateReason,
+          selectedTier,
+          allowedTier,
+          multiplier: Number.isFinite(multiplier) ? multiplier : null,
+          estimatedDaysRemaining,
+          burnRatePerDay,
+          currentPlan,
+        })
+        pendingCreateRef.current = { body, attachments, tier: selectedTier }
+        setIntelligenceGate({
+          reason: gateReason,
+          selectedTier,
+          allowedTier,
+          multiplier: Number.isFinite(multiplier) ? multiplier : null,
+          estimatedDaysRemaining,
+          burnRatePerDay,
+        })
+        return
+      }
+      await createNewAgent(body, selectedTier)
+      return
+    }
+    await sendMessage(body, attachments)
+    if (!autoScrollPinnedRef.current) return
+    scrollToBottom()
+  }, [
+    activeAgentId,
+    burnRateSummary,
+    createNewAgent,
+    currentPlan,
+    ensureAuthenticated,
+    extraTasksEnabled,
+    hasUnlimitedQuota,
+    isNewAgent,
+    llmIntelligence?.canEdit,
+    llmIntelligence?.maxAllowedTier,
+    llmIntelligence?.maxAllowedTierRank,
+    llmIntelligence?.options,
+    resolvedIntelligenceTier,
+    refetchBurnRateSummary,
+    scrollToBottom,
+    sendMessage,
+    shouldFetchUsageBurnRate,
+  ])
+
+  useEffect(() => {
+    if (!isNewAgent || !spawnIntent?.charter?.trim()) {
+      return
+    }
+    if (!contextReady || rosterQuery.isLoading) {
+      return
+    }
+    if (spawnIntentAutoSubmittedRef.current) {
+      return
+    }
+
+    const preferredTierRaw = spawnIntent.preferred_llm_tier?.trim() || null
+    if (preferredTierRaw) {
+      let resolvedTier = preferredTierRaw
+      if (llmIntelligence) {
+        const isKnownTier = llmIntelligence.options.some((option) => option.key === preferredTierRaw)
+        resolvedTier = isKnownTier ? preferredTierRaw : 'standard'
+      }
+      if (resolvedTier !== draftIntelligenceTier) {
+        setDraftIntelligenceTier(resolvedTier)
+        return
+      }
+    }
+
+    spawnIntentAutoSubmittedRef.current = true
+    void handleSend(spawnIntent.charter)
+  }, [
+    contextReady,
+    draftIntelligenceTier,
+    handleSend,
+    isNewAgent,
+    llmIntelligence,
+    rosterQuery.isLoading,
+    spawnIntent,
+  ])
 
   return (
     <div className="agent-chat-page">
       {error || (sessionStatus === 'error' && sessionError) ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{error || sessionError}</div>
+      ) : null}
+      {intelligenceGate ? (
+        <AgentIntelligenceGateModal
+          open={Boolean(intelligenceGate)}
+          reason={intelligenceGate.reason}
+          selectedTier={intelligenceGate.selectedTier}
+          allowedTier={intelligenceGate.allowedTier}
+          multiplier={intelligenceGate.multiplier}
+          estimatedDaysRemaining={intelligenceGate.estimatedDaysRemaining}
+          burnRatePerDay={intelligenceGate.burnRatePerDay}
+          currentPlan={currentPlan}
+          showUpgradePlans={isProprietaryMode}
+          showAddPack={isProprietaryMode && Boolean(billingUrl)}
+          onUpgrade={handleGateUpgrade}
+          onAddPack={handleGateAddPack}
+          onContinue={handleGateContinue}
+          onClose={handleGateDismiss}
+        />
       ) : null}
       <CollaboratorInviteDialog
         open={collaboratorInviteOpen}
@@ -1163,6 +1578,8 @@ export function AgentChatPage({
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
         agentColorHex={resolvedAgentColorHex || undefined}
         agentAvatarUrl={resolvedAvatarUrl}
+        agentEmail={resolvedAgentEmail}
+        agentSms={resolvedAgentSms}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         agentIsOrgOwned={resolvedIsOrgOwned}
         isCollaborator={isCollaboratorOnly}
@@ -1236,13 +1653,19 @@ export function AgentChatPage({
         loadingOlder={isNewAgent ? false : loadingOlder}
         loadingNewer={isNewAgent ? false : loadingNewer}
         initialLoading={initialLoading}
-        insights={isNewAgent ? [] : availableInsights}
+        insights={isNewAgent ? [] : hydratedInsights}
         currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
         onInsightIndexChange={setCurrentInsightIndex}
         onPauseChange={setInsightsPaused}
         isInsightsPaused={insightsPaused}
         onUpgrade={handleUpgrade}
+        llmIntelligence={llmIntelligence}
+        currentLlmTier={resolvedIntelligenceTier}
+        onLlmTierChange={handleIntelligenceChange}
+        allowLockedIntelligenceSelection={isNewAgent}
+        llmTierSaving={intelligenceBusy}
+        llmTierError={intelligenceError}
       />
     </div>
   )

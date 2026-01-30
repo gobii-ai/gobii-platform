@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { Check, Zap, Rocket } from 'lucide-react'
 
 import type { PlanTier } from '../../stores/subscriptionStore'
+import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
@@ -73,11 +74,17 @@ const PLANS: PlanConfig[] = [
 type SubscriptionUpgradePlansProps = {
   currentPlan: PlanTier | null
   onUpgrade: (plan: PlanTier) => void
+  variant?: 'modal' | 'inline'
+  pricingLinkLabel?: string
+  source?: string
 }
 
 export function SubscriptionUpgradePlans({
   currentPlan,
   onUpgrade,
+  variant = 'modal',
+  pricingLinkLabel = 'View full comparison',
+  source,
 }: SubscriptionUpgradePlansProps) {
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const isUpgrade = useCallback(
@@ -93,13 +100,21 @@ export function SubscriptionUpgradePlans({
     track(AnalyticsEvent.UPGRADE_PLAN_SELECTED, {
       currentPlan,
       selectedPlan: planId,
+      source: source ?? 'unknown',
     })
     onUpgrade(planId)
-  }, [currentPlan, onUpgrade])
+  }, [currentPlan, onUpgrade, source])
+
+  const pricingUrl = appendReturnTo('/pricing/')
+
+  const wrapperClass = variant === 'inline' ? 'px-0 py-0' : 'px-6 py-6 sm:px-8'
+  const footerClass = variant === 'inline'
+    ? 'mt-2 text-center text-xs text-slate-500'
+    : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
 
   return (
     <>
-      <div className="px-6 py-6 sm:px-8">
+      <div className={wrapperClass}>
         <div className="grid gap-4 sm:grid-cols-2">
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
@@ -110,7 +125,7 @@ export function SubscriptionUpgradePlans({
                 key={plan.id}
                 className={`relative flex flex-col rounded-xl border p-5 ${
                   plan.highlight
-                    ? 'border-blue-200 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30 shadow-md'
+                    ? 'border-blue-200 bg-gradient-to-br from-white via-blue-50/30 to-indigo-50/30'
                     : 'border-slate-200 bg-white'
                 } ${isCurrent ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}
               >
@@ -119,7 +134,7 @@ export function SubscriptionUpgradePlans({
                     className={`absolute -top-2.5 left-1/2 -translate-x-1/2 rounded-full px-3 py-0.5 text-xs font-semibold ${
                       plan.highlight
                         ? 'bg-blue-600 text-white'
-                        : 'bg-slate-100 text-slate-600'
+                        : 'bg-blue-50 text-blue-700'
                     }`}
                   >
                     {plan.badge}
@@ -160,7 +175,7 @@ export function SubscriptionUpgradePlans({
                 </ul>
 
                 {isCurrent ? (
-                  <span className="inline-flex w-full items-center justify-center rounded-lg bg-slate-100 px-4 py-2.5 text-sm font-semibold text-slate-500">
+                  <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-500">
                     Current plan
                   </span>
                 ) : canUpgrade ? (
@@ -169,8 +184,8 @@ export function SubscriptionUpgradePlans({
                     onClick={() => handlePlanSelect(plan.id)}
                     className={`inline-flex w-full items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition ${
                       plan.highlight
-                        ? 'bg-blue-600 text-white shadow-md hover:bg-blue-700'
-                        : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 hover:text-blue-600'
+                        ? 'bg-blue-600 text-white hover:bg-blue-700'
+                        : 'border border-slate-200 bg-white text-slate-700 hover:bg-blue-50/40 hover:text-blue-600'
                     }`}
                   >
                     {plan.id === 'scale' ? (
@@ -181,7 +196,7 @@ export function SubscriptionUpgradePlans({
                     Upgrade to {plan.name}
                   </button>
                 ) : (
-                  <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-400">
+                  <span className="inline-flex w-full items-center justify-center rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-400">
                     {plan.name}
                   </span>
                 )}
@@ -191,14 +206,13 @@ export function SubscriptionUpgradePlans({
         </div>
       </div>
 
-      <div className="border-t border-slate-100 bg-slate-50 px-6 py-4 sm:px-8">
+      <div className={footerClass}>
         <p className="text-center text-xs text-slate-500">
-          Questions about pricing?{' '}
           <a
-            href="/pricing/"
+            href={pricingUrl}
             className="font-medium text-blue-600 hover:text-blue-700"
           >
-            View full comparison
+            {pricingLinkLabel}
           </a>
         </p>
       </div>

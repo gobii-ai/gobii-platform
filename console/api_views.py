@@ -12,6 +12,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 import zstandard as zstd
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.conf import settings
+from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Min, Max, Q
@@ -21,7 +23,7 @@ from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
@@ -63,6 +65,7 @@ from api.models import (
     PersistentAgentPromptArchive,
     AgentFileSpaceAccess,
     AgentFsNode,
+    Organization,
     OrganizationMembership,
     AgentCollaborator,
     build_web_agent_address,
@@ -70,6 +73,8 @@ from api.models import (
     UserPhoneNumber,
 )
 from django.core.files.storage import default_storage
+from agents.services import PretrainedWorkerTemplateService
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
@@ -108,6 +113,7 @@ from console.context_overrides import get_context_override
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
+from console.views import build_llm_intelligence_props
 from console.agent_addons import (
     build_agent_addons_payload,
     update_contact_pack_quantities,
@@ -202,6 +208,38 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "email": request.user.email,
             }
         )
+
+
+class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        restored_cookie = False
+        if "agent_charter" not in request.session:
+            cookie_value = request.COOKIES.get(OAUTH_CHARTER_COOKIE)
+            if cookie_value:
+                try:
+                    stashed = signing.loads(cookie_value, max_age=3600)
+                    for key in (
+                        "agent_charter",
+                        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
+                        "agent_charter_source",
+                    ):
+                        if key in stashed:
+                            request.session[key] = stashed[key]
+                    request.session.modified = True
+                    restored_cookie = True
+                except (signing.BadSignature, signing.SignatureExpired):
+                    logger.debug("Invalid or expired OAuth charter cookie")
+
+        payload = {
+            "charter": request.session.get("agent_charter"),
+            "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
+        }
+        response = JsonResponse(payload)
+        if restored_cookie:
+            response.delete_cookie(OAUTH_CHARTER_COOKIE)
+        return response
 
 
 def _path_meta(path: str | None) -> tuple[str | None, str | None]:
@@ -1328,12 +1366,46 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             override=override,
         )
 
+        upgrade_url = None
+        if settings.GOBII_PROPRIETARY_MODE:
+            try:
+                upgrade_url = reverse("proprietary:pricing")
+            except NoReverseMatch:
+                upgrade_url = None
+
+        owner = request.user
+        owner_type = "user"
+        organization = None
+        if context_info.current_context.type == "organization":
+            organization = Organization.objects.filter(id=context_info.current_context.id).first()
+            if organization:
+                owner = organization
+                owner_type = "organization"
+
+        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
+
+        # Prefetch primary email and SMS endpoints for header display
+        email_prefetch = models.Prefetch(
+            "comms_endpoints",
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL, is_primary=True),
+            to_attr="primary_email_endpoints",
+        )
+        sms_prefetch = models.Prefetch(
+            "comms_endpoints",
+            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS),
+            to_attr="primary_sms_endpoints",
+        )
         agents_qs = (
             agent_queryset_for(request.user, context_info.current_context)
             .select_related("agent_color")
+            .prefetch_related(email_prefetch, sms_prefetch)
             .order_by("name")
         )
-        shared_qs = shared_agent_queryset_for(request.user).select_related("agent_color")
+        shared_qs = (
+            shared_agent_queryset_for(request.user)
+            .select_related("agent_color")
+            .prefetch_related(email_prefetch, sms_prefetch)
+        )
         agent_ids = list(agents_qs.values_list("id", flat=True))
         if agent_ids:
             shared_qs = shared_qs.exclude(id__in=agent_ids)
@@ -1356,6 +1428,18 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             ).values_list("org_id", flat=True)
         )
         is_staff = bool(user.is_staff)
+        def get_primary_email(agent: PersistentAgent) -> str | None:
+            endpoints = getattr(agent, "primary_email_endpoints", None)
+            if endpoints:
+                return endpoints[0].address if endpoints else None
+            return None
+
+        def get_primary_sms(agent: PersistentAgent) -> str | None:
+            endpoints = getattr(agent, "primary_sms_endpoints", None)
+            if endpoints:
+                return endpoints[0].address if endpoints else None
+            return None
+
         payload = [
             {
                 "id": str(agent.id),
@@ -1376,6 +1460,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     or agent.user_id == user.id
                     or (agent.organization_id and agent.organization_id in admin_org_ids)
                 ),
+                "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                "email": get_primary_email(agent),
+                "sms": get_primary_sms(agent),
             }
             for agent in agents
         ]
@@ -1387,6 +1474,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "name": context_info.current_context.name,
                 },
                 "agents": payload,
+                "llmIntelligence": llm_intelligence,
             }
         )
 
@@ -1408,6 +1496,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         initial_message = (body.get("message") or "").strip()
         if not initial_message:
             return JsonResponse({"error": "Message is required"}, status=400)
+        preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
 
         contact_email = (request.user.email or "").strip()
         if not contact_email:
@@ -1421,6 +1510,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 email_enabled=True,
                 sms_enabled=False,
                 preferred_contact_method="email",
+                preferred_llm_tier_key=preferred_llm_tier_key,
             )
         except ValidationError as exc:
             error_messages = []
@@ -1431,13 +1521,23 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             if not error_messages:
                 error_messages.append("We couldn't create that agent. Please try again.")
             return JsonResponse({"error": error_messages[0]}, status=400)
-        except Exception:
+        except IntegrityError:
             logger.exception("Error creating persistent agent via API")
             return JsonResponse({"error": "We ran into a problem creating your agent. Please try again."}, status=500)
+
+        agent_email = None
+        agent_email_endpoint = (
+            result.agent.comms_endpoints.filter(channel=CommsChannel.EMAIL)
+            .order_by("-is_primary")
+            .first()
+        )
+        if agent_email_endpoint:
+            agent_email = agent_email_endpoint.address
 
         return JsonResponse({
             "agent_id": str(result.agent.id),
             "agent_name": result.agent.name,
+            "agent_email": agent_email,
         })
 
 

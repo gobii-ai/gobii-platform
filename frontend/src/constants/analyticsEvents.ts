@@ -67,6 +67,18 @@ export const AnalyticsEvent = {
   UPGRADE_CHECKOUT_REDIRECTED: 'Upgrade Checkout Redirected',
 
   // ============================================
+  // Intelligence Gate Events
+  // ============================================
+  /** Intelligence gate modal was shown */
+  INTELLIGENCE_GATE_SHOWN: 'Intelligence Gate Shown',
+  /** User dismissed the intelligence gate */
+  INTELLIGENCE_GATE_DISMISSED: 'Intelligence Gate Dismissed',
+  /** User continued with a lower intelligence tier */
+  INTELLIGENCE_GATE_CONTINUED: 'Intelligence Gate Continued',
+  /** User clicked add pack from the intelligence gate */
+  INTELLIGENCE_GATE_ADD_PACK_CLICKED: 'Intelligence Gate Add Pack Clicked',
+
+  // ============================================
   // Upsell Message Events
   // ============================================
   /** Upsell message was shown to the user */

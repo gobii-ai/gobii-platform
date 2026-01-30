@@ -4,6 +4,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Optional
 
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db.models import Case, Count, DecimalField, F, Q, Sum, Value, When
 from django.db.models.functions import Coalesce, TruncDay, TruncHour
@@ -20,6 +21,11 @@ from api.models import (
     Organization,
     PersistentAgentStep,
     PersistentAgentToolCall,
+)
+from api.agent.core.llm_config import get_credit_multiplier_for_tier
+from api.services.burn_rate_snapshots import (
+    get_burn_rate_snapshot_for_owner,
+    serialize_burn_rate_snapshot,
 )
 from console.context_helpers import build_console_context
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -49,6 +55,107 @@ def _parse_query_date(value: str | None) -> date | None:
         return datetime.strptime(value, "%Y-%m-%d").date()
     except ValueError:
         return None
+
+
+def _parse_window_minutes(value: str | None) -> int | None:
+    if not value:
+        return None
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        return None
+    return minutes if minutes > 0 else None
+
+
+def _to_decimal(value: object, default: Decimal = DECIMAL_ZERO) -> Decimal:
+    try:
+        return Decimal(value)
+    except (TypeError, ValueError, InvalidOperation):
+        return default
+
+
+def _build_quota_payload(owner, *, user, organization) -> tuple[dict, bool, bool, Decimal]:
+    credits_qs = TaskCreditService.get_current_task_credit_for_owner(owner)
+    credits_zero = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+    credit_agg = credits_qs.aggregate(
+        available=Coalesce(Sum("available_credits"), credits_zero),
+        total=Coalesce(Sum("credits"), credits_zero),
+        used=Coalesce(Sum("credits_used"), credits_zero),
+    )
+
+    ledger_available = _to_decimal(credit_agg.get("available"), DECIMAL_ZERO)
+    ledger_total = _to_decimal(credit_agg.get("total"), DECIMAL_ZERO)
+    ledger_used = _to_decimal(credit_agg.get("used"), DECIMAL_ZERO)
+
+    if organization is None:
+        quota_total = _to_decimal(TaskCreditService.get_tasks_entitled_for_owner(owner), DECIMAL_ZERO)
+        quota_used = _to_decimal(
+            TaskCreditService.get_owner_task_credits_used(owner, task_credits=credits_qs),
+            DECIMAL_ZERO,
+        )
+        available_credits = _to_decimal(
+            TaskCreditService.calculate_available_tasks_for_owner(owner, task_credits=credits_qs),
+            DECIMAL_ZERO,
+        )
+        extra_tasks_enabled = allow_user_extra_tasks(user)
+    else:
+        quota_total = ledger_total
+        quota_used = ledger_used
+        available_credits = ledger_available
+        extra_tasks_enabled = allow_organization_extra_tasks(organization)
+
+    unlimited_quota = quota_total == Decimal(TASKS_UNLIMITED)
+    if not unlimited_quota:
+        available_credits = max(available_credits, DECIMAL_ZERO)
+
+    quota_used_pct = 0.0
+    if not unlimited_quota and quota_total > 0:
+        usage_pct = (quota_used / quota_total) * Decimal("100")
+        quota_used_pct = float(min(usage_pct, Decimal("100")))
+
+    payload = {
+        "available": float(available_credits),
+        "total": float(quota_total),
+        "used": float(quota_used),
+        "used_pct": quota_used_pct,
+        "unlimited": unlimited_quota,
+    }
+
+    return payload, extra_tasks_enabled, unlimited_quota, available_credits
+
+
+def _build_burn_rate_projection(
+    *,
+    snapshot,
+    tier_key: str,
+    window_minutes: int,
+    available_credits: Decimal,
+    extra_tasks_enabled: bool,
+    unlimited_quota: bool,
+) -> dict | None:
+    if unlimited_quota or extra_tasks_enabled:
+        return None
+
+    multiplier = get_credit_multiplier_for_tier(tier_key or "standard")
+    projected_days = None
+    burn_rate_per_day = snapshot.burn_rate_per_day if snapshot is not None else None
+
+    if available_credits < Decimal("1"):
+        projected_days = Decimal("0")
+    elif (
+        burn_rate_per_day is not None
+        and burn_rate_per_day > Decimal("0")
+        and multiplier > Decimal("0")
+    ):
+        projected_days = available_credits / (burn_rate_per_day * multiplier)
+
+    return {
+        "tier": tier_key or "standard",
+        "multiplier": float(multiplier),
+        "available": float(available_credits),
+        "projected_days_remaining": float(projected_days) if projected_days is not None else None,
+        "window_minutes": window_minutes,
+    }
 
 
 def _format_period_label(start_date: date, end_date: date) -> str:
@@ -287,50 +394,11 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         cancelled_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.CANCELLED, DECIMAL_ZERO)
         total_credits = combined_total
 
-        credits_zero = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
-
-        task_credit_qs = TaskCreditService.get_current_task_credit_for_owner(owner)
-        credit_agg = task_credit_qs.aggregate(
-            available=Coalesce(Sum("available_credits"), credits_zero),
-            total=Coalesce(Sum("credits"), credits_zero),
-            used=Coalesce(Sum("credits_used"), credits_zero),
+        quota_payload, extra_tasks_enabled, _unlimited_quota, _available_credits = _build_quota_payload(
+            owner,
+            user=request.user,
+            organization=organization,
         )
-
-        def _to_decimal(value: object, default: Decimal = DECIMAL_ZERO) -> Decimal:
-            try:
-                return Decimal(value)
-            except (TypeError, ValueError, InvalidOperation):
-                return default
-
-        ledger_available = _to_decimal(credit_agg.get("available"), DECIMAL_ZERO)
-        ledger_total = _to_decimal(credit_agg.get("total"), DECIMAL_ZERO)
-        ledger_used = _to_decimal(credit_agg.get("used"), DECIMAL_ZERO)
-
-        if organization is None:
-            quota_total = _to_decimal(TaskCreditService.get_tasks_entitled_for_owner(owner), DECIMAL_ZERO)
-            quota_used = _to_decimal(
-                TaskCreditService.get_owner_task_credits_used(owner, task_credits=task_credit_qs),
-                DECIMAL_ZERO,
-            )
-            available_credits = _to_decimal(
-                TaskCreditService.calculate_available_tasks_for_owner(owner, task_credits=task_credit_qs),
-                DECIMAL_ZERO,
-            )
-            extra_tasks_enabled = allow_user_extra_tasks(request.user)
-        else:
-            quota_total = ledger_total
-            quota_used = ledger_used
-            available_credits = ledger_available
-            extra_tasks_enabled = allow_organization_extra_tasks(organization)
-
-        unlimited_quota = quota_total == Decimal(TASKS_UNLIMITED)
-        if not unlimited_quota:
-            available_credits = max(available_credits, DECIMAL_ZERO)
-
-        quota_used_pct = 0.0
-        if not unlimited_quota and quota_total > 0:
-            usage_pct = (quota_used / quota_total) * Decimal("100")
-            quota_used_pct = float(min(usage_pct, Decimal("100")))
 
         payload = {
             "period": {
@@ -357,16 +425,59 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                     "total": float(total_credits),
                     "unit": "credits",
                 },
-                "quota": {
-                    "available": float(available_credits),
-                    "total": float(quota_total),
-                    "used": float(quota_used),
-                    "used_pct": quota_used_pct,
-                },
+                "quota": quota_payload,
             },
             "extra_tasks": {
                 "enabled": extra_tasks_enabled,
             },
+        }
+
+        return JsonResponse(payload)
+
+
+class UsageBurnRateSnapshotAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+
+        owner = request.user
+        organization = None
+
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+            owner = organization
+
+        requested_window = _parse_window_minutes(request.GET.get("window"))
+        window_minutes = requested_window or settings.BURN_RATE_SNAPSHOT_DEFAULT_WINDOW_MINUTES
+        tier_key = request.GET.get("tier") or "standard"
+
+        quota_payload, extra_tasks_enabled, unlimited_quota, available_credits = _build_quota_payload(
+            owner,
+            user=request.user,
+            organization=organization,
+        )
+
+        snapshot = get_burn_rate_snapshot_for_owner(
+            owner,
+            window_minutes=window_minutes,
+            max_age_minutes=settings.BURN_RATE_SNAPSHOT_STALE_MINUTES,
+        )
+
+        projection = _build_burn_rate_projection(
+            snapshot=snapshot,
+            tier_key=tier_key,
+            window_minutes=snapshot.window_minutes if snapshot is not None else window_minutes,
+            available_credits=available_credits,
+            extra_tasks_enabled=extra_tasks_enabled,
+            unlimited_quota=unlimited_quota,
+        )
+
+        payload = {
+            "snapshot": serialize_burn_rate_snapshot(snapshot),
+            "projection": projection,
+            "quota": quota_payload,
+            "extra_tasks": {"enabled": extra_tasks_enabled},
         }
 
         return JsonResponse(payload)

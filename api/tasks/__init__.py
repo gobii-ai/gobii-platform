@@ -48,6 +48,9 @@ from .soft_expiration_task import soft_expire_inactive_agents_task
 # Billing rollup / Stripe metering
 from .billing_rollup import rollup_and_meter_usage_task
 
+# Burn rate snapshot refresh
+from .burn_rate_snapshots import refresh_burn_rate_snapshots_task  # noqa: F401
+
 # Proactive agent scheduler
 from .proactive_agents import schedule_proactive_agents_task  # noqa: F401
 

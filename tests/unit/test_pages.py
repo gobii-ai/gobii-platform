@@ -147,7 +147,7 @@ class HomePageTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
-        self.assertEqual(params.get("next"), [reverse("agent_quick_spawn")])
+        self.assertEqual(params.get("next"), ["/app/agents/new"])
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
 @tag("batch_pages")
@@ -308,7 +308,7 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_login"))
 
         params = parse_qs(parsed.query)
-        self.assertEqual(params.get("next"), [reverse("agent_quick_spawn")])
+        self.assertEqual(params.get("next"), ["/app/agents/new"])
         self.assertEqual(params.get("utm_medium"), ["ads"])
 
     @tag("batch_pages")
