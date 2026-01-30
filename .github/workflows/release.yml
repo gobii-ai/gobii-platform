@@ -1,0 +1,209 @@
+name: Release Gobii Platform
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump
+        type: choice
+        options:
+          - major
+          - minor
+          - patch
+        required: true
+      notes:
+        description: Patch notes
+        type: string
+        required: false
+      title:
+        description: Release title
+        type: string
+        required: false
+
+concurrency:
+  group: gobii-platform-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release Gobii Platform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump version
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import sys
+          import tomllib
+
+          bump = os.environ["BUMP"]
+
+          pyproject_path = "pyproject.toml"
+          pyproject_text = open(pyproject_path, "r", encoding="utf-8").read()
+          try:
+              pyproject = tomllib.loads(pyproject_text)
+          except tomllib.TOMLDecodeError as exc:
+              print(f"Invalid pyproject.toml: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          version = (pyproject.get("project") or {}).get("version")
+          if not isinstance(version, str) or not version.strip():
+              print("Version not found in pyproject.toml [project].version", file=sys.stderr)
+              sys.exit(1)
+
+          match = re.match(r"^(?P<maj>\d+)\.(?P<min>\d+)\.(?P<pat>\d+)$", version.strip())
+          if not match:
+              print(f"Unsupported version format: {version}", file=sys.stderr)
+              sys.exit(1)
+
+          major = int(match.group("maj"))
+          minor = int(match.group("min"))
+          patch = int(match.group("pat"))
+
+          if bump == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif bump == "minor":
+              minor += 1
+              patch = 0
+          elif bump == "patch":
+              patch += 1
+          else:
+              print(f"Unsupported bump: {bump}", file=sys.stderr)
+              sys.exit(1)
+
+          new_version = f"{major}.{minor}.{patch}"
+
+          pyproject_pattern = (
+              r'(?m)^(version\s*=\s*")'
+              + re.escape(version.strip())
+              + r'("\s*(#.*)?)$'
+          )
+          pyproject_updated, pyproject_count = re.subn(
+              pyproject_pattern,
+              lambda match: f'{match.group(1)}{new_version}{match.group(2)}',
+              pyproject_text,
+              count=1,
+          )
+          if pyproject_updated == pyproject_text or pyproject_count != 1:
+              print("Version update failed: pyproject.toml version line not replaced", file=sys.stderr)
+              sys.exit(1)
+          open(pyproject_path, "w", encoding="utf-8").write(pyproject_updated)
+
+          package_path = "frontend/package.json"
+          package_text = open(package_path, "r", encoding="utf-8").read()
+          try:
+              package = json.loads(package_text)
+          except json.JSONDecodeError as exc:
+              print(f"Invalid package.json: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          package_version = package.get("version")
+          if not isinstance(package_version, str) or not package_version.strip():
+              print("Version not found in frontend/package.json", file=sys.stderr)
+              sys.exit(1)
+
+          package_pattern = (
+              r'("version"\s*:\s*")'
+              + re.escape(package_version)
+              + r'(")'
+          )
+          package_updated, package_count = re.subn(
+              package_pattern,
+              lambda match: f'{match.group(1)}{new_version}{match.group(2)}',
+              package_text,
+              count=1,
+          )
+          if package_updated == package_text or package_count != 1:
+              print("Version update failed: frontend/package.json version not replaced", file=sys.stderr)
+              sys.exit(1)
+          open(package_path, "w", encoding="utf-8").write(package_updated)
+
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8", newline="\n") as env:
+              env.write(f"NEW_VERSION={new_version}\n")
+          print(f"Bumped version to {new_version}")
+          PY
+
+      - name: Commit version bump
+        run: |
+          NEW_VERSION="$(printf '%s' "$NEW_VERSION" | tr -d '\r\n')"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml frontend/package.json
+          git commit -m "chore(release): ${NEW_VERSION}"
+          git tag -a "${NEW_VERSION}" -m "Release ${NEW_VERSION}"
+
+      - name: Push release commit and tag
+        run: |
+          git push origin HEAD:main
+          git push origin --tags
+
+      - name: Generate release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="$(printf '%s' "$NEW_VERSION" | tr -d '\r\n')"
+          gh api "repos/${{ github.repository }}/releases/generate-notes" \
+            -f tag_name="${NEW_VERSION}" \
+            --jq .body > release-notes-auto.md
+
+      - name: Assemble release notes file
+        env:
+          NOTES: ${{ inputs.notes }}
+          TITLE: ${{ inputs.title }}
+          VERSION: ${{ env.NEW_VERSION }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          version = os.environ.get("VERSION", "").strip()
+          title = os.environ.get("TITLE", "").strip()
+          notes = os.environ.get("NOTES", "").strip()
+
+          parts = []
+          if version:
+              header = f"## {version}" + (f" - {title}" if title else "")
+              parts.append(header)
+          if notes:
+              parts.extend(["", notes])
+
+          auto_path = Path("release-notes-auto.md")
+          if auto_path.exists():
+              auto_notes = auto_path.read_text(encoding="utf-8").strip()
+              if auto_notes:
+                  parts.extend(["", auto_notes])
+
+          content = "\n".join(part for part in parts if part is not None).lstrip()
+          if content and not content.endswith("\n"):
+              content += "\n"
+          Path("release-notes.md").write_text(content, encoding="utf-8")
+          PY
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEW_VERSION="$(printf '%s' "$NEW_VERSION" | tr -d '\r\n')"
+          gh release create "${NEW_VERSION}" \
+            --title "${NEW_VERSION}" \
+            --notes-file release-notes.md
