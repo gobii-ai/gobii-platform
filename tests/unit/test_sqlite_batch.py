@@ -467,6 +467,20 @@ class SqliteBatchToolTests(TestCase):
             self.assertIsNotNone(auto_fix)
             self.assertTrue(any("removed '*'" in fix for fix in auto_fix["fixes"]))
 
+    def test_warning_status_on_zero_row_update(self):
+        with self._with_temp_db():
+            queries = [
+                "CREATE TABLE t(id INTEGER)",
+                "INSERT INTO t(id) VALUES (1)",
+                "UPDATE t SET id = 2 WHERE id = 999",
+            ]
+            out = execute_sqlite_batch(self.agent, {"queries": queries})
+            self.assertEqual(out.get("status"), "warning", out.get("message"))
+            results = out.get("results", [])
+            self.assertTrue(results[2].get("warning"))
+            self.assertEqual(results[2].get("warning_code"), "zero_rows_affected")
+            self.assertIn("No match", results[2].get("message", ""))
+
     def test_autocorrect_insert_value_keyword(self):
         with self._with_temp_db():
             queries = [

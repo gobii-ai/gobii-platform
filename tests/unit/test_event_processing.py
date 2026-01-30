@@ -472,6 +472,71 @@ class PromptContextBuilderTests(TestCase):
         self.assertNotIn("enable_database", tool_names)
         self.assertIn("sqlite_batch", tool_names)
 
+    def test_warning_status_requires_followup(self):
+        """Tool warning status should trigger another loop iteration."""
+        enable_tools(self.agent, ["sqlite_batch"])
+
+        tool_call = MagicMock()
+        tool_call.function = MagicMock()
+        tool_call.function.name = "sqlite_batch"
+        tool_call.function.arguments = '{"sql": "UPDATE t SET id = 1", "will_continue_work": false}'
+
+        message_first = MagicMock()
+        message_first.tool_calls = [tool_call]
+        message_first.function_call = None
+        message_first.content = None
+
+        choice_first = MagicMock(message=message_first)
+        response_first = MagicMock()
+        response_first.choices = [choice_first]
+        response_first.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=5,
+                completion_tokens=5,
+                total_tokens=10,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+
+        message_second = MagicMock()
+        message_second.tool_calls = None
+        message_second.function_call = None
+        message_second.content = "done"
+
+        choice_second = MagicMock(message=message_second)
+        response_second = MagicMock()
+        response_second.choices = [choice_second]
+        response_second.model_extra = {
+            "usage": MagicMock(
+                prompt_tokens=5,
+                completion_tokens=5,
+                total_tokens=10,
+                prompt_tokens_details=MagicMock(cached_tokens=0),
+            )
+        }
+
+        token_usage = {
+            "prompt_tokens": 5,
+            "completion_tokens": 5,
+            "total_tokens": 10,
+            "model": "mock-model",
+            "provider": "mock-provider",
+            "cached_tokens": 0,
+        }
+
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
+             patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
+             patch('api.agent.core.event_processing._completion_with_failover', side_effect=[(response_first, token_usage), (response_second, token_usage)]) as mock_completion, \
+             patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "warning", "message": "0 rows affected"}), \
+             patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}):
+            from api.agent.core import event_processing as ep
+            with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
+                _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2, "Warning status should force a follow-up iteration.")
+
 
 @tag("batch_event_processing")
 class AgentRunSequenceHelperTests(TestCase):

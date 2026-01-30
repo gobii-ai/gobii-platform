@@ -1316,15 +1316,20 @@ def _execute_with_autocorrections(
             else:
                 affected = cur.rowcount if cur.rowcount is not None else 0
                 msg = f"Query {idx} affected {max(0, affected)} rows."
+                zero_rows_warning = False
                 query_upper = current_query.upper()
                 if affected <= 0 and "WITH" in query_upper and "INSERT" in query_upper:
                     msg += " (Normal for CTE INSERT - check sqlite_schema for actual row count)"
                 elif affected == 0 and ("UPDATE" in query_upper or "DELETE" in query_upper):
+                    zero_rows_warning = True
                     msg += (
                         " (No match—verify WHERE values against ground truth: "
                         "schema, kanban snapshot, tool results, or prior query output.)"
                     )
                 result_entry = {"message": msg}
+                if zero_rows_warning:
+                    result_entry["warning"] = True
+                    result_entry["warning_code"] = "zero_rows_affected"
             return result_entry, current_query, corrections, None
         except Exception as orig_exc:
             last_error_message = str(orig_exc)
@@ -1639,6 +1644,7 @@ def _execute_sqlite_batch_inner(
     conn: Optional[sqlite3.Connection] = None
     results: List[Dict[str, Any]] = []
     had_error = False
+    had_warning = False
     error_message = ""
     only_write_queries = True
     all_corrections: List[str] = []
@@ -1698,6 +1704,9 @@ def _execute_sqlite_batch_inner(
             if result_entry.get("result") is not None:
                 only_write_queries = False
 
+            if result_entry.get("warning"):
+                had_warning = True
+
             if applied_corrections and original_query != final_query:
                 result_entry["auto_correction"] = {
                     "before": original_query,
@@ -1727,13 +1736,13 @@ def _execute_sqlite_batch_inner(
                 )
 
         response: Dict[str, Any] = {
-            "status": "error" if had_error else "ok",
+            "status": "error" if had_error else ("warning" if had_warning else "ok"),
             "results": results,
             "db_size_mb": round(db_size_mb, 2),
             "message": msg,
         }
 
-        if not had_error and will_continue_work is False:
+        if not had_error and not had_warning and will_continue_work is False:
             response["auto_sleep_ok"] = True
 
         return response
