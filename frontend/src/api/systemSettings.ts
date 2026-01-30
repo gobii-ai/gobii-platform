@@ -4,6 +4,7 @@ export type SystemSetting = {
   key: string
   label: string
   description: string
+  category: string
   value_type: 'int' | 'float'
   unit?: string | null
   min_value?: number | null

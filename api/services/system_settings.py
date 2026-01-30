@@ -26,6 +26,7 @@ class SystemSettingDefinition:
     value_type: str
     env_var: str
     default_getter: Callable[[], int | float]
+    category: str
     unit: str | None = None
     min_value: int | float | None = None
     disable_value: int | float | None = None
@@ -52,6 +53,7 @@ SYSTEM_SETTING_DEFINITIONS = (
         value_type=VALUE_TYPE_INT,
         env_var="MAX_FILE_SIZE",
         default_getter=lambda: settings.MAX_FILE_SIZE,
+        category="Files",
         unit="bytes",
         min_value=1,
         disable_value=-1,
@@ -63,6 +65,7 @@ SYSTEM_SETTING_DEFINITIONS = (
         value_type=VALUE_TYPE_FLOAT,
         env_var="MCP_HTTP_REQUEST_TIMEOUT_SECONDS",
         default_getter=lambda: settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS,
+        category="MCP",
         unit="seconds",
         min_value=0.1,
     ),
@@ -73,6 +76,7 @@ SYSTEM_SETTING_DEFINITIONS = (
         value_type=VALUE_TYPE_FLOAT,
         env_var="MCP_STDIO_REQUEST_TIMEOUT_SECONDS",
         default_getter=lambda: settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS,
+        category="MCP",
         unit="seconds",
         min_value=0.1,
     ),
@@ -83,6 +87,7 @@ SYSTEM_SETTING_DEFINITIONS = (
         value_type=VALUE_TYPE_INT,
         env_var="LITELLM_TIMEOUT_SECONDS",
         default_getter=lambda: settings.LITELLM_TIMEOUT_SECONDS,
+        category="LLM",
         unit="seconds",
         min_value=1,
     ),
@@ -202,6 +207,7 @@ def serialize_setting(
         "key": definition.key,
         "label": definition.label,
         "description": definition.description,
+        "category": definition.category,
         "value_type": definition.value_type,
         "unit": definition.unit,
         "min_value": definition.min_value,

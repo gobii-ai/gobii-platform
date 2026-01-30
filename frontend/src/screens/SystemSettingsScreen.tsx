@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, Info, RefreshCw, XCircle } from 'lucide-react'
 
@@ -42,6 +42,9 @@ const formatValue = (setting: SystemSetting, value: number | null) => {
 const draftFromSetting = (setting: SystemSetting) =>
   setting.db_value !== null && setting.db_value !== undefined ? String(setting.db_value) : ''
 
+const toCategoryId = (category: string) =>
+  `system-settings-${category.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')}`
+
 export function SystemSettingsScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['system-settings'] as const, [])
@@ -52,6 +55,9 @@ export function SystemSettingsScreen() {
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
+  const activeCategoryRef = useRef<string | null>(null)
+  const visibilityRef = useRef(new Map<string, number>())
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey,
@@ -88,6 +94,81 @@ export function SystemSettingsScreen() {
     () => settings.some((setting) => (drafts[setting.key] ?? '') !== draftFromSetting(setting)),
     [drafts, settings],
   )
+
+  const categories = useMemo(() => {
+    const map = new Map<string, SystemSetting[]>()
+    const order: string[] = []
+    settings.forEach((setting) => {
+      const category = setting.category || 'Other'
+      if (!map.has(category)) {
+        map.set(category, [])
+        order.push(category)
+      }
+      map.get(category)?.push(setting)
+    })
+    return order.map((category) => ({
+      name: category,
+      id: toCategoryId(category),
+      settings: map.get(category) ?? [],
+    }))
+  }, [settings])
+
+  const setActiveCategory = useCallback((nextId: string) => {
+    activeCategoryRef.current = nextId
+    setActiveCategoryId(nextId)
+  }, [])
+
+  useEffect(() => {
+    if (!categories.length) {
+      return
+    }
+    if (!activeCategoryRef.current) {
+      setActiveCategory(categories[0].id)
+    }
+    const sections = Array.from(document.querySelectorAll<HTMLElement>('[data-category-id]'))
+    if (!sections.length) {
+      return
+    }
+    visibilityRef.current.clear()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const id = entry.target.getAttribute('data-category-id')
+          if (!id) {
+            return
+          }
+          if (entry.isIntersecting) {
+            visibilityRef.current.set(id, entry.intersectionRatio)
+          } else {
+            visibilityRef.current.delete(id)
+          }
+        })
+        if (!visibilityRef.current.size) {
+          return
+        }
+        let bestId = activeCategoryRef.current
+        let bestRatio = -1
+        visibilityRef.current.forEach((ratio, id) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio
+            bestId = id
+          }
+        })
+        if (bestId && bestId !== activeCategoryRef.current) {
+          setActiveCategory(bestId)
+        }
+      },
+      {
+        rootMargin: '0px 0px -60% 0px',
+        threshold: [0, 0.15, 0.3, 0.6, 1],
+      },
+    )
+    sections.forEach((section) => observer.observe(section))
+    return () => {
+      observer.disconnect()
+      visibilityRef.current.clear()
+    }
+  }, [categories, setActiveCategory])
 
   const resetAllDrafts = useCallback(
     (nextSettings: SystemSetting[]) => {
@@ -176,7 +257,7 @@ export function SystemSettingsScreen() {
           {errorBanner}
         </div>
       )}
-      <div className="gobii-card-base px-6 py-6">
+      <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">System settings</h1>
@@ -194,118 +275,155 @@ export function SystemSettingsScreen() {
         </div>
 
         {listError && (
-          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+          <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
             Failed to load settings. {listError}
           </div>
         )}
 
-        <div className="mt-6 divide-y divide-slate-100">
-          {isLoading ? (
-            <div className="py-6 text-sm text-slate-600">Loading settings…</div>
-          ) : (
-            settings.map((setting) => {
-              const draftValue = drafts[setting.key] ?? ''
-              const hasOverride = setting.db_value !== null && setting.db_value !== undefined
-              const showEnvWarning = setting.env_set && hasOverride
-              const status = rowStatus[setting.key]
-              const minValue =
-                setting.disable_value !== null && setting.disable_value !== undefined
-                  ? setting.disable_value
-                  : setting.min_value ?? undefined
-              const placeholderValue =
-                hasOverride && draftValue.trim() === '' ? setting.fallback_value : setting.effective_value
-              return (
-                <div key={setting.key} className="py-6">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
-                    <div className="space-y-2">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h2 className="text-base font-semibold text-slate-900">{setting.label}</h2>
-                        <span
-                          className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${sourceBadgeStyles[setting.source]}`}
-                        >
-                          {sourceLabels[setting.source]}
-                        </span>
-                      </div>
-                      <p className="text-sm text-slate-600">{setting.description}</p>
-                      <p className="text-xs text-slate-500">
-                        Effective value: {formatValue(setting, setting.effective_value)} · Env var: {setting.env_var}{' '}
-                        {setting.env_set ? '(set)' : '(not set)'}
-                      </p>
-                      {showEnvWarning && (
-                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                          Environment variable is set. Saving here will override the env value.
-                        </div>
-                      )}
-                    </div>
-                      <div className="space-y-3">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                          Override value
-                        </label>
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          min={minValue}
-                          step={setting.value_type === 'int' ? 1 : 0.1}
-                          className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                          placeholder={String(placeholderValue)}
-                          value={draftValue}
-                          onChange={(event) => {
-                            const value = event.target.value
-                            setDrafts((prev) => ({
-                              ...prev,
-                              [setting.key]: value,
-                            }))
-                            setDirtyKeys((prev) => ({
-                              ...prev,
-                              [setting.key]: true,
-                            }))
-                            if (status?.error) {
-                              updateRowError(setting.key, null)
-                            }
-                          }}
-                        />
-                      {setting.disable_value !== null && setting.disable_value !== undefined && (
-                        <p className="text-xs text-slate-500">
-                          Use {setting.disable_value} to disable this limit.
-                        </p>
-                      )}
-                      {hasOverride && (
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            type="button"
-                            className={buttonStyles.reset}
-                            onClick={() => {
-                              setDrafts((prev) => ({
-                                ...prev,
-                                [setting.key]: '',
-                              }))
-                              setDirtyKeys((prev) => ({
-                                ...prev,
-                                [setting.key]: true,
-                              }))
-                              if (status?.error) {
-                                updateRowError(setting.key, null)
-                              }
-                            }}
-                            disabled={saving}
-                          >
-                            Reset to default
-                          </button>
-                        </div>
-                      )}
-                      {status?.error && (
-                        <p className="flex items-center gap-2 text-xs text-rose-600">
-                          <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                          {status.error}
-                        </p>
-                      )}
-                      {!status?.error && hasOverride && null}
-                    </div>
+        <div className="grid gap-8 lg:grid-cols-[220px_minmax(0,1fr)]">
+          <aside className="flex flex-col gap-3 lg:sticky lg:top-24 lg:self-start">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Categories</p>
+            <nav className="flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:overflow-visible lg:pb-0">
+              {categories.map((category) => (
+                <a
+                  key={category.id}
+                  href={`#${category.id}`}
+                  onClick={() => setActiveCategory(category.id)}
+                  aria-current={activeCategoryId === category.id ? 'page' : undefined}
+                  className={
+                    activeCategoryId === category.id
+                      ? 'inline-flex items-center rounded-full border border-blue-500 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 shadow-[0_10px_25px_rgba(37,99,235,0.15)] transition lg:rounded-lg'
+                      : 'inline-flex items-center rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 lg:rounded-lg'
+                  }
+                >
+                  {category.name}
+                </a>
+              ))}
+            </nav>
+          </aside>
+          <div className="space-y-10">
+            {isLoading ? (
+              <div className="py-6 text-sm text-slate-600">Loading settings…</div>
+            ) : (
+              categories.map((category) => (
+                <section
+                  key={category.id}
+                  id={category.id}
+                  data-category-id={category.id}
+                  className="space-y-4 scroll-mt-28"
+                >
+                  <div>
+                    <h2 className="text-lg font-semibold text-slate-900">{category.name}</h2>
+                    <p className="text-xs text-slate-500">Manage {category.name.toLowerCase()} settings.</p>
                   </div>
-                </div>
-              )
-            })
-          )}
+                  <div className="space-y-6">
+                    {category.settings.map((setting) => {
+                      const draftValue = drafts[setting.key] ?? ''
+                      const hasOverride = setting.db_value !== null && setting.db_value !== undefined
+                      const showEnvWarning = setting.env_set && hasOverride
+                      const status = rowStatus[setting.key]
+                      const minValue =
+                        setting.disable_value !== null && setting.disable_value !== undefined
+                          ? setting.disable_value
+                          : setting.min_value ?? undefined
+                      const placeholderValue =
+                        hasOverride && draftValue.trim() === '' ? setting.fallback_value : setting.effective_value
+                      return (
+                        <div key={setting.key} className="rounded-2xl border border-slate-200 bg-white px-5 py-5">
+                          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-base font-semibold text-slate-900">{setting.label}</h3>
+                                <span
+                                  className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${sourceBadgeStyles[setting.source]}`}
+                                >
+                                  {sourceLabels[setting.source]}
+                                </span>
+                              </div>
+                              <p className="text-sm text-slate-600">{setting.description}</p>
+                              <p className="text-xs text-slate-500">
+                                Effective value: {formatValue(setting, setting.effective_value)} · Env var: {setting.env_var}{' '}
+                                {setting.env_set ? '(set)' : '(not set)'}
+                              </p>
+                              {showEnvWarning && (
+                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                                  Environment variable is set. Saving here will override the env value.
+                                </div>
+                              )}
+                            </div>
+                            <div className="space-y-3">
+                              <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Override value
+                              </label>
+                              <input
+                                type="number"
+                                inputMode="decimal"
+                                min={minValue}
+                                step={setting.value_type === 'int' ? 1 : 0.1}
+                                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                                placeholder={String(placeholderValue)}
+                                value={draftValue}
+                                onChange={(event) => {
+                                  const value = event.target.value
+                                  setDrafts((prev) => ({
+                                    ...prev,
+                                    [setting.key]: value,
+                                  }))
+                                  setDirtyKeys((prev) => ({
+                                    ...prev,
+                                    [setting.key]: true,
+                                  }))
+                                  if (status?.error) {
+                                    updateRowError(setting.key, null)
+                                  }
+                                }}
+                              />
+                              {setting.disable_value !== null && setting.disable_value !== undefined && (
+                                <p className="text-xs text-slate-500">
+                                  Use {setting.disable_value} to disable this limit.
+                                </p>
+                              )}
+                              {hasOverride && (
+                                <div className="flex flex-wrap gap-2">
+                                  <button
+                                    type="button"
+                                    className={buttonStyles.reset}
+                                    onClick={() => {
+                                      setDrafts((prev) => ({
+                                        ...prev,
+                                        [setting.key]: '',
+                                      }))
+                                      setDirtyKeys((prev) => ({
+                                        ...prev,
+                                        [setting.key]: true,
+                                      }))
+                                      if (status?.error) {
+                                        updateRowError(setting.key, null)
+                                      }
+                                    }}
+                                    disabled={saving}
+                                  >
+                                    Reset to default
+                                  </button>
+                                </div>
+                              )}
+                              {status?.error && (
+                                <p className="flex items-center gap-2 text-xs text-rose-600">
+                                  <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+                                  {status.error}
+                                </p>
+                              )}
+                              {!status?.error && hasOverride && null}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
+              ))
+            )}
+          </div>
         </div>
       </div>
       <SaveBar visible={hasChanges} onCancel={handleCancelAll} onSave={handleSaveAll} busy={saving} error={saveError} />
