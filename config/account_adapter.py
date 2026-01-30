@@ -19,7 +19,7 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
         domain = cleaned_email.rsplit("@", 1)[-1].lower()
 
         blocked_domain = self._match_blocked_domain(
-            domain, getattr(settings, "SIGNUP_BLOCKED_EMAIL_DOMAINS", ())
+            domain, settings.SIGNUP_BLOCKED_EMAIL_DOMAINS
         )
         if blocked_domain:
             logger.warning(
@@ -33,6 +33,9 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
 
         return cleaned_email
 
+    def is_open_for_signup(self, request) -> bool:
+        return settings.ACCOUNT_ALLOW_REGISTRATION
+
     @staticmethod
     def _match_blocked_domain(domain: str, blocked_domains: Iterable[str] | None) -> str | None:
         if not blocked_domains:
@@ -43,4 +46,3 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
                 return blocked
 
         return None
-
