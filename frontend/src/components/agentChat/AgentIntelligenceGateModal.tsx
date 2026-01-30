@@ -74,14 +74,16 @@ export function AgentIntelligenceGateModal({
     ? burnRatePerDay.toFixed(1)
     : null
 
+  const isPaidUser = currentPlan === 'startup' || currentPlan === 'scale'
+
   const title = needsPlanUpgrade
     ? `Unlock ${selectedLabel}`
     : 'Credits running low'
   const subtitle = needsPlanUpgrade
-    ? `Your plan does not include ${selectedLabel}.`
+    ? `Upgrade your plan to access ${selectedLabel}.`
     : `At ${selectedLabel}, you have about ${remainingLabel} day${remainingLabel === '1' ? '' : 's'} left.`
 
-  const continueLabel = needsPlanUpgrade ? `Use ${allowedLabel}` : 'Continue anyway'
+  const continueLabel = needsPlanUpgrade ? `Continue with ${allowedLabel}` : 'Continue anyway'
 
   return (
     <Modal
@@ -89,33 +91,23 @@ export function AgentIntelligenceGateModal({
       subtitle={subtitle}
       onClose={onClose}
       icon={needsPlanUpgrade ? Lock : Zap}
-      iconBgClass={needsPlanUpgrade ? 'bg-amber-100' : 'bg-indigo-100'}
+      iconBgClass={needsPlanUpgrade ? 'bg-gradient-to-br from-amber-100 to-orange-100' : 'bg-gradient-to-br from-indigo-100 to-blue-100'}
       iconColorClass={needsPlanUpgrade ? 'text-amber-600' : 'text-indigo-600'}
-      widthClass="sm:max-w-xl"
-      bodyClassName="pr-0"
+      widthClass="sm:max-w-2xl"
+      bodyClassName="pr-1"
     >
-      <div className="space-y-3 text-sm text-slate-600">
-        {needsPlanUpgrade ? (
-          <div className="flex items-start gap-2">
-            <Lock className="mt-0.5 h-4 w-4 text-amber-500" aria-hidden="true" />
-            <span>
-              Upgrade to Pro or Scale to unlock this intelligence tier.
-            </span>
-          </div>
-        ) : null}
-        {creditsTight ? (
-          <div className="flex items-start gap-2">
-            <Zap className="mt-0.5 h-4 w-4 text-indigo-500" aria-hidden="true" />
-            <span>
-              {burnRateLabel
-                ? `Current burn rate is ~${burnRateLabel} credits/day. `
-                : ''}
-              Higher tiers burn credits faster
-              {multiplier && Number.isFinite(multiplier) ? ` (${multiplier}× credits).` : '.'}
-            </span>
-          </div>
-        ) : null}
-      </div>
+      {creditsTight && !needsPlanUpgrade ? (
+        <div className="mb-4 flex items-start gap-3 rounded-xl bg-indigo-50/50 p-3 text-sm">
+          <Zap className="mt-0.5 h-4 w-4 flex-shrink-0 text-indigo-500" aria-hidden="true" />
+          <span className="text-slate-600">
+            {burnRateLabel
+              ? `Current burn rate is ~${burnRateLabel} credits/day. `
+              : ''}
+            Higher tiers burn credits faster
+            {multiplier && Number.isFinite(multiplier) ? ` (${multiplier}× credits).` : '.'}
+          </span>
+        </div>
+      ) : null}
 
       {needsPlanUpgrade && showUpgradePlans && onUpgrade ? (
         <div className="mt-4">
@@ -129,19 +121,20 @@ export function AgentIntelligenceGateModal({
         </div>
       ) : null}
 
-      <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
-        {showAddPack && onAddPack ? (
+      <div className="mt-6 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center">
+        {showAddPack && isPaidUser && onAddPack ? (
           <button
             type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-600 transition hover:border-indigo-300 hover:text-indigo-700"
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/50 px-4 py-2.5 text-sm font-semibold text-indigo-600 transition-colors hover:border-indigo-300 hover:bg-indigo-100/50"
             onClick={onAddPack}
           >
+            <Zap className="h-4 w-4" aria-hidden="true" />
             Add task pack
           </button>
         ) : null}
         <button
           type="button"
-          className="inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-800"
+          className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50"
           onClick={onContinue}
         >
           {continueLabel}
