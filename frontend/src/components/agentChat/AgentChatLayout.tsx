@@ -1,6 +1,6 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { Zap } from 'lucide-react'
+import { Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -125,6 +125,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   llmTierSaving?: boolean
   llmTierError?: string | null
   onOpenTaskPacks?: () => void
+  spawnIntentLoading?: boolean
 }
 
 export function AgentChatLayout({
@@ -220,6 +221,7 @@ export function AgentChatLayout({
   llmTierSaving = false,
   llmTierError = null,
   onOpenTaskPacks,
+  spawnIntentLoading = false,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
   const {
@@ -684,32 +686,44 @@ export function AgentChatLayout({
           </div>
 
           {/* Composer at bottom of flex layout */}
-          <AgentComposer
-            onSubmit={onSendMessage}
-            onFocus={onComposerFocus}
-            agentFirstName={agentFirstName}
-            isProcessing={showProcessingIndicator}
-            processingTasks={processingWebTasks}
-            autoFocus={autoFocusComposer}
-            focusKey={activeAgentId}
-            insightsPanelStorageKey={insightsPanelStorageKey}
-            insights={insights}
-            currentInsightIndex={currentInsightIndex}
-            onDismissInsight={onDismissInsight}
-            onInsightIndexChange={onInsightIndexChange}
-            onPauseChange={onPauseChange}
-            isInsightsPaused={isInsightsPaused}
-            onCollaborate={onShare}
-            hideInsightsPanel={hideInsightsPanel}
-            intelligenceConfig={llmIntelligence}
-            intelligenceTier={currentLlmTier}
-            onIntelligenceChange={onLlmTierChange}
-            allowLockedIntelligenceSelection={allowLockedIntelligenceSelection}
-            intelligenceBusy={llmTierSaving}
-            intelligenceError={llmTierError}
-            onOpenTaskPacks={resolvedOpenTaskPacks}
-            canManageAgent={canManageAgent}
-          />
+          {spawnIntentLoading ? (
+            <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
+              <div className="flex flex-col items-center gap-3 text-center">
+                <Loader2 className="app-loading__spinner" aria-hidden="true" />
+                <div>
+                  <p className="text-sm font-semibold text-slate-700">Preparing your agent…</p>
+                  <p className="text-xs text-slate-500">Checking plan access and usage.</p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <AgentComposer
+              onSubmit={onSendMessage}
+              onFocus={onComposerFocus}
+              agentFirstName={agentFirstName}
+              isProcessing={showProcessingIndicator}
+              processingTasks={processingWebTasks}
+              autoFocus={autoFocusComposer}
+              focusKey={activeAgentId}
+              insightsPanelStorageKey={insightsPanelStorageKey}
+              insights={insights}
+              currentInsightIndex={currentInsightIndex}
+              onDismissInsight={onDismissInsight}
+              onInsightIndexChange={onInsightIndexChange}
+              onPauseChange={onPauseChange}
+              isInsightsPaused={isInsightsPaused}
+              onCollaborate={onShare}
+              hideInsightsPanel={hideInsightsPanel}
+              intelligenceConfig={llmIntelligence}
+              intelligenceTier={currentLlmTier}
+              onIntelligenceChange={onLlmTierChange}
+              allowLockedIntelligenceSelection={allowLockedIntelligenceSelection}
+              intelligenceBusy={llmTierSaving}
+              intelligenceError={llmTierError}
+              onOpenTaskPacks={resolvedOpenTaskPacks}
+              canManageAgent={canManageAgent}
+            />
+          )}
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>

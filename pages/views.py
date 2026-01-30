@@ -517,9 +517,10 @@ class HomeAgentSpawnView(TemplateView):
                 # User is already logged in, go directly to agent creation
                 return redirect(next_url)
             # User needs to log in first, then continue to agent creation in the app
+            app_redirect_params = {**redirect_params, "spawn": "1"}
             app_next_url = append_query_params(
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-                redirect_params,
+                app_redirect_params,
             )
             return redirect_to_login(
                 next=app_next_url,
@@ -647,9 +648,12 @@ class PretrainedWorkerHireView(View):
         app_next_url = next_url
         if flow != "pro":
             return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
+            app_params = {"spawn": "1"}
+            if return_to:
+                app_params["return_to"] = return_to
             app_next_url = append_query_params(
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-                {"return_to": return_to} if return_to else {},
+                app_params,
             )
 
         response = redirect_to_login(
@@ -794,9 +798,12 @@ class PublicTemplateHireView(View):
         app_next_url = next_url
         if flow != "pro":
             return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
+            app_params = {"spawn": "1"}
+            if return_to:
+                app_params["return_to"] = return_to
             app_next_url = append_query_params(
                 f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
-                {"return_to": return_to} if return_to else {},
+                app_params,
             )
 
         response = redirect_to_login(

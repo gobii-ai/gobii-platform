@@ -48,6 +48,8 @@ type IntelligenceGateState = {
   burnRatePerDay: number | null
 }
 
+type SpawnIntentStatus = 'idle' | 'loading' | 'ready' | 'done'
+
 function buildAgentChatPath(pathname: string, agentId: string): string {
   if (pathname.startsWith('/app')) {
     return `/app/agents/${agentId}`
@@ -802,6 +804,7 @@ export function AgentChatPage({
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
+  const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const spawnIntentFetchedRef = useRef(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
@@ -845,34 +848,54 @@ export function AgentChatPage({
     setIntelligenceError(null)
   }, [isNewAgent, activeAgentId])
 
+  const spawnFlow = useMemo(() => {
+    if (!isNewAgent || typeof window === 'undefined') {
+      return false
+    }
+    const params = new URLSearchParams(window.location.search)
+    const flag = (params.get('spawn') || '').toLowerCase()
+    return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
+  }, [isNewAgent])
+
   useEffect(() => {
-    if (!isNewAgent) {
+    if (!isNewAgent || !spawnFlow) {
       spawnIntentFetchedRef.current = false
       spawnIntentAutoSubmittedRef.current = false
       setSpawnIntent(null)
+      setSpawnIntentStatus('idle')
       return
     }
     if (spawnIntentFetchedRef.current) {
       return
     }
     spawnIntentFetchedRef.current = true
+    setSpawnIntentStatus('loading')
     let isActive = true
     const loadSpawnIntent = async () => {
       try {
         const intent = await fetchAgentSpawnIntent()
-        if (!isActive || !intent?.charter?.trim()) {
+        if (!isActive) {
+          return
+        }
+        const charter = intent?.charter?.trim()
+        if (!charter) {
+          setSpawnIntentStatus('done')
           return
         }
         setSpawnIntent(intent)
+        setSpawnIntentStatus('ready')
       } catch (err) {
-        // If we can't load a spawn intent, just fall back to manual entry.
+        if (!isActive) {
+          return
+        }
+        setSpawnIntentStatus('done')
       }
     }
     void loadSpawnIntent()
     return () => {
       isActive = false
     }
-  }, [isNewAgent])
+  }, [isNewAgent, spawnFlow])
 
   const resolvedIntelligenceTier = useMemo(() => {
     if (isNewAgent) {
@@ -1508,13 +1531,16 @@ export function AgentChatPage({
   ])
 
   useEffect(() => {
-    if (!isNewAgent || !spawnIntent?.charter?.trim()) {
+    if (!isNewAgent || !spawnFlow || !spawnIntent?.charter?.trim()) {
       return
     }
     if (!contextReady || rosterQuery.isLoading) {
       return
     }
     if (spawnIntentAutoSubmittedRef.current) {
+      return
+    }
+    if (spawnIntentStatus !== 'ready') {
       return
     }
 
@@ -1532,7 +1558,8 @@ export function AgentChatPage({
     }
 
     spawnIntentAutoSubmittedRef.current = true
-    void handleSend(spawnIntent.charter)
+    const sendPromise = handleSend(spawnIntent.charter)
+    sendPromise.finally(() => setSpawnIntentStatus('done'))
   }, [
     contextReady,
     draftIntelligenceTier,
@@ -1540,8 +1567,14 @@ export function AgentChatPage({
     isNewAgent,
     llmIntelligence,
     rosterQuery.isLoading,
+    spawnFlow,
     spawnIntent,
+    spawnIntentStatus,
   ])
+
+  const showSpawnIntentLoader = Boolean(
+    spawnFlow && isNewAgent && (spawnIntentStatus === 'loading' || spawnIntentStatus === 'ready'),
+  )
 
   return (
     <div className="agent-chat-page">
@@ -1666,6 +1699,7 @@ export function AgentChatPage({
         allowLockedIntelligenceSelection={isNewAgent}
         llmTierSaving={intelligenceBusy}
         llmTierError={intelligenceError}
+        spawnIntentLoading={showSpawnIntentLoader}
       />
     </div>
   )
