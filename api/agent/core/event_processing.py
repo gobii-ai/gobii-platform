@@ -214,6 +214,13 @@ def _is_error_status(result: Any) -> bool:
     return isinstance(status, str) and status.lower() == "error"
 
 
+def _is_warning_status(result: Any) -> bool:
+    if not isinstance(result, dict):
+        return False
+    status = result.get("status")
+    return isinstance(status, str) and status.lower() == "warning"
+
+
 def _infer_retryable_from_text(message: str) -> bool:
     if not message:
         return False
@@ -3496,13 +3503,14 @@ def _run_agent_loop(
                     )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
                     tool_had_error = _is_error_status(result)
+                    tool_had_warning = _is_warning_status(result)
                     explicit_continue = None
                     if isinstance(tool_params, dict):
                         explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
                         if explicit_continue is not None:
                             last_explicit_continue = explicit_continue
 
-                    if tool_had_error:
+                    if tool_had_error or tool_had_warning:
                         followup_required = True
                     elif explicit_continue is None and not allow_auto_sleep:
                         followup_required = True
