@@ -30,6 +30,7 @@ from browser_use.agent.views import ActionResult
 from browser_use.browser import BrowserSession
 from browser_use.browser.events import UploadFileEvent
 
+from api.services.system_settings import get_max_file_size
 from ..files.filespace_service import get_or_create_default_filespace
 from ...models import AgentFsNode, AgentFileSpaceAccess, PersistentAgent
 
@@ -124,17 +125,18 @@ def _create_temp_file_from_node(node: AgentFsNode, span) -> str:
     fd, temp_path = tempfile.mkstemp(prefix=FILE_UPLOAD_PREFIX, suffix=suffix)
     os.close(fd)
 
+    max_file_size = get_max_file_size()
     try:
         total_bytes = 0
         with default_storage.open(node.content.name, "rb") as src, open(temp_path, "wb") as dst:
             for chunk in iter(lambda: src.read(BUFFER_SIZE), b""):
                 dst.write(chunk)
                 total_bytes += len(chunk)
-                if total_bytes > settings.MAX_FILE_SIZE:
+                if max_file_size and total_bytes > max_file_size:
                     os.remove(temp_path)  # Clean up the oversized file immediately
                     raise FileSizeError(
                         f"File exceeds maximum allowed size while reading "
-                        f"({total_bytes} bytes > {settings.MAX_FILE_SIZE} bytes)."
+                        f"({total_bytes} bytes > {max_file_size} bytes)."
                     )
 
         span.set_attribute("upload.temp_file_size", total_bytes)
@@ -205,10 +207,11 @@ def _validate_file_node(path: str, filespace, agent) -> AgentFsNode:
         raise InvalidFileError("Target node is not a file.")
     
     # Size validation
-    if node.size_bytes and node.size_bytes > settings.MAX_FILE_SIZE:
+    max_file_size = get_max_file_size()
+    if max_file_size and node.size_bytes and node.size_bytes > max_file_size:
         raise FileSizeError(
             f"File too large ({node.size_bytes} bytes). "
-            f"Max allowed is {settings.MAX_FILE_SIZE} bytes."
+            f"Max allowed is {max_file_size} bytes."
         )
     
     # Authorization check

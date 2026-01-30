@@ -38,6 +38,11 @@ from django.contrib.sites.models import Site
 from django.db import DatabaseError
 from django.db.models import Max
 from django.urls import reverse
+
+from api.services.system_settings import (
+    get_mcp_http_timeout_seconds,
+    get_mcp_stdio_timeout_seconds,
+)
 from django.utils import timezone
 
 from .mcp_param_guards import MCPParamGuardRegistry
@@ -750,7 +755,7 @@ class MCPToolManager:
             follow_redirects: Optional[bool] = None,
             **extra_client_kwargs: Any,
         ) -> httpx.AsyncClient:
-            default_timeout_seconds = float(settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS)
+            default_timeout_seconds = get_mcp_http_timeout_seconds()
             client_kwargs: Dict[str, Any] = {
                 "headers": headers,
                 "timeout": timeout or httpx.Timeout(default_timeout_seconds),
@@ -841,12 +846,7 @@ class MCPToolManager:
     def _get_timeout_for_runtime(self, runtime: Optional[MCPServerRuntime]) -> float:
         """Get the appropriate request timeout based on the runtime's transport."""
         is_http = bool(runtime and runtime.url)
-        timeout_setting = (
-            settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS
-            if is_http
-            else settings.MCP_STDIO_REQUEST_TIMEOUT_SECONDS
-        )
-        return float(timeout_setting)
+        return get_mcp_http_timeout_seconds() if is_http else get_mcp_stdio_timeout_seconds()
 
     def _effective_prefetch_apps(self, server: MCPServerRuntime) -> List[str]:
         if server.prefetch_apps:
@@ -1715,7 +1715,7 @@ class MCPToolManager:
         async with client:
             effective_timeout = timeout_seconds
             if effective_timeout is None:
-                effective_timeout = float(settings.MCP_HTTP_REQUEST_TIMEOUT_SECONDS)
+                effective_timeout = get_mcp_http_timeout_seconds()
             try:
                 return await asyncio.wait_for(
                     client.call_tool(tool_name, params),

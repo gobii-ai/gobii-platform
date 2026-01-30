@@ -163,6 +163,12 @@
                     Django Admin
                   </a>
                 </div>
+                <div class="py-1">
+                  <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
+                    System Settings
+                  </a>
+                </div>
                 {% endif %}
 
                 <div class="py-1">
@@ -330,6 +336,10 @@
             <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
               Django Admin
+            </a>
+            <a href="{% url 'system-settings' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 mr-2 text-slate-500"></i>
+              System Settings
             </a>
             {% endif %}
 

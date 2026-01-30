@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% load vite_tags %}
+
+{% block content %}
+  <div class="mx-auto w-full max-w-5xl px-4 py-8">
+    <div id="gobii-frontend-root"
+         class="min-h-[60vh]"
+         data-app="system-settings">
+      <!-- React system settings screen mounts here -->
+    </div>
+  </div>
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

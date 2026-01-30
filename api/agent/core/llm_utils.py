@@ -7,6 +7,7 @@ from typing import Any, Iterable
 from django.conf import settings
 import litellm
 
+from api.services.system_settings import get_litellm_timeout_seconds
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
@@ -248,7 +249,7 @@ def run_completion(
         kwargs.pop("parallel_tool_calls", None)
 
     if kwargs.get("timeout") is None:
-        kwargs["timeout"] = getattr(settings, "LITELLM_TIMEOUT_SECONDS", 300)
+        kwargs["timeout"] = get_litellm_timeout_seconds()
 
     max_attempts = max(1, int(getattr(settings, "LITELLM_MAX_RETRIES", 2)))
     backoff_seconds = float(getattr(settings, "LITELLM_RETRY_BACKOFF_SECONDS", 1.0))

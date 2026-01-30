@@ -17,8 +17,8 @@ from api.models import CommsChannel
 import  logging
 import re
 
-from config.settings import EMAIL_STRIP_REPLIES, MAX_FILE_SIZE
-from config import settings
+from config.settings import EMAIL_STRIP_REPLIES
+from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -259,10 +259,7 @@ class PostmarkEmailAdapter(EmailAdapter):
 
         # Enforce max file size on inbound email attachments if Postmark provided ContentLength
         # (we do not decode content here; just filter metadata-labeled oversize attachments)
-        try:
-            max_bytes = int(settings.MAX_FILE_SIZE)
-        except (ValueError, TypeError):
-            max_bytes = 0
+        max_bytes = get_max_file_size()
         if isinstance(attachments, list) and max_bytes:
             def _within_size(a: Any) -> bool:
                 try:
@@ -402,11 +399,12 @@ class MailgunEmailAdapter(EmailAdapter):
         body = working_text
 
         # Build attachment metadata for forward detection (filter oversized files)
+        max_file_size = get_max_file_size()
         attachments_meta = []
         for att in attachments:
             content_type = getattr(att, "content_type", "")
             file_size = getattr(att, "size", 0)
-            if file_size > MAX_FILE_SIZE:
+            if max_file_size and file_size > max_file_size:
                 logger.warning(f"Attachment {att.name} is too large to process. Skipping.");
                 span.add_event(f"Attachment {att.name} is too large to process. Skipping. Size in bytes: {file_size}")
                 continue

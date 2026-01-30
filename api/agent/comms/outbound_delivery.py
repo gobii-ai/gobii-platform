@@ -19,6 +19,7 @@ from api.models import (
     PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
 )
+from api.services.system_settings import get_max_file_size
 from api.agent.files.attachment_helpers import track_file_send_failed, track_file_unsupported
 from opentelemetry.trace import get_current_span
 from opentelemetry import trace
@@ -313,7 +314,7 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
     message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
     channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
     user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
-    max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
+    max_bytes = get_max_file_size()
     attached = 0
     for att in attachments:
         filename = att.filename or "attachment"
