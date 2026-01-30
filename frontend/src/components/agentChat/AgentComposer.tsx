@@ -160,7 +160,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [isSending, setIsSending] = useState(false)
   const [isDragActive, setIsDragActive] = useState(false)
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
-  const { isProprietaryMode, openUpgradeModal } = useSubscriptionStore()
+  const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
   const focusScrollTimeoutRef = useRef<number | null>(null)
@@ -215,7 +215,11 @@ export const AgentComposer = memo(function AgentComposer({
   const MAX_COMPOSER_HEIGHT = 320
 
   const showIntelligenceSelector = Boolean(intelligenceConfig && intelligenceTier && onIntelligenceChange)
-  const handleIntelligenceUpsell = useCallback(() => {
+  const handleIntelligenceUpsell = useCallback(async () => {
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
     if (isProprietaryMode) {
       openUpgradeModal()
       return
@@ -223,7 +227,7 @@ export const AgentComposer = memo(function AgentComposer({
     if (intelligenceConfig?.upgradeUrl) {
       window.open(intelligenceConfig.upgradeUrl, '_top')
     }
-  }, [intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
+  }, [ensureAuthenticated, intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
 
   // Insight carousel logic
   const totalInsights = insights.length

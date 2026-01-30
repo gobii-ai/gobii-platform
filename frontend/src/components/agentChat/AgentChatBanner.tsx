@@ -82,7 +82,14 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   })
 
   // Subscription state
-  const { currentPlan, isUpgradeModalOpen, isProprietaryMode, openUpgradeModal, closeUpgradeModal } = useSubscriptionStore()
+  const {
+    currentPlan,
+    isUpgradeModalOpen,
+    isProprietaryMode,
+    openUpgradeModal,
+    closeUpgradeModal,
+    ensureAuthenticated,
+  } = useSubscriptionStore()
   const canShowBannerActions = canManageAgent !== false && !isCollaborator
 
   // Determine if we should show upgrade button and what it should say
@@ -94,7 +101,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const targetPlan = currentPlan === 'free' ? 'startup' : 'scale'
   const upgradeButtonLabel = currentPlan === 'free' ? 'Upgrade to Pro' : 'Upgrade to Scale'
 
-  const handleBannerUpgradeClick = useCallback(() => {
+  const handleBannerUpgradeClick = useCallback(async () => {
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
     track(AnalyticsEvent.UPGRADE_BANNER_CLICKED, {
       currentPlan,
       targetPlan,
@@ -104,7 +115,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       source: 'banner',
     })
     openUpgradeModal()
-  }, [currentPlan, targetPlan, openUpgradeModal])
+  }, [currentPlan, ensureAuthenticated, openUpgradeModal, targetPlan])
 
   const handleModalDismiss = useCallback(() => {
     track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {

@@ -14,12 +14,16 @@ export function ContactCapCalloutCard({
   showUpgrade = false,
   onDismiss,
 }: ContactCapCalloutCardProps) {
-  const { openUpgradeModal } = useSubscriptionStore()
+  const { openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const canShowUpgrade = Boolean(showUpgrade)
   const showActions = Boolean(onOpenPacks || canShowUpgrade)
-  const handleUpgradeClick = useCallback(() => {
+  const handleUpgradeClick = useCallback(async () => {
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
     openUpgradeModal()
-  }, [openUpgradeModal])
+  }, [ensureAuthenticated, openUpgradeModal])
 
   return (
     <div className="timeline-event hard-limit-callout">

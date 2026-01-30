@@ -285,7 +285,7 @@ export function AgentChatPage({
     updating: addonsUpdating,
   } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
-  const { openUpgradeModal, isProprietaryMode } = useSubscriptionStore()
+  const { currentPlan, isProprietaryMode, ensureAuthenticated } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -1003,14 +1003,28 @@ export function AgentChatPage({
     }, 180)
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
-  const handleUpgrade = useCallback((plan: PlanTier) => {
+  const buildCheckoutUrl = useCallback((baseUrl: string) => {
+    if (typeof window === 'undefined') {
+      return baseUrl
+    }
+    const url = new URL(baseUrl, window.location.origin)
+    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
+    url.searchParams.set('return_to', returnTo)
+    return url.toString()
+  }, [])
+
+  const handleUpgrade = useCallback(async (plan: PlanTier) => {
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
     track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
       plan,
       source: 'agent_chat_upgrade_modal',
     })
-    const checkoutUrl = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
+    const checkoutUrl = buildCheckoutUrl(plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/')
     window.open(checkoutUrl, '_top')
-  }, [])
+  }, [buildCheckoutUrl, ensureAuthenticated])
 
   const createNewAgent = useCallback(
     async (body: string, tier: IntelligenceTierKey) => {
@@ -1328,12 +1342,10 @@ export function AgentChatPage({
     setIntelligenceGate(null)
   }, [])
 
-  const handleGateUpgrade = useCallback(() => {
+  const handleGateUpgrade = useCallback((plan: PlanTier) => {
     handleGateClose()
-    if (isProprietaryMode) {
-      openUpgradeModal()
-    }
-  }, [handleGateClose, isProprietaryMode, openUpgradeModal])
+    void handleUpgrade(plan)
+  }, [handleGateClose, handleUpgrade])
 
   const handleGateAddPack = useCallback(() => {
     handleGateClose()
@@ -1363,6 +1375,10 @@ export function AgentChatPage({
     }
     // If this is a new agent, create it first then navigate to it
     if (isNewAgent) {
+      const authenticated = await ensureAuthenticated()
+      if (!authenticated) {
+        return
+      }
       const selectedTier = (resolvedIntelligenceTier || 'standard') as IntelligenceTierKey
       const option = llmIntelligence?.options.find((item) => item.key === selectedTier) ?? null
       const allowedTier = (llmIntelligence?.maxAllowedTier || 'standard') as IntelligenceTierKey
@@ -1417,6 +1433,7 @@ export function AgentChatPage({
     activeAgentId,
     burnRateSummary,
     createNewAgent,
+    ensureAuthenticated,
     extraTasksEnabled,
     hasUnlimitedQuota,
     isNewAgent,
@@ -1445,7 +1462,8 @@ export function AgentChatPage({
           multiplier={intelligenceGate.multiplier}
           estimatedDaysRemaining={intelligenceGate.estimatedDaysRemaining}
           burnRatePerDay={intelligenceGate.burnRatePerDay}
-          showUpgrade={isProprietaryMode}
+          currentPlan={currentPlan}
+          showUpgradePlans={isProprietaryMode}
           showAddPack={isProprietaryMode && Boolean(billingUrl)}
           onUpgrade={handleGateUpgrade}
           onAddPack={handleGateAddPack}

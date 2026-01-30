@@ -1,6 +1,8 @@
 import { Lock, Zap } from 'lucide-react'
 
 import type { IntelligenceTierKey } from '../../types/llmIntelligence'
+import type { PlanTier } from '../../stores/subscriptionStore'
+import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import { Modal } from '../common/Modal'
 
 type GateReason = 'plan' | 'credits' | 'both'
@@ -13,9 +15,10 @@ type AgentIntelligenceGateModalProps = {
   multiplier?: number | null
   estimatedDaysRemaining?: number | null
   burnRatePerDay?: number | null
-  showUpgrade?: boolean
+  currentPlan?: PlanTier | null
+  showUpgradePlans?: boolean
   showAddPack?: boolean
-  onUpgrade?: () => void
+  onUpgrade?: (plan: PlanTier) => void
   onAddPack?: () => void
   onContinue: () => void
   onClose: () => void
@@ -50,7 +53,8 @@ export function AgentIntelligenceGateModal({
   multiplier,
   estimatedDaysRemaining,
   burnRatePerDay,
-  showUpgrade = false,
+  currentPlan = null,
+  showUpgradePlans = false,
   showAddPack = false,
   onUpgrade,
   onAddPack,
@@ -113,16 +117,18 @@ export function AgentIntelligenceGateModal({
         ) : null}
       </div>
 
+      {needsPlanUpgrade && showUpgradePlans && onUpgrade ? (
+        <div className="mt-4">
+          <SubscriptionUpgradePlans
+            currentPlan={currentPlan}
+            onUpgrade={onUpgrade}
+            variant="inline"
+            pricingLinkLabel="Pricing details"
+          />
+        </div>
+      ) : null}
+
       <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
-        {showUpgrade && onUpgrade ? (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700"
-            onClick={onUpgrade}
-          >
-            Upgrade plan
-          </button>
-        ) : null}
         {showAddPack && onAddPack ? (
           <button
             type="button"
