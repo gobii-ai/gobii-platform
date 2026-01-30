@@ -145,9 +145,9 @@ def _build_burn_rate_projection(
     elif (
         burn_rate_per_day is not None
         and burn_rate_per_day > Decimal("0")
-        and multiplier > Decimal("0")
     ):
-        projected_days = available_credits / (burn_rate_per_day * multiplier)
+        # Removed multiplier as already factored in
+        projected_days = available_credits / burn_rate_per_day
 
     return {
         "tier": tier_key or "standard",
