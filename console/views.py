@@ -143,6 +143,7 @@ from config.stripe_config import get_stripe_settings
 from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED
 from waffle import flag_is_active
 from api.services.email_verification import has_verified_email
+from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 
 
 def _clamp_color(value: int) -> int:
@@ -4978,6 +4979,7 @@ class MCPServerManagementView(MCPServerOwnerMixin, ConsoleViewMixin, TemplateVie
             {
                 'owner_scope': self.owner_scope,
                 'owner_label': self.get_owner_label(),
+                'allow_mcp_commands': flag_is_active(self.request, SANDBOX_COMPUTE_WAFFLE_FLAG),
             }
         )
         return context

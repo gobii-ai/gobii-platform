@@ -192,6 +192,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         params: Dict[str, Any],
         *,
         full_tool_name: Optional[str] = None,
+        server_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         if not session.pod_name:
             return {"status": "error", "message": "Sandbox pod not available."}
@@ -201,6 +202,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             "tool_name": tool_name,
             "params": params,
         }
+        if server_payload:
+            payload["server"] = server_payload
         return self._proxy_post(session.pod_name, "/sandbox/compute/mcp_request", payload)
 
     def tool_request(
@@ -296,8 +299,31 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._delete_pvc(pvc_name)
         return SandboxSessionUpdate(state=AgentComputeSession.State.STOPPED, pod_name=pod_name, namespace=self._namespace)
 
-    def discover_mcp_tools(self, server_config_id: str, *, reason: str) -> Dict[str, Any]:
-        return {"status": "error", "message": "MCP discovery must run inside sandbox pod."}
+    def discover_mcp_tools(
+        self,
+        server_config_id: str,
+        *,
+        reason: str,
+        server_payload: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        if not server_payload:
+            return {"status": "error", "message": "Missing MCP server payload for discovery."}
+        pod_name = _discovery_pod_name(server_config_id)
+        try:
+            self._create_discovery_pod(pod_name)
+        except KubernetesApiError as exc:
+            return {"status": "error", "message": f"Discovery pod create failed: {exc}"}
+
+        if not self._wait_for_pod_ready(pod_name):
+            self._delete_pod(pod_name)
+            return {"status": "error", "message": "Discovery pod did not become ready in time."}
+
+        payload = {"server_id": server_config_id, "reason": reason, "server": server_payload}
+        try:
+            response = self._proxy_post(pod_name, "/sandbox/compute/discover_mcp_tools", payload)
+            return response
+        finally:
+            self._delete_pod(pod_name)
 
     def _proxy_post(
         self,
@@ -399,6 +425,22 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             agent_id=agent_id,
             proxy_url=proxy_url,
             no_proxy=no_proxy,
+        )
+        try:
+            self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
+        except KubernetesApiError as exc:
+            if exc.status_code != 409:
+                raise
+
+    def _create_discovery_pod(self, pod_name: str) -> None:
+        body = _build_discovery_pod_manifest(
+            pod_name=pod_name,
+            namespace=self._namespace,
+            image=self._pod_image,
+            runtime_class=self._pod_runtime_class,
+            service_account=self._pod_service_account,
+            configmap_name=self._pod_configmap,
+            secret_name=self._pod_secret,
         )
         try:
             self._client.request_json("POST", _pod_collection_path(self._namespace), json_body=body)
@@ -563,6 +605,10 @@ def _slugify(value: str) -> str:
 
 def _pod_name(agent_id: Any) -> str:
     return _slugify(f"sandbox-agent-{agent_id}")
+
+
+def _discovery_pod_name(config_id: Any) -> str:
+    return _slugify(f"sandbox-discovery-{config_id}")
 
 
 def _pvc_name(agent_id: Any) -> str:
@@ -730,6 +776,71 @@ def _build_pod_manifest(
                     "name": "workspace",
                     "persistentVolumeClaim": {"claimName": pvc_name},
                 }
+            ],
+        },
+    }
+
+
+def _build_discovery_pod_manifest(
+    *,
+    pod_name: str,
+    namespace: str,
+    image: str,
+    runtime_class: str,
+    service_account: str,
+    configmap_name: str,
+    secret_name: str,
+) -> Dict[str, Any]:
+    container: Dict[str, Any] = {
+        "name": "sandbox-supervisor",
+        "image": image,
+        "imagePullPolicy": "Always",
+        "ports": [{"containerPort": 8080}],
+        "envFrom": [
+            {"secretRef": {"name": secret_name}},
+            {"configMapRef": {"name": configmap_name}},
+        ],
+        "securityContext": {
+            "allowPrivilegeEscalation": False,
+            "runAsNonRoot": True,
+            "runAsUser": 1000,
+            "runAsGroup": 1000,
+            "capabilities": {"drop": ["ALL"]},
+        },
+        "volumeMounts": [
+            {"name": "workspace", "mountPath": "/workspace"},
+        ],
+        "readinessProbe": {
+            "httpGet": {"path": "/healthz", "port": 8080},
+            "initialDelaySeconds": 10,
+            "periodSeconds": 10,
+            "failureThreshold": 3,
+        },
+    }
+
+    return {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": pod_name,
+            "namespace": namespace,
+            "labels": {
+                "app": "sandbox-compute",
+                "component": "sandbox-discovery",
+            },
+        },
+        "spec": {
+            "serviceAccountName": service_account,
+            "runtimeClassName": runtime_class,
+            "terminationGracePeriodSeconds": 120,
+            "securityContext": {
+                "fsGroup": 1000,
+                "fsGroupChangePolicy": "OnRootMismatch",
+                "seccompProfile": {"type": "RuntimeDefault"},
+            },
+            "containers": [container],
+            "volumes": [
+                {"name": "workspace", "emptyDir": {}},
             ],
         },
     }

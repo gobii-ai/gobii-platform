@@ -15,6 +15,7 @@ import { useMcpOAuth } from '../../hooks/useMcpOAuth'
 import { Modal } from '../common/Modal'
 
 type HeaderEntry = { key: string; value: string }
+type EnvEntry = { key: string; value: string }
 
 type FormErrors = Record<string, string[]>
 
@@ -23,6 +24,7 @@ type McpServerFormModalProps = {
   listUrl: string
   detailUrl?: string
   ownerScope?: string
+  allowCommands?: boolean
   onClose: () => void
   onSuccess: (message: string) => void
   onError: (message: string) => void
@@ -37,6 +39,9 @@ type FormState = {
   displayName: string
   slug: string
   url: string
+  connectionType: 'http' | 'stdio'
+  commandLine: string
+  environmentEntries: EnvEntry[]
   isActive: boolean
   authMethod: string
   headers: HeaderEntry[]
@@ -44,20 +49,23 @@ type FormState = {
 }
 
 const BLANK_HEADER: HeaderEntry = { key: '', value: '' }
+const BLANK_ENV: EnvEntry = { key: '', value: '' }
 
 const createBlankHeaders = (): HeaderEntry[] => [{ ...BLANK_HEADER }]
+const createBlankEnvEntries = (): EnvEntry[] => [{ ...BLANK_ENV }]
 
 export function McpServerFormModal({
   mode,
   listUrl,
   detailUrl,
   ownerScope,
+  allowCommands = false,
   onClose,
   onSuccess,
   onError,
   oauth,
 }: McpServerFormModalProps) {
-  const [state, setState] = useState<FormState>(() => getInitialState())
+  const [state, setState] = useState<FormState>(() => getInitialState(undefined, allowCommands))
   const [formErrors, setFormErrors] = useState<FormErrors | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -65,7 +73,7 @@ export function McpServerFormModal({
   const [clientSecret, setClientSecret] = useState('')
   const [oauthScope, setOauthScope] = useState('')
   const [useCustomClient, setUseCustomClient] = useState(false)
-  const [headersExpanded, setHeadersExpanded] = useState(() => hasConfiguredHeaders(getInitialState()))
+  const [headersExpanded, setHeadersExpanded] = useState(() => hasConfiguredHeaders(getInitialState(undefined, allowCommands)))
 
   const shouldFetchDetail = mode === 'edit' && Boolean(detailUrl)
   const detailQuery = useQuery({
@@ -78,11 +86,11 @@ export function McpServerFormModal({
 
   useEffect(() => {
     if (mode === 'edit' && server) {
-      const nextState = getInitialState(server)
+      const nextState = getInitialState(server, allowCommands)
       setState(nextState)
       setHeadersExpanded(hasConfiguredHeaders(nextState))
     }
-  }, [mode, server])
+  }, [mode, server, allowCommands])
 
   const oauthStore = useMcpOAuth({
     serverId: mode === 'edit' ? server?.id : undefined,
@@ -111,20 +119,44 @@ export function McpServerFormModal({
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
+    const isStdio = allowCommands && state.connectionType === 'stdio'
+    let command = ''
+    let commandArgs: string[] = []
+    let environment: Record<string, string> = {}
+
+    if (isStdio) {
+      const parseResult = parseCommandLine(state.commandLine)
+      if (parseResult.error) {
+        setStatusMessage(parseResult.error)
+        onError(parseResult.error)
+        return
+      }
+      command = parseResult.command
+      commandArgs = parseResult.args
+      environment = entriesToObject(state.environmentEntries)
+    } else if (!state.url.trim()) {
+      const message = 'URL is required for HTTP connections.'
+      setStatusMessage(message)
+      onError(message)
+      return
+    }
+
     const payload: McpServerPayload = {
       display_name: state.displayName.trim(),
       name: state.slug.trim(),
-      url: state.url.trim(),
-      auth_method: state.authMethod,
+      url: isStdio ? '' : state.url.trim(),
+      auth_method: isStdio ? 'none' : state.authMethod,
       is_active: state.isActive,
-      headers: headersToObject(state.headers, {
-        authMethod: state.authMethod,
-        bearerToken: state.bearerToken,
-      }),
+      headers: isStdio
+        ? {}
+        : headersToObject(state.headers, {
+            authMethod: state.authMethod,
+            bearerToken: state.bearerToken,
+          }),
       metadata: {},
-      environment: {},
-      command: '',
-      command_args: [],
+      environment,
+      command,
+      command_args: commandArgs,
     }
 
     setFormErrors(null)
@@ -279,41 +311,151 @@ export function McpServerFormModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-700">URL</label>
-            <input
-              type="url"
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-              value={state.url}
-              onChange={(event) => setState((prev) => ({ ...prev, url: event.target.value }))}
-              required
-            />
-            <p className="text-xs text-slate-500">HTTPS URL for the remote MCP server.</p>
+            <label className="block text-sm font-medium text-slate-700">Connection Type</label>
+            <div className="mt-1 flex flex-col gap-3 sm:flex-row">
+              <select
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500 sm:w-40"
+                value={state.connectionType}
+                onChange={(event) =>
+                  setState((prev) => {
+                    const nextType = event.target.value as FormState['connectionType']
+                    return {
+                      ...prev,
+                      connectionType: nextType,
+                      authMethod: nextType === 'stdio' ? 'none' : prev.authMethod,
+                    }
+                  })
+                }
+              >
+                <option value="http">HTTP</option>
+                <option value="stdio" disabled={!allowCommands}>
+                  STDIO
+                </option>
+              </select>
+              <div className="flex-1">
+                {state.connectionType === 'http' ? (
+                  <input
+                    type="url"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={state.url}
+                    onChange={(event) => setState((prev) => ({ ...prev, url: event.target.value }))}
+                    required
+                    placeholder="https://mcp.example.com"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                    value={state.commandLine}
+                    onChange={(event) => setState((prev) => ({ ...prev, commandLine: event.target.value }))}
+                    placeholder="e.g. npx -y @my/mcp@1.0.0"
+                  />
+                )}
+              </div>
+            </div>
             {getFieldErrors('url', formErrors).map((error) => (
               <p key={error} className="text-xs text-red-600">
                 {error}
               </p>
             ))}
+            {state.connectionType === 'stdio' &&
+              getFieldErrors('command', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
+            {state.connectionType === 'stdio' &&
+              getFieldErrors('command_args', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-slate-700">Authentication</label>
-            <select
-              className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-              value={state.authMethod}
-              onChange={(event) => setState((prev) => ({ ...prev, authMethod: event.target.value }))}
-            >
-              <option value="none">None</option>
-              <option value="bearer_token">Bearer Token</option>
-              <option value="oauth2">OAuth 2.0</option>
-            </select>
-            {getFieldErrors('auth_method', formErrors).map((error) => (
-              <p key={error} className="text-xs text-red-600">
-                {error}
-              </p>
-            ))}
-          </div>
+          {allowCommands && state.connectionType === 'stdio' && (
+            <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 space-y-4">
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-slate-600">Environment variables</label>
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                    onClick={() =>
+                      setState((prev) => ({ ...prev, environmentEntries: [...prev.environmentEntries, { ...BLANK_ENV }] }))
+                    }
+                  >
+                    Add variable
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {state.environmentEntries.map((entry, index) => (
+                    <div key={`env-${index}`} className="flex flex-col gap-3 sm:flex-row">
+                      <div className="sm:flex-1">
+                        <label className="text-xs font-medium text-slate-500">Key</label>
+                        <input
+                          type="text"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                          value={entry.key}
+                          onChange={(event) => handleEnvChange(index, 'key', event.target.value, setState)}
+                          placeholder="API_KEY"
+                        />
+                      </div>
+                      <div className="sm:flex-1">
+                        <label className="text-xs font-medium text-slate-500">Value</label>
+                        <input
+                          type="text"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                          value={entry.value}
+                          onChange={(event) => handleEnvChange(index, 'value', event.target.value, setState)}
+                        />
+                      </div>
+                      <div className="sm:w-auto sm:self-end">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                          onClick={() =>
+                            setState((prev) => {
+                              const entries = prev.environmentEntries.filter((_, idx) => idx !== index)
+                              return { ...prev, environmentEntries: entries.length ? entries : createBlankEnvEntries() }
+                            })
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {getFieldErrors('environment', formErrors).map((error) => (
+                  <p key={error} className="text-xs text-red-600">
+                    {error}
+                  </p>
+                ))}
+              </div>
+            </div>
+          )}
 
-          {state.authMethod === 'bearer_token' && (
+          {state.connectionType !== 'stdio' && (
+            <div>
+              <label className="block text-sm font-medium text-slate-700">Authentication</label>
+              <select
+                className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                value={state.authMethod}
+                onChange={(event) => setState((prev) => ({ ...prev, authMethod: event.target.value }))}
+              >
+                <option value="none">None</option>
+                <option value="bearer_token">Bearer Token</option>
+                <option value="oauth2">OAuth 2.0</option>
+              </select>
+              {getFieldErrors('auth_method', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
+            </div>
+          )}
+
+          {state.connectionType !== 'stdio' && state.authMethod === 'bearer_token' && (
             <div>
               <label className="block text-sm font-medium text-slate-700">Bearer Token</label>
               <input
@@ -335,7 +477,7 @@ export function McpServerFormModal({
           )}
         </div>
 
-        {state.authMethod === 'oauth2' && (
+        {state.connectionType !== 'stdio' && state.authMethod === 'oauth2' && (
           <div className="space-y-3">
             <label className="block text-sm font-semibold text-slate-700">OAuth Connection</label>
             <div className="rounded-xl border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
@@ -443,99 +585,104 @@ export function McpServerFormModal({
           </div>
         )}
 
-        <div className="rounded-lg border border-slate-200 bg-white">
-          <button
-            type="button"
-            className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-            onClick={() => setHeadersExpanded((prev) => !prev)}
-            aria-expanded={headersExpanded}
-          >
-            <div>
-              <p className="text-sm font-semibold text-slate-700 capitalize">Custom headers</p>
-              <p className="text-xs text-slate-500">Encrypted and stored securely.</p>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="inline-flex items-center rounded-full border border-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                Optional
-              </span>
-              {hasConfiguredHeaders(state) && !headersExpanded && (
-                <span className="text-xs font-medium text-slate-600">Configured</span>
-              )}
-              <ChevronDown
-                className={`h-4 w-4 text-slate-500 transition-transform ${headersExpanded ? 'rotate-180' : ''}`}
-                aria-hidden="true"
-              />
-            </div>
-          </button>
-          {headersExpanded && (
-            <div className="space-y-4 border-t border-slate-100 px-4 py-4">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium text-slate-700">Header entries</p>
-                <button
-                  type="button"
-                  className="text-sm font-medium text-blue-600 hover:text-blue-700"
-                  onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
-                >
-                  Add Header
-                </button>
+        {state.connectionType !== 'stdio' && (
+          <div className="rounded-lg border border-slate-200 bg-white">
+            <button
+              type="button"
+              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+              onClick={() => setHeadersExpanded((prev) => !prev)}
+              aria-expanded={headersExpanded}
+            >
+              <div>
+                <p className="text-sm font-semibold text-slate-700 capitalize">Custom headers</p>
+                <p className="text-xs text-slate-500">Encrypted and stored securely.</p>
               </div>
-              <div className="space-y-3">
-                {state.headers.map((entry, index) => (
-                  <div key={`header-${index}`} className="flex flex-col gap-3 sm:flex-row">
-                    <div className="sm:flex-1">
-                      <label className="text-xs font-medium text-slate-500">Header</label>
-                      <input
-                        type="text"
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                        value={entry.key}
-                        onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
-                      />
+              <div className="flex items-center gap-3">
+                <span className="inline-flex items-center rounded-full border border-slate-200 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                  Optional
+                </span>
+                {hasConfiguredHeaders(state) && !headersExpanded && (
+                  <span className="text-xs font-medium text-slate-600">Configured</span>
+                )}
+                <ChevronDown
+                  className={`h-4 w-4 text-slate-500 transition-transform ${headersExpanded ? 'rotate-180' : ''}`}
+                  aria-hidden="true"
+                />
+              </div>
+            </button>
+            {headersExpanded && (
+              <div className="space-y-4 border-t border-slate-100 px-4 py-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-slate-700">Header entries</p>
+                  <button
+                    type="button"
+                    className="text-sm font-medium text-blue-600 hover:text-blue-700"
+                    onClick={() => setState((prev) => ({ ...prev, headers: [...prev.headers, { ...BLANK_HEADER }] }))}
+                  >
+                    Add Header
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {state.headers.map((entry, index) => (
+                    <div key={`header-${index}`} className="flex flex-col gap-3 sm:flex-row">
+                      <div className="sm:flex-1">
+                        <label className="text-xs font-medium text-slate-500">Header</label>
+                        <input
+                          type="text"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                          value={entry.key}
+                          onChange={(event) => handleHeaderChange(index, 'key', event.target.value, setState)}
+                        />
+                      </div>
+                      <div className="sm:flex-1">
+                        <label className="text-xs font-medium text-slate-500">Value</label>
+                        <input
+                          type="text"
+                          className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
+                          value={entry.value}
+                          onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
+                        />
+                      </div>
+                      <div className="sm:w-auto sm:self-end">
+                        <button
+                          type="button"
+                          className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                          onClick={() =>
+                            setState((prev) => {
+                              const headers = prev.headers.filter((_, idx) => idx !== index)
+                              return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
+                            })
+                          }
+                        >
+                          Remove
+                        </button>
+                      </div>
                     </div>
-                    <div className="sm:flex-1">
-                      <label className="text-xs font-medium text-slate-500">Value</label>
-                      <input
-                        type="text"
-                        className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-blue-500"
-                        value={entry.value}
-                        onChange={(event) => handleHeaderChange(index, 'value', event.target.value, setState)}
-                      />
-                    </div>
-                    <div className="sm:w-auto sm:self-end">
-                      <button
-                        type="button"
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 hover:bg-slate-50"
-                        onClick={() =>
-                          setState((prev) => {
-                            const headers = prev.headers.filter((_, idx) => idx !== index)
-                            return { ...prev, headers: headers.length ? headers : createBlankHeaders() }
-                          })
-                        }
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  </div>
+                  ))}
+                </div>
+                {getFieldErrors('headers', formErrors).map((error) => (
+                  <p key={error} className="text-xs text-red-600">
+                    {error}
+                  </p>
                 ))}
               </div>
-              {getFieldErrors('headers', formErrors).map((error) => (
-                <p key={error} className="text-xs text-red-600">
-                  {error}
-                </p>
-              ))}
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        )}
       </form>
     </Modal>
   )
 }
 
-function getInitialState(server?: McpServerDetail): FormState {
+function getInitialState(server?: McpServerDetail, allowCommands = false): FormState {
   if (!server) {
     return {
       displayName: '',
       slug: '',
       url: '',
+      connectionType: 'http',
+      commandLine: '',
+      environmentEntries: createBlankEnvEntries(),
       isActive: true,
       authMethod: 'none',
       headers: createBlankHeaders(),
@@ -543,10 +690,15 @@ function getInitialState(server?: McpServerDetail): FormState {
     }
   }
   const { headerEntries, bearerToken } = splitHeaders(server.headers, server.authMethod)
+  const hasCommand = Boolean(server.command)
+  const connectionType = allowCommands && hasCommand ? 'stdio' : 'http'
   return {
     displayName: server.displayName,
     slug: server.name,
     url: server.url,
+    connectionType,
+    commandLine: hasCommand ? formatCommandLine(server.command ?? '', server.commandArgs ?? []) : '',
+    environmentEntries: environmentToEntries(server.environment),
     isActive: server.isActive,
     authMethod: server.authMethod,
     headers: headerEntries,
@@ -612,6 +764,104 @@ function handleHeaderChange(
     headers[index] = { ...headers[index], [key]: value }
     return { ...prev, headers }
   })
+}
+
+function handleEnvChange(
+  index: number,
+  key: 'key' | 'value',
+  value: string,
+  setState: Dispatch<SetStateAction<FormState>>,
+) {
+  setState((prev) => {
+    const entries = [...prev.environmentEntries]
+    entries[index] = { ...entries[index], [key]: value }
+    return { ...prev, environmentEntries: entries }
+  })
+}
+
+function entriesToObject(entries: EnvEntry[]): Record<string, string> {
+  const result: Record<string, string> = {}
+  entries.forEach(({ key, value }) => {
+    const trimmed = key.trim()
+    if (trimmed) {
+      result[trimmed] = value
+    }
+  })
+  return result
+}
+
+function environmentToEntries(environment?: Record<string, string> | null): EnvEntry[] {
+  if (!environment || Object.keys(environment).length === 0) {
+    return createBlankEnvEntries()
+  }
+  return Object.entries(environment).map(([key, value]) => ({ key, value }))
+}
+
+function formatCommandLine(command: string, args: string[]): string {
+  return [command, ...args].filter(Boolean).map(quoteCommandArg).join(' ')
+}
+
+function quoteCommandArg(value: string): string {
+  if (!value) {
+    return ''
+  }
+  if (!/[\s"'\\]/.test(value)) {
+    return value
+  }
+  const escaped = value.replace(/["\\]/g, '\\$&')
+  return `"${escaped}"`
+}
+
+function parseCommandLine(raw: string): { command: string; args: string[]; error?: string } {
+  const input = raw.trim()
+  if (!input) {
+    return { command: '', args: [], error: 'Command is required for STDIO connections.' }
+  }
+  const tokens: string[] = []
+  let current = ''
+  let quote: '"' | "'" | null = null
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i]
+    if (quote) {
+      if (char === quote) {
+        quote = null
+      } else if (char === '\\' && quote === '"' && i + 1 < input.length) {
+        current += input[i + 1]
+        i += 1
+      } else {
+        current += char
+      }
+      continue
+    }
+    if (char === '"' || char === "'") {
+      quote = char
+      continue
+    }
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current)
+        current = ''
+      }
+      continue
+    }
+    if (char === '\\' && i + 1 < input.length) {
+      current += input[i + 1]
+      i += 1
+      continue
+    }
+    current += char
+  }
+  if (quote) {
+    return { command: '', args: [], error: 'Command contains an unterminated quote.' }
+  }
+  if (current) {
+    tokens.push(current)
+  }
+  if (!tokens.length) {
+    return { command: '', args: [], error: 'Command is required for STDIO connections.' }
+  }
+  const [command, ...args] = tokens
+  return { command, args }
 }
 
 function slugify(value: string): string {

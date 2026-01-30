@@ -31,6 +31,7 @@ from .create_csv import get_create_csv_tool, execute_create_csv
 from .create_pdf import get_create_pdf_tool, execute_create_pdf
 from .create_chart import get_create_chart_tool, execute_create_chart
 from .python_exec import get_python_exec_tool
+from .run_command import get_run_command_tool, execute_run_command
 from .autotool_heuristics import find_matching_tools
 from config.plans import PLAN_CONFIG
 
@@ -81,6 +82,7 @@ CREATE_CSV_TOOL_NAME = "create_csv"
 CREATE_PDF_TOOL_NAME = "create_pdf"
 CREATE_CHART_TOOL_NAME = "create_chart"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
+RUN_COMMAND_TOOL_NAME = "run_command"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -160,6 +162,11 @@ BUILTIN_TOOL_REGISTRY = {
     PYTHON_EXEC_TOOL_NAME: {
         "definition": get_python_exec_tool,
         "sandboxed": True,
+        "sandbox_only": True,
+    },
+    RUN_COMMAND_TOOL_NAME: {
+        "definition": get_run_command_tool,
+        "executor": execute_run_command,
         "sandbox_only": True,
     },
 }

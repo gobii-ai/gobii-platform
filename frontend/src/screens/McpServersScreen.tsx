@@ -18,6 +18,7 @@ type McpServersScreenProps = {
   assignmentUrlTemplate: string
   ownerScope?: string
   ownerLabel?: string
+  allowCommands?: boolean
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -31,6 +32,7 @@ export function McpServersScreen({
   assignmentUrlTemplate,
   ownerScope,
   ownerLabel,
+  allowCommands = false,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -80,6 +82,7 @@ export function McpServersScreen({
         mode="create"
         listUrl={listUrl}
         ownerScope={ownerScope}
+        allowCommands={allowCommands}
         onClose={onClose}
         onSuccess={handleSuccess}
         onError={handleError}
@@ -90,7 +93,17 @@ export function McpServersScreen({
         }}
       />
     ))
-  }, [showModal, listUrl, ownerScope, handleSuccess, handleError, oauthStartUrl, oauthMetadataUrl, oauthCallbackPath])
+  }, [
+    showModal,
+    listUrl,
+    ownerScope,
+    allowCommands,
+    handleSuccess,
+    handleError,
+    oauthStartUrl,
+    oauthMetadataUrl,
+    oauthCallbackPath,
+  ])
 
   const openEditModal = useCallback(
     (server: McpServer) => {
@@ -101,6 +114,7 @@ export function McpServersScreen({
           listUrl={listUrl}
           detailUrl={detailUrl}
           ownerScope={ownerScope}
+          allowCommands={allowCommands}
           onClose={onClose}
           onSuccess={handleSuccess}
           onError={handleError}
@@ -117,6 +131,7 @@ export function McpServersScreen({
       detailUrlTemplate,
       listUrl,
       ownerScope,
+      allowCommands,
       handleSuccess,
       handleError,
       oauthStartUrl,
