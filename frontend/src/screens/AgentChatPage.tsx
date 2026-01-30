@@ -26,6 +26,7 @@ import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { storeConsoleContext } from '../util/consoleContextStorage'
 import { track, AnalyticsEvent } from '../util/analytics'
+import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
   if (!agentName) return 'Agent'
@@ -285,7 +286,7 @@ export function AgentChatPage({
     updating: addonsUpdating,
   } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
-  const { currentPlan, isProprietaryMode, ensureAuthenticated } = useSubscriptionStore()
+  const { currentPlan, isProprietaryMode, ensureAuthenticated, upgradeModalSource } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -1003,28 +1004,19 @@ export function AgentChatPage({
     }, 180)
   }, [jumpToBottom, scrollToBottom, setAutoScrollPinned])
 
-  const buildCheckoutUrl = useCallback((baseUrl: string) => {
-    if (typeof window === 'undefined') {
-      return baseUrl
-    }
-    const url = new URL(baseUrl, window.location.origin)
-    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
-    url.searchParams.set('return_to', returnTo)
-    return url.toString()
-  }, [])
-
-  const handleUpgrade = useCallback(async (plan: PlanTier) => {
+  const handleUpgrade = useCallback(async (plan: PlanTier, source?: string) => {
+    const resolvedSource = source ?? upgradeModalSource ?? 'upgrade_modal'
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
       return
     }
     track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
       plan,
-      source: 'agent_chat_upgrade_modal',
+      source: resolvedSource,
     })
-    const checkoutUrl = buildCheckoutUrl(plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/')
+    const checkoutUrl = appendReturnTo(plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/')
     window.open(checkoutUrl, '_top')
-  }, [buildCheckoutUrl, ensureAuthenticated])
+  }, [ensureAuthenticated, upgradeModalSource])
 
   const createNewAgent = useCallback(
     async (body: string, tier: IntelligenceTierKey) => {
@@ -1337,37 +1329,60 @@ export function AgentChatPage({
     return '/console/billing/'
   }, [effectiveContext])
 
-  const handleGateClose = useCallback(() => {
+  const closeGate = useCallback(() => {
     pendingCreateRef.current = null
     setIntelligenceGate(null)
   }, [])
 
+  const buildGateAnalytics = useCallback((overrides: Record<string, unknown> = {}) => {
+    if (!intelligenceGate) {
+      return overrides
+    }
+    return {
+      reason: intelligenceGate.reason,
+      selectedTier: intelligenceGate.selectedTier,
+      allowedTier: intelligenceGate.allowedTier,
+      multiplier: intelligenceGate.multiplier,
+      estimatedDaysRemaining: intelligenceGate.estimatedDaysRemaining,
+      burnRatePerDay: intelligenceGate.burnRatePerDay,
+      currentPlan,
+      ...overrides,
+    }
+  }, [currentPlan, intelligenceGate])
+
+  const handleGateDismiss = useCallback(() => {
+    track(AnalyticsEvent.INTELLIGENCE_GATE_DISMISSED, buildGateAnalytics())
+    closeGate()
+  }, [buildGateAnalytics, closeGate])
+
   const handleGateUpgrade = useCallback((plan: PlanTier) => {
-    handleGateClose()
-    void handleUpgrade(plan)
-  }, [handleGateClose, handleUpgrade])
+    closeGate()
+    void handleUpgrade(plan, 'intelligence_gate')
+  }, [closeGate, handleUpgrade])
 
   const handleGateAddPack = useCallback(() => {
-    handleGateClose()
+    track(AnalyticsEvent.INTELLIGENCE_GATE_ADD_PACK_CLICKED, buildGateAnalytics())
+    closeGate()
     if (typeof window !== 'undefined') {
       window.open(billingUrl, '_top')
     }
-  }, [billingUrl, handleGateClose])
+  }, [billingUrl, buildGateAnalytics, closeGate])
 
   const handleGateContinue = useCallback(() => {
     const pending = pendingCreateRef.current
     if (!pending || !intelligenceGate) {
-      handleGateClose()
+      closeGate()
       return
     }
     const needsPlanUpgrade = intelligenceGate.reason === 'plan' || intelligenceGate.reason === 'both'
     const tierToUse = needsPlanUpgrade ? intelligenceGate.allowedTier : pending.tier
+    track(AnalyticsEvent.INTELLIGENCE_GATE_CONTINUED, buildGateAnalytics({ chosenTier: tierToUse }))
     if (needsPlanUpgrade) {
       setDraftIntelligenceTier(tierToUse)
     }
-    handleGateClose()
+    closeGate()
     void createNewAgent(pending.body, tierToUse)
-  }, [createNewAgent, handleGateClose, intelligenceGate])
+  }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
   const handleSend = useCallback(async (body: string, attachments: File[] = []) => {
     if (!activeAgentId && !isNewAgent) {
@@ -1412,9 +1427,19 @@ export function AgentChatPage({
         lowCredits = estimatedDaysRemaining <= LOW_CREDIT_DAY_THRESHOLD
       }
       if (isLocked || lowCredits) {
+        const gateReason: IntelligenceGateReason = isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits'
+        track(AnalyticsEvent.INTELLIGENCE_GATE_SHOWN, {
+          reason: gateReason,
+          selectedTier,
+          allowedTier,
+          multiplier: Number.isFinite(multiplier) ? multiplier : null,
+          estimatedDaysRemaining,
+          burnRatePerDay,
+          currentPlan,
+        })
         pendingCreateRef.current = { body, attachments, tier: selectedTier }
         setIntelligenceGate({
-          reason: isLocked && lowCredits ? 'both' : isLocked ? 'plan' : 'credits',
+          reason: gateReason,
           selectedTier,
           allowedTier,
           multiplier: Number.isFinite(multiplier) ? multiplier : null,
@@ -1433,6 +1458,7 @@ export function AgentChatPage({
     activeAgentId,
     burnRateSummary,
     createNewAgent,
+    currentPlan,
     ensureAuthenticated,
     extraTasksEnabled,
     hasUnlimitedQuota,
@@ -1468,7 +1494,7 @@ export function AgentChatPage({
           onUpgrade={handleGateUpgrade}
           onAddPack={handleGateAddPack}
           onContinue={handleGateContinue}
-          onClose={handleGateClose}
+          onClose={handleGateDismiss}
         />
       ) : null}
       <CollaboratorInviteDialog

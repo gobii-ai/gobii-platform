@@ -22,7 +22,7 @@ export function ContactCapCalloutCard({
     if (!authenticated) {
       return
     }
-    openUpgradeModal()
+    openUpgradeModal('contact_cap_callout')
   }, [ensureAuthenticated, openUpgradeModal])
 
   return (

@@ -2,13 +2,10 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { Check, Mail, MessageSquare, Settings, UserPlus, X, Zap } from 'lucide-react'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
-import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
-import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
-import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
+import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
-import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 
@@ -33,7 +30,6 @@ type AgentChatBannerProps = {
   onClose?: () => void
   onShare?: () => void
   sidebarCollapsed?: boolean
-  onUpgrade?: (plan: PlanTier) => void
 }
 
 function ConnectionBadge({ status, label }: { status: ConnectionStatusTone; label: string }) {
@@ -67,7 +63,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onClose,
   onShare,
   sidebarCollapsed = true,
-  onUpgrade,
 }: AgentChatBannerProps) {
   const trimmedName = agentName.trim() || 'Agent'
   const accentColor = normalizeHexColor(agentColorHex) || '#6366f1'
@@ -76,18 +71,12 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const hasAnimatedRef = useRef(false)
   const prevDoneRef = useRef<number | null>(null)
   const [justCompleted, setJustCompleted] = useState(false)
-  const [isMobile, setIsMobile] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return window.innerWidth < 768
-  })
 
   // Subscription state
   const {
     currentPlan,
-    isUpgradeModalOpen,
     isProprietaryMode,
     openUpgradeModal,
-    closeUpgradeModal,
     ensureAuthenticated,
   } = useSubscriptionStore()
   const canShowBannerActions = canManageAgent !== false && !isCollaborator
@@ -110,33 +99,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
       currentPlan,
       targetPlan,
     })
-    track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
-      currentPlan,
-      source: 'banner',
-    })
-    openUpgradeModal()
+    openUpgradeModal('banner')
   }, [currentPlan, ensureAuthenticated, openUpgradeModal, targetPlan])
-
-  const handleModalDismiss = useCallback(() => {
-    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
-      currentPlan,
-    })
-    closeUpgradeModal()
-  }, [currentPlan, closeUpgradeModal])
-
-  const handleUpgrade = useCallback((plan: PlanTier) => {
-    closeUpgradeModal()
-    onUpgrade?.(plan)
-  }, [closeUpgradeModal, onUpgrade])
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     const node = bannerRef.current
@@ -331,31 +295,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
         {/* Celebration shimmer */}
         {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
 
-      {/* Upgrade modal / sheet */}
-      {isUpgradeModalOpen && !isMobile && (
-        <SubscriptionUpgradeModal
-          currentPlan={currentPlan}
-          onClose={handleModalDismiss}
-          onUpgrade={handleUpgrade}
-          dismissible
-        />
-      )}
-      {isUpgradeModalOpen && isMobile && (
-        <AgentChatMobileSheet
-          open={isUpgradeModalOpen}
-          onClose={handleModalDismiss}
-          title="Upgrade your plan"
-          subtitle="Choose the plan that fits your needs"
-          icon={Zap}
-          ariaLabel="Upgrade your plan"
-          bodyPadding={false}
-        >
-          <SubscriptionUpgradePlans
-            currentPlan={currentPlan}
-            onUpgrade={handleUpgrade}
-          />
-        </AgentChatMobileSheet>
-      )}
     </div>
     </div>
   )

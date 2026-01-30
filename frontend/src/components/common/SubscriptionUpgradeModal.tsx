@@ -9,6 +9,7 @@ type SubscriptionUpgradeModalProps = {
   currentPlan: PlanTier | null
   onClose: () => void
   onUpgrade: (plan: PlanTier) => void
+  source?: string
   dismissible?: boolean
 }
 
@@ -16,6 +17,7 @@ export function SubscriptionUpgradeModal({
   currentPlan,
   onClose,
   onUpgrade,
+  source,
   dismissible = true,
 }: SubscriptionUpgradeModalProps) {
   const handleClose = useCallback(() => {
@@ -91,6 +93,7 @@ export function SubscriptionUpgradeModal({
           <SubscriptionUpgradePlans
             currentPlan={currentPlan}
             onUpgrade={onUpgrade}
+            source={source}
           />
         </div>
       </div>

@@ -15,6 +15,7 @@ import {
 import { cloneAgentTemplate } from '../../../api/agentTemplates'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
+import { getReturnToPath } from '../../../util/returnTo'
 import { downloadVCard } from '../../../util/vcard'
 import '../../../styles/insights.css'
 
@@ -230,7 +231,7 @@ export function AgentSetupInsight({ insight, onCollaborate }: AgentSetupInsightP
     }
     const url = new URL(baseUrl, window.location.origin)
     const params = new URLSearchParams(url.search)
-    const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
+    const returnTo = getReturnToPath()
     params.set('return_to', returnTo)
 
     if (metadata.utmQuerystring) {

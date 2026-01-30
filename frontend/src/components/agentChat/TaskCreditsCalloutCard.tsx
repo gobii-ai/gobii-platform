@@ -22,7 +22,7 @@ export function TaskCreditsCalloutCard({
     if (!authenticated) {
       return
     }
-    openUpgradeModal()
+    openUpgradeModal('task_credits_callout')
   }, [ensureAuthenticated, openUpgradeModal])
 
   return (

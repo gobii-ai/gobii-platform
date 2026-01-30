@@ -10,6 +10,7 @@ import { INSIGHT_TIMING } from '../../types/insight'
 import { useLocalStorageState } from '../../hooks/useLocalStorageState'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track, AnalyticsEvent } from '../../util/analytics'
+import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
 // Detect if user is on macOS
@@ -221,11 +222,15 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     if (isProprietaryMode) {
-      openUpgradeModal()
+      openUpgradeModal('intelligence_selector')
       return
     }
     if (intelligenceConfig?.upgradeUrl) {
-      window.open(intelligenceConfig.upgradeUrl, '_top')
+      track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
+        source: 'intelligence_selector',
+        target: 'upgrade_url',
+      })
+      window.open(appendReturnTo(intelligenceConfig.upgradeUrl), '_top')
     }
   }, [ensureAuthenticated, intelligenceConfig?.upgradeUrl, isProprietaryMode, openUpgradeModal])
 

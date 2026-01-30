@@ -124,6 +124,7 @@ export function AgentIntelligenceGateModal({
             onUpgrade={onUpgrade}
             variant="inline"
             pricingLinkLabel="Pricing details"
+            source="intelligence_gate"
           />
         </div>
       ) : null}

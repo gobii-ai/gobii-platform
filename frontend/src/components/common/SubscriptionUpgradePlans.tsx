@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { Check, Zap, Rocket } from 'lucide-react'
 
 import type { PlanTier } from '../../stores/subscriptionStore'
+import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
 
@@ -75,6 +76,7 @@ type SubscriptionUpgradePlansProps = {
   onUpgrade: (plan: PlanTier) => void
   variant?: 'modal' | 'inline'
   pricingLinkLabel?: string
+  source?: string
 }
 
 export function SubscriptionUpgradePlans({
@@ -82,6 +84,7 @@ export function SubscriptionUpgradePlans({
   onUpgrade,
   variant = 'modal',
   pricingLinkLabel = 'View full comparison',
+  source,
 }: SubscriptionUpgradePlansProps) {
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const isUpgrade = useCallback(
@@ -97,9 +100,12 @@ export function SubscriptionUpgradePlans({
     track(AnalyticsEvent.UPGRADE_PLAN_SELECTED, {
       currentPlan,
       selectedPlan: planId,
+      source: source ?? 'unknown',
     })
     onUpgrade(planId)
-  }, [currentPlan, onUpgrade])
+  }, [currentPlan, onUpgrade, source])
+
+  const pricingUrl = appendReturnTo('/pricing/')
 
   const wrapperClass = variant === 'inline' ? 'px-0 py-0' : 'px-6 py-6 sm:px-8'
   const footerClass = variant === 'inline'
@@ -203,7 +209,7 @@ export function SubscriptionUpgradePlans({
       <div className={footerClass}>
         <p className="text-center text-xs text-slate-500">
           <a
-            href="/pricing/"
+            href={pricingUrl}
             className="font-medium text-blue-600 hover:text-blue-700"
           >
             {pricingLinkLabel}

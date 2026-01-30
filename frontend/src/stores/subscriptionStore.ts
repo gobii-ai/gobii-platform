@@ -1,17 +1,25 @@
 import { create } from 'zustand'
 
-import { HttpError, jsonFetch } from '../api/http'
+import { HttpError, jsonFetch, scheduleLoginRedirect } from '../api/http'
+import { track, AnalyticsEvent } from '../util/analytics'
 
 export type PlanTier = 'free' | 'startup' | 'scale'
+export type UpgradeModalSource =
+  | 'banner'
+  | 'task_credits_callout'
+  | 'contact_cap_callout'
+  | 'intelligence_selector'
+  | 'unknown'
 
 type SubscriptionState = {
   currentPlan: PlanTier | null
   isLoading: boolean
   isUpgradeModalOpen: boolean
+  upgradeModalSource: UpgradeModalSource | null
   isProprietaryMode: boolean
   setCurrentPlan: (plan: PlanTier | null) => void
   setProprietaryMode: (isProprietary: boolean) => void
-  openUpgradeModal: () => void
+  openUpgradeModal: (source?: UpgradeModalSource) => void
   closeUpgradeModal: () => void
   ensureAuthenticated: () => Promise<boolean>
 }
@@ -20,11 +28,22 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
   currentPlan: null,
   isLoading: false,
   isUpgradeModalOpen: false,
+  upgradeModalSource: null,
   isProprietaryMode: false,
   setCurrentPlan: (plan) => set({ currentPlan: plan, isLoading: false }),
   setProprietaryMode: (isProprietary) => set({ isProprietaryMode: isProprietary }),
-  openUpgradeModal: () => set({ isUpgradeModalOpen: true }),
-  closeUpgradeModal: () => set({ isUpgradeModalOpen: false }),
+  openUpgradeModal: (source = 'unknown') => set((state) => {
+    const resolvedSource = source ?? 'unknown'
+    if (!state.isUpgradeModalOpen && typeof window !== 'undefined') {
+      track(AnalyticsEvent.UPGRADE_MODAL_OPENED, {
+        currentPlan: state.currentPlan,
+        source: resolvedSource,
+        isProprietaryMode: state.isProprietaryMode,
+      })
+    }
+    return { isUpgradeModalOpen: true, upgradeModalSource: resolvedSource }
+  }),
+  closeUpgradeModal: () => set({ isUpgradeModalOpen: false, upgradeModalSource: null }),
   ensureAuthenticated: async () => {
     if (typeof window === 'undefined') {
       return false
@@ -34,6 +53,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
         method: 'GET',
       })
       if (!data || typeof data !== 'object') {
+        scheduleLoginRedirect()
         return false
       }
       const plan = normalizePlan(data?.plan)
@@ -45,6 +65,7 @@ export const useSubscriptionStore = create<SubscriptionState>((set) => ({
       return true
     } catch (error) {
       if (error instanceof HttpError && error.status === 401) {
+        scheduleLoginRedirect()
         return false
       }
       return true

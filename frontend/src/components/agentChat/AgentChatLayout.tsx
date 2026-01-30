@@ -1,5 +1,6 @@
 import type { ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
+import { Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -10,17 +11,20 @@ import { StreamingReplyCard } from './StreamingReplyCard'
 import { ResponseSkeleton } from './ResponseSkeleton'
 import { ChatSidebar } from './ChatSidebar'
 import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
+import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
+import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
+import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { AgentTimelineProps } from './types'
 import type { ProcessingWebTask, StreamState, KanbanBoardSnapshot } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry } from '../../types/agentRoster'
-import type { PlanTier } from '../../stores/subscriptionStore'
+import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { buildAgentComposerPalette } from '../../util/color'
 import type { DailyCreditsInfo, DailyCreditsStatus, DailyCreditsUpdatePayload } from '../../types/dailyCredits'
 import type { AddonPackOption, ContactCapInfo, ContactCapStatus } from '../../types/agentAddons'
@@ -218,6 +222,17 @@ export function AgentChatLayout({
   onOpenTaskPacks,
 }: AgentChatLayoutProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true)
+  const {
+    currentPlan: subscriptionPlan,
+    isUpgradeModalOpen,
+    closeUpgradeModal,
+    upgradeModalSource,
+    isProprietaryMode,
+  } = useSubscriptionStore()
+  const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return window.innerWidth < 768
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addonsMode, setAddonsMode] = useState<'contacts' | 'tasks' | null>(null)
   const [contactCapDismissed, setContactCapDismissed] = useState(false)
@@ -256,6 +271,37 @@ export function AgentChatLayout({
   const handleAddonsClose = useCallback(() => {
     setAddonsMode(null)
   }, [])
+
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobileUpgrade(window.innerWidth < 768)
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  useEffect(() => {
+    if (!isUpgradeModalOpen) {
+      return
+    }
+    if (!isProprietaryMode || isCollaborator) {
+      closeUpgradeModal()
+    }
+  }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen])
+
+  const handleUpgradeModalDismiss = useCallback(() => {
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan: subscriptionPlan,
+      source: upgradeModalSource ?? 'unknown',
+    })
+    closeUpgradeModal()
+  }, [closeUpgradeModal, subscriptionPlan, upgradeModalSource])
+
+  const handleUpgradeSelection = useCallback((plan: PlanTier) => {
+    onUpgrade?.(plan)
+    closeUpgradeModal()
+  }, [closeUpgradeModal, onUpgrade])
 
   const resolvedOpenTaskPacks = useMemo(
     () =>
@@ -475,7 +521,6 @@ export function AgentChatLayout({
           onClose={onClose}
           onShare={onShare}
           sidebarCollapsed={sidebarCollapsed}
-          onUpgrade={onUpgrade}
         />
       )}
       <AgentChatSettingsPanel
@@ -668,6 +713,33 @@ export function AgentChatLayout({
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
+      {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
+        isMobileUpgrade ? (
+          <AgentChatMobileSheet
+            open={isUpgradeModalOpen}
+            onClose={handleUpgradeModalDismiss}
+            title="Upgrade your plan"
+            subtitle="Choose the plan that fits your needs"
+            icon={Zap}
+            ariaLabel="Upgrade your plan"
+            bodyPadding={false}
+          >
+            <SubscriptionUpgradePlans
+              currentPlan={subscriptionPlan}
+              onUpgrade={handleUpgradeSelection}
+              source={upgradeModalSource ?? undefined}
+            />
+          </AgentChatMobileSheet>
+        ) : (
+          <SubscriptionUpgradeModal
+            currentPlan={subscriptionPlan}
+            onClose={handleUpgradeModalDismiss}
+            onUpgrade={handleUpgradeSelection}
+            source={upgradeModalSource ?? undefined}
+            dismissible
+          />
+        )
+      ) : null}
     </>
   )
 }
