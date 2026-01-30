@@ -128,6 +128,8 @@ from console.daily_credit import (
 from console.agent_creation import enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
+from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
+from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
 import litellm
 
@@ -4522,7 +4524,8 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         owner_scope, _, owner_user, owner_org = _resolve_mcp_owner(request)
-        form = MCPServerConfigForm(payload, allow_commands=False)
+        allow_commands = flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG)
+        form = MCPServerConfigForm(payload, allow_commands=allow_commands)
         if form.is_valid():
             try:
                 with transaction.atomic():
@@ -4563,7 +4566,8 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        form = MCPServerConfigForm(payload, instance=server, allow_commands=False)
+        allow_commands = flag_is_active(request, SANDBOX_COMPUTE_WAFFLE_FLAG)
+        form = MCPServerConfigForm(payload, instance=server, allow_commands=allow_commands)
         if form.is_valid():
             try:
                 with transaction.atomic():

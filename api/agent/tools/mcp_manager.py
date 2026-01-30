@@ -1487,6 +1487,10 @@ class MCPToolManager:
                 logger.info("Sandbox MCP fallback enabled for %s; executing locally.", info.full_name)
                 sandbox_fallback = True
             else:
+                if isinstance(sandbox_result, dict) and sandbox_result.get("status") == "error":
+                    return sandbox_result
+                if isinstance(sandbox_result, dict) and "result" in sandbox_result:
+                    return self._adapt_tool_result(server_name, actual_tool_name, sandbox_result.get("result"))
                 return sandbox_result
 
         if sandbox_fallback and runtime:

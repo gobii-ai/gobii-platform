@@ -152,6 +152,7 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
+    const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
     }
@@ -163,6 +164,7 @@ switch (appName) {
         assignmentUrlTemplate={assignTemplate}
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
+        allowCommands={allowCommands}
         oauthStartUrl={oauthStartUrl}
         oauthMetadataUrl={oauthMetadataUrl}
         oauthCallbackPath={oauthCallbackPath}
