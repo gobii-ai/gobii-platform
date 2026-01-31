@@ -96,12 +96,12 @@
                 {% if can_manage_members %}
                   <form method="post" action="{% url 'org_member_role_update_org' org.id member.user.id %}" class="flex flex-wrap items-center">
                     {% csrf_token %}
-                    <select name="role"
+                            <select name="role"
                             class="rounded-lg border border-gray-300 bg-white py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                            {% if is_org_admin and member.role == 'owner' or is_org_admin and member.role == 'service_partner' %}disabled{% else %}onchange="this.form.submit()"{% endif %}>
+                            {% if is_org_admin and member.role in admin_locked_roles %}disabled{% else %}onchange="this.form.submit()"{% endif %}>
                       {% for value,label in allowed_role_choices %}
                         <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
-                                {% if is_org_admin and value == 'owner' or is_org_admin and value == 'service_partner' %}disabled{% endif %}>{{ label }}</option>
+                                {% if is_org_admin and value in admin_locked_roles %}disabled{% endif %}>{{ label }}</option>
                       {% endfor %}
                     </select>
                   </form>
@@ -175,10 +175,10 @@
                       {% csrf_token %}
                       <select name="role"
                               class="rounded-lg border border-gray-300 bg-white py-2 text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                              {% if is_org_admin and member.role == 'owner' or is_org_admin and member.role == 'service_partner' %}disabled{% else %}onchange="this.form.submit()"{% endif %}>
+                              {% if is_org_admin and member.role in admin_locked_roles %}disabled{% else %}onchange="this.form.submit()"{% endif %}>
                         {% for value,label in allowed_role_choices %}
                           <option value="{{ value }}" {% if member.role == value %}selected{% endif %}
-                                  {% if is_org_admin and value == 'owner' or is_org_admin and value == 'service_partner' %}disabled{% endif %}>{{ label }}</option>
+                                  {% if is_org_admin and value in admin_locked_roles %}disabled{% endif %}>{{ label }}</option>
                         {% endfor %}
                       </select>
                     </form>
