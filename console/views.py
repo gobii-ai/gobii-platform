@@ -450,15 +450,19 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.BILLING,
 }
+if settings.SERVICE_PARTNER_BILLING_ACCESS:
+    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SERVICE_PARTNER)
 
 MEMBER_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.SERVICE_PARTNER,
 }
 
 API_KEY_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
+    OrganizationMembership.OrgRole.SERVICE_PARTNER,
 }
 
 API_KEY_VIEW_ROLES = API_KEY_MANAGE_ROLES | {
@@ -2784,7 +2788,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except:
             context['owner_phone'] = None
 
-        # Provide organizations current user can reassign this agent into (owner/admin only)
+        # Provide organizations current user can reassign this agent into (owner/admin/service partner only)
         try:
             reassignable_orgs = Organization.objects.filter(
                 organizationmembership__user=self.request.user,
@@ -2792,6 +2796,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 organizationmembership__role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
                 ],
             ).order_by('name')
         except ImportError:
@@ -3026,6 +3031,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
                 ],
             ).exists()
         return False
@@ -5016,6 +5022,7 @@ class SharedAgentAccessMixin:
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
                 ],
             ).exists()
         return agent
@@ -5117,7 +5124,11 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
                 org=agent.organization,
                 user=user,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
-                role__in=[OrganizationMembership.OrgRole.OWNER, OrganizationMembership.OrgRole.ADMIN],
+                role__in=[
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                ],
             ).exists()
         return False
 
@@ -7163,6 +7174,9 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
         self.is_org_owner = self.membership.role == OrganizationMembership.OrgRole.OWNER
         self.is_org_admin = self.membership.role == OrganizationMembership.OrgRole.ADMIN
+        self.is_org_service_partner = self.membership.role == OrganizationMembership.OrgRole.SERVICE_PARTNER
+        self.is_org_owner_equivalent = self.is_org_owner or self.is_org_service_partner
+        self.allowed_role_choices = self._resolve_allowed_role_choices()
         # Set console context to this organization when visiting its page directly
         request.session['context_type'] = 'organization'
         request.session['context_id'] = str(self.org.id)
@@ -7174,9 +7188,12 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        members = OrganizationMembership.objects.filter(
-            org=self.org, status=OrganizationMembership.OrgStatus.ACTIVE
+        memberships = OrganizationMembership.objects.filter(
+            org=self.org,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
         ).select_related("user")
+        service_partners = memberships.filter(role=OrganizationMembership.OrgRole.SERVICE_PARTNER)
+        members = memberships.exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER)
         # Pending invites for this organization
         now = timezone.now()
         org_pending_invites = (
@@ -7187,33 +7204,53 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 expires_at__gte=now,
             ).select_related("invited_by")
         )
+        service_partner_invites = org_pending_invites.filter(
+            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+        )
+        pending_invites = org_pending_invites.exclude(
+            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+        )
         billing = getattr(self.org, "billing", None)
 
-        all_role_choices = list(OrganizationMembership.OrgRole.choices)
-        if self.is_org_owner:
-            allowed_role_choices = all_role_choices
-        elif self.is_org_admin:
-            allowed_role_choices = [c for c in all_role_choices if c[0] != OrganizationMembership.OrgRole.OWNER]
-        else:
-            allowed_role_choices = []
-
-        invite_form = context.get("invite_form") or OrganizationInviteForm(org=self.org)
+        invite_form = context.get("invite_form") or OrganizationInviteForm(
+            org=self.org,
+            allowed_roles=self.allowed_role_choices,
+        )
 
         context.update(
             {
                 "org": self.org,
                 "members": members,
+                "service_partners": service_partners,
                 "invite_form": invite_form,
-                "pending_invites": org_pending_invites,
+                "pending_invites": pending_invites,
+                "service_partner_invites": service_partner_invites,
                 "can_manage_members": self.can_manage_members,
                 "can_manage_billing": self.can_manage_billing,
-                "allowed_role_choices": allowed_role_choices,
+                "allowed_role_choices": self.allowed_role_choices,
                 "is_org_owner": self.is_org_owner,
                 "is_org_admin": self.is_org_admin,
+                "is_org_service_partner": self.is_org_service_partner,
                 "org_billing": billing,
             }
         )
         return context
+
+    def _resolve_allowed_role_choices(self) -> list[tuple[str, str]]:
+        all_role_choices = list(OrganizationMembership.OrgRole.choices)
+        if self.is_org_owner_equivalent:
+            return all_role_choices
+        if self.is_org_admin:
+            return [
+                c
+                for c in all_role_choices
+                if c[0]
+                not in (
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                )
+            ]
+        return []
 
     @tracer.start_as_current_span("CONSOLE Organization Invite")
     @transaction.atomic
@@ -7221,10 +7258,19 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         if not self.can_manage_members:
             return HttpResponseForbidden()
 
-        form = OrganizationInviteForm(request.POST, org=self.org)
+        form = OrganizationInviteForm(
+            request.POST,
+            org=self.org,
+            allowed_roles=self.allowed_role_choices,
+        )
         # Defensive check: block when no seats available, even if submitted concurrently
         billing = getattr(self.org, "billing", None)
-        if billing and billing.seats_available <= 0:
+        invite_role = request.POST.get("role")
+        if (
+            billing
+            and billing.seats_available <= 0
+            and invite_role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+        ):
             form.add_error(None, "No seats available. Increase the seat count before inviting new members.")
         if form.is_valid():
             invite = OrganizationInvite.objects.create(
@@ -7317,11 +7363,29 @@ class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
             return HttpResponseForbidden()
 
         self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
+        all_role_choices = list(OrganizationMembership.OrgRole.choices)
+        if self.membership.role in (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.SERVICE_PARTNER,
+        ):
+            self.allowed_role_choices = all_role_choices
+        elif self.membership.role == OrganizationMembership.OrgRole.ADMIN:
+            self.allowed_role_choices = [
+                c
+                for c in all_role_choices
+                if c[0]
+                not in (
+                    OrganizationMembership.OrgRole.OWNER,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                )
+            ]
+        else:
+            self.allowed_role_choices = []
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
         context = {
-            "form": OrganizationInviteForm(org=self.org),
+            "form": OrganizationInviteForm(org=self.org, allowed_roles=self.allowed_role_choices),
             "org": self.org,
             "org_billing": getattr(self.org, "billing", None),
             "can_manage_billing": self.can_manage_billing,
@@ -7444,6 +7508,7 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
             },
             organization=invite.org,
         )
+        seat_eligible = membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(request.user.id),
@@ -7468,7 +7533,7 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
             properties=membership_props.copy(),
         ))
 
-        if created or not was_active:
+        if seat_eligible and (created or not was_active):
             transaction.on_commit(lambda: Analytics.track_event(
                 user_id=request.user.id,
                 event=AnalyticsEvent.ORGANIZATION_SEAT_ASSIGNED,
@@ -7519,6 +7584,7 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
                 },
                 organization=invite.org,
             )
+            seat_eligible = invite.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
             seat_props = Analytics.with_org_properties(
                 {
                     'actor_id': str(request.user.id),
@@ -7533,12 +7599,13 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
                 source=AnalyticsSource.WEB,
                 properties=decline_props.copy(),
             ))
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
-                source=AnalyticsSource.WEB,
-                properties=seat_props.copy(),
-            ))
+            if seat_eligible:
+                transaction.on_commit(lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                    source=AnalyticsSource.WEB,
+                    properties=seat_props.copy(),
+                ))
             messages.info(request, "Invitation declined.")
         else:
             # Should not hit due to resolver, but keep safety
@@ -7577,11 +7644,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
             org=org,
             user=request.user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=(
-                OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.ADMIN,
-                OrganizationMembership.OrgRole.BILLING,
-            ),
+            role__in=BILLING_MANAGE_ROLES,
         ).first()
 
         if membership is None:
@@ -7877,11 +7940,7 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
             org=org,
             user=request.user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=(
-                OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.ADMIN,
-                OrganizationMembership.OrgRole.BILLING,
-            ),
+            role__in=BILLING_MANAGE_ROLES,
         ).first()
 
         if membership is None:
@@ -8118,11 +8177,7 @@ class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagM
             org=org,
             user=request.user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=(
-                OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.ADMIN,
-                OrganizationMembership.OrgRole.BILLING,
-            ),
+            role__in=BILLING_MANAGE_ROLES,
         ).first()
 
         if membership is None:
@@ -8189,11 +8244,7 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
             org=org,
             user=request.user,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-            role__in=(
-                OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.ADMIN,
-                OrganizationMembership.OrgRole.BILLING,
-            ),
+            role__in=BILLING_MANAGE_ROLES,
         ).first()
 
         if membership is None:
@@ -8235,10 +8286,11 @@ class _OrgPermissionMixin:
             return None
         if membership.status != OrganizationMembership.OrgStatus.ACTIVE:
             return None
-        # Allow OWNER and ADMIN to manage invites
+        # Allow owner-equivalent roles to manage invites
         if membership.role not in (
             OrganizationMembership.OrgRole.OWNER,
             OrganizationMembership.OrgRole.ADMIN,
+            OrganizationMembership.OrgRole.SERVICE_PARTNER,
         ):
             return None
         return membership
@@ -8276,6 +8328,7 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                 },
                 organization=org,
             )
+            seat_eligible = invite.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
             seat_props = Analytics.with_org_properties(
                 {
                     'actor_id': str(request.user.id),
@@ -8290,12 +8343,13 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                 source=AnalyticsSource.WEB,
                 properties=revoke_props.copy(),
             ))
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
-                source=AnalyticsSource.WEB,
-                properties=seat_props.copy(),
-            ))
+            if seat_eligible:
+                transaction.on_commit(lambda: Analytics.track_event(
+                    user_id=request.user.id,
+                    event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                    source=AnalyticsSource.WEB,
+                    properties=seat_props.copy(),
+                ))
             messages.success(request, "Invitation revoked.")
         return redirect("organization_detail", org_id=org.id)
 
@@ -8403,10 +8457,13 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             messages.info(request, "This member is already removed.")
             return redirect("organization_detail", org_id=org.id)
 
-        # Admins cannot remove owners
+        # Admins cannot remove owner-equivalent roles
         if (
             acting_membership.role == OrganizationMembership.OrgRole.ADMIN
-            and target_membership.role == OrganizationMembership.OrgRole.OWNER
+            and target_membership.role in (
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            )
         ):
             return HttpResponseForbidden()
 
@@ -8432,6 +8489,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             },
             organization=org,
         )
+        seat_eligible = target_membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(target_membership.user_id),
@@ -8447,12 +8505,13 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             source=AnalyticsSource.WEB,
             properties=removal_props.copy(),
         ))
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
-            source=AnalyticsSource.WEB,
-            properties=seat_props.copy(),
-        ))
+        if seat_eligible:
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                source=AnalyticsSource.WEB,
+                properties=seat_props.copy(),
+            ))
         messages.success(request, "Member removed.")
         return redirect("organization_detail", org_id=org.id)
 
@@ -8502,6 +8561,7 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
             },
             organization=org,
         )
+        seat_eligible = membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(request.user.id),
@@ -8517,12 +8577,13 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
             source=AnalyticsSource.WEB,
             properties=removal_props.copy(),
         ))
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
-            source=AnalyticsSource.WEB,
-            properties=seat_props.copy(),
-        ))
+        if seat_eligible:
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_SEAT_UNASSIGNED,
+                source=AnalyticsSource.WEB,
+                properties=seat_props.copy(),
+            ))
         # After leaving, reset context back to personal
         request.session['context_type'] = 'personal'
         request.session['context_id'] = str(request.user.id)
@@ -8567,11 +8628,17 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
             messages.info(request, "Role unchanged.")
             return redirect("organization_detail", org_id=org.id)
 
-        # Admins cannot modify Owners, nor assign Owner role
+        # Admins cannot modify owner-equivalent roles, nor assign them
         if acting_membership.role == OrganizationMembership.OrgRole.ADMIN:
-            if target_membership.role == OrganizationMembership.OrgRole.OWNER:
+            if target_membership.role in (
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            ):
                 return HttpResponseForbidden()
-            if new_role == OrganizationMembership.OrgRole.OWNER:
+            if new_role in (
+                OrganizationMembership.OrgRole.OWNER,
+                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            ):
                 return HttpResponseForbidden()
 
         # Prevent demoting the last Owner
