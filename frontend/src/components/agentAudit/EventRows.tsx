@@ -32,6 +32,10 @@ export function ToolCallRow({
     const trimmed = tool.result.length > 160 ? `${tool.result.slice(0, 160)}…` : tool.result
     return trimmed
   }, [tool.result])
+  const durationLabel = useMemo(() => {
+    if (tool.execution_duration_ms === null || tool.execution_duration_ms === undefined) return null
+    return `${(tool.execution_duration_ms / 1000).toFixed(2)}s`
+  }, [tool.execution_duration_ms])
 
   const parsedParameters = useMemo(() => {
     if (tool.parameters === null || tool.parameters === undefined) return null
@@ -83,7 +87,18 @@ export function ToolCallRow({
             </div>
           </>
         }
-        right={resultPreview ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">Tool</span> : null}
+        right={
+          durationLabel || resultPreview ? (
+            <div className="flex items-center gap-2">
+              {durationLabel ? (
+                <span className="rounded-full bg-indigo-100 px-2 py-1 text-[11px] font-medium text-indigo-800">
+                  {durationLabel}
+                </span>
+              ) : null}
+              {resultPreview ? <span className="rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-medium text-indigo-700">Tool</span> : null}
+            </div>
+          ) : null
+        }
         collapsed={!isExpanded}
         onToggle={toggle}
       />

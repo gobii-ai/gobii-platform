@@ -111,6 +111,7 @@ def serialize_tool_call(step: PersistentAgentStep) -> dict:
         "tool_name": tool_call.tool_name,
         "parameters": tool_call.tool_params,
         "result": tool_call.result,
+        "execution_duration_ms": tool_call.execution_duration_ms,
         "prompt_archive": serialize_prompt_meta(getattr(step, "llm_prompt_archive", None)),
     }
 
