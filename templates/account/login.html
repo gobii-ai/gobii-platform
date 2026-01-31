@@ -10,6 +10,7 @@
 
     <!-- header -->
     <h1 class="text-center text-2xl font-bold text-gray-900">Sign in</h1>
+    {% if account_allow_registration %}
     <p class="mt-2 text-center text-sm text-gray-500">
       Don't have an account yet?
       {% with request.session.utm_querystring as utm_qs %}
@@ -20,6 +21,7 @@
       {% endif %}
       {% endwith %}
     </p>
+    {% endif %}
 
     {% provider_app_exists 'google' as has_google_provider %}
     {% if has_google_provider %}

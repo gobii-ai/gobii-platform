@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Switch as AriaSwitch } from 'react-aria-components'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, Info, RefreshCw, XCircle } from 'lucide-react'
 
@@ -26,9 +27,12 @@ const buttonStyles = {
     'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-60 disabled:cursor-not-allowed',
 }
 
-const formatValue = (setting: SystemSetting, value: number | null) => {
+const formatValue = (setting: SystemSetting, value: number | boolean | null) => {
   if (value === null || value === undefined) {
     return '—'
+  }
+  if (setting.value_type === 'bool') {
+    return value ? 'Enabled' : 'Disabled'
   }
   if (setting.disable_value !== null && setting.disable_value !== undefined && value === setting.disable_value) {
     return `Disabled (${value})`
@@ -209,9 +213,11 @@ export function SystemSettingsScreen() {
     for (const setting of changes) {
       const draftValue = (drafts[setting.key] ?? '').trim()
       try {
+        const payloadValue =
+          draftValue && setting.value_type === 'bool' ? draftValue === 'true' : draftValue
         const response = await updateSystemSetting(
           setting.key,
-          draftValue ? { value: draftValue } : { clear: true },
+          draftValue ? { value: payloadValue } : { clear: true },
         )
         updateRowError(setting.key, null)
         setDrafts((prev) => ({
@@ -322,6 +328,9 @@ export function SystemSettingsScreen() {
                       const hasOverride = setting.db_value !== null && setting.db_value !== undefined
                       const showEnvWarning = setting.env_set && hasOverride
                       const status = rowStatus[setting.key]
+                      const isBool = setting.value_type === 'bool'
+                      const boolValue =
+                        draftValue.trim() !== '' ? draftValue === 'true' : Boolean(setting.effective_value)
                       const minValue =
                         setting.disable_value !== null && setting.disable_value !== undefined
                           ? setting.disable_value
@@ -345,39 +354,77 @@ export function SystemSettingsScreen() {
                                 Effective value: {formatValue(setting, setting.effective_value)} · Env var: {setting.env_var}{' '}
                                 {setting.env_set ? '(set)' : '(not set)'}
                               </p>
-                              {showEnvWarning && (
-                                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-                                  Environment variable is set. Saving here will override the env value.
-                                </div>
-                              )}
                             </div>
                             <div className="space-y-3">
                               <label className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                                 Override value
                               </label>
-                              <input
-                                type="number"
-                                inputMode="decimal"
-                                min={minValue}
-                                step={setting.value_type === 'int' ? 1 : 0.1}
-                                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-                                placeholder={String(placeholderValue)}
-                                value={draftValue}
-                                onChange={(event) => {
-                                  const value = event.target.value
-                                  setDrafts((prev) => ({
-                                    ...prev,
-                                    [setting.key]: value,
-                                  }))
-                                  setDirtyKeys((prev) => ({
-                                    ...prev,
-                                    [setting.key]: true,
-                                  }))
-                                  if (status?.error) {
-                                    updateRowError(setting.key, null)
-                                  }
-                                }}
-                              />
+                              {isBool ? (
+                                <div className="flex items-center">
+                                  <AriaSwitch
+                                    aria-label={`${setting.label} toggle`}
+                                    isSelected={boolValue}
+                                    onChange={(isSelected) => {
+                                      setDrafts((prev) => ({
+                                        ...prev,
+                                        [setting.key]: isSelected ? 'true' : 'false',
+                                      }))
+                                      setDirtyKeys((prev) => ({
+                                        ...prev,
+                                        [setting.key]: true,
+                                      }))
+                                      if (status?.error) {
+                                        updateRowError(setting.key, null)
+                                      }
+                                    }}
+                                    className="relative inline-flex h-6 w-11 cursor-pointer items-center focus:outline-none"
+                                  >
+                                    {({ isSelected, isFocusVisible }) => (
+                                      <>
+                                        <span
+                                          aria-hidden="true"
+                                          className={`h-6 w-11 rounded-full transition ${
+                                            isSelected ? 'bg-emerald-500' : 'bg-slate-600'
+                                          }`}
+                                        />
+                                        <span
+                                          aria-hidden="true"
+                                          className={`absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform ${
+                                            isSelected ? 'translate-x-5' : 'translate-x-0'
+                                          }`}
+                                        />
+                                        {isFocusVisible && (
+                                          <span className="absolute -inset-1 rounded-full ring-2 ring-emerald-300" aria-hidden="true" />
+                                        )}
+                                      </>
+                                    )}
+                                  </AriaSwitch>
+                                </div>
+                              ) : (
+                                <input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={minValue}
+                                  step={setting.value_type === 'int' ? 1 : 0.1}
+                                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                                  placeholder={String(placeholderValue)}
+                                  value={draftValue}
+                                  onChange={(event) => {
+                                    const value = event.target.value
+                                    setDrafts((prev) => ({
+                                      ...prev,
+                                      [setting.key]: value,
+                                    }))
+                                    setDirtyKeys((prev) => ({
+                                      ...prev,
+                                      [setting.key]: true,
+                                    }))
+                                    if (status?.error) {
+                                      updateRowError(setting.key, null)
+                                    }
+                                  }}
+                                />
+                              )}
                               {setting.disable_value !== null && setting.disable_value !== undefined && (
                                 <p className="text-xs text-slate-500">
                                   Use {setting.disable_value} to disable this limit.

@@ -16,6 +16,7 @@ _CACHE_TTL_SECONDS = 300
 
 VALUE_TYPE_INT = "int"
 VALUE_TYPE_FLOAT = "float"
+VALUE_TYPE_BOOL = "bool"
 
 
 @dataclass(frozen=True)
@@ -25,22 +26,24 @@ class SystemSettingDefinition:
     description: str
     value_type: str
     env_var: str
-    default_getter: Callable[[], int | float]
+    default_getter: Callable[[], int | float | bool]
     category: str
     unit: str | None = None
     min_value: int | float | None = None
     disable_value: int | float | None = None
 
-    def coerce(self, value: Any) -> int | float:
+    def coerce(self, value: Any) -> int | float | bool:
         if self.value_type == VALUE_TYPE_INT:
             coerced = _coerce_int(value)
         elif self.value_type == VALUE_TYPE_FLOAT:
             coerced = _coerce_float(value)
+        elif self.value_type == VALUE_TYPE_BOOL:
+            coerced = _coerce_bool(value)
         else:
             raise ValueError(f"Unsupported value type: {self.value_type}")
         if self.disable_value is not None and coerced == self.disable_value:
             return coerced
-        if self.min_value is not None and coerced < self.min_value:
+        if self.min_value is not None and isinstance(coerced, (int, float)) and coerced < self.min_value:
             raise ValueError(f"Value must be at least {self.min_value}.")
         return coerced
 
@@ -91,6 +94,15 @@ SYSTEM_SETTING_DEFINITIONS = (
         unit="seconds",
         min_value=1,
     ),
+    SystemSettingDefinition(
+        key="ACCOUNT_ALLOW_REGISTRATION",
+        label="Allow account signup",
+        description="Allow new users to create accounts.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="ACCOUNT_ALLOW_REGISTRATION",
+        default_getter=lambda: settings.ACCOUNT_ALLOW_REGISTRATION,
+        category="Accounts",
+    ),
 )
 
 SYSTEM_SETTING_DEFINITIONS_BY_KEY = {definition.key: definition for definition in SYSTEM_SETTING_DEFINITIONS}
@@ -126,6 +138,23 @@ def _coerce_float(value: Any) -> float:
     raise ValueError("Value must be a number.")
 
 
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        if value in (0, 1):
+            return bool(value)
+        raise ValueError("Value must be true or false.")
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if text in ("true", "1", "yes", "y", "on"):
+            return True
+        if text in ("false", "0", "no", "n", "off"):
+            return False
+        raise ValueError("Value must be true or false.")
+    raise ValueError("Value must be true or false.")
+
+
 def _get_system_setting_model():
     from api.models import SystemSetting
 
@@ -156,7 +185,7 @@ def get_setting_definition(key: str) -> SystemSettingDefinition | None:
     return SYSTEM_SETTING_DEFINITIONS_BY_KEY.get(key)
 
 
-def _parse_db_value(definition: SystemSettingDefinition, raw_value: str | None) -> int | float | None:
+def _parse_db_value(definition: SystemSettingDefinition, raw_value: str | None) -> int | float | bool | None:
     if raw_value is None:
         return None
     if isinstance(raw_value, str) and not raw_value.strip():
@@ -227,7 +256,7 @@ def list_system_settings() -> list[dict[str, Any]]:
     return [serialize_setting(definition, db_values) for definition in SYSTEM_SETTING_DEFINITIONS]
 
 
-def get_setting_value(key: str) -> int | float:
+def get_setting_value(key: str) -> int | float | bool:
     definition = SYSTEM_SETTING_DEFINITIONS_BY_KEY.get(key)
     if definition is None:
         raise KeyError(f"Unknown system setting: {key}")
@@ -264,3 +293,7 @@ def get_mcp_stdio_timeout_seconds() -> float:
 
 def get_litellm_timeout_seconds() -> int:
     return int(get_setting_value("LITELLM_TIMEOUT_SECONDS"))
+
+
+def get_account_allow_registration() -> bool:
+    return bool(get_setting_value("ACCOUNT_ALLOW_REGISTRATION"))

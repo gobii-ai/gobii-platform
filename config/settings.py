@@ -327,6 +327,7 @@ TEMPLATES = [
                 "django.template.context_processors.i18n",
                 "django.template.context_processors.debug",
                 "config.context_processors.global_settings_context",
+                "config.context_processors.account_allow_registration",
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
                 "pages.context_processors.show_signup_tracking",
