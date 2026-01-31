@@ -459,6 +459,23 @@ MEMBER_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.SERVICE_PARTNER,
 }
 
+OWNER_EQUIVALENT_ROLES = (
+    OrganizationMembership.OrgRole.OWNER,
+    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+)
+
+def _resolve_allowed_role_choices_for_role(role: str | None) -> list[tuple[str, str]]:
+    all_role_choices = list(OrganizationMembership.OrgRole.choices)
+    if role in OWNER_EQUIVALENT_ROLES:
+        return all_role_choices
+    if role == OrganizationMembership.OrgRole.ADMIN:
+        return [
+            c
+            for c in all_role_choices
+            if c[0] not in OWNER_EQUIVALENT_ROLES
+        ]
+    return []
+
 API_KEY_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
@@ -7235,6 +7252,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "can_manage_members": self.can_manage_members,
                 "can_manage_billing": self.can_manage_billing,
                 "allowed_role_choices": self.allowed_role_choices,
+                "admin_locked_roles": list(OWNER_EQUIVALENT_ROLES),
                 "is_org_owner": self.is_org_owner,
                 "is_org_admin": self.is_org_admin,
                 "is_org_service_partner": self.is_org_service_partner,
@@ -7244,20 +7262,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         return context
 
     def _resolve_allowed_role_choices(self) -> list[tuple[str, str]]:
-        all_role_choices = list(OrganizationMembership.OrgRole.choices)
-        if self.is_org_owner_equivalent:
-            return all_role_choices
-        if self.is_org_admin:
-            return [
-                c
-                for c in all_role_choices
-                if c[0]
-                not in (
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
-                )
-            ]
-        return []
+        role = self.membership.role if self.membership else None
+        return _resolve_allowed_role_choices_for_role(role)
 
     @tracer.start_as_current_span("CONSOLE Organization Invite")
     @transaction.atomic
@@ -7370,24 +7376,7 @@ class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
             return HttpResponseForbidden()
 
         self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
-        all_role_choices = list(OrganizationMembership.OrgRole.choices)
-        if self.membership.role in (
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.SERVICE_PARTNER,
-        ):
-            self.allowed_role_choices = all_role_choices
-        elif self.membership.role == OrganizationMembership.OrgRole.ADMIN:
-            self.allowed_role_choices = [
-                c
-                for c in all_role_choices
-                if c[0]
-                not in (
-                    OrganizationMembership.OrgRole.OWNER,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
-                )
-            ]
-        else:
-            self.allowed_role_choices = []
+        self.allowed_role_choices = _resolve_allowed_role_choices_for_role(self.membership.role)
         return super().dispatch(request, *args, **kwargs)
 
     def get(self, request, *args, **kwargs):
