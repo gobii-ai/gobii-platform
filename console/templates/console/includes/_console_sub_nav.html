@@ -84,6 +84,7 @@ function navigationMenu() {
   return {
     showBilling: {{ stripe_enabled|yesno:'true,false' }},
     hasStripe: {{ stripe_enabled|yesno:'true,false' }},
+    servicePartnerBillingAccess: {{ service_partner_billing_access|yesno:'true,false' }},
     userRole: null,
     
     init() {
@@ -111,7 +112,10 @@ function navigationMenu() {
       if ('{{ membership.org.id }}' === orgId) {
         this.userRole = '{{ membership.role }}';
         // Show billing only for owners, admins, and billing admins
-        this.showBilling = ['owner', 'admin', 'billing_admin'].includes(this.userRole);
+        const billingRoles = this.servicePartnerBillingAccess
+          ? ['owner', 'admin', 'billing_admin', 'service_partner']
+          : ['owner', 'admin', 'billing_admin'];
+        this.showBilling = billingRoles.includes(this.userRole);
       }
       {% endfor %}
     }
