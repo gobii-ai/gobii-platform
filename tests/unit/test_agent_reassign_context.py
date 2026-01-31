@@ -124,9 +124,11 @@ class AgentReassignContextTests(TestCase):
             data={"action": "reassign_org", "target_org_id": str(self.org.id)},
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
         )
-        if resp.status_code != 200:
-            print("Service partner reassign response:", resp.status_code, getattr(resp, 'content', b'')[:500])
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.status_code,
+            200,
+            f"Service partner reassign response: {resp.status_code} {getattr(resp, 'content', b'')[:500]}",
+        )
         data = resp.json()
         self.assertTrue(data.get("success"))
         agent.refresh_from_db(fields=["organization_id"])

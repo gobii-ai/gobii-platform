@@ -1056,6 +1056,7 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
     def test_seats_reserved_excludes_service_partners(self):
         billing = self.org.billing
         billing.refresh_from_db()
+        # Active non-service-partner members are owner, admin, and viewer; founder allowance reduces by one.
         self.assertEqual(billing.seats_reserved, 2)
 
     def test_org_owned_agent_requires_paid_seat(self):
