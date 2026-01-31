@@ -842,7 +842,7 @@ def ingest_inbound_message(
                                     if agent_obj.organization_id:
                                         from api.models import OrganizationMembership
 
-                                        owner_memberships = OrganizationMembership.objects.filter(
+                                        owner_equivalent_memberships = OrganizationMembership.objects.filter(
                                             org=agent_obj.organization,
                                             role__in=[
                                                 OrganizationMembership.OrgRole.OWNER,
@@ -850,7 +850,7 @@ def ingest_inbound_message(
                                             ],
                                             status=OrganizationMembership.OrgStatus.ACTIVE,
                                         ).select_related("user")
-                                        for membership in owner_memberships:
+                                        for membership in owner_equivalent_memberships:
                                             owner_email = (membership.user.email or "").strip()
                                             if owner_email:
                                                 recipients.add(owner_email)
