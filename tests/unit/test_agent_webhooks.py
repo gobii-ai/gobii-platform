@@ -78,7 +78,7 @@ class AgentWebhookToolTests(TestCase):
             self.assertEqual(self.webhook.last_error_message, "")
 
             called_kwargs = mock_post.call_args.kwargs
-            self.assertEqual(called_kwargs["json"]["payload"], payload)
+            self.assertEqual(called_kwargs["json"], payload)
             self.assertEqual(called_kwargs["headers"]["User-Agent"], "Gobii-AgentWebhook/1.0")
             self.assertEqual(
                 called_kwargs["proxies"],
