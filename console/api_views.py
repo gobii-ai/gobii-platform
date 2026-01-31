@@ -170,6 +170,8 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.BILLING,
 }
+if settings.SERVICE_PARTNER_BILLING_ACCESS:
+    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SERVICE_PARTNER)
 
 
 def _can_manage_contact_packs(request: HttpRequest, agent: PersistentAgent, plan_payload: dict | None) -> bool:
@@ -1433,6 +1435,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
+                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
                 ]
             ).values_list("org_id", flat=True)
         )

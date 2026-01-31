@@ -845,7 +845,10 @@ def ingest_inbound_message(
 
                                         owner_memberships = OrganizationMembership.objects.filter(
                                             org=agent_obj.organization,
-                                            role=OrganizationMembership.OrgRole.OWNER,
+                                            role__in=[
+                                                OrganizationMembership.OrgRole.OWNER,
+                                                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                                            ],
                                             status=OrganizationMembership.OrgStatus.ACTIVE,
                                         ).select_related("user")
                                         for membership in owner_memberships:

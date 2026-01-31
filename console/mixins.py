@@ -7,6 +7,7 @@ from django.http import Http404
 from api.models import OrganizationMembership
 
 from .context_helpers import build_console_context
+from config import settings
 from util.integrations import stripe_status
 from util.subscription_helper import get_user_plan
 from constants.plans import PlanNames
@@ -56,6 +57,7 @@ class ConsoleContextMixin:
                 context['user_plan'] = ""
 
         context['stripe_enabled'] = stripe_status().enabled
+        context['service_partner_billing_access'] = settings.SERVICE_PARTNER_BILLING_ACCESS
 
         return context
 
