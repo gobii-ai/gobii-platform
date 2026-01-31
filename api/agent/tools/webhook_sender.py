@@ -203,14 +203,6 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
         logger.warning("Agent %s attempted to call unknown webhook %s", agent.id, webhook_id)
         return {"status": "error", "message": "Webhook not found for this agent."}
 
-    body = {
-        "agent_id": str(agent.id),
-        "agent_name": agent.name,
-        "webhook_id": str(webhook.id),
-        "webhook_name": webhook.name,
-        "payload": payload,
-    }
-
     request_headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
     request_headers.update(headers)
 
@@ -246,7 +238,7 @@ def execute_send_webhook_event(agent: PersistentAgent, params: Dict[str, Any]) -
     try:
         response = requests.post(
             webhook.url,
-            json=body,
+            json=payload,
             headers=request_headers,
             timeout=DEFAULT_TIMEOUT_SECONDS,
             proxies=proxies,
