@@ -39,6 +39,7 @@ from ...models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from api.services.system_settings import get_max_file_size
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
@@ -179,12 +180,12 @@ def _should_skip_signature_attachment(filename: str, content_type: str) -> bool:
 
 @tracer.start_as_current_span("_save_attachments")
 def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any]) -> None:
+    max_bytes = get_max_file_size()
     for att in attachments:
         file_obj: File | None = None
         content_type = ""
         filename = "attachment"
         size = None
-        max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
         url = None
         content_type_hint = ""
         if hasattr(att, "read"):

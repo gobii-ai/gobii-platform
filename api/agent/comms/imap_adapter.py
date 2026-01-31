@@ -24,7 +24,7 @@ from .adapters import (
 )
 from .attachment_filters import is_signature_image_attachment
 from config.settings import EMAIL_STRIP_REPLIES
-from config import settings
+from api.services.system_settings import get_max_file_size
 import logging
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,7 @@ def _collect_attachments(msg: email.message.EmailMessage) -> List[Any]:
     Applies MAX_FILE_SIZE filtering best-effort based on decoded bytes length.
     """
     files: List[Any] = []
-    max_bytes = getattr(settings, "MAX_FILE_SIZE", 0) or 0
+    max_bytes = get_max_file_size()
 
     for part in msg.walk():
         ctype = (part.get_content_type() or "").lower()

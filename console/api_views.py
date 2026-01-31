@@ -147,6 +147,13 @@ from api.services import mcp_servers as mcp_server_service
 from api.services.template_clone import TemplateCloneError, TemplateCloneService
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.system_settings import (
+    clear_setting_value,
+    get_setting_definition,
+    list_system_settings,
+    serialize_setting,
+    set_setting_value,
+)
 from constants.plans import PlanNamesChoices
 from util.integrations import stripe_status
 from util.subscription_helper import get_active_subscription, get_organization_plan, get_user_plan
@@ -2496,6 +2503,49 @@ class ConsoleLLMOverviewAPIView(SystemAdminAPIView):
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         payload = build_llm_overview()
         return JsonResponse(payload)
+
+
+class SystemSettingsListAPIView(SystemAdminAPIView):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse({"settings": list_system_settings()})
+
+
+class SystemSettingDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, key: str, *args: Any, **kwargs: Any):
+        definition = get_setting_definition(key)
+        if definition is None:
+            return HttpResponseBadRequest("Unknown system setting")
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if _coerce_bool(payload.get("clear")):
+            clear_setting_value(definition)
+            return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
+
+        if "value" not in payload:
+            return HttpResponseBadRequest("value is required")
+
+        try:
+            coerced = definition.coerce(payload.get("value"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        set_setting_value(definition, coerced)
+        return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
+
+    def delete(self, request: HttpRequest, key: str, *args: Any, **kwargs: Any):
+        definition = get_setting_definition(key)
+        if definition is None:
+            return HttpResponseBadRequest("Unknown system setting")
+        clear_setting_value(definition)
+        return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
 
 
 class LLMProviderListCreateAPIView(SystemAdminAPIView):

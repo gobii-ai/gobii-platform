@@ -26,6 +26,7 @@ from config import settings
 from browser_use import BrowserSession
 from browser_use.browser.events import FileDownloadedEvent
 
+from api.services.system_settings import get_max_file_size
 from ...models import AgentFsNode, PersistentAgent
 from ..files.filespace_service import (
     get_or_create_default_filespace,
@@ -77,7 +78,8 @@ def register_download_listener(browser_session: BrowserSession, persistent_agent
 
             try:
                 actual_size = os.path.getsize(local_path)
-                if actual_size > settings.MAX_FILE_SIZE:
+                max_file_size = get_max_file_size()
+                if max_file_size and actual_size > max_file_size:
                     span.set_attribute("download.rejected_too_large", True)
                     return
 

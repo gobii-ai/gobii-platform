@@ -6,13 +6,12 @@ from html.parser import HTMLParser
 from typing import Any, Dict
 from urllib.parse import unquote_to_bytes
 
-from django.conf import settings
-
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
 from api.agent.tools.agent_variables import set_agent_variable, substitute_variables_as_data_uris
+from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
 
@@ -595,7 +594,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     # Substitute $[path] variables with data URIs (PDF needs embedded content, not URLs)
     html = substitute_variables_as_data_uris(html, agent)
 
-    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    max_size = get_max_file_size()
     if max_size:
         html_bytes = html.encode("utf-8")
         if len(html_bytes) > max_size:

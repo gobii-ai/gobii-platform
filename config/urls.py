@@ -37,6 +37,8 @@ from console.api_views import (
     AgentWebSessionStartAPIView,
     ConsoleSessionAPIView,
     ConsoleLLMOverviewAPIView,
+    SystemSettingsListAPIView,
+    SystemSettingDetailAPIView,
     LLMProviderListCreateAPIView,
     LLMProviderDetailAPIView,
     PersistentEndpointListCreateAPIView,
@@ -134,6 +136,7 @@ from console.views import (
     PersistentAgentsView,
     ConsoleDiagnosticsView,
     ConsoleUsageView,
+    SystemSettingsView,
     ConsoleLLMConfigView,
     MCPServerManagementView,
     MCPOAuthCallbackPageView,
@@ -217,6 +220,9 @@ urlpatterns = [
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
     
+    # system settings
+    path("system-settings/", SystemSettingsView.as_view(), name="system-settings"),
+
     # console
     path("console/", ConsoleHome.as_view(), name="console-home"),
     path("console/diagnostics/", ConsoleDiagnosticsView.as_view(), name="console_diagnostics"),
@@ -282,6 +288,8 @@ urlpatterns = [
         PersistentAgentViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}),
         name="console_agent_detail",
     ),
+    path("system-settings/api/", SystemSettingsListAPIView.as_view(), name="system_settings_list"),
+    path("system-settings/api/<slug:key>/", SystemSettingDetailAPIView.as_view(), name="system_setting_detail"),
     path("console/api/llm/overview/", ConsoleLLMOverviewAPIView.as_view(), name="console_llm_overview"),
     path("console/api/llm/providers/", LLMProviderListCreateAPIView.as_view(), name="console_llm_providers"),
     path("console/api/llm/providers/<uuid:provider_id>/", LLMProviderDetailAPIView.as_view(), name="console_llm_provider_detail"),

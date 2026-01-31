@@ -2,13 +2,12 @@ import mimetypes
 import os
 from typing import Any, Dict
 
-from django.conf import settings
-
 from api.models import PersistentAgent
 from api.agent.files.filespace_service import write_bytes_to_dir
 from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 from api.agent.tools.file_export_helpers import resolve_export_target
 from api.agent.tools.agent_variables import set_agent_variable
+from api.services.system_settings import get_max_file_size
 
 DISALLOWED_EXPORT_HINTS = {
     "csv": "Use create_csv to write CSV files.",
@@ -107,7 +106,7 @@ def execute_create_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[
         return {"status": "error", "message": hint}
 
     content_bytes = content.encode("utf-8")
-    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    max_size = get_max_file_size()
     if max_size and len(content_bytes) > max_size:
         return {
             "status": "error",

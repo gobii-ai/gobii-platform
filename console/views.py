@@ -4893,6 +4893,13 @@ class ConsoleUsageView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
+class SystemSettingsView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "system_settings.html"
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - read-only shell
+        return HttpResponseNotAllowed(['GET'])
+
+
 class ConsoleLLMConfigView(SystemAdminRequiredMixin, TemplateView):
     template_name = "console/llm_config.html"
 
