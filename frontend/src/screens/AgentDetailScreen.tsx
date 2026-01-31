@@ -3064,10 +3064,6 @@ function WebhookModal({ mode, webhook, onSubmit, onClose }: WebhookModalProps) {
             className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
             placeholder="https://example.com/webhooks/gobii"
           />
-          <p className="mt-2 text-xs text-gray-500">
-            We send a POST request with JSON payload including <code className="bg-gray-100 px-1 py-0.5 rounded">agent_id</code> and your provided{' '}
-            <code className="bg-gray-100 px-1 py-0.5 rounded">payload</code>.
-          </p>
         </div>
         <div className="flex items-center justify-end gap-3 pt-2">
           <button type="button" className="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50" onClick={onClose}>
