@@ -149,6 +149,37 @@ class OrganizationInvitesTest(TestCase):
         self.assertTrue(any("No seats available" in e for e in form.non_field_errors()))
         self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=email2).exists())
 
+    @tag("batch_organizations")
+    def test_service_partner_invite_does_not_require_seat(self):
+        service_partner = get_user_model().objects.create_user(
+            email="sp-inviter@example.com",
+            password="pw",
+            username="sp-inviter",
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=service_partner,
+            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+        )
+        billing = self.org.billing
+        billing.purchased_seats = 0
+        billing.save(update_fields=["purchased_seats"])
+
+        self.client.force_login(service_partner)
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+        resp = self.client.post(
+            detail_url,
+            {"email": "sp-invitee@example.com", "role": OrganizationMembership.OrgRole.SERVICE_PARTNER},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            OrganizationInvite.objects.filter(
+                org=self.org,
+                email__iexact="sp-invitee@example.com",
+                role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            ).exists()
+        )
+
     @patch("config.stripe_config._load_from_database", return_value=None)
     @patch("console.views.stripe.checkout.Session.create")
     @patch("console.views.get_or_create_stripe_customer")
@@ -814,6 +845,11 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.owner = User.objects.create_user(email="owner2@example.com", password="pw", username="owner2")
         self.admin = User.objects.create_user(email="admin@example.com", password="pw", username="admin")
         self.viewer = User.objects.create_user(email="viewer@example.com", password="pw", username="viewer")
+        self.service_partner = User.objects.create_user(
+            email="servicepartner@example.com",
+            password="pw",
+            username="servicepartner",
+        )
         self.removed_user = User.objects.create_user(email="removed@example.com", password="pw", username="removed")
         self.outsider = User.objects.create_user(email="outsider@example.com", password="pw", username="outsider")
 
@@ -827,6 +863,11 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
             org=self.org,
             user=self.admin,
             role=OrganizationMembership.OrgRole.ADMIN,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.service_partner,
+            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
         )
         billing = self.org.billing
         billing.purchased_seats = 5
@@ -950,6 +991,72 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         self.assertEqual(resp.status_code, 302)
         m = OrganizationMembership.objects.get(org=self.org, user=self.viewer)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
+
+    @tag("batch_organizations")
+    def test_service_partner_can_invite_members(self):
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+        self.client.force_login(self.service_partner)
+        resp = self.client.post(
+            detail_url,
+            {"email": "member-invite@example.com", "role": OrganizationMembership.OrgRole.MEMBER},
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertTrue(
+            OrganizationInvite.objects.filter(
+                org=self.org,
+                email__iexact="member-invite@example.com",
+                role=OrganizationMembership.OrgRole.MEMBER,
+            ).exists()
+        )
+
+    @tag("batch_organizations")
+    @patch("console.views.stripe.billing_portal.Session.create")
+    def test_service_partner_can_manage_billing(self, mock_portal_create):
+        billing = self.org.billing
+        billing.stripe_customer_id = "cus_test"
+        billing.save(update_fields=["stripe_customer_id"])
+        mock_portal_create.return_value = MagicMock(url="https://stripe.test/portal")
+
+        self.client.force_login(self.service_partner)
+        portal_url = reverse("organization_seat_portal", kwargs={"org_id": self.org.id})
+        resp = self.client.post(portal_url)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/portal")
+
+    @tag("batch_organizations")
+    def test_admin_cannot_modify_or_assign_service_partner(self):
+        role_service_partner_url = reverse(
+            "org_member_role_update_org",
+            kwargs={"org_id": self.org.id, "user_id": self.service_partner.id},
+        )
+        role_viewer_url = reverse(
+            "org_member_role_update_org",
+            kwargs={"org_id": self.org.id, "user_id": self.viewer.id},
+        )
+
+        self.client.force_login(self.admin)
+        self.assertEqual(
+            self.client.post(
+                role_service_partner_url,
+                {"role": OrganizationMembership.OrgRole.MEMBER},
+            ).status_code,
+            403,
+        )
+        self.assertEqual(
+            self.client.post(
+                role_viewer_url,
+                {"role": OrganizationMembership.OrgRole.SERVICE_PARTNER},
+            ).status_code,
+            403,
+        )
+        membership = OrganizationMembership.objects.get(org=self.org, user=self.service_partner)
+        self.assertEqual(membership.role, OrganizationMembership.OrgRole.SERVICE_PARTNER)
+
+    @tag("batch_organizations")
+    def test_seats_reserved_excludes_service_partners(self):
+        billing = self.org.billing
+        billing.refresh_from_db()
+        self.assertEqual(billing.seats_reserved, 2)
 
     def test_org_owned_agent_requires_paid_seat(self):
         owner = self.owner
