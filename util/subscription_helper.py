@@ -999,13 +999,9 @@ def get_users_due_for_monthly_grant(days: int = 35):
         today = timezone.now().date()
         window_start = today - timedelta(days=max(days - 1, 0))
 
-        # Note: We do NOT filter by billing__subscription here. Users who previously
-        # had paid subscriptions but then canceled may still have their billing.subscription
-        # set to the old plan name. The caller (grant_monthly_free_credits) uses
-        # filter_users_without_active_subscription() to properly filter out users
-        # who have active Stripe subscriptions.
         annotated_users = (
             User.objects.filter(is_active=True)
+            .filter(Q(billing__subscription=PlanNames.FREE) | Q(billing__isnull=True))
             .annotate(
                 billing_day=Coalesce(billing_anchor, Value(1, output_field=IntegerField())),
                 last_grant_date=latest_grant,
