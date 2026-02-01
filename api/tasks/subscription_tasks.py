@@ -48,11 +48,16 @@ def grant_monthly_free_credits() -> None:
             logger.warning("djstripe not available; skipping free credit grant")
             return
 
-        # Get users with credits expiring soon
+        # Get users who are due for their monthly grant based on billing cycle
         users = get_users_due_for_monthly_grant()
+        logger.info("grant_monthly_free_credits: %d users due for monthly grant", len(users))
 
-        # Filter to those without an active subscription
+        # Filter to those without an active Stripe subscription (free plan users)
         users_without_subscription = filter_users_without_active_subscription(users)
+        logger.info(
+            "grant_monthly_free_credits: %d users without active subscription (will receive grant)",
+            len(users_without_subscription),
+        )
 
         free_plan = PLAN_CONFIG[PlanNamesChoices.FREE]
         TaskCredit = apps.get_model("api", "TaskCredit")
