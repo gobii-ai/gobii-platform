@@ -416,10 +416,14 @@ export function AgentChatPage({
       storeConsoleContext(rosterQuery.data.context)
       return
     }
-    if (rosterQuery.isError) {
-      // Keep contextReady derived; no state update needed
+    if (rosterQuery.isError && contextData?.context) {
+      const next = contextData.context
+      if (resolvedContext?.id !== next.id || resolvedContext?.type !== next.type) {
+        // Use current console context as fallback so roster failures don't block chat init.
+        setResolvedContext(next)
+      }
     }
-  }, [rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
+  }, [contextData?.context, resolvedContext, rosterQuery.isError, rosterQuery.isSuccess, rosterQuery.data?.context])
 
   const autoScrollPinnedRef = useRef(autoScrollPinned)
   // Sync ref during render (not in useEffect) so ResizeObservers see updated value immediately
@@ -812,7 +816,7 @@ export function AgentChatPage({
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady
-  const rosterLoading = rosterQuery.isLoading || !contextReady || (hasSelectedAgent && !resolvedContext)
+  const rosterLoading = rosterQuery.isLoading || !agentContextReady
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
       return null
