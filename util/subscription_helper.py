@@ -394,6 +394,25 @@ def get_stripe_customer(owner) -> Customer | None:
                 preferred = candidates.filter(deleted=False)
                 if preferred.exists():
                     candidates = preferred
+                now_ts = int(timezone.now().timestamp())
+                active_statuses = ["active", "trialing"]
+                active_customer = candidates.filter(
+                    subscriptions__stripe_data__status__in=active_statuses,
+                    subscriptions__stripe_data__current_period_end__gte=now_ts,
+                ).order_by(
+                    "-livemode",
+                    "-created",
+                    "-djstripe_created",
+                    "-djstripe_id",
+                ).first()
+                if active_customer:
+                    logger.warning(
+                        "Multiple Stripe customers for user %s; using %s with active subscription",
+                        getattr(owner, "id", "unknown"),
+                        getattr(active_customer, "id", None),
+                    )
+                    return active_customer
+
                 customer = candidates.order_by(
                     "-livemode",
                     "-created",
@@ -401,7 +420,7 @@ def get_stripe_customer(owner) -> Customer | None:
                     "-djstripe_id",
                 ).first()
                 logger.warning(
-                    "Multiple Stripe customers for user %s; using %s",
+                    "Multiple Stripe customers for user %s; using %s (most recent)",
                     getattr(owner, "id", "unknown"),
                     getattr(customer, "id", None),
                 )
