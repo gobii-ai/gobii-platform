@@ -473,8 +473,14 @@ def _resolve_allowed_role_choices_for_role(role: str | None) -> list[tuple[str, 
             c
             for c in all_role_choices
             if c[0] not in OWNER_EQUIVALENT_ROLES
-        ]
+    ]
     return []
+
+def _can_invite_service_partner(allowed_roles: list[tuple[str, str]]) -> bool:
+    return any(
+        value == OrganizationMembership.OrgRole.SERVICE_PARTNER
+        for value, _label in allowed_roles
+    )
 
 API_KEY_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
@@ -7253,6 +7259,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "can_manage_billing": self.can_manage_billing,
                 "allowed_role_choices": self.allowed_role_choices,
                 "admin_locked_roles": list(OWNER_EQUIVALENT_ROLES),
+                "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
                 "is_org_owner": self.is_org_owner,
                 "is_org_admin": self.is_org_admin,
                 "is_org_service_partner": self.is_org_service_partner,
@@ -7351,6 +7358,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "org": self.org,
                 "org_billing": billing,
                 "can_manage_billing": self.can_manage_billing,
+                "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
             }
             return render(
                 request,
@@ -7385,6 +7393,7 @@ class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
             "org": self.org,
             "org_billing": getattr(self.org, "billing", None),
             "can_manage_billing": self.can_manage_billing,
+            "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
         }
         return render(request, "partials/_org_invite_modal.html", context)
 

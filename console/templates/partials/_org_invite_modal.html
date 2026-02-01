@@ -43,7 +43,9 @@
       </svg>
       <div>
         <span class="font-medium">No seats available for standard members.</span>
-        You can still invite Service Partners.
+        {% if can_invite_service_partner %}
+          You can still invite Service Partners.
+        {% endif %}
         Purchase additional seats before inviting members who need seats.
         {% if can_manage_billing %}
           <a href="{% url 'billing' %}" class="font-medium underline">Manage seats</a>.
