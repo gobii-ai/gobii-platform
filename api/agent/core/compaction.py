@@ -119,14 +119,16 @@ def ensure_comms_compacted(
         # Materialise once; len(raw_messages) avoids an extra COUNT(*) query.
         raw_messages: List[PersistentAgentMessage] = list(raw_qs)
 
-        span.set_attribute("compaction.raw_messages", len(raw_messages))
+        raw_count = len(raw_messages)
+        span.set_attribute("compaction.raw_messages", raw_count)
         span.set_attribute("compaction.raw_limit", RAW_MSG_LIMIT)
 
-        tail_count = min(COMMS_COMPACTION_TAIL, max(len(raw_messages) - 1, 0))
-        compacted_count = max(len(raw_messages) - tail_count, 0)
-        if compacted_count <= RAW_MSG_LIMIT:
+        if raw_count <= RAW_MSG_LIMIT:
             return  # Nothing to summarise yet.
 
+        # Keep the most recent messages raw; compact everything earlier.
+        tail_count = min(COMMS_COMPACTION_TAIL, max(raw_count - 1, 0))
+        compacted_count = max(raw_count - tail_count, 0)
         messages_to_compact = raw_messages[:compacted_count]
         if not messages_to_compact:
             return

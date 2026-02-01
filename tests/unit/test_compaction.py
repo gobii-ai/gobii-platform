@@ -63,8 +63,8 @@ class CompactionTests(TestCase):
         # Sanity-check: no snapshots at start
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 0)
 
-        # Create one more message than the limit + tail
-        num_messages = RAW_MSG_LIMIT + COMMS_COMPACTION_TAIL + 1
+        # Create one more message than the raw limit
+        num_messages = RAW_MSG_LIMIT + 1
         for i in range(num_messages):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
@@ -98,10 +98,9 @@ class CompactionTests(TestCase):
     def test_no_compaction_when_at_or_below_limit(self):
         """No snapshot should be created when raw messages <= limit."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
-        from api.agent.core.compaction import COMMS_COMPACTION_TAIL
 
-        # Create up to the limit + tail (should not compact)
-        for i in range(RAW_MSG_LIMIT + COMMS_COMPACTION_TAIL):
+        # Create up to the limit (should not compact)
+        for i in range(RAW_MSG_LIMIT):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
         # Run compaction
@@ -117,7 +116,7 @@ class CompactionTests(TestCase):
         from api.agent.core.compaction import COMMS_COMPACTION_TAIL
 
         # ------------------- First batch ------------------- #
-        first_batch = RAW_MSG_LIMIT + COMMS_COMPACTION_TAIL + 1
+        first_batch = RAW_MSG_LIMIT + 1
         for i in range(first_batch):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
@@ -127,7 +126,7 @@ class CompactionTests(TestCase):
         self.assertIsNotNone(first_snapshot)
 
         # ------------------ Second batch ------------------ #
-        second_batch = RAW_MSG_LIMIT + COMMS_COMPACTION_TAIL + 2  # different size to distinguish
+        second_batch = RAW_MSG_LIMIT + 1
         start_sec = first_batch + 1
         for i in range(second_batch):
             self._make_message(self.agent.created_at + timedelta(seconds=start_sec + i))
