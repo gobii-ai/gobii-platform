@@ -331,10 +331,7 @@ export function SystemSettingsScreen() {
                       const isBool = setting.value_type === 'bool'
                       const boolValue =
                         draftValue.trim() !== '' ? draftValue === 'true' : Boolean(setting.effective_value)
-                      const minValue =
-                        setting.disable_value !== null && setting.disable_value !== undefined
-                          ? setting.disable_value
-                          : setting.min_value ?? undefined
+                      const minValue = setting.min_value ?? undefined
                       const placeholderValue =
                         hasOverride && draftValue.trim() === '' ? setting.fallback_value : setting.effective_value
                       return (
