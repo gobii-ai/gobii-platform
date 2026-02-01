@@ -36,12 +36,19 @@ from .token_usage import log_agent_completion, set_usage_span_attributes
 #  Tunables – can be overridden via Django settings for easy experimentation  #
 # --------------------------------------------------------------------------- #
 RAW_MSG_LIMIT: int = getattr(settings, "PA_RAW_MSG_LIMIT", 20)
+COMMS_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_COMMS_COMPACTION_TAIL", 5))
 
 # Tracer shared across backend codebase
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
-__all__ = ["ensure_comms_compacted", "RAW_MSG_LIMIT", "ensure_steps_compacted", "llm_summarise_comms"]
+__all__ = [
+    "ensure_comms_compacted",
+    "RAW_MSG_LIMIT",
+    "COMMS_COMPACTION_TAIL",
+    "ensure_steps_compacted",
+    "llm_summarise_comms",
+]
 
 # --------------------------------------------------------------------------- #
 #  Public helper                                                               
@@ -115,20 +122,26 @@ def ensure_comms_compacted(
         span.set_attribute("compaction.raw_messages", len(raw_messages))
         span.set_attribute("compaction.raw_limit", RAW_MSG_LIMIT)
 
-        if len(raw_messages) <= RAW_MSG_LIMIT:
-            return  # Nothing to summarise.
+        tail_count = min(COMMS_COMPACTION_TAIL, max(len(raw_messages) - 1, 0))
+        compacted_count = max(len(raw_messages) - tail_count, 0)
+        if compacted_count <= RAW_MSG_LIMIT:
+            return  # Nothing to summarise yet.
+
+        messages_to_compact = raw_messages[:compacted_count]
+        if not messages_to_compact:
+            return
 
         previous_summary = last_snap.summary if last_snap else ""
 
         # Provide the value we will later use to detect race conditions.
-        snapshot_until = raw_messages[-1].timestamp
+        snapshot_until = messages_to_compact[-1].timestamp
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work happens *outside* the lock.
     try:
         with tracer.start_as_current_span("COMPACT Summarise") as summarise_span:
             summarise_span.set_attribute("messages.count", len(raw_messages))
-            new_summary = summarise_fn(previous_summary, raw_messages, safety_identifier)
+            new_summary = summarise_fn(previous_summary, messages_to_compact, safety_identifier)
     except Exception:  # pragma: no cover – downstream will handle retry logic
         logger = logging.getLogger(__name__)
         logger.exception("summarise_fn failed; skipping compaction for agent %s", agent.id)
