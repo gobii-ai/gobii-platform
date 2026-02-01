@@ -1,7 +1,7 @@
 from allauth.account.adapter import get_adapter
 from django.core.exceptions import ValidationError
 from django.http import HttpRequest
-from django.test import SimpleTestCase, override_settings, tag
+from django.test import SimpleTestCase, TestCase, override_settings, tag
 
 @tag("batch_email_blocklist")
 class SignupEmailBlocklistTests(SimpleTestCase):
@@ -31,7 +31,7 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
 
 @tag("batch_email_blocklist")
-class SignupRegistrationGateTests(SimpleTestCase):
+class SignupRegistrationGateTests(TestCase):
     @override_settings(ACCOUNT_ALLOW_REGISTRATION=False)
     def test_signup_disabled(self) -> None:
         adapter = get_adapter()
