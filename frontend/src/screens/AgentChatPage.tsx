@@ -331,7 +331,8 @@ export function AgentChatPage({
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = resolvedContext ?? contextData?.context ?? null
   const contextReady = Boolean(effectiveContext)
-  const liveAgentId = contextSwitching || !contextReady ? null : activeAgentId
+  const agentContextReady = activeAgentId ? Boolean(resolvedContext) : contextReady
+  const liveAgentId = contextSwitching || !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
@@ -447,7 +448,7 @@ export function AgentChatPage({
 
   useEffect(() => {
     // Skip initialization for new agent (null agentId)
-    if (!contextReady) return
+    if (!agentContextReady) return
     if (!activeAgentId) return
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
@@ -472,7 +473,7 @@ export function AgentChatPage({
     agentName,
     fetchInsights,
     initialize,
-    contextReady,
+    agentContextReady,
     persistContextSession,
     refreshContext,
     showContextSwitcher,
@@ -810,7 +811,7 @@ export function AgentChatPage({
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
-  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && contextReady
+  const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady
   const rosterLoading = rosterQuery.isLoading || !contextReady || (hasSelectedAgent && !resolvedContext)
   const contextSwitcher = useMemo(() => {
     if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
