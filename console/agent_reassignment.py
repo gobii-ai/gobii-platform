@@ -18,6 +18,7 @@ def reassign_agent_organization(request, agent, target_org_id: str | None) -> di
             role__in=[
                 OrganizationMembership.OrgRole.OWNER,
                 OrganizationMembership.OrgRole.ADMIN,
+                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
             ],
         ).exists()
         if not has_rights:

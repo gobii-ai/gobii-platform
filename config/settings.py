@@ -87,6 +87,8 @@ FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
 # Enable insights system (contextual info during agent processing)
 INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
+# Allow solutions partners to access billing pages
+SOLUTIONS_PARTNER_BILLING_ACCESS = env.bool("SOLUTIONS_PARTNER_BILLING_ACCESS", default=True)
 # Maximum times we will allow the same provider/model to be preferred consecutively
 MAX_PREFERRED_PROVIDER_STREAK = env.int("MAX_PREFERRED_PROVIDER_STREAK", default=3)
 # Default timeout (seconds) for LiteLLM requests

@@ -1121,9 +1121,11 @@ class OrganizationInviteForm(forms.Form):
         ),
     )
 
-    def __init__(self, *args, org=None, **kwargs):
+    def __init__(self, *args, org=None, allowed_roles=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.org = org
+        if allowed_roles is not None:
+            self.fields["role"].choices = allowed_roles
 
     def clean_email(self):
         email = self.cleaned_data.get('email')
@@ -1158,6 +1160,10 @@ class OrganizationInviteForm(forms.Form):
         billing = getattr(self.org, "billing", None)
         if billing is None:
             raise forms.ValidationError('Organization billing configuration is missing for this organization.')
+
+        role = cleaned.get("role")
+        if role == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER:
+            return cleaned
 
         if billing.seats_available <= 0:
             raise forms.ValidationError('No seats available. Increase the seat count before inviting new members.')

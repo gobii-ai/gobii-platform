@@ -95,3 +95,41 @@ class AgentReassignContextTests(TestCase):
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.user.id))
+
+    def test_solutions_partner_can_reassign_agent_to_org(self):
+        solutions_partner = User.objects.create_user(
+            username="servicepartner",
+            email="servicepartner@example.com",
+            password="pw",
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=solutions_partner,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        browser = BrowserUseAgent.objects.create(user=solutions_partner, name="Solutions Partner Browser")
+        agent = PersistentAgent.objects.create(
+            user=solutions_partner,
+            organization=None,
+            name="Solutions Partner Agent",
+            charter="Help the org",
+            browser_use_agent=browser,
+        )
+
+        self.client.force_login(solutions_partner)
+        url = reverse("agent_detail", kwargs={"pk": agent.id})
+        resp = self.client.post(
+            url,
+            data={"action": "reassign_org", "target_org_id": str(self.org.id)},
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+        self.assertEqual(
+            resp.status_code,
+            200,
+            f"Solutions partner reassign response: {resp.status_code} {getattr(resp, 'content', b'')[:500]}",
+        )
+        data = resp.json()
+        self.assertTrue(data.get("success"))
+        agent.refresh_from_db(fields=["organization_id"])
+        self.assertEqual(str(agent.organization_id), str(self.org.id))

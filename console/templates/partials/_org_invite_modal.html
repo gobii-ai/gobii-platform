@@ -25,7 +25,7 @@
 {% block modal_body %}
 <div class="space-y-4 text-left">
   <p class="text-sm text-gray-600">
-    Send an invitation for a teammate to join <span class="font-medium">{{ org.name }}</span>.
+    Send an invitation for a teammate or Solutions Partner to join <span class="font-medium">{{ org.name }}</span>.
   </p>
 
   {% if form.non_field_errors %}
@@ -42,7 +42,11 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
       </svg>
       <div>
-        <span class="font-medium">No seats available.</span> Purchase additional seats before inviting new members.
+        <span class="font-medium">No seats available for standard members.</span>
+        {% if can_invite_solutions_partner %}
+          You can still invite Solutions Partners.
+        {% endif %}
+        Purchase additional seats before inviting members who need seats.
         {% if can_manage_billing %}
           <a href="{% url 'billing' %}" class="font-medium underline">Manage seats</a>.
         {% endif %}
@@ -59,7 +63,7 @@
     class="space-y-4"
   >
     {% csrf_token %}
-    <fieldset class="space-y-4" {% if org_billing and org_billing.seats_available <= 0 %}disabled aria-disabled="true"{% endif %}>
+    <fieldset class="space-y-4">
       <div class="space-y-1">
         {{ form.email.label_tag }}
         {{ form.email }}
@@ -82,20 +86,11 @@
 {% endblock %}
 
 {% block modal_footer %}
-{% if org_billing and org_billing.seats_available <= 0 %}
-  <button type="submit"
-          form="org-invite-form"
-          class="inline-flex w-full justify-center rounded-md border border-transparent bg-gray-400 px-4 py-2 text-base font-medium text-white shadow-sm opacity-70 cursor-not-allowed sm:ml-3 sm:w-auto sm:text-sm"
-          disabled aria-disabled="true">
-    Send Invite
-  </button>
-{% else %}
-  <button type="submit"
-          form="org-invite-form"
-          class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
-    Send Invite
-  </button>
-{% endif %}
+<button type="submit"
+        form="org-invite-form"
+        class="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 sm:ml-3 sm:w-auto sm:text-sm">
+  Send Invite
+</button>
 <button type="button"
         class="mt-3 inline-flex w-full justify-center rounded-md border border-gray-300 bg-white px-4 py-2 text-base font-medium text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
         x-on:click="$dispatch('close-modal', { id: 'org-invite-modal' })">
