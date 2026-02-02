@@ -24,7 +24,7 @@ def noop(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0277_add_tool_call_duration_ms"),
+        ("api", "0278_merge_20260202_1309"),
         ("waffle", "0001_initial"),
     ]
 
