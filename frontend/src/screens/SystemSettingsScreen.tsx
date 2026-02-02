@@ -326,7 +326,6 @@ export function SystemSettingsScreen() {
                     {category.settings.map((setting) => {
                       const draftValue = drafts[setting.key] ?? ''
                       const hasOverride = setting.db_value !== null && setting.db_value !== undefined
-                      const showEnvWarning = setting.env_set && hasOverride
                       const status = rowStatus[setting.key]
                       const isBool = setting.value_type === 'bool'
                       const boolValue =
