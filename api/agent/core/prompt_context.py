@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 import zstandard as zstd
 from waffle import get_waffle_flag_model
-from django.core.exceptions import ObjectDoesNotExist
+from django.core.exceptions import ImproperlyConfigured, MultipleObjectsReturned, ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.contrib.auth import get_user_model
@@ -1488,18 +1488,37 @@ def _is_structured_shrinker_enabled(agent: PersistentAgent) -> bool:
         return False
 
     try:
-        flag = get_waffle_flag_model().get(PROMPT_STRUCTURED_SHRINKER)
-    except Exception:
+        flag_model = get_waffle_flag_model()
+        flag = flag_model.objects.get(name=PROMPT_STRUCTURED_SHRINKER)
+        return bool(flag.is_active_for_user(agent.user))
+    except ImproperlyConfigured:
         logger.debug(
-            "Failed loading waffle flag '%s' for agent %s",
+            "Failed loading waffle flag model when evaluating '%s' for agent %s",
             PROMPT_STRUCTURED_SHRINKER,
             getattr(agent, "id", None),
             exc_info=True,
         )
-        return False
-    try:
-        return bool(flag.is_active_for_user(agent.user))
-    except Exception:
+    except ObjectDoesNotExist as exc:
+        if isinstance(exc, flag_model.DoesNotExist):
+            logger.debug(
+                "Waffle flag '%s' not found for agent %s. This is expected if migrations haven't run.",
+                PROMPT_STRUCTURED_SHRINKER,
+                getattr(agent, "id", None),
+            )
+        else:
+            logger.debug(
+                "User missing while evaluating waffle flag '%s' for agent %s",
+                PROMPT_STRUCTURED_SHRINKER,
+                getattr(agent, "id", None),
+            )
+    except MultipleObjectsReturned:
+        logger.debug(
+            "Multiple waffle flags named '%s' found when evaluating for agent %s",
+            PROMPT_STRUCTURED_SHRINKER,
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+    except DatabaseError:
         logger.debug(
             "Error evaluating waffle flag '%s' for user %s (agent %s)",
             PROMPT_STRUCTURED_SHRINKER,
@@ -1507,7 +1526,7 @@ def _is_structured_shrinker_enabled(agent: PersistentAgent) -> bool:
             getattr(agent, "id", None),
             exc_info=True,
         )
-        return False
+    return False
 
 
 def _get_history_shrinker(agent: PersistentAgent) -> str:

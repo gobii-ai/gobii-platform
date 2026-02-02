@@ -22,12 +22,11 @@ SQL_KEYWORDS_RE = re.compile(
 )
 
 PROTECTED_TOKEN_RE = re.compile(
-    r"__tool_results|__agent_config|__kanban_cards|"
+    r"\b__(?:tool_results|agent_config|kanban_cards)\b|"
     r"\$\[[^\]]+\]|"
-    r"result_id|result_json|result_text|analysis_json|"
-    r"task_id|query|prompt|sql|to_address|to_number|subject|method|status|error|"
+    r"\b(?:result_id|result_json|result_text|analysis_json|"
     r"sqlite_batch|json_extract|json_each|csv_parse|csv_headers|"
-    r"will_continue_work|CONTINUE_WORK_SIGNAL",
+    r"will_continue_work|CONTINUE_WORK_SIGNAL)\b",
     re.IGNORECASE,
 )
 
