@@ -85,6 +85,15 @@ DEFERRED_REFERRAL_CREDITS_ENABLED = env.bool("DEFERRED_REFERRAL_CREDITS_ENABLED"
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+# LLM-Lingua prompt compression (LLMLingua-2)
+LLMLINGUA_ENABLED = env.bool("LLMLINGUA_ENABLED", default=True)
+LLMLINGUA_MODEL_NAME = env.str(
+    "LLMLINGUA_MODEL_NAME",
+    default="microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank",
+)
+LLMLINGUA_DEVICE_MAP = env.str("LLMLINGUA_DEVICE_MAP", default="cpu")
+LLMLINGUA_USE_LLM_LINGUA2 = env.bool("LLMLINGUA_USE_LLM_LINGUA2", default=True)
+LLMLINGUA_MODEL_CONFIG = env.dict("LLMLINGUA_MODEL_CONFIG", default={})
 # Enable insights system (contextual info during agent processing)
 INSIGHTS_ENABLED = env.bool("INSIGHTS_ENABLED", default=True)
 # Allow solutions partners to access billing pages

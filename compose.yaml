@@ -93,6 +93,8 @@ services:
     build:
       context: .
       dockerfile: ./docker/Dockerfile
+      args:
+        PREFETCH_LLM_LINGUA: "1"
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully

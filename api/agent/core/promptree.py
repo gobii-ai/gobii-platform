@@ -5,6 +5,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
+_DEFAULT_SHRINKER = object()
 
 # ── helpers ────────────────────────────────────────────────────────────────
 def _default_estimator(s: str) -> int:
@@ -76,11 +77,13 @@ class _Node:
         renderer: Any,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = _DEFAULT_SHRINKER,
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
         """Add a section to this group."""
+        if shrinker is _DEFAULT_SHRINKER:
+            shrinker = self._prompt.default_shrinker if self._prompt else None
         self.children.append(
             _Node(name, weight, renderer, shrinker, use_jinja2, non_shrinkable=non_shrinkable, _prompt=self._prompt)
         )
@@ -91,7 +94,7 @@ class _Node:
         txt: str,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = _DEFAULT_SHRINKER,
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
@@ -112,11 +115,13 @@ class Prompt:
     def __init__(
         self,
         token_estimator: Callable[[str], int] = _default_estimator,
+        default_shrinker: str | Callable[[str, float], str] | None = "hmt",
         extra_shrinkers: Optional[
             Dict[str, Callable[[str, float], str]]
         ] = None,
     ):
         self.token_estimator = token_estimator
+        self.default_shrinker = default_shrinker
         self.shrinkers: Dict[str, Callable[[str, float], str]] = {
             "hmt": hmt,
         }
@@ -140,10 +145,12 @@ class Prompt:
         renderer: Any,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = _DEFAULT_SHRINKER,
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
+        if shrinker is _DEFAULT_SHRINKER:
+            shrinker = self.default_shrinker
         self.root.children.append(
             _Node(name, weight, renderer, shrinker, use_jinja2, non_shrinkable=non_shrinkable, _prompt=self)
         )
@@ -154,7 +161,7 @@ class Prompt:
         txt: str,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = _DEFAULT_SHRINKER,
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
