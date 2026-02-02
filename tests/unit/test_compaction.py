@@ -15,7 +15,7 @@ from api.models import (
 User = get_user_model()
 
 
-@override_settings(PA_RAW_MSG_LIMIT=10)
+@override_settings(PA_RAW_MSG_LIMIT=10, PA_COMMS_COMPACTION_TAIL=2)
 @tag("batch_compaction")
 class CompactionTests(TestCase):
     """Unit-tests for on-demand message history compaction."""
@@ -58,11 +58,12 @@ class CompactionTests(TestCase):
     def test_compaction_triggered_when_over_limit(self):
         """When raw messages > limit, a new snapshot is created."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
+        from api.agent.core.compaction import COMMS_COMPACTION_TAIL
 
         # Sanity-check: no snapshots at start
         self.assertEqual(PersistentAgentCommsSnapshot.objects.count(), 0)
 
-        # Create one more message than the limit
+        # Create one more message than the raw limit
         num_messages = RAW_MSG_LIMIT + 1
         for i in range(num_messages):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
@@ -77,20 +78,28 @@ class CompactionTests(TestCase):
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.agent, self.agent)
         self.assertIsNone(snapshot.previous_snapshot)
+        compacted_count = num_messages - COMMS_COMPACTION_TAIL
         self.assertIn(
-            f"[SUMMARY PLACEHOLDER for {num_messages} messages]", snapshot.summary
+            f"[SUMMARY PLACEHOLDER for {compacted_count} messages]", snapshot.summary
         )
 
-        # Check snapshot_until is correct (timestamp of the last message)
-        last_message = PersistentAgentMessage.objects.order_by("timestamp").last()
-        self.assertEqual(snapshot.snapshot_until, last_message.timestamp)
+        # Check snapshot_until is correct (timestamp of the last compacted message)
+        ordered = list(PersistentAgentMessage.objects.order_by("timestamp"))
+        expected_until = ordered[-(COMMS_COMPACTION_TAIL + 1)].timestamp
+        self.assertEqual(snapshot.snapshot_until, expected_until)
+
+        # Tail messages should remain after the snapshot cutoff
+        remaining = PersistentAgentMessage.objects.filter(
+            timestamp__gt=snapshot.snapshot_until
+        ).count()
+        self.assertEqual(remaining, COMMS_COMPACTION_TAIL)
 
     @tag("batch_compaction")
     def test_no_compaction_when_at_or_below_limit(self):
         """No snapshot should be created when raw messages <= limit."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
 
-        # Create exactly the limit number of messages
+        # Create up to the limit (should not compact)
         for i in range(RAW_MSG_LIMIT):
             self._make_message(self.agent.created_at + timedelta(seconds=i + 1))
 
@@ -104,6 +113,7 @@ class CompactionTests(TestCase):
     def test_incremental_compaction_with_existing_snapshot(self):
         """A second compaction should create a new snapshot linked to the previous one."""
         from api.agent.core.compaction import RAW_MSG_LIMIT
+        from api.agent.core.compaction import COMMS_COMPACTION_TAIL
 
         # ------------------- First batch ------------------- #
         first_batch = RAW_MSG_LIMIT + 1
@@ -116,7 +126,7 @@ class CompactionTests(TestCase):
         self.assertIsNotNone(first_snapshot)
 
         # ------------------ Second batch ------------------ #
-        second_batch = RAW_MSG_LIMIT + 2  # different size to distinguish
+        second_batch = RAW_MSG_LIMIT + 1
         start_sec = first_batch + 1
         for i in range(second_batch):
             self._make_message(self.agent.created_at + timedelta(seconds=start_sec + i))
@@ -131,10 +141,17 @@ class CompactionTests(TestCase):
 
         # Summary should include both the previous snapshot's content and the new placeholder.
         self.assertIn(first_snapshot.summary, latest_snapshot.summary)
+        expected_compacted = (
+            PersistentAgentMessage.objects.filter(
+                timestamp__gt=first_snapshot.snapshot_until
+            ).count()
+            - COMMS_COMPACTION_TAIL
+        )
         self.assertIn(
-            f"[SUMMARY PLACEHOLDER for {second_batch} messages]", latest_snapshot.summary
+            f"[SUMMARY PLACEHOLDER for {expected_compacted} messages]", latest_snapshot.summary
         )
 
-        # snapshot_until should correspond to the last message we've created
-        last_message = PersistentAgentMessage.objects.order_by("timestamp").last()
-        self.assertEqual(latest_snapshot.snapshot_until, last_message.timestamp) 
+        # snapshot_until should correspond to the last compacted message
+        ordered = list(PersistentAgentMessage.objects.order_by("timestamp"))
+        expected_until = ordered[-(COMMS_COMPACTION_TAIL + 1)].timestamp
+        self.assertEqual(latest_snapshot.snapshot_until, expected_until) 
