@@ -3,7 +3,6 @@ import os
 import tempfile
 from typing import Any, Dict, Optional
 
-from django.conf import settings
 from django.core.files.storage import default_storage
 
 from markitdown import MarkItDown
@@ -12,6 +11,7 @@ from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgent
 from api.agent.core.file_handler_config import get_file_handler_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.files.filespace_service import get_or_create_default_filespace
+from api.services.system_settings import get_max_file_size
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +76,11 @@ def _copy_node_to_tempfile(node: AgentFsNode) -> str:
 
     try:
         total_bytes = 0
+        max_size = get_max_file_size()
         with default_storage.open(node.content.name, "rb") as src, open(temp_path, "wb") as dst:
             for chunk in iter(lambda: src.read(BUFFER_SIZE), b""):
                 dst.write(chunk)
                 total_bytes += len(chunk)
-                max_size = getattr(settings, "MAX_FILE_SIZE", None)
                 if max_size and total_bytes > max_size:
                     raise ValueError(
                         f"File exceeds maximum allowed size while reading ({total_bytes} bytes > {max_size} bytes)."
@@ -157,7 +157,7 @@ def execute_read_file(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[st
     if not node.content or not getattr(node.content, "name", None):
         return {"status": "error", "message": "File has no stored content."}
 
-    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    max_size = get_max_file_size()
     if max_size and node.size_bytes and node.size_bytes > max_size:
         return {"status": "error", "message": f"File exceeds maximum allowed size ({node.size_bytes} bytes)."}
 

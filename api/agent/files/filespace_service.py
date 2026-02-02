@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, List
 
 from celery.utils.log import get_task_logger
-from django.conf import settings
 from django.core.exceptions import SuspiciousFileOperation
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
@@ -15,6 +14,7 @@ from django.utils.text import get_valid_filename
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
+from api.services.system_settings import get_max_file_size
 from ...models import (
     PersistentAgentMessage,
     AgentFileSpace,
@@ -210,7 +210,7 @@ def write_bytes_to_dir(
         return {"status": "error", "message": "File content must be bytes."}
 
     content_bytes = bytes(content_bytes)
-    max_size = getattr(settings, "MAX_FILE_SIZE", None)
+    max_size = get_max_file_size()
     if max_size and len(content_bytes) > max_size:
         return {
             "status": "error",

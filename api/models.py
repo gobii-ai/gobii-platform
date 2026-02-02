@@ -4462,6 +4462,27 @@ class StripeConfigEntry(models.Model):
         return bool(self.value_text)
 
 
+class SystemSetting(models.Model):
+    """System-level configuration override stored in the database."""
+
+    key = models.CharField(max_length=128, unique=True)
+    value_text = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["key"]
+        verbose_name = "System setting"
+        verbose_name_plural = "System settings"
+
+    def __str__(self) -> str:
+        return f"SystemSetting<{self.key}>"
+
+    @property
+    def has_value(self) -> bool:
+        return bool(self.value_text)
+
+
 class MeteringBatch(models.Model):
     """Audit record linking a batch of reserved usage to a Stripe meter event.
 

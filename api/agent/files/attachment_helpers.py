@@ -2,12 +2,12 @@ from dataclasses import dataclass
 from typing import Iterable, List
 from urllib.parse import urlencode
 
-from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core import signing
 from django.urls import reverse
 
 from api.models import AgentFileSpaceAccess, AgentFsNode, PersistentAgentMessageAttachment
+from api.services.system_settings import get_max_file_size
 from .filespace_service import get_or_create_default_filespace
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -279,7 +279,7 @@ def resolve_filespace_attachments(agent, raw_paths: object) -> List[ResolvedAtta
         )
         raise AttachmentResolutionError(f"Attachment not found in default filespace: {missing[0]}")
 
-    max_bytes = getattr(settings, "MAX_FILE_SIZE", None)
+    max_bytes = get_max_file_size()
     resolved: List[ResolvedAttachment] = []
     for path in paths:
         node = nodes_by_path[path]

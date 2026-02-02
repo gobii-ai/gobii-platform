@@ -7,6 +7,7 @@ from allauth.account.adapter import DefaultAccountAdapter
 from django.conf import settings
 from django.core.exceptions import ValidationError
 
+from api.services.system_settings import get_account_allow_registration
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
         return cleaned_email
 
     def is_open_for_signup(self, request) -> bool:
-        return settings.ACCOUNT_ALLOW_REGISTRATION
+        return get_account_allow_registration()
 
     @staticmethod
     def _match_blocked_domain(domain: str, blocked_domains: Iterable[str] | None) -> str | None:

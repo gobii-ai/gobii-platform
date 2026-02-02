@@ -22,6 +22,7 @@ from ...models import PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
 from ..files.attachment_helpers import build_signed_filespace_download_url
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
+from api.services.system_settings import get_max_file_size
 from .agent_variables import set_agent_variable
 
 logger = logging.getLogger(__name__)
@@ -477,7 +478,7 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     except (TypeError, ValueError):
         content_length = None
 
-    max_download_bytes = getattr(settings, "MAX_FILE_SIZE", None) if download_requested else None
+    max_download_bytes = get_max_file_size() if download_requested else None
     if download_requested and max_download_bytes and content_length and content_length > max_download_bytes:
         resp.close()
         return {
