@@ -9584,7 +9584,7 @@ class OrganizationMembership(models.Model):
     class OrgRole(models.TextChoices):
         OWNER = "owner", "Owner"
         ADMIN = "admin", "Admin"
-        SERVICE_PARTNER = "service_partner", "Service Partner"
+        SERVICE_PARTNER = "service_partner", "Solutions Partner"
         BILLING = "billing_admin", "Billing"
         MEMBER = "member", "Member"
         VIEWER = "viewer", "Viewer"

@@ -25,7 +25,7 @@
 {% block modal_body %}
 <div class="space-y-4 text-left">
   <p class="text-sm text-gray-600">
-    Send an invitation for a teammate or service partner to join <span class="font-medium">{{ org.name }}</span>.
+    Send an invitation for a teammate or Solutions Partner to join <span class="font-medium">{{ org.name }}</span>.
   </p>
 
   {% if form.non_field_errors %}
@@ -44,7 +44,7 @@
       <div>
         <span class="font-medium">No seats available for standard members.</span>
         {% if can_invite_service_partner %}
-          You can still invite Service Partners.
+          You can still invite Solutions Partners.
         {% endif %}
         Purchase additional seats before inviting members who need seats.
         {% if can_manage_billing %}

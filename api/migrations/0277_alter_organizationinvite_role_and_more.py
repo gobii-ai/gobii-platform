@@ -13,11 +13,11 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='organizationinvite',
             name='role',
-            field=models.CharField(choices=[('owner', 'Owner'), ('admin', 'Admin'), ('service_partner', 'Service Partner'), ('billing_admin', 'Billing'), ('member', 'Member'), ('viewer', 'Viewer')], max_length=20),
+            field=models.CharField(choices=[('owner', 'Owner'), ('admin', 'Admin'), ('service_partner', 'Solutions Partner'), ('billing_admin', 'Billing'), ('member', 'Member'), ('viewer', 'Viewer')], max_length=20),
         ),
         migrations.AlterField(
             model_name='organizationmembership',
             name='role',
-            field=models.CharField(choices=[('owner', 'Owner'), ('admin', 'Admin'), ('service_partner', 'Service Partner'), ('billing_admin', 'Billing'), ('member', 'Member'), ('viewer', 'Viewer')], max_length=20),
+            field=models.CharField(choices=[('owner', 'Owner'), ('admin', 'Admin'), ('service_partner', 'Solutions Partner'), ('billing_admin', 'Billing'), ('member', 'Member'), ('viewer', 'Viewer')], max_length=20),
         ),
     ]

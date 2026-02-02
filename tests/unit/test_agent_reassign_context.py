@@ -96,7 +96,7 @@ class AgentReassignContextTests(TestCase):
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.user.id))
 
-    def test_service_partner_can_reassign_agent_to_org(self):
+    def test_solutions_partner_can_reassign_agent_to_org(self):
         service_partner = User.objects.create_user(
             username="servicepartner",
             email="servicepartner@example.com",
@@ -108,11 +108,11 @@ class AgentReassignContextTests(TestCase):
             role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
-        browser = BrowserUseAgent.objects.create(user=service_partner, name="Service Partner Browser")
+        browser = BrowserUseAgent.objects.create(user=service_partner, name="Solutions Partner Browser")
         agent = PersistentAgent.objects.create(
             user=service_partner,
             organization=None,
-            name="Service Partner Agent",
+            name="Solutions Partner Agent",
             charter="Help the org",
             browser_use_agent=browser,
         )
@@ -127,7 +127,7 @@ class AgentReassignContextTests(TestCase):
         self.assertEqual(
             resp.status_code,
             200,
-            f"Service partner reassign response: {resp.status_code} {getattr(resp, 'content', b'')[:500]}",
+            f"Solutions partner reassign response: {resp.status_code} {getattr(resp, 'content', b'')[:500]}",
         )
         data = resp.json()
         self.assertTrue(data.get("success"))

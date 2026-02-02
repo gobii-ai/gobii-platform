@@ -2811,7 +2811,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
         except:
             context['owner_phone'] = None
 
-        # Provide organizations current user can reassign this agent into (owner/admin/service partner only)
+        # Provide organizations current user can reassign this agent into (owner/admin/solutions partner only)
         try:
             reassignable_orgs = Organization.objects.filter(
                 organizationmembership__user=self.request.user,
