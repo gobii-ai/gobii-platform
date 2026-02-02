@@ -1709,21 +1709,19 @@ class MCPToolManager:
         tool_name: str,
         params: Dict[str, Any],
         *,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: float,
     ):
         """Execute a tool asynchronously."""
         async with client:
-            effective_timeout = timeout_seconds
-            if effective_timeout is None:
-                effective_timeout = get_mcp_http_timeout_seconds()
+            # Timeout must be resolved before the async call to avoid sync ORM access in the event loop.
             try:
                 return await asyncio.wait_for(
                     client.call_tool(tool_name, params),
-                    timeout=effective_timeout,
+                    timeout=timeout_seconds,
                 )
             except asyncio.TimeoutError as exc:
                 raise asyncio.TimeoutError(
-                    f"MCP tool call timed out after {effective_timeout}s"
+                    f"MCP tool call timed out after {timeout_seconds}s"
                 ) from exc
     
     def cleanup(self):
