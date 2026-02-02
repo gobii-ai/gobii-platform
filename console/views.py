@@ -450,18 +450,18 @@ BILLING_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.ADMIN,
     OrganizationMembership.OrgRole.BILLING,
 }
-if settings.SERVICE_PARTNER_BILLING_ACCESS:
-    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SERVICE_PARTNER)
+if settings.SOLUTIONS_PARTNER_BILLING_ACCESS:
+    BILLING_MANAGE_ROLES.add(OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
 
 MEMBER_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 }
 
 OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 )
 
 def _resolve_allowed_role_choices_for_role(role: str | None) -> list[tuple[str, str]]:
@@ -476,16 +476,16 @@ def _resolve_allowed_role_choices_for_role(role: str | None) -> list[tuple[str, 
     ]
     return []
 
-def _can_invite_service_partner(allowed_roles: list[tuple[str, str]]) -> bool:
+def _can_invite_solutions_partner(allowed_roles: list[tuple[str, str]]) -> bool:
     return any(
-        value == OrganizationMembership.OrgRole.SERVICE_PARTNER
+        value == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         for value, _label in allowed_roles
     )
 
 API_KEY_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 }
 
 API_KEY_VIEW_ROLES = API_KEY_MANAGE_ROLES | {
@@ -2819,7 +2819,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 organizationmembership__role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
                 ],
             ).order_by('name')
         except ImportError:
@@ -3054,7 +3054,7 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
                 ],
             ).exists()
         return False
@@ -5052,7 +5052,7 @@ class SharedAgentAccessMixin:
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
                 ],
             ).exists()
         return agent
@@ -5157,7 +5157,7 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
                 role__in=[
                     OrganizationMembership.OrgRole.OWNER,
                     OrganizationMembership.OrgRole.ADMIN,
-                    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
                 ],
             ).exists()
         return False
@@ -7204,8 +7204,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
         self.is_org_owner = self.membership.role == OrganizationMembership.OrgRole.OWNER
         self.is_org_admin = self.membership.role == OrganizationMembership.OrgRole.ADMIN
-        self.is_org_service_partner = self.membership.role == OrganizationMembership.OrgRole.SERVICE_PARTNER
-        self.is_org_owner_equivalent = self.is_org_owner or self.is_org_service_partner
+        self.is_org_solutions_partner = self.membership.role == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
+        self.is_org_owner_equivalent = self.is_org_owner or self.is_org_solutions_partner
         self.allowed_role_choices = self._resolve_allowed_role_choices()
         # Set console context to this organization when visiting its page directly
         request.session['context_type'] = 'organization'
@@ -7222,8 +7222,8 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             org=self.org,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         ).select_related("user")
-        service_partners = memberships.filter(role=OrganizationMembership.OrgRole.SERVICE_PARTNER)
-        members = memberships.exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER)
+        solutions_partners = memberships.filter(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
+        members = memberships.exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
         # Pending invites for this organization
         now = timezone.now()
         org_pending_invites = (
@@ -7234,11 +7234,11 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 expires_at__gte=now,
             ).select_related("invited_by")
         )
-        service_partner_invites = org_pending_invites.filter(
-            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+        solutions_partner_invites = org_pending_invites.filter(
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
         )
         pending_invites = org_pending_invites.exclude(
-            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
         )
         billing = getattr(self.org, "billing", None)
 
@@ -7251,18 +7251,18 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
             {
                 "org": self.org,
                 "members": members,
-                "service_partners": service_partners,
+                "solutions_partners": solutions_partners,
                 "invite_form": invite_form,
                 "pending_invites": pending_invites,
-                "service_partner_invites": service_partner_invites,
+                "solutions_partner_invites": solutions_partner_invites,
                 "can_manage_members": self.can_manage_members,
                 "can_manage_billing": self.can_manage_billing,
                 "allowed_role_choices": self.allowed_role_choices,
                 "admin_locked_roles": list(OWNER_EQUIVALENT_ROLES),
-                "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
+                "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
                 "is_org_owner": self.is_org_owner,
                 "is_org_admin": self.is_org_admin,
-                "is_org_service_partner": self.is_org_service_partner,
+                "is_org_solutions_partner": self.is_org_solutions_partner,
                 "org_billing": billing,
             }
         )
@@ -7289,7 +7289,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         if (
             billing
             and billing.seats_available <= 0
-            and invite_role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+            and invite_role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         ):
             form.add_error(None, "No seats available. Increase the seat count before inviting new members.")
         if form.is_valid():
@@ -7358,7 +7358,7 @@ class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
                 "org": self.org,
                 "org_billing": billing,
                 "can_manage_billing": self.can_manage_billing,
-                "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
+                "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
             }
             return render(
                 request,
@@ -7393,7 +7393,7 @@ class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
             "org": self.org,
             "org_billing": getattr(self.org, "billing", None),
             "can_manage_billing": self.can_manage_billing,
-            "can_invite_service_partner": _can_invite_service_partner(self.allowed_role_choices),
+            "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
         }
         return render(request, "partials/_org_invite_modal.html", context)
 
@@ -7513,7 +7513,7 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
             },
             organization=invite.org,
         )
-        seat_eligible = membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+        seat_eligible = membership.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(request.user.id),
@@ -7589,7 +7589,7 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
                 },
                 organization=invite.org,
             )
-            seat_eligible = invite.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+            seat_eligible = invite.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
             seat_props = Analytics.with_org_properties(
                 {
                     'actor_id': str(request.user.id),
@@ -8295,7 +8295,7 @@ class _OrgPermissionMixin:
         if membership.role not in (
             OrganizationMembership.OrgRole.OWNER,
             OrganizationMembership.OrgRole.ADMIN,
-            OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
         ):
             return None
         return membership
@@ -8333,7 +8333,7 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                 },
                 organization=org,
             )
-            seat_eligible = invite.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+            seat_eligible = invite.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
             seat_props = Analytics.with_org_properties(
                 {
                     'actor_id': str(request.user.id),
@@ -8467,7 +8467,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             acting_membership.role == OrganizationMembership.OrgRole.ADMIN
             and target_membership.role in (
                 OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
             )
         ):
             return HttpResponseForbidden()
@@ -8494,7 +8494,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             },
             organization=org,
         )
-        seat_eligible = target_membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+        seat_eligible = target_membership.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(target_membership.user_id),
@@ -8566,7 +8566,7 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
             },
             organization=org,
         )
-        seat_eligible = membership.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+        seat_eligible = membership.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         seat_props = Analytics.with_org_properties(
             {
                 'member_id': str(request.user.id),
@@ -8637,12 +8637,12 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
         if acting_membership.role == OrganizationMembership.OrgRole.ADMIN:
             if target_membership.role in (
                 OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
             ):
                 return HttpResponseForbidden()
             if new_role in (
                 OrganizationMembership.OrgRole.OWNER,
-                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
             ):
                 return HttpResponseForbidden()
 

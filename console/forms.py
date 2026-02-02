@@ -1162,7 +1162,7 @@ class OrganizationInviteForm(forms.Form):
             raise forms.ValidationError('Organization billing configuration is missing for this organization.')
 
         role = cleaned.get("role")
-        if role == OrganizationMembership.OrgRole.SERVICE_PARTNER:
+        if role == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER:
             return cleaned
 
         if billing.seats_available <= 0:

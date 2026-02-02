@@ -97,27 +97,27 @@ class AgentReassignContextTests(TestCase):
         self.assertEqual(session.get("context_id"), str(self.user.id))
 
     def test_solutions_partner_can_reassign_agent_to_org(self):
-        service_partner = User.objects.create_user(
+        solutions_partner = User.objects.create_user(
             username="servicepartner",
             email="servicepartner@example.com",
             password="pw",
         )
         OrganizationMembership.objects.create(
             org=self.org,
-            user=service_partner,
-            role=OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            user=solutions_partner,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
             status=OrganizationMembership.OrgStatus.ACTIVE,
         )
-        browser = BrowserUseAgent.objects.create(user=service_partner, name="Solutions Partner Browser")
+        browser = BrowserUseAgent.objects.create(user=solutions_partner, name="Solutions Partner Browser")
         agent = PersistentAgent.objects.create(
-            user=service_partner,
+            user=solutions_partner,
             organization=None,
             name="Solutions Partner Agent",
             charter="Help the org",
             browser_use_agent=browser,
         )
 
-        self.client.force_login(service_partner)
+        self.client.force_login(solutions_partner)
         url = reverse("agent_detail", kwargs={"pk": agent.id})
         resp = self.client.post(
             url,

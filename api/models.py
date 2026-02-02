@@ -3810,13 +3810,13 @@ class OrganizationBilling(models.Model):
         active_members = OrganizationMembership.objects.filter(
             org_id=self.organization_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER).count()
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER).count()
         pending_invites = OrganizationInvite.objects.filter(
             org_id=self.organization_id,
             accepted_at__isnull=True,
             revoked_at__isnull=True,
             expires_at__gte=now,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER).count()
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER).count()
 
         seats_required = max(active_members - founder_allowance, 0) + pending_invites
 
@@ -3842,13 +3842,13 @@ class OrganizationBilling(models.Model):
         active_members = OrganizationMembership.objects.filter(
             org_id=self.organization_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER).count()
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER).count()
         pending_invites = OrganizationInvite.objects.filter(
             org_id=self.organization_id,
             accepted_at__isnull=True,
             revoked_at__isnull=True,
             expires_at__gte=now,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER).count()
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER).count()
         reserved_members = max(active_members - founder_allowance, 0)
         return reserved_members + pending_invites
 
@@ -9584,7 +9584,7 @@ class OrganizationMembership(models.Model):
     class OrgRole(models.TextChoices):
         OWNER = "owner", "Owner"
         ADMIN = "admin", "Admin"
-        SERVICE_PARTNER = "service_partner", "Solutions Partner"
+        SOLUTIONS_PARTNER = "solutions_partner", "Solutions Partner"
         BILLING = "billing_admin", "Billing"
         MEMBER = "member", "Member"
         VIEWER = "viewer", "Viewer"
@@ -9631,14 +9631,14 @@ class OrganizationInvite(models.Model):
         active_members = OrganizationMembership.objects.filter(
             org_id=self.org_id,
             status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER).count()
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER).count()
 
         pending_invites_qs = OrganizationInvite.objects.filter(
             org_id=self.org_id,
             accepted_at__isnull=True,
             revoked_at__isnull=True,
             expires_at__gte=now,
-        ).exclude(role=OrganizationMembership.OrgRole.SERVICE_PARTNER)
+        ).exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
 
         if self.pk:
             pending_invites_qs = pending_invites_qs.exclude(pk=self.pk)
@@ -9649,7 +9649,7 @@ class OrganizationInvite(models.Model):
             self.accepted_at is None
             and self.revoked_at is None
             and (self.expires_at or now) >= now
-            and self.role != OrganizationMembership.OrgRole.SERVICE_PARTNER
+            and self.role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
         )
 
         seats_required = max(active_members - founder_allowance, 0) + pending_invites + (1 if will_reserve_seat else 0)

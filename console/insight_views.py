@@ -148,7 +148,7 @@ def _build_agent_setup_metadata(
         role__in=[
             OrganizationMembership.OrgRole.OWNER,
             OrganizationMembership.OrgRole.ADMIN,
-            OrganizationMembership.OrgRole.SERVICE_PARTNER,
+            OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
         ],
     ).select_related("org").order_by("org__name")
     org_options = [

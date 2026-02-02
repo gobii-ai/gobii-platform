@@ -33,7 +33,7 @@ class ConsoleContextInfo:
 _ALLOWED_MANAGE_ROLES = {
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SERVICE_PARTNER,
+    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
 }
 
 

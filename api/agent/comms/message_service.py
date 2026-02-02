@@ -847,7 +847,7 @@ def ingest_inbound_message(
                                             org=agent_obj.organization,
                                             role__in=[
                                                 OrganizationMembership.OrgRole.OWNER,
-                                                OrganizationMembership.OrgRole.SERVICE_PARTNER,
+                                                OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
                                             ],
                                             status=OrganizationMembership.OrgStatus.ACTIVE,
                                         ).select_related("user")

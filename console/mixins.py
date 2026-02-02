@@ -57,7 +57,7 @@ class ConsoleContextMixin:
                 context['user_plan'] = ""
 
         context['stripe_enabled'] = stripe_status().enabled
-        context['service_partner_billing_access'] = settings.SERVICE_PARTNER_BILLING_ACCESS
+        context['solutions_partner_billing_access'] = settings.SOLUTIONS_PARTNER_BILLING_ACCESS
 
         return context
 
