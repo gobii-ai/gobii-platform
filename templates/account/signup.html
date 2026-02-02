@@ -20,7 +20,7 @@
     </div>
 
     {% provider_app_exists 'google' as has_google_provider %}
-    {% if has_google_provider %}
+    {% if has_google_provider and account_allow_social_signup %}
       <div class="flex justify-center mt-6">
         <a href="{% provider_login_url 'google' %}"
            class="w-full inline-flex justify-center items-center gap-x-2 rounded-lg
@@ -37,11 +37,14 @@
         </a>
       </div>
 
+      {% if account_allow_password_signup %}
       <div class="my-6 flex items-center text-xs text-gray-400 uppercase before:flex-1
                   before:border-t before:border-gray-200 before:me-6 after:flex-1 after:border-t
                   after:border-gray-200 after:ms-6">{% trans "or" %}</div>
+      {% endif %}
     {% endif %}
 
+    {% if account_allow_password_signup %}
     <form method="post" action="{% url 'account_signup' %}" class="space-y-4">
       {% csrf_token %}
       {% if redirect_field_value %}
@@ -86,6 +89,11 @@
       </p>
       {% endif %}
     </form>
+    {% else %}
+    <p class="mt-6 text-center text-sm text-slate-600">
+      {% trans "Password signup is currently unavailable." %}
+    </p>
+    {% endif %}
   </div>
 </div>
 {% endblock %} 

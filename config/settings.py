@@ -327,7 +327,7 @@ TEMPLATES = [
                 "django.template.context_processors.i18n",
                 "django.template.context_processors.debug",
                 "config.context_processors.global_settings_context",
-                "config.context_processors.account_allow_registration",
+                "config.context_processors.account_auth_flags",
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
                 "pages.context_processors.show_signup_tracking",
@@ -508,7 +508,10 @@ AUTHENTICATION_BACKENDS = (
 )
 ACCOUNT_LOGIN_METHODS = {"email"}
 ACCOUNT_SIGNUP_FIELDS = ["email*", "password1*", "password2*"]
-ACCOUNT_ALLOW_REGISTRATION = env.bool("ACCOUNT_ALLOW_REGISTRATION", default=True)
+ACCOUNT_ALLOW_PASSWORD_SIGNUP = env.bool("ACCOUNT_ALLOW_PASSWORD_SIGNUP", default=True)
+ACCOUNT_ALLOW_SOCIAL_SIGNUP = env.bool("ACCOUNT_ALLOW_SOCIAL_SIGNUP", default=True)
+ACCOUNT_ALLOW_PASSWORD_LOGIN = env.bool("ACCOUNT_ALLOW_PASSWORD_LOGIN", default=True)
+ACCOUNT_ALLOW_SOCIAL_LOGIN = env.bool("ACCOUNT_ALLOW_SOCIAL_LOGIN", default=True)
 
 # Domains declined during signup (lowercase, comma separated via env override)
 SIGNUP_BLOCKED_EMAIL_DOMAINS = [

@@ -27,6 +27,9 @@ const buttonStyles = {
     'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-slate-300 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:opacity-60 disabled:cursor-not-allowed',
 }
 
+const loginToggleKeys = new Set(['ACCOUNT_ALLOW_PASSWORD_LOGIN', 'ACCOUNT_ALLOW_SOCIAL_LOGIN'])
+const loginToggleError = 'At least one login method must remain enabled.'
+
 const formatValue = (setting: SystemSetting, value: number | boolean | null) => {
   if (value === null || value === undefined) {
     return '—'
@@ -98,6 +101,27 @@ export function SystemSettingsScreen() {
     () => settings.some((setting) => (drafts[setting.key] ?? '') !== draftFromSetting(setting)),
     [drafts, settings],
   )
+
+  const loginToggleState = useMemo(() => {
+    const passwordSetting = settings.find((setting) => setting.key === 'ACCOUNT_ALLOW_PASSWORD_LOGIN')
+    const socialSetting = settings.find((setting) => setting.key === 'ACCOUNT_ALLOW_SOCIAL_LOGIN')
+    if (!passwordSetting || !socialSetting) {
+      return { invalid: false, dirty: false, message: loginToggleError }
+    }
+    const resolveBool = (setting: SystemSetting) => {
+      const draftValue = (drafts[setting.key] ?? draftFromSetting(setting)).trim()
+      if (!draftValue) {
+        return Boolean(setting.fallback_value)
+      }
+      return draftValue === 'true'
+    }
+    const passwordValue = resolveBool(passwordSetting)
+    const socialValue = resolveBool(socialSetting)
+    const dirty =
+      (drafts[passwordSetting.key] ?? '') !== draftFromSetting(passwordSetting) ||
+      (drafts[socialSetting.key] ?? '') !== draftFromSetting(socialSetting)
+    return { invalid: !passwordValue && !socialValue, dirty, message: loginToggleError }
+  }, [drafts, settings])
 
   const categories = useMemo(() => {
     const map = new Map<string, SystemSetting[]>()
@@ -206,6 +230,11 @@ export function SystemSettingsScreen() {
     if (!changes.length) {
       return
     }
+    if (loginToggleState.invalid && loginToggleState.dirty) {
+      setSaveError(loginToggleState.message)
+      setErrorBanner(loginToggleState.message)
+      return
+    }
     setSaving(true)
     setSaveError(null)
     setErrorBanner(null)
@@ -249,7 +278,7 @@ export function SystemSettingsScreen() {
     }
     setSaving(false)
     queryClient.invalidateQueries({ queryKey })
-  }, [drafts, queryClient, queryKey, settings, updateRowError])
+  }, [drafts, loginToggleState, queryClient, queryKey, settings, updateRowError])
 
   return (
     <div className="space-y-4">
@@ -327,6 +356,10 @@ export function SystemSettingsScreen() {
                       const draftValue = drafts[setting.key] ?? ''
                       const hasOverride = setting.db_value !== null && setting.db_value !== undefined
                       const status = rowStatus[setting.key]
+                      const guardError =
+                        loginToggleState.invalid && loginToggleState.dirty && loginToggleKeys.has(setting.key)
+                          ? loginToggleState.message
+                          : null
                       const isBool = setting.value_type === 'bool'
                       const boolValue =
                         draftValue.trim() !== '' ? draftValue === 'true' : Boolean(setting.effective_value)
@@ -450,10 +483,10 @@ export function SystemSettingsScreen() {
                                   </button>
                                 </div>
                               )}
-                              {status?.error && (
+                              {(status?.error || guardError) && (
                                 <p className="flex items-center gap-2 text-xs text-rose-600">
                                   <AlertTriangle className="h-4 w-4" aria-hidden="true" />
-                                  {status.error}
+                                  {status?.error ?? guardError}
                                 </p>
                               )}
                               {!status?.error && hasOverride && null}

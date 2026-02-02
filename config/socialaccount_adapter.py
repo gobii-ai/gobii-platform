@@ -12,6 +12,7 @@ from django.http import HttpResponseRedirect, HttpRequest
 from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
+from api.services.system_settings import get_account_allow_social_signup
 
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ OAUTH_CHARTER_COOKIE = "gobii_oauth_charter"
 
 class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
     """Tighten the social login flow for existing email/password users."""
+
+    def is_open_for_signup(self, request: HttpRequest, sociallogin: SocialLogin) -> bool:
+        return get_account_allow_social_signup()
 
     def pre_social_login(self, request: HttpRequest, social_login: SocialLogin) -> None:
         """Stop Google (or other) logins from hijacking password accounts.
@@ -82,4 +86,3 @@ class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
         )
 
         raise ImmediateHttpResponse(HttpResponseRedirect(reverse("account_login")))
-
