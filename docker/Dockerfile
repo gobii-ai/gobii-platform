@@ -35,11 +35,25 @@ RUN --mount=type=cache,target=/var/cache/apt \
 
 RUN pip install --upgrade pip
 
+# Optional model prefetch for LLM-Lingua
+ARG PREFETCH_LLM_LINGUA=0
+ENV HF_HOME=/app/.cache/huggingface
+
 # copy only manifests → keep cache when only code changes
 COPY pyproject.toml poetry.lock* ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .
+
+RUN if [ "$PREFETCH_LLM_LINGUA" = "1" ]; then \
+  python - <<'PY'\n\
+from transformers import AutoModel, AutoTokenizer\n\
+model = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"\n\
+AutoTokenizer.from_pretrained(model)\n\
+AutoModel.from_pretrained(model)\n\
+print("Prefetched:", model)\n\
+PY\n\
+; fi
 
 # Preinstall Bright Data MCP globally so containers do not fetch it on-the-fly.
 # Local dev (outside Docker) still uses npx to install on demand.

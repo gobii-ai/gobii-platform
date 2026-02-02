@@ -4,6 +4,7 @@ import json
 import logging
 import math
 import re
+import time
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import partial
@@ -71,6 +72,7 @@ from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
 )
+from .prompt_shrinkers import llm_lingua_shrinker
 from .promptree import Prompt
 from .step_compaction import llm_summarise_steps
 
@@ -1216,7 +1218,7 @@ def _build_kanban_sections(agent: PersistentAgent, parent_group) -> None:
         "kanban_activity",
         _build_kanban_activity_text(cards),
         weight=2,
-        shrinker="hmt",
+        shrinker="llm-lingua",
     )
 
     doing_preview = doing_by_priority[:KANBAN_DOING_DETAIL_LIMIT]
@@ -1812,6 +1814,7 @@ def build_prompt_context(
         accurate LLM selection and prompt_archive_id references the metadata row
         for the stored prompt archive (or ``None`` if archiving failed).
     """
+    start_time = time.perf_counter()
     max_iterations = _resolve_max_iterations(max_iterations)
 
     span = trace.get_current_span()
@@ -1852,7 +1855,11 @@ def build_prompt_context(
     token_estimator = _create_token_estimator(model)
     
     # Initialize promptree with the token estimator
-    prompt = Prompt(token_estimator=token_estimator)
+    prompt = Prompt(
+        token_estimator=token_estimator,
+        default_shrinker="llm-lingua",
+        extra_shrinkers={"llm-lingua": llm_lingua_shrinker},
+    )
 
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
@@ -2026,14 +2033,14 @@ def build_prompt_context(
         "sqlite_schema",
         sqlite_schema_block,
         weight=1,
-        shrinker="hmt"
+        shrinker="llm-lingua"
     )
     sqlite_digest_block = get_sqlite_digest_prompt()
     variable_group.section_text(
         "sqlite_digest",
         sqlite_digest_block,
         weight=1,
-        shrinker="hmt"
+        shrinker="llm-lingua"
     )
 
     # Agent filesystem listing - simple list of accessible files
@@ -2042,7 +2049,7 @@ def build_prompt_context(
         "agent_filesystem",
         files_listing_block,
         weight=1,
-        shrinker="hmt"
+        shrinker="llm-lingua"
     )
 
     # Agent variables - placeholder values set by tools (e.g., $[/charts/...])
@@ -2260,6 +2267,9 @@ def build_prompt_context(
     # Log the prompt report for debugging if needed
     if logger.isEnabledFor(logging.DEBUG):
         logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
+
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    logger.info("Prompt context built for agent %s in %.1f ms", agent.id, duration_ms)
 
     return (
         [
@@ -2620,7 +2630,7 @@ def _build_webhooks_block(agent: PersistentAgent, important_group, span) -> None
         "webhook_catalog",
         "\n".join(lines),
         weight=2,
-        shrinker="hmt",
+        shrinker="llm-lingua",
     )
     webhooks_group.section_text(
         "webhook_usage_hint",
@@ -2662,7 +2672,7 @@ def _build_mcp_servers_block(agent: PersistentAgent, important_group, span) -> N
         "mcp_servers_catalog",
         "\n".join(lines),
         weight=2,
-        shrinker="hmt",
+        shrinker="llm-lingua",
     )
 
 
@@ -4768,19 +4778,19 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             for component_name, component_content in components.items():
                 component_weight = COMPONENT_WEIGHTS.get(component_name, 1)
 
-                # Apply HMT shrinking to bulky content
+                # Keep bulky content from crowding out higher-priority sections.
                 shrinker = None
                 if (
                     component_name in ("params", "result", "result_preview", "result_schema", "body") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
-                    shrinker = "hmt"
+                    shrinker = "llm-lingua"
                 if (
                     event_type == "step_description_internal_reasoning"
                     and component_name == "description"
                 ):
                     component_weight = 1
-                    shrinker = "hmt"
+                    shrinker = "llm-lingua"
 
                 event_group.section_text(
                     component_name,
@@ -4875,7 +4885,7 @@ def _build_browser_tasks_sections(agent: PersistentAgent, tasks_group) -> None:
             "prompt",
             task.prompt,
             weight=2,
-            shrinker="hmt"
+            shrinker="llm-lingua"
         )
 
     # Add explanatory note

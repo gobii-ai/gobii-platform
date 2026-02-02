@@ -33,6 +33,7 @@ dependencies = [
   "zstandard~=0.23.0",
   "json-schema-to-pydantic~=0.4.1",
   "litellm==1.80.15",
+  "llmlingua==0.2.2",
   "markitdown[all]==0.1.4",
   "markdown~=3.8",
   "psycopg[binary]~=3.1",
