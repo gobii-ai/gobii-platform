@@ -15,3 +15,6 @@ AGENT_CRON_THROTTLE = "agent_cron_throttle"
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag
 MULTISEND_ENABLED = "multisend_enabled"
+
+# Enable structured prompt shrinker for unified history/tool results
+PROMPT_STRUCTURED_SHRINKER = "prompt_structured_shrinker"

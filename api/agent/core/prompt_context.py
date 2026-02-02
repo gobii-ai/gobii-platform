@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import UUID, uuid4
 
 import zstandard as zstd
+from waffle import get_waffle_flag_model
 from django.core.exceptions import ObjectDoesNotExist
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
@@ -25,6 +26,7 @@ from opentelemetry import trace
 from billing.addons import AddonEntitlementService
 from config import settings
 from config.plans import PLAN_CONFIG
+from constants.feature_flags import PROMPT_STRUCTURED_SHRINKER
 from tasks.services import TaskCreditService
 from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import get_owner_plan
@@ -72,6 +74,7 @@ from .llm_config import (
     get_llm_config_with_failover,
 )
 from .promptree import Prompt
+from .prompt_shrinkers import structured_shrinker
 from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
@@ -1479,6 +1482,39 @@ def _create_token_estimator(model: str) -> callable:
     return token_estimator
 
 
+def _is_structured_shrinker_enabled(agent: PersistentAgent) -> bool:
+    """Return True when the structured shrinker flag is enabled for the agent user."""
+    if not agent or not agent.user_id:
+        return False
+
+    try:
+        flag = get_waffle_flag_model().get(PROMPT_STRUCTURED_SHRINKER)
+    except Exception:
+        logger.debug(
+            "Failed loading waffle flag '%s' for agent %s",
+            PROMPT_STRUCTURED_SHRINKER,
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return False
+    try:
+        return bool(flag.is_active_for_user(agent.user))
+    except Exception:
+        logger.debug(
+            "Error evaluating waffle flag '%s' for user %s (agent %s)",
+            PROMPT_STRUCTURED_SHRINKER,
+            getattr(agent, "user_id", None),
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+        return False
+
+
+def _get_history_shrinker(agent: PersistentAgent) -> str:
+    """Return the shrinker name used for unified history sections."""
+    return "structured" if _is_structured_shrinker_enabled(agent) else "hmt"
+
+
 def _resolve_max_iterations(max_iterations: Optional[int]) -> int:
     """Derive the iteration ceiling, falling back to event_processing defaults."""
 
@@ -1850,9 +1886,14 @@ def build_prompt_context(
     
     # Create token estimator for the specific model
     token_estimator = _create_token_estimator(model)
-    
+
+    history_shrinker = _get_history_shrinker(agent)
+
     # Initialize promptree with the token estimator
-    prompt = Prompt(token_estimator=token_estimator)
+    prompt = Prompt(
+        token_estimator=token_estimator,
+        extra_shrinkers={"structured": structured_shrinker},
+    )
 
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
@@ -2007,7 +2048,7 @@ def build_prompt_context(
 
     # Unified history follows the important context (order within user prompt: important -> unified_history -> critical)
     unified_history_group = prompt.group("unified_history", weight=3)
-    _get_unified_history_prompt(agent, unified_history_group)
+    _get_unified_history_prompt(agent, unified_history_group, history_shrinker=history_shrinker)
 
     runtime_group = prompt.group("runtime_context", weight=6)
     runtime_group.section_text(
@@ -4389,7 +4430,21 @@ def _get_message_attachment_paths(message: PersistentAgentMessage) -> List[str]:
                     seen.add(path)
     return paths
 
-def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
+
+HISTORY_SHRINK_COMPONENTS = {
+    "params",
+    "result",
+    "result_preview",
+    "result_schema",
+    "body",
+}
+
+
+def _get_unified_history_prompt(
+    agent: PersistentAgent,
+    history_group,
+    history_shrinker: str = "hmt",
+) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
@@ -4771,16 +4826,16 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 # Apply HMT shrinking to bulky content
                 shrinker = None
                 if (
-                    component_name in ("params", "result", "result_preview", "result_schema", "body") or
+                    component_name in HISTORY_SHRINK_COMPONENTS or
                     (component_name == "content" and len(component_content) > 250)
                 ):
-                    shrinker = "hmt"
+                    shrinker = history_shrinker
                 if (
                     event_type == "step_description_internal_reasoning"
                     and component_name == "description"
                 ):
                     component_weight = 1
-                    shrinker = "hmt"
+                    shrinker = history_shrinker
 
                 event_group.section_text(
                     component_name,
