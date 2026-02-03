@@ -496,9 +496,9 @@ class PromptUnshrinkableTests(TestCase):
         self.assertIn("shrinkable", report)
         self.assertIn("unshrinkable", report)
         
-        # Check that total tokens exceed the budget (due to unshrinkable section)
+        # Shrinkable content should be able to fit within the budget alongside unshrinkable sections.
         tokens_after = prompt.get_tokens_after_fitting()
-        self.assertGreater(tokens_after, budget)
+        self.assertLessEqual(tokens_after, budget)
         
         # The unshrinkable section should preserve "critical info"
         self.assertIn("critical info", result)

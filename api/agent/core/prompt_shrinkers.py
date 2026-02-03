@@ -13,22 +13,28 @@ LLM_LINGUA_FORCE_TOKENS = [
 ]
 
 _LLM_LINGUA_LOCK = threading.Lock()
+_LLM_LINGUA_INIT_FAILED = object()
 _LLM_LINGUA_COMPRESSOR = None
 
 
 def _get_llm_lingua_compressor():
     global _LLM_LINGUA_COMPRESSOR
+    if _LLM_LINGUA_COMPRESSOR is _LLM_LINGUA_INIT_FAILED:
+        return None
     if _LLM_LINGUA_COMPRESSOR is not None:
         return _LLM_LINGUA_COMPRESSOR
     if not settings.LLMLINGUA_ENABLED:
         return None
     with _LLM_LINGUA_LOCK:
+        if _LLM_LINGUA_COMPRESSOR is _LLM_LINGUA_INIT_FAILED:
+            return None
         if _LLM_LINGUA_COMPRESSOR is not None:
             return _LLM_LINGUA_COMPRESSOR
         try:
             from llmlingua import PromptCompressor
         except ImportError:
             logger.debug("LLM-Lingua not installed; falling back to HMT shrinker.")
+            _LLM_LINGUA_COMPRESSOR = _LLM_LINGUA_INIT_FAILED
             return None
         try:
             compressor_kwargs = {
@@ -41,6 +47,7 @@ def _get_llm_lingua_compressor():
             _LLM_LINGUA_COMPRESSOR = PromptCompressor(**compressor_kwargs)
         except (OSError, RuntimeError, TypeError, ValueError):
             logger.exception("Failed to initialize LLM-Lingua compressor; falling back to HMT shrinker.")
+            _LLM_LINGUA_COMPRESSOR = _LLM_LINGUA_INIT_FAILED
             return None
     return _LLM_LINGUA_COMPRESSOR
 
@@ -49,9 +56,11 @@ def llm_lingua_shrinker(text: str, k: float) -> str:
     """Shrink text using LLM-Lingua, falling back to HMT when unavailable."""
     if not text:
         return text
-    k = max(LLM_LINGUA_MIN_RATIO, min(k, 1.0))
+    k = max(0.0, min(k, 1.0))
     if k >= 0.99:
         return text
+    if k < LLM_LINGUA_MIN_RATIO:
+        return hmt(text, k)
 
     compressor = _get_llm_lingua_compressor()
     if compressor is None:
