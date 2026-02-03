@@ -321,7 +321,7 @@ def get_setting_value(key: str) -> int | float | bool:
     return resolved["effective_value"]
 
 
-def set_setting_value(definition: SystemSettingDefinition, value: int | float) -> None:
+def set_setting_value(definition: SystemSettingDefinition, value: int | float | bool) -> None:
     validate_login_toggle_update(
         definition.key,
         value if isinstance(value, bool) else None,

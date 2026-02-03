@@ -98,6 +98,7 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
 
     @staticmethod
     def _get_latest_auth_method(request) -> str | None:
+        # NOTE: This relies on an internal django-allauth session key and may break on upgrades.
         methods = request.session.get("account_authentication_methods", [])
         if not methods:
             return None
