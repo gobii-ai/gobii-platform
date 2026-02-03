@@ -72,6 +72,8 @@ class PromptSummarizer:
             self.agent,
             completion_type=PersistentAgentCompletion.CompletionType.PROMPT_SUMMARIZATION,
             response=response,
+            model=model,
+            provider=provider,
         )
         summary_text = response.choices[0].message.content.strip()
         if not summary_text:
