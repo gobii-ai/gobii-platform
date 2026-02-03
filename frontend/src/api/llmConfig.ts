@@ -177,6 +177,18 @@ const endpointPaths = {
 
 type EndpointKind = keyof typeof endpointPaths
 
+const simpleTierPaths = {
+  embedding: `${base}/embeddings`,
+  summarization: `${base}/summarization`,
+  file_handler: `${base}/file-handlers`,
+} as const
+
+type SimpleTierScope = keyof typeof simpleTierPaths
+
+function simpleTierPath(scope: SimpleTierScope, suffix: string) {
+  return `${simpleTierPaths[scope]}${suffix}`
+}
+
 export function createEndpoint(kind: EndpointKind, payload: Record<string, unknown>) {
   return jsonRequest(endpointPaths[kind], withCsrf(payload))
 }
@@ -252,76 +264,104 @@ export function deleteBrowserTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/browser/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
+export function createSimpleTier(scope: SimpleTierScope, payload: { description?: string }) {
+  return jsonRequest(simpleTierPath(scope, '/tiers/'), withCsrf(payload))
+}
+
+export function updateSimpleTier(scope: SimpleTierScope, tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(simpleTierPath(scope, `/tiers/${tierId}/`), withCsrf(payload, 'PATCH'))
+}
+
+export function deleteSimpleTier(scope: SimpleTierScope, tierId: string) {
+  return jsonRequest(simpleTierPath(scope, `/tiers/${tierId}/`), withCsrf(undefined, 'DELETE'))
+}
+
+export function addSimpleTierEndpoint(
+  scope: SimpleTierScope,
+  tierId: string,
+  payload: { endpoint_id: string; weight: number },
+) {
+  return jsonRequest(simpleTierPath(scope, `/tiers/${tierId}/endpoints/`), withCsrf(payload))
+}
+
+export function updateSimpleTierEndpoint(scope: SimpleTierScope, tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(simpleTierPath(scope, `/tier-endpoints/${tierEndpointId}/`), withCsrf(payload, 'PATCH'))
+}
+
+export function deleteSimpleTierEndpoint(scope: SimpleTierScope, tierEndpointId: string) {
+  return jsonRequest(simpleTierPath(scope, `/tier-endpoints/${tierEndpointId}/`), withCsrf(undefined, 'DELETE'))
+}
+
 export function createEmbeddingTier(payload: { description?: string }) {
-  return jsonRequest(`${base}/embeddings/tiers/`, withCsrf(payload))
+  return createSimpleTier('embedding', payload)
 }
 
 export function updateEmbeddingTier(tierId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/embeddings/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTier('embedding', tierId, payload)
 }
 
 export function deleteEmbeddingTier(tierId: string) {
-  return jsonRequest(`${base}/embeddings/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTier('embedding', tierId)
 }
 
 export function addEmbeddingTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return jsonRequest(`${base}/embeddings/tiers/${tierId}/endpoints/`, withCsrf(payload))
+  return addSimpleTierEndpoint('embedding', tierId, payload)
 }
 
 export function updateEmbeddingTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/embeddings/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTierEndpoint('embedding', tierEndpointId, payload)
 }
 
 export function deleteEmbeddingTierEndpoint(tierEndpointId: string) {
-  return jsonRequest(`${base}/embeddings/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTierEndpoint('embedding', tierEndpointId)
 }
 
 export function createSummarizationTier(payload: { description?: string }) {
-  return jsonRequest(`${base}/summarization/tiers/`, withCsrf(payload))
+  return createSimpleTier('summarization', payload)
 }
 
 export function updateSummarizationTier(tierId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/summarization/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTier('summarization', tierId, payload)
 }
 
 export function deleteSummarizationTier(tierId: string) {
-  return jsonRequest(`${base}/summarization/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTier('summarization', tierId)
 }
 
 export function addSummarizationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return jsonRequest(`${base}/summarization/tiers/${tierId}/endpoints/`, withCsrf(payload))
+  return addSimpleTierEndpoint('summarization', tierId, payload)
 }
 
 export function updateSummarizationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/summarization/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTierEndpoint('summarization', tierEndpointId, payload)
 }
 
 export function deleteSummarizationTierEndpoint(tierEndpointId: string) {
-  return jsonRequest(`${base}/summarization/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTierEndpoint('summarization', tierEndpointId)
 }
 
 export function createFileHandlerTier(payload: { description?: string }) {
-  return jsonRequest(`${base}/file-handlers/tiers/`, withCsrf(payload))
+  return createSimpleTier('file_handler', payload)
 }
 
 export function updateFileHandlerTier(tierId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTier('file_handler', tierId, payload)
 }
 
 export function deleteFileHandlerTier(tierId: string) {
-  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTier('file_handler', tierId)
 }
 
 export function addFileHandlerTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
-  return jsonRequest(`${base}/file-handlers/tiers/${tierId}/endpoints/`, withCsrf(payload))
+  return addSimpleTierEndpoint('file_handler', tierId, payload)
 }
 
 export function updateFileHandlerTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
-  return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+  return updateSimpleTierEndpoint('file_handler', tierEndpointId, payload)
 }
 
 export function deleteFileHandlerTierEndpoint(tierEndpointId: string) {
-  return jsonRequest(`${base}/file-handlers/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+  return deleteSimpleTierEndpoint('file_handler', tierEndpointId)
 }
 
 export type EndpointTestResponse = {

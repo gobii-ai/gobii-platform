@@ -1181,14 +1181,10 @@ def get_summarization_llm_config(
     if summarization_config:
         provider_key, model, params = summarization_config
         params = dict(params)
-        supports_temperature = bool(params.get("supports_temperature", True))
-        params.pop("supports_temperature", None)
-        if not supports_temperature:
-            params.pop("temperature", None)
-        elif "temperature" not in params or params["temperature"] is None:
-            params["temperature"] = 0
-
+        supports_temperature = bool(params.pop("supports_temperature", True))
         if supports_temperature:
+            if "temperature" not in params or params["temperature"] is None:
+                params["temperature"] = 0
             _apply_required_temperature(model, params)
         else:
             params.pop("temperature", None)

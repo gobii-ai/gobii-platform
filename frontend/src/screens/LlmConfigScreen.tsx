@@ -689,55 +689,28 @@ function mapBrowserTiers(policy: llmApi.BrowserPolicy | null): Tier[] {
 }
 
 function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'embedding',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
-  })
-  applySequentialFallbackNames(mapped, () => 'embedding')
-  return mapped
+  return mapSimpleTiers(tiers, 'embedding')
 }
 
 function mapSummarizationTiers(tiers: llmApi.SummarizationTier[] = []): Tier[] {
-  const mapped = tiers.map((tier) => {
-    const normalized = normalizeTierEndpointWeights(tier.endpoints)
-    return {
-      id: tier.id,
-      name: (tier.description || '').trim(),
-      order: tier.order,
-      rangeId: 'summarization',
-      intelligenceTier: null,
-      endpoints: tier.endpoints.map((endpoint) => ({
-        id: endpoint.id,
-        endpointId: endpoint.endpoint_id,
-        label: endpoint.label,
-        weight: normalized[endpoint.id] ?? 0,
-      })),
-    }
-  })
-  applySequentialFallbackNames(mapped, () => 'summarization')
-  return mapped
+  return mapSimpleTiers(tiers, 'summarization')
 }
 
 function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
+  return mapSimpleTiers(tiers, 'file_handler')
+}
+
+function mapSimpleTiers<T extends { id: string; order: number; description: string; endpoints: llmApi.TierEndpoint[] }>(
+  tiers: T[] = [],
+  rangeId: 'embedding' | 'summarization' | 'file_handler',
+): Tier[] {
   const mapped = tiers.map((tier) => {
     const normalized = normalizeTierEndpointWeights(tier.endpoints)
     return {
       id: tier.id,
       name: (tier.description || '').trim(),
       order: tier.order,
-      rangeId: 'file_handler',
+      rangeId,
       intelligenceTier: null,
       endpoints: tier.endpoints.map((endpoint) => ({
         id: endpoint.id,
@@ -747,7 +720,7 @@ function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
       })),
     }
   })
-  applySequentialFallbackNames(mapped, () => 'file_handler')
+  applySequentialFallbackNames(mapped, () => rangeId)
   return mapped
 }
 
