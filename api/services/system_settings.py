@@ -1,13 +1,15 @@
+import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError, ProgrammingError
+import redis
 
+from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +196,50 @@ def _get_system_setting_model():
     return SystemSetting
 
 
-def _load_db_values() -> dict[str, str]:
-    cached = cache.get(_CACHE_KEY)
-    if cached is not None:
-        return cached
+def _get_system_settings_cache_client():
+    try:
+        return get_redis_client()
+    except (redis.RedisError, ValueError) as exc:
+        logger.warning("System settings cache unavailable: %s", exc)
+        return None
+
+
+def _read_cached_db_values() -> dict[str, str] | None:
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return None
+    try:
+        cached = client.get(_CACHE_KEY)
+    except redis.RedisError as exc:
+        logger.warning("Failed to read system settings cache: %s", exc)
+        return None
+    if not cached:
+        return None
+    try:
+        data = json.loads(cached)
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Invalid system settings cache payload: %s", exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _write_cached_db_values(values: dict[str, str]) -> None:
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return
+    try:
+        client.set(_CACHE_KEY, json.dumps(values), ex=_CACHE_TTL_SECONDS)
+    except redis.RedisError as exc:
+        logger.warning("Failed to write system settings cache: %s", exc)
+
+
+def _load_db_values(*, use_cache: bool = True) -> dict[str, str]:
+    if use_cache:
+        cached = _read_cached_db_values()
+        if cached is not None:
+            return cached
 
     try:
         SystemSetting = _get_system_setting_model()
@@ -206,12 +248,18 @@ def _load_db_values() -> dict[str, str]:
         logger.warning("Failed to load system settings from database: %s", exc)
         return {}
 
-    cache.set(_CACHE_KEY, values, _CACHE_TTL_SECONDS)
+    _write_cached_db_values(values)
     return values
 
 
 def invalidate_system_settings_cache() -> None:
-    cache.delete(_CACHE_KEY)
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return
+    try:
+        client.delete(_CACHE_KEY)
+    except redis.RedisError as exc:
+        logger.warning("Failed to clear system settings cache: %s", exc)
 
 
 def get_setting_definition(key: str) -> SystemSettingDefinition | None:
@@ -227,7 +275,8 @@ def validate_login_toggle_update(key: str, value: bool | None, clear: bool) -> N
     if not password_definition or not social_definition:
         raise ImproperlyConfigured("Login toggle definitions are missing.")
 
-    db_values = _load_db_values()
+    # Use uncached values to avoid stale in-process caches blocking valid toggle sequences.
+    db_values = _load_db_values(use_cache=False)
     next_db_values = dict(db_values)
     if clear:
         next_db_values.pop(key, None)

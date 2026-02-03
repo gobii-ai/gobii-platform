@@ -245,7 +245,21 @@ export function SystemSettingsScreen() {
     setSaveError(null)
     setErrorBanner(null)
     let firstError: string | null = null
-    for (const setting of changes) {
+    const resolveLoginDesired = (setting: SystemSetting) => {
+      const draftValue = (drafts[setting.key] ?? '').trim()
+      if (draftValue) {
+        return draftValue === 'true'
+      }
+      return Boolean(setting.fallback_value)
+    }
+    const loginChanges = changes.filter((setting) => loginToggleKeys.has(setting.key))
+    const otherChanges = changes.filter((setting) => !loginToggleKeys.has(setting.key))
+    const orderedChanges = [
+      ...loginChanges.filter(resolveLoginDesired),
+      ...loginChanges.filter((setting) => !resolveLoginDesired(setting)),
+      ...otherChanges,
+    ]
+    for (const setting of orderedChanges) {
       const draftValue = (drafts[setting.key] ?? '').trim()
       try {
         const payloadValue =
