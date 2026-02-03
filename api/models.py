@@ -8350,6 +8350,7 @@ class PersistentAgentCompletion(models.Model):
         ORCHESTRATOR = ("orchestrator", "Orchestrator")
         COMPACTION = ("compaction", "Comms Compaction")
         STEP_COMPACTION = ("step_compaction", "Step Compaction")
+        PROMPT_SUMMARIZATION = ("prompt_summarization", "Prompt Summarization")
         TAG = ("tag", "Tag Generation")
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
@@ -8456,6 +8457,34 @@ class PersistentAgentCompletion(models.Model):
 
     def __str__(self):
         return f"Completion[{self.completion_type}] {self.llm_model or 'unknown'} @ {self.created_at}"
+
+
+class ContentSummaryCache(models.Model):
+    """Cached LLM summaries keyed by content hash and summary type."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    content_hash = models.CharField(max_length=64, db_index=True)
+    summary_type = models.CharField(max_length=64, db_index=True)
+    summary = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["content_hash", "summary_type"],
+                name="content_summary_cache_unique",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["summary_type", "content_hash"],
+                name="content_summary_type_hash_idx",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"ContentSummaryCache<{self.summary_type}>"
 
 
 class PersistentAgentStep(models.Model):

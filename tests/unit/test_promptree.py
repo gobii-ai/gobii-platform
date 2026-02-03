@@ -1,5 +1,6 @@
 import random
 import string
+from unittest.mock import patch
 from django.test import TestCase, tag
 
 from api.agent.core.promptree import Prompt, hmt
@@ -103,6 +104,24 @@ class PromptShrinkingTests(TestCase):
         prompt.section_text("s", base, shrinker="summarization")
         result = prompt.render(15)
 
+        self.assertLessEqual(prompt._tok(result), 15)
+
+    def test_summarization_shrinker_skips_internal_llm_when_custom_returns_none(self):
+        """Custom summarizer failures should fall back without internal LLM calls."""
+        def summarizer(text, target_tokens):
+            return None
+
+        base = "word " * 200
+        prompt = Prompt(summarize_fn=summarizer)
+        prompt.section_text("s", base, shrinker="summarization")
+
+        with patch("api.agent.core.llm_config.get_summarization_llm_config") as mock_config, patch(
+            "api.agent.core.llm_utils.run_completion"
+        ) as mock_completion:
+            result = prompt.render(15)
+
+        mock_config.assert_not_called()
+        mock_completion.assert_not_called()
         self.assertLessEqual(prompt._tok(result), 15)
 
     def test_pathological_tiny_budget(self):

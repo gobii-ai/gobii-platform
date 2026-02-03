@@ -71,6 +71,7 @@ from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
 )
+from .prompt_summarizer import PromptSummarizer
 from .promptree import Prompt
 from .step_compaction import llm_summarise_steps
 
@@ -1851,8 +1852,9 @@ def build_prompt_context(
     # Create token estimator for the specific model
     token_estimator = _create_token_estimator(model)
     
-    # Initialize promptree with the token estimator
-    prompt = Prompt(token_estimator=token_estimator)
+    # Initialize promptree with the token estimator and summarizer
+    prompt_summarizer = PromptSummarizer(agent=agent, routing_profile=routing_profile)
+    prompt = Prompt(token_estimator=token_estimator, summarize_fn=prompt_summarizer)
 
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)

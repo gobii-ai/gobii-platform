@@ -409,13 +409,15 @@ class Prompt:
             return
 
         summary_text: Optional[str] = None
+        summarizer_used = False
         if self._summarize_fn:
+            summarizer_used = True
             try:
                 summary_text = self._summarize_fn(n.text, content_budget)
             except Exception:
                 summary_text = None
 
-        if summary_text is None:
+        if summary_text is None and not summarizer_used:
             try:
                 from api.agent.core.llm_config import get_summarization_llm_config
                 from api.agent.core.llm_utils import run_completion
