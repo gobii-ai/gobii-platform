@@ -1,28 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Workflow, X } from 'lucide-react'
+import { X } from 'lucide-react'
 
 import { formatRelativeTimestamp } from '../../util/time'
 import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
+import { ToolIconSlot } from './ToolIconSlot'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   cluster: ToolClusterTransform
   onClose: () => void
-}
-
-function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
-  const IconComponent = icon ?? Workflow
-  return <IconComponent className={className} aria-hidden="true" />
-}
-
-function ToolIconSlot({ entry }: { entry: ToolEntryDisplay }) {
-  if (entry.status === 'pending') {
-    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
-  }
-  return <ToolIcon icon={entry.icon} className="h-5 w-5" />
 }
 
 function deriveCaption(entry: ToolEntryDisplay): string | null {

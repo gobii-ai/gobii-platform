@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Workflow } from 'lucide-react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
+import { ToolIconSlot } from './ToolIconSlot'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -12,18 +12,6 @@ import { scrollIntoViewIfNeeded } from './scrollIntoView'
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
   suppressedThinkingCursor?: string | null
-}
-
-function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
-  const IconComponent = icon ?? Workflow
-  return <IconComponent className={className} aria-hidden="true" />
-}
-
-function ToolIconSlot({ entry }: { entry: ToolEntryDisplay }) {
-  if (entry.status === 'pending') {
-    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
-  }
-  return <ToolIcon icon={entry.icon} className="h-5 w-5" />
 }
 
 export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {

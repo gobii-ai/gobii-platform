@@ -826,6 +826,36 @@ def _build_tool_call_description(
         return f"Tool call: {safe_tool_name}"
 
 
+def _emit_tool_call_realtime(step: "PersistentAgentStep", context: str) -> None:
+    try:
+        from console.agent_chat.signals import emit_tool_call_realtime
+
+        emit_tool_call_realtime(step)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast %s tool call for agent %s step %s",
+            context,
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
+        )
+
+
+def _emit_tool_call_audit(step: "PersistentAgentStep", context: str) -> None:
+    try:
+        from console.agent_chat.signals import emit_tool_call_audit
+
+        emit_tool_call_audit(step)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast %s tool call audit for agent %s step %s",
+            context,
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
+        )
+
+
 def _persist_tool_call_step(
     agent: "PersistentAgent",
     tool_name: str,
@@ -876,17 +906,7 @@ def _persist_tool_call_step(
             execution_duration_ms=execution_duration_ms,
             status=tool_call_status,
         )
-        try:
-            from console.agent_chat.signals import emit_tool_call_realtime
-
-            emit_tool_call_realtime(step)
-        except Exception:
-            logger.debug(
-                "Failed to broadcast realtime tool call for agent %s step %s",
-                agent.id,
-                getattr(step, "id", None),
-                exc_info=True,
-            )
+        _emit_tool_call_realtime(step, "realtime")
         return step
 
     # Try primary path
@@ -971,17 +991,7 @@ def _create_pending_tool_call_step(
             execution_duration_ms=None,
             status="pending",
         )
-        try:
-            from console.agent_chat.signals import emit_tool_call_realtime
-
-            emit_tool_call_realtime(step)
-        except Exception:
-            logger.debug(
-                "Failed to broadcast pending tool call for agent %s step %s",
-                agent.id,
-                getattr(step, "id", None),
-                exc_info=True,
-            )
+        _emit_tool_call_realtime(step, "pending")
         return step
     except Exception:
         logger.debug(
@@ -1018,6 +1028,7 @@ def _finalize_pending_tool_call_step(
             exc_info=True,
         )
 
+    created_tool_call = False
     try:
         tool_call = getattr(step, "tool_call", None)
         if tool_call is None:
@@ -1029,6 +1040,7 @@ def _finalize_pending_tool_call_step(
                 execution_duration_ms=execution_duration_ms,
                 status=status,
             )
+            created_tool_call = True
         else:
             tool_call.tool_name = safe_tool_name
             tool_call.tool_params = tool_params
@@ -1045,17 +1057,9 @@ def _finalize_pending_tool_call_step(
         )
         return
 
-    try:
-        from console.agent_chat.signals import emit_tool_call_realtime
-
-        emit_tool_call_realtime(step)
-    except Exception:
-        logger.debug(
-            "Failed to broadcast finalized tool call for agent %s step %s",
-            getattr(step, "agent_id", None),
-            getattr(step, "id", None),
-            exc_info=True,
-        )
+    _emit_tool_call_realtime(step, "finalized")
+    if not created_tool_call:
+        _emit_tool_call_audit(step, "finalized")
 
 
 def _get_tool_call_arguments(call: Any) -> Any:

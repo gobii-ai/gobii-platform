@@ -80,10 +80,30 @@ def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
     send_audit_event(agent_id, payload)
 
 
+def _should_audit_tool_call(tool_call: PersistentAgentToolCall | None) -> bool:
+    if tool_call is None:
+        return False
+    return tool_call.status != "pending"
+
+
 def emit_tool_call_realtime(step: PersistentAgentStep) -> None:
     """Public helper to broadcast a tool call cluster for a fully populated step."""
 
     _broadcast_tool_cluster(step)
+
+
+def emit_tool_call_audit(step: PersistentAgentStep) -> None:
+    tool_call = getattr(step, "tool_call", None)
+    if not _should_audit_tool_call(tool_call):
+        return
+    agent_id = getattr(step, "agent_id", None)
+    if not agent_id:
+        return
+    try:
+        audit_payload = serialize_tool_call(step)
+        _broadcast_audit_event(str(agent_id), audit_payload)
+    except Exception:
+        logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
 
 
 @receiver(post_save, sender=PersistentAgentMessage)
@@ -141,10 +161,11 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
             return
         emit_tool_call_realtime(step)
         try:
-            if getattr(step, "tool_call", None) is None and not (step.description or "").startswith("Tool call"):
+            tool_call = getattr(step, "tool_call", None)
+            if tool_call is None and not (step.description or "").startswith("Tool call"):
                 step_payload = serialize_step(step)
                 _broadcast_audit_event(str(step.agent_id), step_payload)
-            if getattr(step, "tool_call", None):
+            if _should_audit_tool_call(tool_call):
                 audit_payload = serialize_tool_call(step)
                 _broadcast_audit_event(str(step.agent_id), audit_payload)
         except Exception:
@@ -159,6 +180,8 @@ def broadcast_new_tool_call(sender, instance: PersistentAgentToolCall, created: 
         return
     step = instance.step
     emit_tool_call_realtime(step)
+    if not _should_audit_tool_call(instance):
+        return
     try:
         audit_payload = serialize_tool_call(step)
         _broadcast_audit_event(str(step.agent_id), audit_payload)
