@@ -2529,7 +2529,10 @@ class SystemSettingDetailAPIView(SystemAdminAPIView):
             return HttpResponseBadRequest(str(exc))
 
         if _coerce_bool(payload.get("clear")):
-            clear_setting_value(definition)
+            try:
+                clear_setting_value(definition)
+            except (ValueError, ValidationError) as exc:
+                return HttpResponseBadRequest(str(exc))
             return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
 
         if "value" not in payload:
@@ -2540,14 +2543,20 @@ class SystemSettingDetailAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        set_setting_value(definition, coerced)
+        try:
+            set_setting_value(definition, coerced)
+        except (ValueError, ValidationError) as exc:
+            return HttpResponseBadRequest(str(exc))
         return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
 
     def delete(self, request: HttpRequest, key: str, *args: Any, **kwargs: Any):
         definition = get_setting_definition(key)
         if definition is None:
             return HttpResponseBadRequest("Unknown system setting")
-        clear_setting_value(definition)
+        try:
+            clear_setting_value(definition)
+        except (ValueError, ValidationError) as exc:
+            return HttpResponseBadRequest(str(exc))
         return JsonResponse({"ok": True, "setting": serialize_setting(definition)})
 
 

@@ -4482,6 +4482,37 @@ class SystemSetting(models.Model):
     def has_value(self) -> bool:
         return bool(self.value_text)
 
+    def clean(self) -> None:
+        super().clean()
+        from api.services import system_settings
+
+        if self.key not in system_settings.LOGIN_TOGGLE_KEYS:
+            return
+
+        definition = system_settings.get_setting_definition(self.key)
+        if definition is None:
+            return
+
+        value_text = (self.value_text or "").strip()
+        if value_text:
+            try:
+                coerced = definition.coerce(value_text)
+            except ValueError as exc:
+                raise ValidationError({"value_text": str(exc)})
+            clear = False
+        else:
+            coerced = None
+            clear = True
+
+        try:
+            system_settings.validate_login_toggle_update(self.key, coerced, clear=clear)
+        except ValueError as exc:
+            raise ValidationError({"value_text": str(exc)})
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
 
 class MeteringBatch(models.Model):
     """Audit record linking a batch of reserved usage to a Stripe meter event.

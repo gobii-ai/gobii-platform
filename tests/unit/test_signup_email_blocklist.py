@@ -31,15 +31,35 @@ class SignupEmailBlocklistTests(SimpleTestCase):
 
 
 @tag("batch_email_blocklist")
-class SignupRegistrationGateTests(TestCase):
-    @override_settings(ACCOUNT_ALLOW_REGISTRATION=False)
-    def test_signup_disabled(self) -> None:
+class SignupPasswordGateTests(TestCase):
+    @override_settings(ACCOUNT_ALLOW_PASSWORD_SIGNUP=False, ACCOUNT_ALLOW_SOCIAL_SIGNUP=False)
+    def test_signup_disabled_when_all_signup_closed(self) -> None:
         adapter = get_adapter()
+        request = HttpRequest()
+        request.method = "GET"
 
-        self.assertFalse(adapter.is_open_for_signup(HttpRequest()))
+        self.assertFalse(adapter.is_open_for_signup(request))
 
-    @override_settings(ACCOUNT_ALLOW_REGISTRATION=True)
-    def test_signup_enabled(self) -> None:
+    @override_settings(ACCOUNT_ALLOW_PASSWORD_SIGNUP=False, ACCOUNT_ALLOW_SOCIAL_SIGNUP=True)
+    def test_signup_page_open_for_social_only(self) -> None:
         adapter = get_adapter()
+        request = HttpRequest()
+        request.method = "GET"
 
-        self.assertTrue(adapter.is_open_for_signup(HttpRequest()))
+        self.assertTrue(adapter.is_open_for_signup(request))
+
+    @override_settings(ACCOUNT_ALLOW_PASSWORD_SIGNUP=False, ACCOUNT_ALLOW_SOCIAL_SIGNUP=True)
+    def test_password_signup_blocked_when_disabled(self) -> None:
+        adapter = get_adapter()
+        request = HttpRequest()
+        request.method = "POST"
+
+        self.assertFalse(adapter.is_open_for_signup(request))
+
+    @override_settings(ACCOUNT_ALLOW_PASSWORD_SIGNUP=True)
+    def test_password_signup_enabled(self) -> None:
+        adapter = get_adapter()
+        request = HttpRequest()
+        request.method = "POST"
+
+        self.assertTrue(adapter.is_open_for_signup(request))

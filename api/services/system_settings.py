@@ -1,13 +1,15 @@
+import json
 import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Callable
 
 from django.conf import settings
-from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
 from django.db import OperationalError, ProgrammingError
+import redis
 
+from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,12 @@ _CACHE_TTL_SECONDS = 300
 VALUE_TYPE_INT = "int"
 VALUE_TYPE_FLOAT = "float"
 VALUE_TYPE_BOOL = "bool"
+LOGIN_TOGGLE_KEYS = frozenset(
+    {
+        "ACCOUNT_ALLOW_PASSWORD_LOGIN",
+        "ACCOUNT_ALLOW_SOCIAL_LOGIN",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -95,12 +103,39 @@ SYSTEM_SETTING_DEFINITIONS = (
         min_value=1,
     ),
     SystemSettingDefinition(
-        key="ACCOUNT_ALLOW_REGISTRATION",
-        label="Allow account signup",
-        description="Allow new users to create accounts.",
+        key="ACCOUNT_ALLOW_PASSWORD_SIGNUP",
+        label="Allow password signup",
+        description="Allow new users to create accounts with email and password.",
         value_type=VALUE_TYPE_BOOL,
-        env_var="ACCOUNT_ALLOW_REGISTRATION",
-        default_getter=lambda: settings.ACCOUNT_ALLOW_REGISTRATION,
+        env_var="ACCOUNT_ALLOW_PASSWORD_SIGNUP",
+        default_getter=lambda: settings.ACCOUNT_ALLOW_PASSWORD_SIGNUP,
+        category="Accounts",
+    ),
+    SystemSettingDefinition(
+        key="ACCOUNT_ALLOW_SOCIAL_SIGNUP",
+        label="Allow social signup",
+        description="Allow new users to create accounts via social login providers.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="ACCOUNT_ALLOW_SOCIAL_SIGNUP",
+        default_getter=lambda: settings.ACCOUNT_ALLOW_SOCIAL_SIGNUP,
+        category="Accounts",
+    ),
+    SystemSettingDefinition(
+        key="ACCOUNT_ALLOW_PASSWORD_LOGIN",
+        label="Allow password login",
+        description="Allow existing users to log in with email and password.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="ACCOUNT_ALLOW_PASSWORD_LOGIN",
+        default_getter=lambda: settings.ACCOUNT_ALLOW_PASSWORD_LOGIN,
+        category="Accounts",
+    ),
+    SystemSettingDefinition(
+        key="ACCOUNT_ALLOW_SOCIAL_LOGIN",
+        label="Allow social login",
+        description="Allow existing users to log in via social login providers.",
+        value_type=VALUE_TYPE_BOOL,
+        env_var="ACCOUNT_ALLOW_SOCIAL_LOGIN",
+        default_getter=lambda: settings.ACCOUNT_ALLOW_SOCIAL_LOGIN,
         category="Accounts",
     ),
 )
@@ -161,10 +196,50 @@ def _get_system_setting_model():
     return SystemSetting
 
 
-def _load_db_values() -> dict[str, str]:
-    cached = cache.get(_CACHE_KEY)
-    if cached is not None:
-        return cached
+def _get_system_settings_cache_client():
+    try:
+        return get_redis_client()
+    except (redis.RedisError, ValueError) as exc:
+        logger.warning("System settings cache unavailable: %s", exc)
+        return None
+
+
+def _read_cached_db_values() -> dict[str, str] | None:
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return None
+    try:
+        cached = client.get(_CACHE_KEY)
+    except redis.RedisError as exc:
+        logger.warning("Failed to read system settings cache: %s", exc)
+        return None
+    if not cached:
+        return None
+    try:
+        data = json.loads(cached)
+    except (TypeError, json.JSONDecodeError) as exc:
+        logger.warning("Invalid system settings cache payload: %s", exc)
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _write_cached_db_values(values: dict[str, str]) -> None:
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return
+    try:
+        client.set(_CACHE_KEY, json.dumps(values), ex=_CACHE_TTL_SECONDS)
+    except redis.RedisError as exc:
+        logger.warning("Failed to write system settings cache: %s", exc)
+
+
+def _load_db_values(*, use_cache: bool = True) -> dict[str, str]:
+    if use_cache:
+        cached = _read_cached_db_values()
+        if cached is not None:
+            return cached
 
     try:
         SystemSetting = _get_system_setting_model()
@@ -173,16 +248,47 @@ def _load_db_values() -> dict[str, str]:
         logger.warning("Failed to load system settings from database: %s", exc)
         return {}
 
-    cache.set(_CACHE_KEY, values, _CACHE_TTL_SECONDS)
+    _write_cached_db_values(values)
     return values
 
 
 def invalidate_system_settings_cache() -> None:
-    cache.delete(_CACHE_KEY)
+    client = _get_system_settings_cache_client()
+    if client is None:
+        return
+    try:
+        client.delete(_CACHE_KEY)
+    except redis.RedisError as exc:
+        logger.warning("Failed to clear system settings cache: %s", exc)
 
 
 def get_setting_definition(key: str) -> SystemSettingDefinition | None:
     return SYSTEM_SETTING_DEFINITIONS_BY_KEY.get(key)
+
+
+def validate_login_toggle_update(key: str, value: bool | None, clear: bool) -> None:
+    if key not in LOGIN_TOGGLE_KEYS:
+        return
+
+    password_definition = SYSTEM_SETTING_DEFINITIONS_BY_KEY.get("ACCOUNT_ALLOW_PASSWORD_LOGIN")
+    social_definition = SYSTEM_SETTING_DEFINITIONS_BY_KEY.get("ACCOUNT_ALLOW_SOCIAL_LOGIN")
+    if not password_definition or not social_definition:
+        raise ImproperlyConfigured("Login toggle definitions are missing.")
+
+    # Use uncached values to avoid stale in-process caches blocking valid toggle sequences.
+    db_values = _load_db_values(use_cache=False)
+    next_db_values = dict(db_values)
+    if clear:
+        next_db_values.pop(key, None)
+    else:
+        if value is None:
+            raise ValueError("Value is required.")
+        next_db_values[key] = str(value)
+
+    password_effective = bool(_resolve_setting(password_definition, next_db_values)["effective_value"])
+    social_effective = bool(_resolve_setting(social_definition, next_db_values)["effective_value"])
+    if not password_effective and not social_effective:
+        raise ValueError("At least one login method must remain enabled.")
 
 
 def _parse_db_value(definition: SystemSettingDefinition, raw_value: str | None) -> int | float | bool | None:
@@ -264,7 +370,12 @@ def get_setting_value(key: str) -> int | float | bool:
     return resolved["effective_value"]
 
 
-def set_setting_value(definition: SystemSettingDefinition, value: int | float) -> None:
+def set_setting_value(definition: SystemSettingDefinition, value: int | float | bool) -> None:
+    validate_login_toggle_update(
+        definition.key,
+        value if isinstance(value, bool) else None,
+        clear=False,
+    )
     SystemSetting = _get_system_setting_model()
     setting, _ = SystemSetting.objects.get_or_create(key=definition.key)
     setting.value_text = str(value)
@@ -272,6 +383,7 @@ def set_setting_value(definition: SystemSettingDefinition, value: int | float) -
 
 
 def clear_setting_value(definition: SystemSettingDefinition) -> None:
+    validate_login_toggle_update(definition.key, None, clear=True)
     SystemSetting = _get_system_setting_model()
     SystemSetting.objects.filter(key=definition.key).delete()
 
@@ -295,5 +407,17 @@ def get_litellm_timeout_seconds() -> int:
     return int(get_setting_value("LITELLM_TIMEOUT_SECONDS"))
 
 
-def get_account_allow_registration() -> bool:
-    return bool(get_setting_value("ACCOUNT_ALLOW_REGISTRATION"))
+def get_account_allow_password_signup() -> bool:
+    return bool(get_setting_value("ACCOUNT_ALLOW_PASSWORD_SIGNUP"))
+
+
+def get_account_allow_social_signup() -> bool:
+    return bool(get_setting_value("ACCOUNT_ALLOW_SOCIAL_SIGNUP"))
+
+
+def get_account_allow_password_login() -> bool:
+    return bool(get_setting_value("ACCOUNT_ALLOW_PASSWORD_LOGIN"))
+
+
+def get_account_allow_social_login() -> bool:
+    return bool(get_setting_value("ACCOUNT_ALLOW_SOCIAL_LOGIN"))

@@ -226,6 +226,8 @@ jobs:
             tag: batch_owner_billing
           - batch: email_blocklist
             tag: batch_email_blocklist
+          - batch: system_settings
+            tag: batch_system_settings
           - batch: stripe_config
             tag: batch_stripe_config
           - batch: org_billing

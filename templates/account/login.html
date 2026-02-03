@@ -10,7 +10,7 @@
 
     <!-- header -->
     <h1 class="text-center text-2xl font-bold text-gray-900">Sign in</h1>
-    {% if account_allow_registration %}
+    {% if account_allow_password_signup or account_allow_social_signup %}
     <p class="mt-2 text-center text-sm text-gray-500">
       Don't have an account yet?
       {% with request.session.utm_querystring as utm_qs %}
@@ -25,6 +25,7 @@
 
     {% provider_app_exists 'google' as has_google_provider %}
     {% if has_google_provider %}
+      {% if account_allow_social_login or account_allow_social_signup %}
       {% providers_media_js %}
       <a href="{% provider_login_url 'google' %}"
          class="mt-6 w-full inline-flex justify-center items-center gap-x-2 rounded-lg
@@ -40,12 +41,16 @@
         Sign in with Google
       </a>
 
+      {% if account_allow_password_login %}
       <div class="my-6 flex items-center text-xs text-gray-400 uppercase before:flex-1
                   before:border-t before:border-gray-200 before:me-6 after:flex-1 after:border-t
                   after:border-gray-200 after:ms-6">or</div>
+      {% endif %}
+      {% endif %}
     {% endif %}
 
     <!-- email/password form -->
+    {% if account_allow_password_login %}
     <form method="post" action="{% url 'account_login' %}" class="space-y-4">{% csrf_token %}
       {# Preserve ?next= URL parameter #}
       {% if redirect_field_value %}
@@ -124,6 +129,11 @@
       </p>
       {% endif %}
     </form>
+    {% else %}
+    <p class="mt-6 text-center text-sm text-gray-500">
+      Password sign-in is currently unavailable.
+    </p>
+    {% endif %}
 
   </div>
 </div>
