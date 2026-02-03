@@ -22,10 +22,10 @@ class PromptSummarizer:
         self.routing_profile = routing_profile
         self.summary_type = summary_type
 
-    def __call__(self, text: str, target_tokens: int):
+    def __call__(self, text: str, target_tokens: int) -> str:
         return self.summarize(text, target_tokens)
 
-    def summarize(self, text: str, target_tokens: int):
+    def summarize(self, text: str, target_tokens: int) -> str:
         if not text:
             return ""
         if target_tokens <= 0:
@@ -75,7 +75,7 @@ class PromptSummarizer:
         )
         summary_text = response.choices[0].message.content.strip()
         if not summary_text:
-            return None
+            return ""
 
         try:
             ContentSummaryCache.objects.create(

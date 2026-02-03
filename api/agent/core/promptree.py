@@ -412,52 +412,12 @@ class Prompt:
             return
 
         summary_text: Optional[str] = None
-        summarizer_used = False
         if self._summarize_fn:
-            summarizer_used = True
             try:
                 summary_text = self._summarize_fn(n.text, content_budget)
             except Exception:
+                logger.warning("Custom summarizer function failed", exc_info=True)
                 summary_text = None
-
-        if summary_text is None and not summarizer_used:
-            try:
-                from api.agent.core.llm_config import get_summarization_llm_config
-                from api.agent.core.llm_utils import run_completion
-            except Exception:
-                summary_text = None
-            else:
-                try:
-                    _provider_key, model, params = get_summarization_llm_config()
-                    params = dict(params or {})
-                    params.setdefault("max_tokens", max(1, content_budget))
-                    prompt = [
-                        {
-                            "role": "system",
-                            "content": (
-                                "You compress text. Return a concise summary that fits within the token budget. "
-                                "Preserve key facts, numbers, identifiers, and structure. Do not add new info."
-                            ),
-                        },
-                        {
-                            "role": "user",
-                            "content": (
-                                f"Token budget: {content_budget}\n"
-                                "Summarize the following text:\n\n"
-                                f"{n.text}"
-                            ),
-                        },
-                    ]
-                    response = run_completion(
-                        model=model,
-                        messages=prompt,
-                        params=params,
-                        drop_params=True,
-                    )
-                    summary_text = response.choices[0].message.content.strip()
-                except Exception:
-                    logger.warning("Summarization via LLM failed", exc_info=True)
-                    summary_text = None
 
         if not summary_text:
             r = min(1.0, budget / max(1, n.tokens))
