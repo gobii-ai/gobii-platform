@@ -9439,6 +9439,17 @@ def update_addons(request, owner, owner_type):
             return redirect(_billing_redirect(owner, owner_type))
         desired_quantities[price_id] = qty
 
+    owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+    posted_qty_keys = [key for key in request.POST.keys() if key.startswith("quantity__")]
+    logger.info(
+        "Add-ons update requested: owner_type=%s owner_id=%s plan_id=%s posted_keys=%s desired_quantities=%s",
+        owner_type,
+        owner_id,
+        plan_id,
+        posted_qty_keys,
+        desired_quantities,
+    )
+
     if not desired_quantities:
         messages.error(request, "No add-on quantities provided.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -9472,6 +9483,14 @@ def update_addons(request, owner, owner_type):
             except (TypeError, ValueError):
                 existing_qty[pid] = 0
 
+        logger.info(
+            "Add-ons existing quantities: owner_type=%s owner_id=%s subscription_id=%s existing_qty=%s",
+            owner_type,
+            getattr(owner, "id", None) or getattr(owner, "pk", None),
+            subscription.id,
+            existing_qty,
+        )
+
         changes_made = False
         items_payload: list[dict[str, Any]] = []
         for price_id, desired_qty in desired_quantities.items():
@@ -9501,6 +9520,22 @@ def update_addons(request, owner, owner_type):
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
                 updated_items = []
+                logger.info(
+                    "Add-ons updated on Stripe: owner_type=%s owner_id=%s subscription_id=%s items_payload=%s",
+                    owner_type,
+                    getattr(owner, "id", None) or getattr(owner, "pk", None),
+                    subscription.id,
+                    items_payload,
+                )
+            else:
+                logger.info(
+                    "Add-ons update noop: owner_type=%s owner_id=%s subscription_id=%s desired_quantities=%s existing_qty=%s",
+                    owner_type,
+                    getattr(owner, "id", None) or getattr(owner, "pk", None),
+                    subscription.id,
+                    desired_quantities,
+                    existing_qty,
+                )
 
             try:
                 period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
