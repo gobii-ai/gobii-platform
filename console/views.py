@@ -9439,6 +9439,17 @@ def update_addons(request, owner, owner_type):
             return redirect(_billing_redirect(owner, owner_type))
         desired_quantities[price_id] = qty
 
+    owner_id = getattr(owner, "id", None) or getattr(owner, "pk", None)
+    posted_qty_keys = [key for key in request.POST.keys() if key.startswith("quantity__")]
+    logger.info(
+        "Add-ons update requested: owner_type=%s owner_id=%s plan_id=%s posted_keys=%s desired_quantities=%s",
+        owner_type,
+        owner_id,
+        plan_id,
+        posted_qty_keys,
+        desired_quantities,
+    )
+
     if not desired_quantities:
         messages.error(request, "No add-on quantities provided.")
         return redirect(_billing_redirect(owner, owner_type))
@@ -9472,6 +9483,14 @@ def update_addons(request, owner, owner_type):
             except (TypeError, ValueError):
                 existing_qty[pid] = 0
 
+        logger.info(
+            "Add-ons existing quantities: owner_type=%s owner_id=%s subscription_id=%s existing_qty=%s",
+            owner_type,
+            owner_id,
+            subscription.id,
+            existing_qty,
+        )
+
         changes_made = False
         items_payload: list[dict[str, Any]] = []
         for price_id, desired_qty in desired_quantities.items():
@@ -9500,8 +9519,21 @@ def update_addons(request, owner, owner_type):
             updated_subscription = stripe.Subscription.modify(subscription.id, **modify_kwargs)
             updated_items = (updated_subscription.get("items") or {}).get("data", []) if isinstance(updated_subscription, Mapping) else []
             if not isinstance(updated_items, list):
+                logger.warning(
+                    "Add-ons update returned unexpected items format: owner_type=%s owner_id=%s subscription_id=%s",
+                    owner_type,
+                    owner_id,
+                    subscription.id,
+                )
                 updated_items = []
-
+            else:
+                logger.info(
+                    "Add-ons updated on Stripe: owner_type=%s owner_id=%s subscription_id=%s items_payload=%s",
+                    owner_type,
+                    owner_id,
+                    subscription.id,
+                    items_payload,
+                )
             try:
                 period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
                 tz = timezone.get_current_timezone()
@@ -9522,15 +9554,24 @@ def update_addons(request, owner, owner_type):
             except Exception:
                 logger.exception(
                     "Failed to sync add-on entitlements after batch update for %s",
-                    getattr(owner, "id", None) or owner,
+                    owner_id or owner,
                 )
+        else:
+            logger.info(
+                "Add-ons update noop: owner_type=%s owner_id=%s subscription_id=%s desired_quantities=%s existing_qty=%s",
+                owner_type,
+                owner_id,
+                subscription.id,
+                desired_quantities,
+                existing_qty,
+            )
 
         messages.success(request, "Add-ons updated.")
     except stripe.error.StripeError as exc:
         logger.warning("Stripe API error while updating addons: %s", exc)
         messages.error(request, f"A billing error occurred: {exc}")
     except Exception as exc:
-        logger.exception("Failed to update add-ons for %s", getattr(owner, "id", None) or owner)
+        logger.exception("Failed to update add-ons for %s", owner_id or owner)
         messages.error(request, "An unexpected error occurred while updating add-ons.")
 
     return redirect(_billing_redirect(owner, owner_type))
