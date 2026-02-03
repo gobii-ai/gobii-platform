@@ -115,6 +115,7 @@ class Prompt:
         extra_shrinkers: Optional[
             Dict[str, Callable[[str, float], str]]
         ] = None,
+        summarize_fn: Optional[Callable[[str, int], str]] = None,
     ):
         self.token_estimator = token_estimator
         self.shrinkers: Dict[str, Callable[[str, float], str]] = {
@@ -127,6 +128,7 @@ class Prompt:
         self._last: List[_Node] = []
         self._tokens_before_fitting: int = 0
         self._tokens_after_fitting: int = 0
+        self._summarize_fn = summarize_fn
 
     # builder shortcuts ---------------------------------------------------
     def group(self, name: str, *, weight: int = 1) -> _Node:
@@ -342,6 +344,10 @@ class Prompt:
         self, n: _Node, fn: Optional[Callable[[str, float], str]], budget: int
     ):
         base = n.text
+        if isinstance(n.shrinker, str) and n.shrinker == "summarization":
+            self._summarize_shrink(n, budget)
+            n.shrunk = True
+            return
         if fn:
             r = min(1.0, budget / max(1, n.tokens))
             for _ in range(12):  # iterative refinement
@@ -392,3 +398,79 @@ class Prompt:
             words = final.split()
             n.text = " ".join(words[:budget])
             n.tokens = self._tok(n.text)
+
+    def _summarize_shrink(self, n: _Node, budget: int):
+        tag_open = f"<{n.name}>"
+        tag_close = f"</{n.name}>"
+        overhead = self._tok(tag_open + tag_close)
+        content_budget = max(0, budget - overhead)
+        if content_budget < 12:
+            self._hard_truncate(n, budget)
+            return
+
+        summary_text: Optional[str] = None
+        if self._summarize_fn:
+            try:
+                summary_text = self._summarize_fn(n.text, content_budget)
+            except Exception:
+                summary_text = None
+
+        if summary_text is None:
+            try:
+                from api.agent.core.llm_config import get_summarization_llm_config
+                from api.agent.core.llm_utils import run_completion
+            except Exception:
+                summary_text = None
+            else:
+                try:
+                    _provider_key, model, params = get_summarization_llm_config()
+                    params = dict(params or {})
+                    params.setdefault("max_tokens", max(1, content_budget))
+                    prompt = [
+                        {
+                            "role": "system",
+                            "content": (
+                                "You compress text. Return a concise summary that fits within the token budget. "
+                                "Preserve key facts, numbers, identifiers, and structure. Do not add new info."
+                            ),
+                        },
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Token budget: {content_budget}\n"
+                                "Summarize the following text:\n\n"
+                                f"{n.text}"
+                            ),
+                        },
+                    ]
+                    response = run_completion(
+                        model=model,
+                        messages=prompt,
+                        params=params,
+                        drop_params=True,
+                    )
+                    summary_text = response.choices[0].message.content.strip()
+                except Exception:
+                    summary_text = None
+
+        if not summary_text:
+            r = min(1.0, budget / max(1, n.tokens))
+            fallback = hmt(n.text, r)
+            wrapped = f"{tag_open}{fallback}{tag_close}"
+            if self._tok(wrapped) <= budget:
+                n.text = wrapped
+                n.tokens = self._tok(wrapped)
+                return
+            n.text = fallback
+            self._hard_truncate(n, budget)
+            return
+
+        wrapped = f"{tag_open}{summary_text}{tag_close}"
+        current = self._tok(wrapped)
+        if current <= budget:
+            n.text = wrapped
+            n.tokens = current
+            return
+
+        n.text = summary_text
+        self._hard_truncate(n, budget)

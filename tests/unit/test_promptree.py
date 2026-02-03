@@ -77,6 +77,34 @@ class PromptShrinkingTests(TestCase):
         
         self.assertEqual(cut.count("BYTES TRUNCATED"), 2)  # HMT produces 2 markers
 
+    def test_summarization_shrinker_uses_custom_summarizer(self):
+        """Test that summarization shrinker respects budgets and runs once."""
+        calls = []
+
+        def summarizer(text, target_tokens):
+            calls.append(target_tokens)
+            return " ".join(["summary"] * max(1, target_tokens))
+
+        base = "word " * 120
+        prompt = Prompt(summarize_fn=summarizer)
+        prompt.section_text("s", base, shrinker="summarization")
+        result = prompt.render(20)
+
+        self.assertLessEqual(prompt._tok(result), 20)
+        self.assertEqual(len(calls), 1)
+
+    def test_summarization_shrinker_hard_truncates_when_needed(self):
+        """Test summarization shrinker hard truncates when summary is too long."""
+        def summarizer(text, target_tokens):
+            return " ".join(["summary"] * max(1, target_tokens * 5))
+
+        base = "word " * 200
+        prompt = Prompt(summarize_fn=summarizer)
+        prompt.section_text("s", base, shrinker="summarization")
+        result = prompt.render(15)
+
+        self.assertLessEqual(prompt._tok(result), 15)
+
     def test_pathological_tiny_budget(self):
         """Test handling of pathologically small token budgets."""
         huge = _long_random_text(20000)

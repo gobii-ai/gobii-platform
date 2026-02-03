@@ -4770,8 +4770,10 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
                 # Apply HMT shrinking to bulky content
                 shrinker = None
-                if (
-                    component_name in ("params", "result", "result_preview", "result_schema", "body") or
+                if component_name in ("result", "body"):
+                    shrinker = "summarization"
+                elif (
+                    component_name in ("params", "result_preview", "result_schema") or
                     (component_name == "content" and len(component_content) > 250)
                 ):
                     shrinker = "hmt"

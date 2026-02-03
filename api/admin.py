@@ -4097,6 +4097,9 @@ from .models import (
     EmbeddingsModelEndpoint,
     EmbeddingsLLMTier,
     EmbeddingsTierEndpoint,
+    SummarizationModelEndpoint,
+    SummarizationLLMTier,
+    SummarizationTierEndpoint,
     FileHandlerModelEndpoint,
     FileHandlerLLMTier,
     FileHandlerTierEndpoint,
@@ -4221,6 +4224,35 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
     search_fields = ("description", "tier_endpoints__endpoint__key")
     ordering = ("order",)
     inlines = [EmbeddingsTierEndpointInline]
+
+
+@admin.register(SummarizationModelEndpoint)
+class SummarizationModelEndpointAdmin(admin.ModelAdmin):
+    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "enabled")
+    list_filter = ("enabled", "low_latency", "provider")
+    search_fields = ("key", "litellm_model", "api_base")
+    fields = (
+        "key",
+        "provider",
+        "enabled",
+        "low_latency",
+        "litellm_model",
+        "api_base",
+    )
+
+
+class SummarizationTierEndpointInline(admin.TabularInline):
+    model = SummarizationTierEndpoint
+    extra = 0
+    autocomplete_fields = ("endpoint",)
+
+
+@admin.register(SummarizationLLMTier)
+class SummarizationLLMTierAdmin(admin.ModelAdmin):
+    list_display = ("order", "description")
+    search_fields = ("description", "tier_endpoints__endpoint__key")
+    ordering = ("order",)
+    inlines = [SummarizationTierEndpointInline]
 
 
 @admin.register(FileHandlerModelEndpoint)

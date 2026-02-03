@@ -24,7 +24,7 @@ export type ProviderEndpoint = {
   supports_reasoning?: boolean
   reasoning_effort?: string | null
   openrouter_preset?: string | null
-  type: 'persistent' | 'browser' | 'embedding' | 'file_handler'
+  type: 'persistent' | 'browser' | 'embedding' | 'summarization' | 'file_handler'
   low_latency?: boolean
   enabled: boolean
   provider_id: string
@@ -102,6 +102,13 @@ export type EmbeddingTier = {
   endpoints: TierEndpoint[]
 }
 
+export type SummarizationTier = {
+  id: string
+  order: number
+  description: string
+  endpoints: TierEndpoint[]
+}
+
 export type FileHandlerTier = {
   id: string
   order: number
@@ -113,6 +120,7 @@ export type EndpointChoices = {
   persistent_endpoints: ProviderEndpoint[]
   browser_endpoints: ProviderEndpoint[]
   embedding_endpoints: ProviderEndpoint[]
+  summarization_endpoints: ProviderEndpoint[]
   file_handler_endpoints: ProviderEndpoint[]
 }
 
@@ -123,6 +131,7 @@ export type LlmOverviewResponse = {
   persistent: { ranges: TokenRange[] }
   browser: BrowserPolicy | null
   embeddings: { tiers: EmbeddingTier[] }
+  summarization: { tiers: SummarizationTier[] }
   file_handlers: { tiers: FileHandlerTier[] }
   choices: EndpointChoices
 }
@@ -162,6 +171,7 @@ const endpointPaths = {
   persistent: `${base}/persistent/endpoints/`,
   browser: `${base}/browser/endpoints/`,
   embedding: `${base}/embeddings/endpoints/`,
+  summarization: `${base}/summarization/endpoints/`,
   file_handler: `${base}/file-handlers/endpoints/`,
 } as const
 
@@ -264,6 +274,30 @@ export function updateEmbeddingTierEndpoint(tierEndpointId: string, payload: Rec
 
 export function deleteEmbeddingTierEndpoint(tierEndpointId: string) {
   return jsonRequest(`${base}/embeddings/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function createSummarizationTier(payload: { description?: string }) {
+  return jsonRequest(`${base}/summarization/tiers/`, withCsrf(payload))
+}
+
+export function updateSummarizationTier(tierId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/summarization/tiers/${tierId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteSummarizationTier(tierId: string) {
+  return jsonRequest(`${base}/summarization/tiers/${tierId}/`, withCsrf(undefined, 'DELETE'))
+}
+
+export function addSummarizationTierEndpoint(tierId: string, payload: { endpoint_id: string; weight: number }) {
+  return jsonRequest(`${base}/summarization/tiers/${tierId}/endpoints/`, withCsrf(payload))
+}
+
+export function updateSummarizationTierEndpoint(tierEndpointId: string, payload: Record<string, unknown>) {
+  return jsonRequest(`${base}/summarization/tier-endpoints/${tierEndpointId}/`, withCsrf(payload, 'PATCH'))
+}
+
+export function deleteSummarizationTierEndpoint(tierEndpointId: string) {
+  return jsonRequest(`${base}/summarization/tier-endpoints/${tierEndpointId}/`, withCsrf(undefined, 'DELETE'))
 }
 
 export function createFileHandlerTier(payload: { description?: string }) {

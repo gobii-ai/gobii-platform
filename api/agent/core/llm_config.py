@@ -18,7 +18,7 @@ from typing import Dict, List, Tuple, Any, Optional
 from django.apps import apps
 from django.core.cache import cache
 from django.db import connection
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from django.conf import settings
 from django.utils import timezone
 
@@ -1080,6 +1080,82 @@ def _get_failover_configs_from_legacy(
     )
 
 
+def _get_summarization_config_from_tiers() -> Optional[Tuple[str, str, dict]]:
+    """Return the first viable summarization config from DB tiers."""
+    try:
+        SummarizationLLMTier = apps.get_model('api', 'SummarizationLLMTier')
+        SummarizationTierEndpoint = apps.get_model('api', 'SummarizationTierEndpoint')
+    except Exception:
+        return None
+
+    tier_prefetch = Prefetch(
+        "tier_endpoints",
+        queryset=SummarizationTierEndpoint.objects.select_related("endpoint__provider").order_by("-weight"),
+    )
+    tiers = SummarizationLLMTier.objects.prefetch_related(tier_prefetch).order_by("order")
+
+    for tier in tiers:
+        for entry in tier.tier_endpoints.all():
+            if entry.weight <= 0:
+                continue
+            endpoint = entry.endpoint
+            if endpoint is None or not getattr(endpoint, "enabled", False):
+                continue
+
+            provider = getattr(endpoint, "provider", None)
+            if provider is not None and not getattr(provider, "enabled", True):
+                continue
+
+            model_name = normalize_model_name(provider, endpoint.litellm_model, api_base=endpoint.api_base)
+            if not model_name:
+                continue
+
+            params: Dict[str, Any] = {}
+            api_key = None
+            if provider is not None:
+                encrypted = getattr(provider, "api_key_encrypted", None)
+                if encrypted:
+                    try:
+                        from api.encryption import SecretsEncryption
+                        api_key = SecretsEncryption.decrypt_value(encrypted)
+                    except Exception:
+                        logger.warning(
+                            "Failed to decrypt summarization API key for provider %s",
+                            getattr(provider, "key", "unknown"),
+                            exc_info=True,
+                        )
+                        api_key = None
+
+            if not api_key and provider is not None:
+                env_var = getattr(provider, "env_var_name", None)
+                if env_var:
+                    api_key = os.getenv(env_var)
+
+            if api_key:
+                params["api_key"] = api_key
+
+            api_base = (endpoint.api_base or "").strip()
+            if api_base:
+                params["api_base"] = api_base
+                params.setdefault("api_key", "sk-noauth")
+
+            if provider is not None and "google" in getattr(provider, "key", ""):
+                params["vertex_project"] = provider.vertex_project or os.getenv("GOOGLE_CLOUD_PROJECT", "browser-use-458714")
+                params["vertex_location"] = provider.vertex_location or os.getenv("GOOGLE_CLOUD_LOCATION", "us-east4")
+
+            if "api_key" not in params and not api_base:
+                continue
+
+            if provider is not None and getattr(provider, "key", "") == "openrouter":
+                headers = get_attribution_headers()
+                if headers:
+                    params["extra_headers"] = headers
+
+            return endpoint.key, model_name, params
+
+    return None
+
+
 def get_summarization_llm_config(
     *,
     agent: Any | None = None,
@@ -1101,6 +1177,24 @@ def get_summarization_llm_config(
     Returns:
         Tuple of (provider_key, model_name, litellm_params)
     """
+    summarization_config = _get_summarization_config_from_tiers()
+    if summarization_config:
+        provider_key, model, params = summarization_config
+        params = dict(params)
+        supports_temperature = bool(params.get("supports_temperature", True))
+        params.pop("supports_temperature", None)
+        if not supports_temperature:
+            params.pop("temperature", None)
+        elif "temperature" not in params or params["temperature"] is None:
+            params["temperature"] = 0
+
+        if supports_temperature:
+            _apply_required_temperature(model, params)
+        else:
+            params.pop("temperature", None)
+
+        return provider_key, model, params
+
     # DB-only: pick primary config and adjust temperature for summarisation
     if agent_id is None and agent is not None:
         possible_id = getattr(agent, "id", None)

@@ -64,6 +64,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'persistent', label: 'Persistent' },
   { id: 'browser', label: 'Browser' },
   { id: 'embedding', label: 'Embedding' },
+  { id: 'summarization', label: 'Summarization' },
   { id: 'file_handler', label: 'File handler' },
 ]
 
@@ -201,7 +202,7 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
-type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler'
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'summarization' | 'file_handler'
 
 const getTierStyle = (tierKey?: string | null) => TIER_STYLE_MAP[tierKey ?? 'standard'] ?? TIER_STYLE_MAP.standard
 
@@ -708,6 +709,27 @@ function mapEmbeddingTiers(tiers: llmApi.EmbeddingTier[] = []): Tier[] {
   return mapped
 }
 
+function mapSummarizationTiers(tiers: llmApi.SummarizationTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'summarization',
+      intelligenceTier: null,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'summarization')
+  return mapped
+}
+
 function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
     const normalized = normalizeTierEndpointWeights(tier.endpoints)
@@ -794,6 +816,8 @@ function AddEndpointModal({
     ? choices.browser_endpoints
     : scope === 'embedding'
       ? choices.embedding_endpoints
+      : scope === 'summarization'
+        ? choices.summarization_endpoints
       : scope === 'file_handler'
         ? choices.file_handler_endpoints
         : choices.persistent_endpoints
@@ -1213,7 +1237,9 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                     ? 'Edit browser endpoint'
                     : endpoint.type === 'file_handler'
                       ? 'Edit file handler endpoint'
-                      : 'Edit embedding endpoint'}
+                      : endpoint.type === 'summarization'
+                        ? 'Edit summarization endpoint'
+                        : 'Edit embedding endpoint'}
               </h3>
               <button
                 onClick={() => {
@@ -1465,9 +1491,10 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
 
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
+  const isSummarization = endpoint.type === 'summarization'
   const isFileHandler = endpoint.type === 'file_handler'
   const isPersistent = endpoint.type === 'persistent'
-  const isToolingEndpoint = !isEmbedding && !isFileHandler
+  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isSummarization
 
   return (
     <div className="space-y-3">
@@ -1476,7 +1503,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
-        {!isBrowser && (
+        {!isBrowser && !isSummarization && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
@@ -1511,10 +1538,12 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-          Supports temperature
-        </label>
+        {!isSummarization && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Supports temperature
+          </label>
+        )}
         <label className="inline-flex items-center gap-2">
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
@@ -1605,6 +1634,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     persistent: 'Add persistent endpoint',
     browser: 'Add browser endpoint',
     embedding: 'Add embedding endpoint',
+    summarization: 'Add summarization endpoint',
     file_handler: 'Add file handler endpoint',
   }[type]
 
@@ -1688,10 +1718,12 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-              Supports temperature
-            </label>
+            {type !== 'summarization' && (
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                Supports temperature
+              </label>
+            )}
             <label className="inline-flex items-center gap-2">
               <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Vision
@@ -1710,7 +1742,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && type !== 'file_handler' && (
+            {type !== 'embedding' && type !== 'file_handler' && type !== 'summarization' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2364,6 +2396,11 @@ export function LlmConfigScreen() {
     return mapEmbeddingTiers(overviewQuery.data?.embeddings.tiers)
   }, [selectedProfile, overviewQuery.data?.embeddings.tiers])
 
+  const summarizationTiers = useMemo(
+    () => mapSummarizationTiers(overviewQuery.data?.summarization?.tiers),
+    [overviewQuery.data?.summarization?.tiers],
+  )
+
   const fileHandlerTiers = useMemo(
     () => mapFileHandlerTiers(overviewQuery.data?.file_handlers?.tiers),
     [overviewQuery.data?.file_handlers?.tiers],
@@ -2377,6 +2414,7 @@ export function LlmConfigScreen() {
     persistent_endpoints: [],
     browser_endpoints: [],
     embedding_endpoints: [],
+    summarization_endpoints: [],
     file_handler_endpoints: [],
   }
 
@@ -2531,10 +2569,12 @@ export function LlmConfigScreen() {
     type: llmApi.ProviderEndpoint['type'],
     values: EndpointFormValues & { key: string },
   ) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'summarization' | 'file_handler' = type === 'browser'
       ? 'browser'
       : type === 'embedding'
         ? 'embedding'
+        : type === 'summarization'
+          ? 'summarization'
         : type === 'file_handler'
           ? 'file_handler'
           : 'persistent'
@@ -2552,6 +2592,11 @@ export function LlmConfigScreen() {
       payload.supports_vision = Boolean(values.supportsVision)
       payload.enabled = true
     } else if (type === 'embedding') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
+      payload.enabled = true
+    } else if (type === 'summarization') {
       payload.model = values.model
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
@@ -2594,10 +2639,12 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'summarization' | 'file_handler' = endpoint.type === 'browser'
       ? 'browser'
       : endpoint.type === 'embedding'
         ? 'embedding'
+        : endpoint.type === 'summarization'
+          ? 'summarization'
         : endpoint.type === 'file_handler'
           ? 'file_handler'
           : 'persistent'
@@ -2648,10 +2695,12 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
+    const kind: 'persistent' | 'browser' | 'embedding' | 'summarization' | 'file_handler' = endpoint.type === 'browser'
       ? 'browser'
       : endpoint.type === 'embedding'
         ? 'embedding'
+        : endpoint.type === 'summarization'
+          ? 'summarization'
         : endpoint.type === 'file_handler'
           ? 'file_handler'
           : 'persistent'
@@ -2781,6 +2830,9 @@ export function LlmConfigScreen() {
         if (scope === 'embedding') {
           return llmApi.updateEmbeddingTierEndpoint(entry.id, payload)
         }
+        if (scope === 'summarization') {
+          return llmApi.updateSummarizationTierEndpoint(entry.id, payload)
+        }
         if (scope === 'file_handler') {
           return llmApi.updateFileHandlerTierEndpoint(entry.id, payload)
         }
@@ -2822,6 +2874,14 @@ export function LlmConfigScreen() {
         }
         if (scope === 'embedding') {
           return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(endpoint.id), {
+            successMessage: 'Endpoint removed',
+            label: 'Removing endpoint…',
+            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
+            context: tier.name,
+          })
+        }
+        if (scope === 'summarization') {
+          return runMutation(() => llmApi.deleteSummarizationTierEndpoint(endpoint.id), {
             successMessage: 'Endpoint removed',
             label: 'Removing endpoint…',
             busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
@@ -2934,6 +2994,32 @@ export function LlmConfigScreen() {
       }),
     })
 
+  const handleSummarizationTierAdd = () => runMutation(() => llmApi.createSummarizationTier({}), {
+    successMessage: 'Summarization tier added',
+    label: 'Creating summarization tier…',
+    busyKey: actionKey('summarization', 'add'),
+    context: 'Summarization tiers',
+  })
+  const handleSummarizationTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateSummarizationTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving summarization tier up…' : 'Moving summarization tier down…',
+      busyKey: actionKey('summarization', tierId, 'move', direction),
+      busyKeys: [actionKey('summarization', tierId, 'move')],
+      context: 'Summarization tiers',
+    })
+  const handleSummarizationTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete summarization tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteSummarizationTier(tier.id), {
+        successMessage: 'Summarization tier removed',
+        label: 'Removing summarization tier…',
+        busyKey: actionKey('summarization', tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+
   const handleFileHandlerTierAdd = () => runMutation(() => llmApi.createFileHandlerTier({}), {
     successMessage: 'File handler tier added',
     label: 'Creating file handler tier…',
@@ -2961,7 +3047,7 @@ export function LlmConfigScreen() {
     })
 
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
-    const useProfile = Boolean(selectedProfile && scope !== 'file_handler')
+    const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'summarization')
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
@@ -3000,6 +3086,8 @@ export function LlmConfigScreen() {
         response = await llmApi.addBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
       } else if (scope === 'embedding') {
         response = await llmApi.addEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
+      } else if (scope === 'summarization') {
+        response = await llmApi.addSummarizationTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else if (scope === 'file_handler') {
         response = await llmApi.addFileHandlerTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
       } else {
@@ -3029,6 +3117,9 @@ export function LlmConfigScreen() {
         }
         if (scope === 'embedding') {
           return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload)
+        }
+        if (scope === 'summarization') {
+          return llmApi.updateSummarizationTierEndpoint(tierEndpointId, payload)
         }
         if (scope === 'file_handler') {
           return llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload)
@@ -3883,7 +3974,7 @@ export function LlmConfigScreen() {
                   <BookText className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
                   <div>
                     <h4 className="font-semibold text-slate-900/90">Summaries</h4>
-                    <p className="text-sm text-slate-600">Uses the primary model from the smallest token range, temperature forced to 0.</p>
+                    <p className="text-sm text-slate-600">Uses the summarization tiers below with temperature forced to 0.</p>
                   </div>
                 </div>
               </div>
@@ -3972,6 +4063,43 @@ export function LlmConfigScreen() {
                 )
               })}
               {embeddingTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No embedding tiers configured.</p>}
+            </div>
+            <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/60 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <BookText className="size-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Summarization tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for summaries and LLM-based shrinking.</p>
+                  </div>
+                </div>
+                <button type="button" className={button.secondary} onClick={handleSummarizationTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
+              </div>
+              {summarizationTiers.map((tier, index) => {
+                const lastIndex = summarizationTiers.length - 1
+                return (
+                  <TierCard
+                    key={tier.id}
+                    tier={tier}
+                    pendingWeights={pendingWeights}
+                    scope="summarization"
+                    canMoveUp={index > 0}
+                    canMoveDown={index < lastIndex}
+                    isDirty={dirtyTierIds.has(`summarization:${tier.id}`)}
+                    isSaving={savingTierIds.has(`summarization:${tier.id}`)}
+                    onMove={(direction) => handleSummarizationTierMove(tier.id, direction)}
+                    onRemove={handleSummarizationTierRemove}
+                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'summarization')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'summarization')}
+                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'summarization')}
+                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'summarization')}
+                    isActionBusy={isBusy}
+                  />
+                )
+              })}
+              {summarizationTiers.length === 0 && <p className="text-center text-xs text-slate-500 py-4">No summarization tiers configured.</p>}
             </div>
             <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
               <div className="flex items-center justify-between">

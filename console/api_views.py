@@ -41,6 +41,9 @@ from api.models import (
     EmbeddingsLLMTier,
     EmbeddingsModelEndpoint,
     EmbeddingsTierEndpoint,
+    SummarizationLLMTier,
+    SummarizationModelEndpoint,
+    SummarizationTierEndpoint,
     FileHandlerLLMTier,
     FileHandlerModelEndpoint,
     FileHandlerTierEndpoint,
@@ -792,6 +795,11 @@ def _next_order_for_browser(policy: BrowserLLMPolicy, intelligence_tier: "Intell
 
 def _next_embedding_order() -> int:
     last = EmbeddingsLLMTier.objects.order_by("-order").first()
+    return (last.order if last else 0) + 1
+
+
+def _next_summarization_order() -> int:
+    last = SummarizationLLMTier.objects.order_by("-order").first()
     return (last.order if last else 0) + 1
 
 
@@ -2641,6 +2649,7 @@ class LLMProviderDetailAPIView(SystemAdminAPIView):
             provider.persistent_endpoints.exists()
             or provider.browser_endpoints.exists()
             or provider.embedding_endpoints.exists()
+            or provider.summarization_endpoints.exists()
             or provider.file_handler_endpoints.exists()
         )
         if has_dependents:
@@ -2685,6 +2694,15 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
             elif kind == "embedding":
                 endpoint = get_object_or_404(EmbeddingsModelEndpoint, pk=endpoint_id)
                 result = _run_embedding_test(endpoint)
+            elif kind == "summarization":
+                endpoint = get_object_or_404(SummarizationModelEndpoint, pk=endpoint_id)
+                result = _run_completion_test(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="litellm_model",
+                    base_attr="api_base",
+                    default_max_tokens=128,
+                )
             elif kind == "file_handler":
                 endpoint = get_object_or_404(FileHandlerModelEndpoint, pk=endpoint_id)
                 result = _run_completion_test(
@@ -3418,6 +3436,167 @@ class EmbeddingTierEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
         tier_endpoint = get_object_or_404(EmbeddingsTierEndpoint, pk=tier_endpoint_id)
+        tier_endpoint.delete()
+        return _json_ok()
+
+
+class SummarizationEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if SummarizationModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        provider_id = payload.get("provider_id")
+        provider = None
+        if provider_id:
+            provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+        endpoint = SummarizationModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            litellm_model=model,
+            api_base=(payload.get("api_base") or "").strip(),
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+
+class SummarizationEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(SummarizationModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "litellm_model" in payload:
+            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+            if model:
+                endpoint.litellm_model = model
+        if "api_base" in payload:
+            endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        if "provider_id" in payload:
+            provider_id = payload.get("provider_id")
+            if provider_id:
+                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+            else:
+                endpoint.provider = None
+        endpoint.save()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(SummarizationModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        return _json_ok()
+
+
+class SummarizationTierListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        description = (payload.get("description") or "").strip()
+        order = _next_summarization_order()
+        tier = SummarizationLLMTier.objects.create(order=order, description=description)
+        return _json_ok(tier_id=str(tier.id))
+
+
+class SummarizationTierDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(SummarizationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "description" in payload:
+            tier.description = (payload.get("description") or "").strip()
+        if "move" in payload:
+            direction = (payload.get("move") or "").lower()
+            if direction not in {"up", "down"}:
+                return HttpResponseBadRequest("direction must be 'up' or 'down'")
+            changed = _swap_orders(SummarizationLLMTier.objects.all(), tier, direction)
+            if not changed:
+                return HttpResponseBadRequest("Unable to move tier in that direction")
+        tier.save()
+        return _json_ok(tier_id=str(tier.id))
+
+    def delete(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(SummarizationLLMTier, pk=tier_id)
+        tier.delete()
+        return _json_ok()
+
+
+class SummarizationTierEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, tier_id: str, *args: Any, **kwargs: Any):
+        tier = get_object_or_404(SummarizationLLMTier, pk=tier_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        endpoint = get_object_or_404(SummarizationModelEndpoint, pk=payload.get("endpoint_id"))
+        if tier.tier_endpoints.filter(endpoint=endpoint).exists():
+            return HttpResponseBadRequest("Endpoint already exists in tier")
+        try:
+            weight = float(payload.get("weight", 1))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("weight must be numeric")
+        if weight <= 0:
+            return HttpResponseBadRequest("weight must be greater than zero")
+        te = SummarizationTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=weight)
+        return _json_ok(tier_endpoint_id=str(te.id))
+
+
+class SummarizationTierEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(SummarizationTierEndpoint, pk=tier_endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if "weight" in payload:
+            try:
+                weight = float(payload.get("weight"))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("weight must be numeric")
+            if weight <= 0:
+                return HttpResponseBadRequest("weight must be greater than zero")
+            tier_endpoint.weight = weight
+        tier_endpoint.save()
+        return _json_ok(tier_endpoint_id=str(tier_endpoint.id))
+
+    def delete(self, request: HttpRequest, tier_endpoint_id: str, *args: Any, **kwargs: Any):
+        tier_endpoint = get_object_or_404(SummarizationTierEndpoint, pk=tier_endpoint_id)
         tier_endpoint.delete()
         return _json_ok()
 
