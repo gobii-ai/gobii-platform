@@ -351,8 +351,10 @@ class Prompt:
         base = n.text
         if fn:
             r = min(1.0, budget / max(1, n.tokens))
+            last_shrunk_text = base
             for _ in range(12):  # iterative refinement
                 shrunk_text = fn(base, r)
+                last_shrunk_text = shrunk_text
                 wrapped = f"<{n.name}>{shrunk_text}</{n.name}>"
                 current = self._tok(wrapped)
                 if current <= budget:
@@ -363,6 +365,9 @@ class Prompt:
             else:
                 n.text = wrapped
                 n.tokens = self._tok(wrapped)
+                if n.tokens > budget:
+                    n.text = last_shrunk_text
+                    self._hard_truncate(n, budget)
         else:
             self._hard_truncate(n, budget)
 
