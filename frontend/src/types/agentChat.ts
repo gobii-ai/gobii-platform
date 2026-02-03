@@ -42,6 +42,8 @@ export type ToolMeta = {
   iconColor: string
 }
 
+export type ToolCallStatus = 'pending' | 'complete' | 'error'
+
 export type ToolCallEntry = {
   id: string
   meta: ToolMeta
@@ -54,6 +56,7 @@ export type ToolCallEntry = {
   sqlStatements?: string[]
   result?: string | null
   charterText?: string | null
+  status?: ToolCallStatus | null
   cursor?: string
 }
 

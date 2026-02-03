@@ -19,6 +19,13 @@ function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefi
   return <IconComponent className={className} aria-hidden="true" />
 }
 
+function ToolIconSlot({ entry }: { entry: ToolEntryDisplay }) {
+  if (entry.status === 'pending') {
+    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
+  }
+  return <ToolIcon icon={entry.icon} className="h-5 w-5" />
+}
+
 export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
   const transformed = useMemo(
     () => transformToolCluster(cluster, { suppressedThinkingCursor }),
@@ -174,7 +181,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
       <div className={detailClassName}>
         <div className="tool-chip-detail-header">
           <span className={`tool-chip-detail-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-            <ToolIcon icon={entry.icon} className="h-5 w-5" />
+            <ToolIconSlot entry={entry} />
           </span>
           <div className="tool-chip-detail-text">
             <span className="tool-chip-detail-label">{entry.label}</span>
@@ -249,7 +256,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
                   onClick={() => handleChipClick(entry)}
                 >
                   <span className={`tool-chip-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                    <ToolIcon icon={entry.icon} className="h-5 w-5" />
+                    <ToolIconSlot entry={entry} />
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>

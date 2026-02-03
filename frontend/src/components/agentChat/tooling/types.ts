@@ -12,6 +12,7 @@ export type ToolEntryDisplay = {
   label: string
   caption?: string | null
   timestamp?: string | null
+  status?: ToolCallEntry['status']
   icon: LucideIcon
   iconBgClass: string
   iconColorClass: string

@@ -178,6 +178,7 @@ function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallE
     sqlStatements: pickNonEmptyArray(incoming.sqlStatements ?? undefined, base.sqlStatements ?? undefined),
     result: pickNonEmptyString(incoming.result ?? undefined, base.result ?? undefined),
     charterText: pickNonEmptyString(incoming.charterText ?? undefined, base.charterText ?? undefined),
+    status: incoming.status ?? base.status,
     cursor: incoming.cursor ?? base.cursor,
     meta: incoming.meta ?? base.meta,
   }

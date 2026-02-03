@@ -811,12 +811,28 @@ def _sanitize_tool_name(name: str) -> str:
     return name
 
 
+def _build_tool_call_description(
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    normalized_result: str | None,
+) -> str:
+    # Keep descriptions compact; they surface in chat captions.
+    safe_tool_name = (tool_name or "")[:256]
+    try:
+        params_preview = str(tool_params)[:100] if tool_params else ""
+        result_preview = (normalized_result or "")[:100]
+        return f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
+    except Exception:
+        return f"Tool call: {safe_tool_name}"
+
+
 def _persist_tool_call_step(
     agent: "PersistentAgent",
     tool_name: str,
     tool_params: Dict[str, Any],
     result_content: str,
     execution_duration_ms: Optional[int],
+    status: str | None,
     credits_consumed: Any,
     consumed_credit: Any,
     attach_completion: Any,
@@ -837,12 +853,7 @@ def _persist_tool_call_step(
     safe_tool_name = (tool_name or "")[:256]
 
     # Build a safe description (truncate if needed)
-    try:
-        params_preview = str(tool_params)[:100] if tool_params else ""
-        result_preview = (normalized_result or "")[:100]
-        description = f"Tool call: {safe_tool_name}({params_preview}) -> {result_preview}"
-    except Exception:
-        description = f"Tool call: {safe_tool_name}"
+    description = _build_tool_call_description(safe_tool_name, tool_params, normalized_result)
 
     step_kwargs = {
         "agent": agent,
@@ -856,12 +867,14 @@ def _persist_tool_call_step(
         attach_completion(step_kwargs)
         step = PersistentAgentStep.objects.create(**step_kwargs)
         attach_prompt_archive(step)
+        tool_call_status = status or "complete"
         PersistentAgentToolCall.objects.create(
             step=step,
             tool_name=safe_tool_name,
             tool_params=tool_params,
             result=normalized_result,
             execution_duration_ms=execution_duration_ms,
+            status=tool_call_status,
         )
         try:
             from console.agent_chat.signals import emit_tool_call_realtime
@@ -925,6 +938,124 @@ def _persist_tool_call_step(
             exc_info=True,
         )
         return None
+
+
+def _create_pending_tool_call_step(
+    agent: "PersistentAgent",
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    credits_consumed: Any,
+    consumed_credit: Any,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> Optional["PersistentAgentStep"]:
+    from api.models import PersistentAgentStep, PersistentAgentToolCall
+
+    safe_tool_name = (tool_name or "")[:256]
+    step_kwargs = {
+        "agent": agent,
+        "description": "",
+        "credits_cost": credits_consumed if isinstance(credits_consumed, Decimal) else None,
+        "task_credit": consumed_credit,
+    }
+
+    try:
+        attach_completion(step_kwargs)
+        step = PersistentAgentStep.objects.create(**step_kwargs)
+        attach_prompt_archive(step)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=safe_tool_name,
+            tool_params=tool_params,
+            result="",
+            execution_duration_ms=None,
+            status="pending",
+        )
+        try:
+            from console.agent_chat.signals import emit_tool_call_realtime
+
+            emit_tool_call_realtime(step)
+        except Exception:
+            logger.debug(
+                "Failed to broadcast pending tool call for agent %s step %s",
+                agent.id,
+                getattr(step, "id", None),
+                exc_info=True,
+            )
+        return step
+    except Exception:
+        logger.debug(
+            "Failed to persist pending tool call for agent %s (%s)",
+            agent.id,
+            safe_tool_name,
+            exc_info=True,
+        )
+        return None
+
+
+def _finalize_pending_tool_call_step(
+    step: "PersistentAgentStep",
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    result_content: str,
+    execution_duration_ms: Optional[int],
+    status: str,
+) -> None:
+    from api.models import PersistentAgentToolCall
+
+    normalized_result = _normalize_tool_result_content(result_content)
+    safe_tool_name = (tool_name or "")[:256]
+    description = _build_tool_call_description(safe_tool_name, tool_params, normalized_result)
+
+    try:
+        step.description = description[:500]
+        step.save(update_fields=["description"])
+    except Exception:
+        logger.debug(
+            "Failed to update tool step description for agent %s step %s",
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
+        )
+
+    try:
+        tool_call = getattr(step, "tool_call", None)
+        if tool_call is None:
+            tool_call = PersistentAgentToolCall.objects.create(
+                step=step,
+                tool_name=safe_tool_name,
+                tool_params=tool_params,
+                result=normalized_result,
+                execution_duration_ms=execution_duration_ms,
+                status=status,
+            )
+        else:
+            tool_call.tool_name = safe_tool_name
+            tool_call.tool_params = tool_params
+            tool_call.result = normalized_result
+            tool_call.execution_duration_ms = execution_duration_ms
+            tool_call.status = status
+            tool_call.save(update_fields=["tool_name", "tool_params", "result", "execution_duration_ms", "status"])
+    except Exception:
+        logger.debug(
+            "Failed to finalize tool call for agent %s step %s",
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
+        )
+        return
+
+    try:
+        from console.agent_chat.signals import emit_tool_call_realtime
+
+        emit_tool_call_realtime(step)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast finalized tool call for agent %s step %s",
+            getattr(step, "agent_id", None),
+            getattr(step, "id", None),
+            exc_info=True,
+        )
 
 
 def _get_tool_call_arguments(call: Any) -> Any:
@@ -3372,6 +3503,16 @@ def _run_agent_loop(
                     # Ensure a fresh DB connection before tool execution and subsequent ORM writes
                     close_old_connections()
 
+                    pending_step = _create_pending_tool_call_step(
+                        agent=agent,
+                        tool_name=tool_name,
+                        tool_params=tool_params,
+                        credits_consumed=credits_consumed,
+                        consumed_credit=consumed_credit,
+                        attach_completion=_attach_completion,
+                        attach_prompt_archive=_attach_prompt_archive,
+                    )
+
                     logger.info("Agent %s: executing %s now", agent.id, tool_name)
 
                     tool_started_at = time.monotonic()
@@ -3495,21 +3636,36 @@ def _run_agent_loop(
                         if status_label in MESSAGE_SUCCESS_STATUSES:
                             message_delivery_ok = True
 
+                    is_error_status = _is_error_status(result)
+                    tool_status = "error" if is_error_status else "complete"
+
                     # Guard ORM writes against stale connections; retry once on OperationalError
                     close_old_connections()
-                    step = _persist_tool_call_step(
-                        agent=agent,
-                        tool_name=tool_name,
-                        tool_params=tool_params,
-                        result_content=result_content,
-                        execution_duration_ms=tool_duration_ms,
-                        credits_consumed=credits_consumed,
-                        consumed_credit=consumed_credit,
-                        attach_completion=_attach_completion,
-                        attach_prompt_archive=_attach_prompt_archive,
-                    )
+                    if pending_step is not None:
+                        _finalize_pending_tool_call_step(
+                            step=pending_step,
+                            tool_name=tool_name,
+                            tool_params=tool_params,
+                            result_content=result_content,
+                            execution_duration_ms=tool_duration_ms,
+                            status=tool_status,
+                        )
+                        step = pending_step
+                    else:
+                        step = _persist_tool_call_step(
+                            agent=agent,
+                            tool_name=tool_name,
+                            tool_params=tool_params,
+                            result_content=result_content,
+                            execution_duration_ms=tool_duration_ms,
+                            status=tool_status,
+                            credits_consumed=credits_consumed,
+                            consumed_credit=consumed_credit,
+                            attach_completion=_attach_completion,
+                            attach_prompt_archive=_attach_prompt_archive,
+                        )
                     allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
-                    tool_had_error = _is_error_status(result)
+                    tool_had_error = is_error_status
                     tool_had_warning = _is_warning_status(result)
                     explicit_continue = None
                     if isinstance(tool_params, dict):

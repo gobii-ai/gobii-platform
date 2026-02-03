@@ -141,7 +141,7 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
             return
         emit_tool_call_realtime(step)
         try:
-            if not (step.description or "").startswith("Tool call"):
+            if getattr(step, "tool_call", None) is None and not (step.description or "").startswith("Tool call"):
                 step_payload = serialize_step(step)
                 _broadcast_audit_event(str(step.agent_id), step_payload)
             if getattr(step, "tool_call", None):

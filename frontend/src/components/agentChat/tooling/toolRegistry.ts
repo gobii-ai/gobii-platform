@@ -222,6 +222,7 @@ function buildToolEntry(clusterCursor: string, entry: ToolCallEntry): ToolEntryD
     label: finalLabel,
     caption: finalCaption,
     timestamp: entry.timestamp ?? null,
+    status: entry.status ?? null,
     icon: finalIcon,
     iconBgClass: transform.iconBgClass ?? descriptor.iconBgClass,
     iconColorClass: transform.iconColorClass ?? descriptor.iconColorClass,

@@ -18,6 +18,13 @@ function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefi
   return <IconComponent className={className} aria-hidden="true" />
 }
 
+function ToolIconSlot({ entry }: { entry: ToolEntryDisplay }) {
+  if (entry.status === 'pending') {
+    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
+  }
+  return <ToolIcon icon={entry.icon} className="h-5 w-5" />
+}
+
 function deriveCaption(entry: ToolEntryDisplay): string | null {
   if (entry.caption && entry.caption !== entry.label) {
     return entry.caption
@@ -120,7 +127,7 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
                     onClick={() => handleToggleEntry(entry.id)}
                   >
                     <span className={`tool-cluster-timeline-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                      <ToolIcon icon={entry.icon} className="h-5 w-5" />
+                      <ToolIconSlot entry={entry} />
                     </span>
                     <span className="tool-cluster-timeline-main">
                       <span className="tool-cluster-timeline-label">{entry.label}</span>
