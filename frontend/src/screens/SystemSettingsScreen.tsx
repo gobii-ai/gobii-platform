@@ -56,7 +56,6 @@ export function SystemSettingsScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['system-settings'] as const, [])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
-  const [dirtyKeys, setDirtyKeys] = useState<Record<string, boolean>>({})
   const [rowStatus, setRowStatus] = useState<RowStatusMap>({})
   const [banner, setBanner] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
@@ -65,10 +64,16 @@ export function SystemSettingsScreen() {
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null)
   const activeCategoryRef = useRef<string | null>(null)
   const visibilityRef = useRef(new Map<string, number>())
+  const dirtyKeysRef = useRef<Record<string, boolean>>({})
+
+  const setDirtyKey = useCallback((key: string, dirty: boolean) => {
+    dirtyKeysRef.current = { ...dirtyKeysRef.current, [key]: dirty }
+  }, [])
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchSystemSettings(signal),
+    refetchOnWindowFocus: false,
   })
 
   useEffect(() => {
@@ -77,6 +82,7 @@ export function SystemSettingsScreen() {
     }
     setDrafts((prev) => {
       const next: Record<string, string> = { ...prev }
+      const dirtyKeys = dirtyKeysRef.current
       data.settings.forEach((setting) => {
         const shouldReset = !dirtyKeys[setting.key] || !(setting.key in prev)
         if (shouldReset) {
@@ -85,7 +91,7 @@ export function SystemSettingsScreen() {
       })
       return next
     })
-  }, [data, dirtyKeys])
+  }, [data])
 
   const settings = data?.settings ?? []
   const listError = error instanceof Error ? error.message : null
@@ -111,7 +117,7 @@ export function SystemSettingsScreen() {
     const resolveBool = (setting: SystemSetting) => {
       const draftValue = (drafts[setting.key] ?? draftFromSetting(setting)).trim()
       if (!draftValue) {
-        return Boolean(setting.fallback_value)
+        return Boolean(setting.effective_value)
       }
       return draftValue === 'true'
     }
@@ -205,7 +211,7 @@ export function SystemSettingsScreen() {
         nextDrafts[setting.key] = draftFromSetting(setting)
       })
       setDrafts(nextDrafts)
-      setDirtyKeys({})
+      dirtyKeysRef.current = {}
       setRowStatus({})
       setSaveError(null)
       setErrorBanner(null)
@@ -253,10 +259,7 @@ export function SystemSettingsScreen() {
           ...prev,
           [setting.key]: draftFromSetting(response.setting),
         }))
-        setDirtyKeys((prev) => ({
-          ...prev,
-          [setting.key]: false,
-        }))
+        setDirtyKey(setting.key, false)
       } catch (err) {
         const message =
           err instanceof HttpError
@@ -278,7 +281,7 @@ export function SystemSettingsScreen() {
     }
     setSaving(false)
     queryClient.invalidateQueries({ queryKey })
-  }, [drafts, loginToggleState, queryClient, queryKey, settings, updateRowError])
+  }, [drafts, loginToggleState, queryClient, queryKey, settings, setDirtyKey, updateRowError])
 
   return (
     <div className="space-y-4">
@@ -394,13 +397,10 @@ export function SystemSettingsScreen() {
                                     aria-label={`${setting.label} toggle`}
                                     isSelected={boolValue}
                                     onChange={(isSelected) => {
+                                      setDirtyKey(setting.key, true)
                                       setDrafts((prev) => ({
                                         ...prev,
                                         [setting.key]: isSelected ? 'true' : 'false',
-                                      }))
-                                      setDirtyKeys((prev) => ({
-                                        ...prev,
-                                        [setting.key]: true,
                                       }))
                                       if (status?.error) {
                                         updateRowError(setting.key, null)
@@ -440,13 +440,10 @@ export function SystemSettingsScreen() {
                                   value={draftValue}
                                   onChange={(event) => {
                                     const value = event.target.value
+                                    setDirtyKey(setting.key, true)
                                     setDrafts((prev) => ({
                                       ...prev,
                                       [setting.key]: value,
-                                    }))
-                                    setDirtyKeys((prev) => ({
-                                      ...prev,
-                                      [setting.key]: true,
                                     }))
                                     if (status?.error) {
                                       updateRowError(setting.key, null)
@@ -465,13 +462,10 @@ export function SystemSettingsScreen() {
                                     type="button"
                                     className={buttonStyles.reset}
                                     onClick={() => {
+                                      setDirtyKey(setting.key, true)
                                       setDrafts((prev) => ({
                                         ...prev,
                                         [setting.key]: '',
-                                      }))
-                                      setDirtyKeys((prev) => ({
-                                        ...prev,
-                                        [setting.key]: true,
                                       }))
                                       if (status?.error) {
                                         updateRowError(setting.key, null)
