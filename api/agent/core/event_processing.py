@@ -2763,6 +2763,17 @@ def _run_agent_loop(
                     agent.id,
                     exc_info=True,
                 )
+            pending_settings = get_pending_drain_settings(settings)
+            enqueue_pending_agent(
+                agent.id,
+                ttl=pending_settings.pending_set_ttl_seconds,
+            )
+            _schedule_pending_drain(
+                delay_seconds=pending_settings.pending_drain_delay_seconds,
+                schedule_ttl_seconds=pending_settings.pending_drain_schedule_ttl_seconds,
+                span=span,
+            )
+            span.add_event("Runtime limit follow-up queued")
             _attempt_cycle_close_for_sleep(agent, budget_ctx)
             return cumulative_token_usage
         with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):

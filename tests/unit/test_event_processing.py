@@ -9,7 +9,7 @@ from django.core.exceptions import ValidationError
 from django.core.files.storage import FileSystemStorage
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, ANY
 
 import zstandard as zstd
 
@@ -18,6 +18,7 @@ from api.agent.core.event_processing import (
     _get_completed_process_run_count,
     _run_agent_loop,
 )
+from api.agent.core.processing_flags import PendingDrainSettings
 from api.agent.core.prompt_context import (
     get_prompt_token_budget,
     message_history_limit,
@@ -1666,6 +1667,9 @@ class EventProcessingRuntimeGuardTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
+    @patch("api.agent.core.event_processing._schedule_pending_drain")
+    @patch("api.agent.core.event_processing.enqueue_pending_agent")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
@@ -1676,12 +1680,21 @@ class EventProcessingRuntimeGuardTests(TestCase):
         _mock_tools,
         mock_build_context,
         _mock_runtime,
+        mock_get_pending_settings,
+        mock_enqueue_pending,
+        mock_schedule_pending,
     ):
         class _FakeRedis:
             def get(self, _key):
                 return None
 
         mock_get_redis.return_value = _FakeRedis()
+        mock_get_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
 
         with patch(
             "api.agent.core.event_processing.settings.AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS",
@@ -1692,5 +1705,14 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertFalse(mock_build_context.called)
         self.assertTrue(
             self.agent.steps.filter(description__icontains="runtime limit").exists()
+        )
+        mock_enqueue_pending.assert_called_once_with(
+            self.agent.id,
+            ttl=123,
+        )
+        mock_schedule_pending.assert_called_once_with(
+            delay_seconds=10,
+            schedule_ttl_seconds=60,
+            span=ANY,
         )
         self.assertEqual(usage.get("total_tokens"), 0)
