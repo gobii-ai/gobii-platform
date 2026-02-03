@@ -2354,6 +2354,35 @@
   white-space: nowrap;
 }
 
+.tool-provider-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0;
+  border-radius: 0;
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.tool-provider-badge--chip {
+  font-size: 0.55rem;
+}
+
+.tool-provider-badge--detail {
+  font-size: 0.6rem;
+}
+
+.tool-provider-badge--timeline {
+  font-size: 0.58rem;
+}
+
 .tool-chip-spinner {
   width: 0.6rem;
   height: 0.6rem;
@@ -2438,6 +2467,13 @@
   flex-direction: column;
   gap: 0.15rem;
   min-width: 0;
+}
+
+.tool-chip-detail-title-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .tool-chip-detail-label {
@@ -2666,6 +2702,13 @@
   font-size: 0.82rem;
   font-weight: 600;
   color: #0f172a;
+}
+
+.tool-cluster-timeline-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
 }
 
 .tool-cluster-timeline-caption {

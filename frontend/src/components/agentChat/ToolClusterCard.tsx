@@ -3,6 +3,7 @@ import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
 import { ToolIconSlot } from './ToolIconSlot'
+import { ToolProviderBadge } from './ToolProviderBadge'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -172,7 +173,10 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
             <ToolIconSlot entry={entry} />
           </span>
           <div className="tool-chip-detail-text">
-            <span className="tool-chip-detail-label">{entry.label}</span>
+            <div className="tool-chip-detail-title-row">
+              <span className="tool-chip-detail-label">{entry.label}</span>
+              <ToolProviderBadge entry={entry} className="tool-provider-badge--detail" />
+            </div>
             {entry.timestamp ? (
               <time dateTime={entry.timestamp ?? undefined} className="tool-chip-detail-meta" title={entry.timestamp ?? undefined}>
                 {detailRelative}
@@ -248,6 +252,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>
+                    <ToolProviderBadge entry={entry} className="tool-provider-badge--chip" />
                     {entry.caption ? (
                       <>
                         <span className="tool-chip-separator" aria-hidden="true" />
