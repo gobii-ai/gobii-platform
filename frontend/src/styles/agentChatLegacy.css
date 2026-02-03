@@ -2354,6 +2354,22 @@
   white-space: nowrap;
 }
 
+.tool-chip-spinner {
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 9999px;
+  border: 2px solid rgba(99, 102, 241, 0.3);
+  border-top-color: rgba(79, 70, 229, 0.9);
+  animation: tool-chip-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+.tool-chip-spinner--icon {
+  width: 1rem;
+  height: 1rem;
+  border-width: 2px;
+}
+
 .tool-chip-separator {
   width: 0.25rem;
   height: 0.25rem;
@@ -2712,6 +2728,12 @@
   }
 }
 
+@keyframes tool-chip-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @media (max-width: 768px) {
   .tool-cluster-timeline-overlay {
     align-items: flex-end;
@@ -2741,6 +2763,10 @@
 
   .tool-cluster-timeline-row {
     transition: none;
+  }
+
+  .tool-chip-spinner {
+    animation: none;
   }
 }
 

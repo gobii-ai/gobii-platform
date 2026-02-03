@@ -493,6 +493,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
     tool_name = tool_call.tool_name or ""
     meta = _tool_icon_for(tool_name)
     meta["label"] = _friendly_tool_label(tool_name, labels)
+    status = getattr(tool_call, "status", None) or "complete"
     return {
         "id": str(step.id),
         "cursor": env.cursor.encode(),
@@ -502,6 +503,7 @@ def _serialize_step_entry(env: StepEnvelope, labels: Mapping[str, str]) -> dict:
         "meta": meta,
         "parameters": tool_call.tool_params,
         "result": tool_call.result,
+        "status": status,
     }
 
 

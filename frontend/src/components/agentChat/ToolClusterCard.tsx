@@ -1,8 +1,8 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Workflow } from 'lucide-react'
 import { useToolDetailController, entryKey } from './tooling/ToolDetailContext'
 import { transformToolCluster, isClusterRenderable } from './tooling/toolRegistry'
 import { ToolClusterTimelineOverlay } from './ToolClusterTimelineOverlay'
+import { ToolIconSlot } from './ToolIconSlot'
 import type { ToolClusterEvent } from './types'
 import type { ToolEntryDisplay } from './tooling/types'
 import { formatRelativeTimestamp } from '../../util/time'
@@ -12,11 +12,6 @@ import { scrollIntoViewIfNeeded } from './scrollIntoView'
 type ToolClusterCardProps = {
   cluster: ToolClusterEvent
   suppressedThinkingCursor?: string | null
-}
-
-function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
-  const IconComponent = icon ?? Workflow
-  return <IconComponent className={className} aria-hidden="true" />
 }
 
 export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppressedThinkingCursor }: ToolClusterCardProps) {
@@ -174,7 +169,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
       <div className={detailClassName}>
         <div className="tool-chip-detail-header">
           <span className={`tool-chip-detail-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-            <ToolIcon icon={entry.icon} className="h-5 w-5" />
+            <ToolIconSlot entry={entry} />
           </span>
           <div className="tool-chip-detail-text">
             <span className="tool-chip-detail-label">{entry.label}</span>
@@ -249,7 +244,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({ cluster, suppress
                   onClick={() => handleChipClick(entry)}
                 >
                   <span className={`tool-chip-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                    <ToolIcon icon={entry.icon} className="h-5 w-5" />
+                    <ToolIconSlot entry={entry} />
                   </span>
                   <span className="tool-chip-body">
                     <span className="tool-chip-label">{entry.label}</span>

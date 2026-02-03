@@ -8528,6 +8528,12 @@ class PersistentAgentToolCall(models.Model):
         blank=True,
         help_text="Elapsed time in milliseconds for executing the tool call.",
     )
+    status = models.CharField(
+        max_length=32,
+        default="complete",
+        blank=True,
+        help_text="Execution status for the tool call (pending, complete, error).",
+    )
 
     class Meta:
         ordering = ["-step__created_at"]  # newest first via step timestamp

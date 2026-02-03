@@ -1,21 +1,17 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Workflow, X } from 'lucide-react'
+import { X } from 'lucide-react'
 
 import { formatRelativeTimestamp } from '../../util/time'
 import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
+import { ToolIconSlot } from './ToolIconSlot'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
   open: boolean
   cluster: ToolClusterTransform
   onClose: () => void
-}
-
-function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefined; className?: string }) {
-  const IconComponent = icon ?? Workflow
-  return <IconComponent className={className} aria-hidden="true" />
 }
 
 function deriveCaption(entry: ToolEntryDisplay): string | null {
@@ -120,7 +116,7 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
                     onClick={() => handleToggleEntry(entry.id)}
                   >
                     <span className={`tool-cluster-timeline-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                      <ToolIcon icon={entry.icon} className="h-5 w-5" />
+                      <ToolIconSlot entry={entry} />
                     </span>
                     <span className="tool-cluster-timeline-main">
                       <span className="tool-cluster-timeline-label">{entry.label}</span>
