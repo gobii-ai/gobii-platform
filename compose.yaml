@@ -94,7 +94,7 @@ services:
       context: .
       dockerfile: ./docker/Dockerfile
       args:
-        PREFETCH_LLM_LINGUA: "1"
+        PREFETCH_LLM_LINGUA: "0"
     depends_on:
       bootstrap-env:
         condition: service_completed_successfully
@@ -110,6 +110,7 @@ services:
       - runtime-config:/config:ro
       - media-data:/app/mediafiles
       - static-data:/app/staticfiles
+      - hf-cache:/app/.cache/huggingface
     shm_size: 2gb
     restart: unless-stopped
 
@@ -255,3 +256,4 @@ volumes:
   static-data:
   minio-data:
   runtime-config:
+  hf-cache:
