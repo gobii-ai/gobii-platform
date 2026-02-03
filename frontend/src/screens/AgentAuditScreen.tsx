@@ -57,6 +57,7 @@ const DEFAULT_FILTERS = {
   tagGeneration: true,
   miniDescription: true,
   shortDescription: true,
+  promptSummarization: false,
 } as const
 
 const AGENT_SEARCH_LIMIT = 8
@@ -78,7 +79,7 @@ type EventFilterKey =
   | 'systemSteps'
   | 'agentSteps'
 
-type CompletionFilterKey = 'tagGeneration' | 'miniDescription' | 'shortDescription'
+type CompletionFilterKey = 'tagGeneration' | 'miniDescription' | 'shortDescription' | 'promptSummarization'
 
 const EVENT_TYPE_FILTERS: {
   key: EventFilterKey
@@ -101,6 +102,7 @@ const COMPLETION_TYPE_FILTERS: {
   { key: 'tagGeneration', label: 'Tag generation', matches: (completionType) => completionType === 'tag' },
   { key: 'miniDescription', label: 'Mini description', matches: (completionType) => completionType === 'mini_description' },
   { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
+  { key: 'promptSummarization', label: 'Prompt summarization', matches: (completionType) => completionType === 'prompt_summarization' },
 ]
 
 export function AgentAuditScreen({ agentId, agentName }: AgentAuditScreenProps) {

@@ -65,6 +65,8 @@ export function CompletionCard({
         return 'Mini Description Generation'
       case 'tool_search':
         return 'Tool Search'
+      case 'prompt_summarization':
+        return 'Prompt Summarization'
       default:
         return 'Other'
     }
