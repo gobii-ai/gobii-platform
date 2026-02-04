@@ -86,9 +86,10 @@ export function AgentChatSettingsPanel({
   const fallbackSliderEmptyValue = dailyCredits?.sliderEmptyValue ?? fallbackSliderMax
   const fallbackSliderLimitMax = dailyCredits?.sliderLimitMax ?? fallbackSliderMax
   const standardSliderLimitValue = dailyCredits?.standardSliderLimit
-  const standardSliderLimit = Number.isFinite(standardSliderLimitValue)
-    ? standardSliderLimitValue
-    : fallbackSliderLimitMax
+  const standardSliderLimit =
+    typeof standardSliderLimitValue === 'number' && Number.isFinite(standardSliderLimitValue)
+      ? standardSliderLimitValue
+      : fallbackSliderLimitMax
   const sliderMin = dailyCredits?.sliderMin ?? 0
   const sliderStep = dailyCredits?.sliderStep ?? 1
   const getSliderMetrics = useCallback(
