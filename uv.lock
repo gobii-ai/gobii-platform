@@ -472,7 +472,7 @@ wheels = [
 
 [[package]]
 name = "browser-use"
-version = "0.11.5"
+version = "0.11.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -513,9 +513,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "uuid7" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/28/af/8b791890f5f087830f58905ff4ae78013acc903b4f44f896ad4075489861/browser_use-0.11.5.tar.gz", hash = "sha256:be8de3491f7e4dbbe75f09be8cd9f1a3caa7c5d984fc6b732bf92ca2f7da2cea", size = 537197, upload-time = "2026-01-28T04:53:22.386Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/99/82/ce535edeae6d008c537bf816d9f5536cbc1fc0b45b5ac34e8380e390693e/browser_use-0.11.8.tar.gz", hash = "sha256:2ab22e35581f1d8cd0561814b8fabe87bcdbc1e4c5dfe56ca0ab19716f1ddbea", size = 563875, upload-time = "2026-02-03T02:01:30.666Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/ca/5c/3f40f08b3b919d56dcca38d8ddadbc0fd5badfe4e2cbe6f2dfbe133484af/browser_use-0.11.5-py3-none-any.whl", hash = "sha256:667a34daf30287e1d24c0cc67429b72d6067a1dcfd3c3276203da19e20f8693c", size = 660137, upload-time = "2026-01-28T04:53:20.404Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/66/02c329371cf52fe3c1f3f78f1e45670dbee50ee8387eef6cd3110cddcb0f/browser_use-0.11.8-py3-none-any.whl", hash = "sha256:2a967e0093716184076567103891a707f525a9b4883add082494e42122915f34", size = 675853, upload-time = "2026-02-03T02:01:28.452Z" },
 ]
 
 [[package]]
@@ -1513,7 +1513,7 @@ sdist = { url = "https://files.pythonhosted.org/packages/e1/71/fbd2f1ad9695c92ad
 
 [[package]]
 name = "gobii-platform"
-version = "0.4.0"
+version = "0.5.1"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp-retry" },
@@ -1650,7 +1650,7 @@ requires-dist = [
     { name = "beautifulsoup4", specifier = ">=4.14.2" },
     { name = "bleach", specifier = "~=6.2.0" },
     { name = "boto3", specifier = "~=1.38.39" },
-    { name = "browser-use", specifier = "==0.11.5" },
+    { name = "browser-use", specifier = "==0.11.8" },
     { name = "celery", specifier = "~=5.5.2" },
     { name = "celery-redbeat", specifier = "~=2.3.2" },
     { name = "channels", specifier = ">=4.3.1" },
