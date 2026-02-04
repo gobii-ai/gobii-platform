@@ -1156,6 +1156,9 @@ def _get_summarization_config_from_tiers() -> Optional[Tuple[str, str, dict]]:
             params["supports_reasoning"] = supports_reasoning
             if supports_reasoning and reasoning_effort:
                 params["reasoning_effort"] = reasoning_effort
+            max_input_tokens = getattr(endpoint, "max_input_tokens", None)
+            if max_input_tokens is not None:
+                params["max_input_tokens"] = max_input_tokens
 
             return endpoint.key, model_name, params
 

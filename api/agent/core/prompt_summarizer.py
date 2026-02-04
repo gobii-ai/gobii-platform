@@ -11,16 +11,27 @@ from .token_usage import log_agent_completion
 
 PROMPT_SUMMARY_TYPE = "promptree"
 
+def _default_token_estimator(text: str) -> int:
+    return len(text.split())
+
 
 def _hash_content(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 class PromptSummarizer:
-    def __init__(self, *, agent, routing_profile=None, summary_type: str = PROMPT_SUMMARY_TYPE):
+    def __init__(
+        self,
+        *,
+        agent,
+        routing_profile=None,
+        summary_type: str = PROMPT_SUMMARY_TYPE,
+        token_estimator=None,
+    ):
         self.agent = agent
         self.routing_profile = routing_profile
         self.summary_type = summary_type
+        self.token_estimator = token_estimator or _default_token_estimator
 
     def __call__(self, text: str, target_tokens: int) -> str:
         return self.summarize(text, target_tokens)
@@ -44,7 +55,12 @@ class PromptSummarizer:
             routing_profile=self.routing_profile,
         )
         params = dict(params or {})
-        params.setdefault("max_tokens", max(1, target_tokens))
+        max_input_tokens = params.pop("max_input_tokens", None)
+        if max_input_tokens:
+            estimated_tokens = self.token_estimator(text)
+            if estimated_tokens > max_input_tokens:
+                return ""
+
         prompt = [
             {
                 "role": "system",

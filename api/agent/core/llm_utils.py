@@ -17,6 +17,7 @@ _HINT_KEYS = (
     "supports_reasoning",
     "reasoning_effort",
     "low_latency",
+    "max_input_tokens",
 )
 
 logger = logging.getLogger(__name__)

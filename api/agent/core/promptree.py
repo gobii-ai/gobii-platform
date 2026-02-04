@@ -79,7 +79,7 @@ class _Node:
         renderer: Any,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = "summarization",
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
@@ -94,7 +94,7 @@ class _Node:
         txt: str,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = "summarization",
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
@@ -145,7 +145,7 @@ class Prompt:
         renderer: Any,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = "summarization",
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
@@ -159,7 +159,7 @@ class Prompt:
         txt: str,
         *,
         weight: int = 1,
-        shrinker: str | Callable[[str, float], str] | None = "hmt",
+        shrinker: str | Callable[[str, float], str] | None = "summarization",
         use_jinja2: bool = False,
         non_shrinkable: bool = False,
     ) -> None:
