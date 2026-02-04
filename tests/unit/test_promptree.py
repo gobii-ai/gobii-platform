@@ -65,18 +65,18 @@ class PromptShrinkingTests(TestCase):
         self.assertLessEqual(p._tok(fit), 50)
         self.assertEqual(fit.count("BYTES TRUNCATED"), 2)
 
-    def test_default_hmt_truncation_produces_two_markers(self):
-        """Test that default HMT truncation produces two markers."""
+    def test_default_shrinker_truncation_produces_single_marker(self):
+        """Test that default summarization fallback truncation produces one marker."""
         base = (
             "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima "
             * 8
         ).strip()
         
         p2 = Prompt()
-        p2.section_text("s", base)  # No shrinker specified - uses default "hmt"
+        p2.section_text("s", base)  # No shrinker specified - uses default "summarization"
         cut = p2.render(50)
         
-        self.assertEqual(cut.count("BYTES TRUNCATED"), 2)  # HMT produces 2 markers
+        self.assertEqual(cut.count("BYTES TRUNCATED"), 1)
 
     def test_summarization_shrinker_uses_custom_summarizer(self):
         """Test that summarization shrinker respects budgets and runs once."""
