@@ -1468,6 +1468,8 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isFileHandler = endpoint.type === 'file_handler'
   const isPersistent = endpoint.type === 'persistent'
   const isToolingEndpoint = !isEmbedding && !isFileHandler && !isSummarization
+  const showsReasoning = (!isBrowser && isToolingEndpoint) || isSummarization
+  const showsMaxInputTokens = isPersistent || isSummarization
 
   return (
     <div className="space-y-3">
@@ -1503,7 +1505,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
             <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
           </div>
         )}
-        {isPersistent && (
+        {showsMaxInputTokens && (
           <div>
             <label className="text-xs text-slate-500">Max input tokens</label>
             <input type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
@@ -1521,7 +1523,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
           Vision
         </label>
-        {!isBrowser && isToolingEndpoint && (
+        {showsReasoning && (
           <label className="inline-flex items-center gap-2">
             <input
               type="checkbox"
@@ -1552,7 +1554,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           Low latency
         </label>
       </div>
-      {!isBrowser && isToolingEndpoint && (
+      {showsReasoning && (
         <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
           <span className="font-semibold text-slate-700">Default reasoning effort</span>
           <select
@@ -1668,7 +1670,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 <input type="number" value={maxTokens} onChange={(event) => setMaxTokens(event.target.value)} placeholder="Default" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
               </div>
             )}
-            {type === 'persistent' && (
+            {(type === 'persistent' || type === 'summarization') && (
               <div>
                 <label className="text-xs text-slate-500">Max input tokens</label>
                 <input type="number" value={maxInputTokens} onChange={(event) => setMaxInputTokens(event.target.value)} placeholder="Automatic" className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
@@ -1701,7 +1703,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
               Vision
             </label>
-            {type === 'persistent' && (
+            {(type === 'persistent' || type === 'summarization') && (
               <label className="inline-flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -1732,19 +1734,19 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
               Low latency
             </label>
           </div>
-          {type === 'persistent' && (
+          {(type === 'persistent' || type === 'summarization') && (
             <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
-          <span className="font-semibold text-slate-700">Default reasoning effort</span>
-          <select
-            value={reasoningEffort}
-            onChange={(event) => setReasoningEffort(event.target.value)}
-            disabled={!supportsReasoning}
-            className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
-          >
-            {reasoningEffortOptions.map((option) => (
-              <option key={option.value || 'default'} value={option.value}>{option.label}</option>
-            ))}
-          </select>
+              <span className="font-semibold text-slate-700">Default reasoning effort</span>
+              <select
+                value={reasoningEffort}
+                onChange={(event) => setReasoningEffort(event.target.value)}
+                disabled={!supportsReasoning}
+                className="rounded-lg border border-slate-300 py-1.5 text-xs shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-slate-50 disabled:text-slate-400"
+              >
+                {reasoningEffortOptions.map((option) => (
+                  <option key={option.value || 'default'} value={option.value}>{option.label}</option>
+                ))}
+              </select>
               <span className="text-slate-400">Optional override when reasoning is enabled.</span>
             </div>
           )}
@@ -2573,6 +2575,10 @@ export function LlmConfigScreen() {
       payload.model = values.model
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
+      payload.supports_reasoning = values.supportsReasoning ?? false
+      payload.reasoning_effort = values.reasoningEffort ? values.reasoningEffort : null
+      const maxInput = parseNumber(values.max_input_tokens)
+      if (maxInput !== undefined) payload.max_input_tokens = maxInput
       payload.enabled = true
     } else if (type === 'file_handler') {
       payload.model = values.model
@@ -2647,14 +2653,16 @@ export function LlmConfigScreen() {
     if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
     if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
-    if (kind === 'persistent') {
+    if (kind === 'persistent' || kind === 'summarization') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
       if (values.reasoningEffort !== undefined) payload.reasoning_effort = values.reasoningEffort || null
-      if (values.openrouterPreset !== undefined) payload.openrouter_preset = values.openrouterPreset.trim()
       if (values.max_input_tokens !== undefined) {
         const parsed = parseNumber(values.max_input_tokens)
         payload.max_input_tokens = parsed ?? null
       }
+    }
+    if (kind === 'persistent') {
+      if (values.openrouterPreset !== undefined) payload.openrouter_preset = values.openrouterPreset.trim()
     }
     return runMutation(() => llmApi.updateEndpoint(kind, endpoint.id, payload), {
       successMessage: 'Endpoint updated',

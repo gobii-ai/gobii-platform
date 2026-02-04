@@ -2877,6 +2877,12 @@ class FileHandlerTierEndpoint(models.Model):
 class SummarizationModelEndpoint(models.Model):
     """Summarization endpoint configuration used for text summarization tasks."""
 
+    class ReasoningEffort(models.TextChoices):
+        MINIMAL = "minimal", "Minimal"
+        LOW = "low", "Low"
+        MEDIUM = "medium", "Medium"
+        HIGH = "high", "High"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openai_gpt4o_summary'")
     provider = models.ForeignKey(
@@ -2898,6 +2904,23 @@ class SummarizationModelEndpoint(models.Model):
         max_length=256,
         blank=True,
         help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
+    )
+    supports_reasoning = models.BooleanField(
+        default=False,
+        help_text="Indicates the model accepts reasoning parameters",
+    )
+    reasoning_effort = models.CharField(
+        max_length=16,
+        choices=ReasoningEffort.choices,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Default reasoning effort to pass when reasoning is supported",
+    )
+    max_input_tokens = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text="Maximum input tokens for this endpoint. Leave blank for automatic (no limit).",
     )
 
     created_at = models.DateTimeField(auto_now_add=True)

@@ -122,6 +122,9 @@ def _serialize_summarization_endpoint(endpoint: SummarizationModelEndpoint) -> d
             "key": endpoint.key,
             "model": endpoint.litellm_model,
             "api_base": endpoint.api_base,
+            "max_input_tokens": endpoint.max_input_tokens,
+            "supports_reasoning": endpoint.supports_reasoning,
+            "reasoning_effort": endpoint.reasoning_effort,
             "provider_id": str(endpoint.provider_id) if endpoint.provider_id else None,
             "type": "summarization",
         }

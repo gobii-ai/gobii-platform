@@ -4228,8 +4228,18 @@ class EmbeddingsLLMTierAdmin(admin.ModelAdmin):
 
 @admin.register(SummarizationModelEndpoint)
 class SummarizationModelEndpointAdmin(admin.ModelAdmin):
-    list_display = ("key", "provider", "litellm_model", "api_base", "low_latency", "enabled")
-    list_filter = ("enabled", "low_latency", "provider")
+    list_display = (
+        "key",
+        "provider",
+        "litellm_model",
+        "api_base",
+        "max_input_tokens",
+        "low_latency",
+        "enabled",
+        "supports_reasoning",
+        "reasoning_effort",
+    )
+    list_filter = ("enabled", "low_latency", "provider", "supports_reasoning")
     search_fields = ("key", "litellm_model", "api_base")
     fields = (
         "key",
@@ -4238,6 +4248,9 @@ class SummarizationModelEndpointAdmin(admin.ModelAdmin):
         "low_latency",
         "litellm_model",
         "api_base",
+        "max_input_tokens",
+        "supports_reasoning",
+        "reasoning_effort",
     )
 
 

@@ -21,6 +21,26 @@ class Migration(migrations.Migration):
                 ('low_latency', models.BooleanField(default=False, help_text='Marks this endpoint as low latency/high performance.')),
                 ('litellm_model', models.CharField(max_length=256, help_text='Model identifier passed to LiteLLM.')),
                 ('api_base', models.CharField(max_length=256, blank=True, help_text='Optional OpenAI-compatible base URL for proxy endpoints.')),
+                ('supports_reasoning', models.BooleanField(default=False, help_text='Indicates the model accepts reasoning parameters')),
+                (
+                    'reasoning_effort',
+                    models.CharField(
+                        max_length=16,
+                        choices=[('minimal', 'Minimal'), ('low', 'Low'), ('medium', 'Medium'), ('high', 'High')],
+                        null=True,
+                        blank=True,
+                        default=None,
+                        help_text='Default reasoning effort to pass when reasoning is supported',
+                    ),
+                ),
+                (
+                    'max_input_tokens',
+                    models.PositiveIntegerField(
+                        null=True,
+                        blank=True,
+                        help_text='Maximum input tokens for this endpoint. Leave blank for automatic (no limit).',
+                    ),
+                ),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 (

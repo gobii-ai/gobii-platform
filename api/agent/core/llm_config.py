@@ -1151,6 +1151,12 @@ def _get_summarization_config_from_tiers() -> Optional[Tuple[str, str, dict]]:
                 if headers:
                     params["extra_headers"] = headers
 
+            supports_reasoning = bool(getattr(endpoint, "supports_reasoning", False))
+            reasoning_effort = getattr(endpoint, "reasoning_effort", None)
+            params["supports_reasoning"] = supports_reasoning
+            if supports_reasoning and reasoning_effort:
+                params["reasoning_effort"] = reasoning_effort
+
             return endpoint.key, model_name, params
 
     return None

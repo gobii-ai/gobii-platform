@@ -746,6 +746,15 @@ def _coerce_reasoning_effort(value) -> str | None:
     return effort
 
 
+def _coerce_max_input_tokens(value) -> int | None:
+    if value in (None, "", "auto", "automatic"):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("max_input_tokens must be an integer or 'automatic'") from exc
+
+
 def _validate_reasoning_override(endpoint, value) -> str | None:
     reasoning_override = _coerce_reasoning_effort(value)
     if reasoning_override and not getattr(endpoint, "supports_reasoning", False):
@@ -2820,14 +2829,10 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
         if "openrouter_preset" in payload:
             endpoint.openrouter_preset = (payload.get("openrouter_preset") or "").strip()
         if "max_input_tokens" in payload:
-            val = payload.get("max_input_tokens")
-            if val in (None, "", "auto", "automatic"):
-                endpoint.max_input_tokens = None
-            else:
-                try:
-                    endpoint.max_input_tokens = int(val)
-                except (TypeError, ValueError):
-                    return HttpResponseBadRequest("max_input_tokens must be an integer or 'automatic'")
+            try:
+                endpoint.max_input_tokens = _coerce_max_input_tokens(payload.get("max_input_tokens"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
         if "enabled" in payload:
             endpoint.enabled = _coerce_bool(payload.get("enabled"))
         endpoint.save()
@@ -3490,12 +3495,101 @@ class EmbeddingTierEndpointDetailAPIView(_SimpleTierEndpointDetailAPIView):
     tier_endpoint_model = EmbeddingsTierEndpoint
 
 
-class SummarizationEndpointListCreateAPIView(_SimpleEndpointListCreateAPIView):
-    endpoint_model = SummarizationModelEndpoint
+class SummarizationEndpointListCreateAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        key = (payload.get("key") or "").strip()
+        model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+        if not key or not model:
+            return HttpResponseBadRequest("key and model are required")
+        if SummarizationModelEndpoint.objects.filter(key=key).exists():
+            return HttpResponseBadRequest("Endpoint key already exists")
+
+        provider_id = payload.get("provider_id")
+        provider = None
+        if provider_id:
+            provider = get_object_or_404(LLMProvider, pk=provider_id)
+
+        try:
+            reasoning_effort = _coerce_reasoning_effort(payload.get("reasoning_effort"))
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        max_input_tokens = None
+        if "max_input_tokens" in payload:
+            try:
+                max_input_tokens = _coerce_max_input_tokens(payload.get("max_input_tokens"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+
+        endpoint = SummarizationModelEndpoint.objects.create(
+            key=key,
+            provider=provider,
+            litellm_model=model,
+            api_base=(payload.get("api_base") or "").strip(),
+            supports_reasoning=_coerce_bool(payload.get("supports_reasoning", False)),
+            reasoning_effort=reasoning_effort,
+            max_input_tokens=max_input_tokens,
+            low_latency=_coerce_bool(payload.get("low_latency", False)),
+            enabled=_coerce_bool(payload.get("enabled", True)),
+        )
+        return _json_ok(endpoint_id=str(endpoint.id))
 
 
-class SummarizationEndpointDetailAPIView(_SimpleEndpointDetailAPIView):
-    endpoint_model = SummarizationModelEndpoint
+class SummarizationEndpointDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["patch", "delete"]
+
+    def patch(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(SummarizationModelEndpoint, pk=endpoint_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        if "model" in payload or "litellm_model" in payload:
+            model = (payload.get("model") or payload.get("litellm_model") or "").strip()
+            if model:
+                endpoint.litellm_model = model
+        if "api_base" in payload:
+            endpoint.api_base = (payload.get("api_base") or "").strip()
+        if "supports_reasoning" in payload:
+            endpoint.supports_reasoning = _coerce_bool(payload.get("supports_reasoning"))
+        if "reasoning_effort" in payload:
+            try:
+                reasoning_effort = _coerce_reasoning_effort(payload.get("reasoning_effort"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+            endpoint.reasoning_effort = reasoning_effort
+        if "max_input_tokens" in payload:
+            try:
+                endpoint.max_input_tokens = _coerce_max_input_tokens(payload.get("max_input_tokens"))
+            except ValueError as exc:
+                return HttpResponseBadRequest(str(exc))
+        if "low_latency" in payload:
+            endpoint.low_latency = _coerce_bool(payload.get("low_latency"))
+        if "enabled" in payload:
+            endpoint.enabled = _coerce_bool(payload.get("enabled"))
+        if "provider_id" in payload:
+            provider_id = payload.get("provider_id")
+            if provider_id:
+                endpoint.provider = get_object_or_404(LLMProvider, pk=provider_id)
+            else:
+                endpoint.provider = None
+        endpoint.save()
+        return _json_ok(endpoint_id=str(endpoint.id))
+
+    def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
+        endpoint = get_object_or_404(SummarizationModelEndpoint, pk=endpoint_id)
+        if endpoint.in_tiers.exists():
+            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
+        endpoint.delete()
+        return _json_ok()
 
 
 class SummarizationTierListCreateAPIView(_SimpleTierListCreateAPIView):
