@@ -804,6 +804,13 @@ export function AgentChatPage({
     rosterQuery.refetch,
   ])
   const llmIntelligence = rosterQuery.data?.llmIntelligence ?? null
+  const tierLabels = useMemo(() => {
+    const map: Partial<Record<IntelligenceTierKey, string>> = {}
+    for (const option of llmIntelligence?.options ?? []) {
+      map[option.key] = option.label
+    }
+    return map
+  }, [llmIntelligence?.options])
   const [draftIntelligenceTier, setDraftIntelligenceTier] = useState<string>('standard')
   const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
@@ -1113,13 +1120,13 @@ export function AgentChatPage({
   )
 
   const handleIntelligenceChange = useCallback(
-    async (tier: string) => {
+    async (tier: string): Promise<boolean> => {
       if (isNewAgent) {
         setDraftIntelligenceTier(tier)
-        return
+        return true
       }
       if (!activeAgentId) {
-        return
+        return false
       }
       const previousTier = resolvedIntelligenceTier
       setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: tier }))
@@ -1128,9 +1135,11 @@ export function AgentChatPage({
       try {
         await updateAgent(activeAgentId, { preferred_llm_tier: tier })
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+        return true
       } catch (err) {
         setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: previousTier }))
         setIntelligenceError('Unable to update intelligence level.')
+        return false
       } finally {
         setIntelligenceBusy(false)
       }
@@ -1592,6 +1601,7 @@ export function AgentChatPage({
           reason={intelligenceGate.reason}
           selectedTier={intelligenceGate.selectedTier}
           allowedTier={intelligenceGate.allowedTier}
+          tierLabels={tierLabels}
           multiplier={intelligenceGate.multiplier}
           estimatedDaysRemaining={intelligenceGate.estimatedDaysRemaining}
           burnRatePerDay={intelligenceGate.burnRatePerDay}

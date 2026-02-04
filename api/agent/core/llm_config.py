@@ -105,10 +105,41 @@ TIER_ORDER = {
     AgentLLMTier.ULTRA: 3,
     AgentLLMTier.ULTRA_MAX: 4,
 }
+TIER_LABELS: Dict[str, str] = {
+    AgentLLMTier.STANDARD.value: "Lite",
+    AgentLLMTier.PREMIUM.value: "Standard",
+    AgentLLMTier.MAX.value: "Max",
+    AgentLLMTier.ULTRA.value: "Ultra",
+    AgentLLMTier.ULTRA_MAX.value: "Ultra Max",
+}
+TIER_DESCRIPTIONS: Dict[str, str] = {
+    AgentLLMTier.STANDARD.value: "Best for simple tasks and quick questions.",
+    AgentLLMTier.PREMIUM.value: "Handles everyday workflows and multi-step tasks.",
+    AgentLLMTier.MAX.value: "Great for complex tasks that need deeper reasoning.",
+    AgentLLMTier.ULTRA.value: "Built for advanced, high-complexity tasks.",
+    AgentLLMTier.ULTRA_MAX.value: "Best for the most complex and long-running tasks.",
+}
 _TIER_RANK_CACHE_KEY = "intelligence_tier_ranks:v1"
 _DEFAULT_TIER_RANKS: Dict[str, int] = {
     tier.value: rank for tier, rank in TIER_ORDER.items()
 }
+
+
+def get_llm_tier_label(tier_key: str | None, fallback: str | None = None) -> str:
+    if not tier_key:
+        return fallback or ""
+    label = TIER_LABELS.get(tier_key)
+    if label:
+        return label
+    if fallback:
+        return fallback
+    return tier_key.replace("_", " ").title()
+
+
+def get_llm_tier_description(tier_key: str | None) -> str:
+    if not tier_key:
+        return ""
+    return TIER_DESCRIPTIONS.get(tier_key, "")
 
 
 def _plan_supports_paid_tiers(plan: Optional[dict[str, Any]]) -> bool:

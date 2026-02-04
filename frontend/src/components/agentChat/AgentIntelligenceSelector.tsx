@@ -13,22 +13,6 @@ import {
 
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 
-const LABEL_OVERRIDES: Record<string, string> = {
-  standard: 'Smol Brain',
-  premium: 'Mid Brain',
-  max: 'Big Brain',
-  ultra: 'Giga Brain',
-  ultra_max: 'Galaxy Brain',
-}
-
-const SHORT_LABELS: Record<string, string> = {
-  standard: 'Smol',
-  premium: 'Mid',
-  max: 'Big',
-  ultra: 'Giga',
-  ultra_max: 'Galaxy',
-}
-
 const EMOJI_MAP: Record<string, string> = {
   standard: '🌱',
   premium: '💭',
@@ -36,6 +20,12 @@ const EMOJI_MAP: Record<string, string> = {
   ultra: '⚡',
   ultra_max: '🤯',
 }
+
+const formatTierLabel = (tier: string) =>
+  tier
+    .split('_')
+    .map((segment) => (segment ? segment[0].toUpperCase() + segment.slice(1) : segment))
+    .join(' ')
 
 type IntelligenceSelectorProps = {
   config: LlmIntelligenceConfig
@@ -67,19 +57,18 @@ export function AgentIntelligenceSelector({
       : null
     const fallbackLocked = !config.canEdit
     return config.options.map((option) => {
-      const normalizedLabel = LABEL_OVERRIDES[option.key] ?? option.label
       const optionRank = typeof option.rank === 'number' ? option.rank : null
       const lockedByRank = resolvedMaxRank !== null && optionRank !== null && optionRank > resolvedMaxRank
       const locked = lockedByRank || (fallbackLocked && option.key !== currentTier)
       return {
         ...option,
-        label: normalizedLabel,
         locked,
       }
     })
   }, [config.canEdit, config.maxAllowedTierRank, config.options, currentTier])
   const selectedOption = options.find((option) => option.key === currentTier) ?? options[0]
   const selectedKey = selectedOption?.key ?? options[0]?.key ?? 'standard'
+  const selectedLabel = selectedOption?.label ?? formatTierLabel(selectedKey)
   const selectedKeys = useMemo(() => new Set<Key>([selectedKey]), [selectedKey])
 
   const handleSelection = (keys: Selection) => {
@@ -118,12 +107,12 @@ export function AgentIntelligenceSelector({
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
         className="composer-intelligence-trigger"
-        aria-label={`Intelligence (${selectedOption?.label ?? 'Smol Brain'})`}
+        aria-label={`Intelligence (${selectedLabel})`}
         data-busy={busy ? 'true' : 'false'}
         isDisabled={disabled}
       >
         <Brain className="composer-intelligence-icon" aria-hidden="true" />
-        <span className="composer-intelligence-trigger-label">{selectedOption?.label ?? 'Smol Brain'}</span>
+        <span className="composer-intelligence-trigger-label">{selectedLabel}</span>
         <ChevronDown className="composer-intelligence-trigger-chevron" aria-hidden="true" />
       </Button>
       <Popover className="composer-intelligence-popover">
@@ -154,7 +143,7 @@ export function AgentIntelligenceSelector({
                   <>
                     <span className="composer-intelligence-option-label">
                       {EMOJI_MAP[option.key] ? `${EMOJI_MAP[option.key]} ` : ''}
-                      {SHORT_LABELS[option.key] ?? option.label}
+                      {option.label}
                     </span>
                     <span className="composer-intelligence-option-multiplier">
                       {option.multiplier ? `${option.multiplier}×` : ''}

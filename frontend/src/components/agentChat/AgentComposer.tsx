@@ -121,7 +121,7 @@ type AgentComposerProps = {
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
-  onIntelligenceChange?: (tier: string) => void
+  onIntelligenceChange?: (tier: string) => Promise<boolean>
   allowLockedIntelligenceSelection?: boolean
   intelligenceBusy?: boolean
   intelligenceError?: string | null
