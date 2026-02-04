@@ -10,6 +10,7 @@ from .llm_utils import run_completion
 from .token_usage import log_agent_completion
 
 PROMPT_SUMMARY_TYPE = "promptree"
+SUMMARY_TIMEOUT = 15
 
 def _default_token_estimator(text: str) -> int:
     return len(text.split())
@@ -55,6 +56,7 @@ class PromptSummarizer:
             routing_profile=self.routing_profile,
         )
         params = dict(params or {})
+        params.setdefault("timeout", SUMMARY_TIMEOUT)
         max_input_tokens = params.pop("max_input_tokens", None)
         if max_input_tokens:
             estimated_tokens = self.token_estimator(text)

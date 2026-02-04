@@ -433,7 +433,7 @@ class Prompt:
 
         wrapped = f"{tag_open}{summary_text}{tag_close}"
         current = self._tok(wrapped)
-        if current <= budget:
+        if current <= budget*2:
             n.text = wrapped
             n.tokens = current
             return
