@@ -487,6 +487,21 @@ class AgentChatAPITests(TestCase):
         self.assertIsNotNone(message)
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_defaults_to_owner_without_to_address_and_no_other_channels(self):
+        result = execute_send_chat_message(
+            self.agent,
+            {"body": "Ping"},
+        )
+        self.assertEqual(result["status"], "ok")
+        message = PersistentAgentMessage.objects.filter(
+            owner_agent=self.agent,
+            is_outbound=True,
+            body="Ping",
+        ).first()
+        self.assertIsNotNone(message)
+        self.assertEqual(message.to_endpoint.address, self.user_address)
+
+    @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_message_post_creates_console_message(self, mock_delay):
         body = "Run weekly summary"
