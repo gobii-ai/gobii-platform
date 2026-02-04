@@ -2306,9 +2306,9 @@ def process_agent_events(
                     "Cleared pending burn-rate follow-up token for agent %s due to new processing run.",
                     persistent_agent_id,
                 )
-        except Exception:
-            logger.debug(
-                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
+        except redis.exceptions.RedisError as e:
+            logger.warning(
+                "Failed to clear burn-rate follow-up token for agent %s: %s", persistent_agent_id, e, exc_info=True
             )
 
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
