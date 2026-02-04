@@ -90,12 +90,29 @@ export function AgentChatSettingsPanel({
     : fallbackSliderLimitMax
   const sliderMin = dailyCredits?.sliderMin ?? 0
   const sliderStep = dailyCredits?.sliderStep ?? 1
-  const currentMultiplier = hasTierMultipliers ? getTierMultiplier(stagedTier) : 1
-  const sliderLimitMax = hasTierMultipliers
-    ? Math.max(sliderMin, Math.round(standardSliderLimit * currentMultiplier))
-    : fallbackSliderLimitMax
-  const sliderMax = hasTierMultipliers ? sliderLimitMax + sliderStep : fallbackSliderMax
-  const sliderEmptyValue = hasTierMultipliers ? sliderMax : fallbackSliderEmptyValue
+  const getSliderMetrics = useCallback(
+    (tier: IntelligenceTierKey) => {
+      const multiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
+      const limitMax = hasTierMultipliers
+        ? Math.max(sliderMin, Math.round(standardSliderLimit * multiplier))
+        : fallbackSliderLimitMax
+      const max = hasTierMultipliers ? limitMax + sliderStep : fallbackSliderMax
+      const emptyValue = hasTierMultipliers ? max : fallbackSliderEmptyValue
+      return { limitMax, max, emptyValue }
+    },
+    [
+      fallbackSliderEmptyValue,
+      fallbackSliderLimitMax,
+      fallbackSliderMax,
+      getTierMultiplier,
+      hasTierMultipliers,
+      sliderMin,
+      sliderStep,
+      standardSliderLimit,
+    ],
+  )
+
+  const { limitMax: sliderLimitMax, max: sliderMax, emptyValue: sliderEmptyValue } = getSliderMetrics(stagedTier)
 
   const handleTierChange = useCallback(
     (tier: IntelligenceTierKey) => {
@@ -105,12 +122,9 @@ export function AgentChatSettingsPanel({
       if (tier !== stagedTier) {
         const previousMultiplier = hasTierMultipliers ? getTierMultiplier(stagedTier) : 1
         const nextMultiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-        const nextSliderLimitMax = hasTierMultipliers
-          ? Math.max(sliderMin, Math.round(standardSliderLimit * nextMultiplier))
-          : fallbackSliderLimitMax
-        const nextSliderMax = hasTierMultipliers ? nextSliderLimitMax + sliderStep : fallbackSliderMax
-        const nextSliderEmptyValue = hasTierMultipliers ? nextSliderMax : fallbackSliderEmptyValue
-        const isUnlimited = sliderValue >= sliderEmptyValue || !dailyCreditInput.trim()
+        const { emptyValue: currentEmptyValue } = getSliderMetrics(stagedTier)
+        const { limitMax: nextSliderLimitMax, emptyValue: nextSliderEmptyValue } = getSliderMetrics(tier)
+        const isUnlimited = sliderValue >= currentEmptyValue || !dailyCreditInput.trim()
 
         if (isUnlimited) {
           setSliderValue(nextSliderEmptyValue)
@@ -136,18 +150,13 @@ export function AgentChatSettingsPanel({
     },
     [
       dailyCreditInput,
-      fallbackSliderEmptyValue,
-      fallbackSliderLimitMax,
-      fallbackSliderMax,
+      getSliderMetrics,
       getTierMultiplier,
       hasTierMultipliers,
       llmTierSaving,
-      sliderEmptyValue,
       sliderMin,
-      sliderStep,
       sliderValue,
       stagedTier,
-      standardSliderLimit,
     ],
   )
 

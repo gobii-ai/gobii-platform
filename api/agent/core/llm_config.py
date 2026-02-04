@@ -129,9 +129,9 @@ def get_llm_tier_label(tier_key: str | None, fallback: str | None = None) -> str
     if not tier_key:
         return fallback or ""
     label = TIER_LABELS.get(tier_key)
-    if label:
+    if label is not None:
         return label
-    if fallback:
+    if fallback is not None:
         return fallback
     return tier_key.replace("_", " ").title()
 

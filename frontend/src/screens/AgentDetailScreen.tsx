@@ -428,12 +428,30 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
     },
     [tierMultiplierByKey],
   )
-  const currentMultiplier = hasTierMultipliers ? getTierMultiplier(formState.preferredTier) : 1
-  const sliderLimitMax = hasTierMultipliers
-    ? Math.max(sliderMin, Math.round(standardSliderLimit * currentMultiplier))
-    : fallbackSliderLimitMax
-  const sliderMax = hasTierMultipliers ? sliderLimitMax + sliderStep : fallbackSliderMax
-  const sliderEmptyValue = hasTierMultipliers ? sliderMax : fallbackSliderEmptyValue
+  const getSliderMetrics = useCallback(
+    (tier: IntelligenceTierKey) => {
+      const multiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
+      const limitMax = hasTierMultipliers
+        ? Math.max(sliderMin, Math.round(standardSliderLimit * multiplier))
+        : fallbackSliderLimitMax
+      const max = hasTierMultipliers ? limitMax + sliderStep : fallbackSliderMax
+      const emptyValue = hasTierMultipliers ? max : fallbackSliderEmptyValue
+      return { limitMax, max, emptyValue }
+    },
+    [
+      fallbackSliderEmptyValue,
+      fallbackSliderLimitMax,
+      fallbackSliderMax,
+      getTierMultiplier,
+      hasTierMultipliers,
+      sliderMin,
+      sliderStep,
+      standardSliderLimit,
+    ],
+  )
+  const { limitMax: sliderLimitMax, max: sliderMax, emptyValue: sliderEmptyValue } = getSliderMetrics(
+    formState.preferredTier,
+  )
 
   const clearAvatarPreviewUrl = useCallback(() => {
     if (avatarPreviewObjectUrlRef.current) {
@@ -926,12 +944,9 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
         const previousMultiplier = hasTierMultipliers ? getTierMultiplier(prev.preferredTier) : 1
         const nextMultiplier = hasTierMultipliers ? getTierMultiplier(tier) : 1
-        const nextSliderLimitMax = hasTierMultipliers
-          ? Math.max(sliderMin, Math.round(standardSliderLimit * nextMultiplier))
-          : fallbackSliderLimitMax
-        const nextSliderMax = hasTierMultipliers ? nextSliderLimitMax + sliderStep : fallbackSliderMax
-        const nextSliderEmptyValue = hasTierMultipliers ? nextSliderMax : fallbackSliderEmptyValue
-        const isUnlimited = prev.sliderValue >= sliderEmptyValue || !prev.dailyCreditInput.trim()
+        const { emptyValue: currentEmptyValue } = getSliderMetrics(prev.preferredTier)
+        const { limitMax: nextSliderLimitMax, emptyValue: nextSliderEmptyValue } = getSliderMetrics(tier)
+        const isUnlimited = prev.sliderValue >= currentEmptyValue || !prev.dailyCreditInput.trim()
 
         if (isUnlimited) {
           return {
@@ -969,15 +984,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       })
     },
     [
-      fallbackSliderEmptyValue,
-      fallbackSliderLimitMax,
-      fallbackSliderMax,
+      getSliderMetrics,
       getTierMultiplier,
       hasTierMultipliers,
-      sliderEmptyValue,
       sliderMin,
-      sliderStep,
-      standardSliderLimit,
     ],
   )
 
