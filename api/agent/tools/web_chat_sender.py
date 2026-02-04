@@ -25,6 +25,7 @@ from ...models import (
     DeliveryStatus,
     CommsChannel,
     build_web_agent_address,
+    build_web_user_address,
     parse_web_user_address,
 )
 from ...services.email_verification import has_verified_email
@@ -82,7 +83,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "Optional web chat address for the recipient (e.g. 'web://user/123/agent/<agent_id>'). "
-                            "If omitted, the agent will reply to the latest active chat participant or preferred web contact."
+                            "If omitted, the agent will reply to the latest active chat participant or preferred web contact. "
+                            "If no other communication channels are available, it will default to the owner's web address."
                         ),
                     },
                     "attachments": {
@@ -135,6 +137,11 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
             latest_conversation = agent.owned_conversations.filter(channel=CommsChannel.WEB).order_by("-id").first()
             if latest_conversation:
                 to_address = latest_conversation.address
+            else:
+                owner_user = getattr(agent, "user", None)
+                if owner_user and not _has_other_contact_channel(agent, owner_user):
+                    # When web chat is the only channel, default to the owner's web address.
+                    to_address = build_web_user_address(owner_user.id, agent.id)
 
     if not to_address:
         return {
