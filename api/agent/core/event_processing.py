@@ -1255,11 +1255,11 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     """Estimate token count for agent context using simple heuristics."""
     total_length = 0
     tool_result_overhead = 240
-    
+
     # Charter length
     if agent.charter:
         total_length += len(agent.charter)
-    
+
     # Rough estimates for other content
     # History: estimate based on recent steps and comms
     recent_steps = (
@@ -1272,14 +1272,14 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
         # Add description length
         if step.description:
             total_length += len(step.description)
-        
+
         # Account for tool result metadata (prompt stores metadata + small previews)
         try:
             if step.tool_call:
                 total_length += tool_result_overhead
         except PersistentAgentToolCall.DoesNotExist:
             pass
-    
+
     recent_comms = (
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .only("body")
@@ -1288,13 +1288,13 @@ def _estimate_agent_context_tokens(agent: PersistentAgent) -> int:
     for comm in recent_comms:
         if comm.body:
             total_length += len(comm.body)
-    
+
     # Add base overhead for system prompt and structure
     total_length += 2000  # Base system prompt overhead
-    
+
     # Rough estimation: ~4 characters per token 
     estimated_tokens = total_length // 4
-    
+
     # Apply reasonable bounds
     return max(min(estimated_tokens, 50000), 1000)  # Between 1k and 50k tokens
 
@@ -1347,8 +1347,8 @@ _GEMINI_CACHE_BLOCKLIST = GEMINI_CACHE_BLOCKLIST
 
 
 def _completion_with_failover(
-    messages: List[dict], 
-    tools: List[dict], 
+    messages: List[dict],
+    tools: List[dict],
     failover_configs: List[Tuple[str, str, dict]],
     agent_id: str = None,
     safety_identifier: str = None,
@@ -1379,7 +1379,7 @@ def _completion_with_failover(
     base_messages: List[dict] = list(messages or [])
     base_tools: List[dict] = list(tools or [])
     active_stream_broadcaster = stream_broadcaster
-    
+
     ordered_configs: List[Tuple[str, str, dict]] = list(failover_configs)
     if preferred_config:
         pref_provider, pref_model = preferred_config
@@ -1415,7 +1415,7 @@ def _completion_with_failover(
             provider,
             agent_id or "unknown",
         )
-        
+
         try:
             with tracer.start_as_current_span("LLM Completion") as llm_span:
                 if agent_id:
@@ -1503,7 +1503,7 @@ def _completion_with_failover(
                 set_usage_span_attributes(llm_span, usage)
 
                 return response, token_usage
-                
+
         except Exception as exc:
             if use_gemini_cache and is_gemini_cache_conflict_error(exc):
                 disable_gemini_cache_for(provider, model)
@@ -1525,7 +1525,7 @@ def _completion_with_failover(
                 provider,
                 agent_id or "unknown",
             )
-    
+
     # All providers failed
     if last_exc:
         raise last_exc
@@ -2265,19 +2265,6 @@ def process_agent_events(
                 "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
             )
     else:
-        # A normal run cancels any pending burn follow-up so we don't double-run.
-        try:
-            deleted = redis_client.delete(follow_up_key)
-            if isinstance(deleted, int) and deleted > 0:
-                logger.info(
-                    "Cleared pending burn-rate follow-up token for agent %s due to new processing run.",
-                    persistent_agent_id,
-                )
-        except Exception:
-            logger.debug(
-                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
-            )
-
         # Respect active burn-rate cooldown unless a recent user message arrived.
         try:
             cooldown_value = redis_client.get(cooldown_key)
@@ -2310,6 +2297,19 @@ def process_agent_events(
                 span.add_event("Processing skipped - burn cooldown active")
                 clear_processing_queued_flag(persistent_agent_id)
                 return
+
+        # A normal run cancels any pending burn follow-up so we don't double-run.
+        try:
+            deleted = redis_client.delete(follow_up_key)
+            if isinstance(deleted, int) and deleted > 0:
+                logger.info(
+                    "Cleared pending burn-rate follow-up token for agent %s due to new processing run.",
+                    persistent_agent_id,
+                )
+        except Exception:
+            logger.debug(
+                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
+            )
 
     # Guard against reviving expired/closed cycles when a follow‑up arrives after TTL expiry
     if budget_id is not None:
@@ -2766,7 +2766,7 @@ def _process_agent_events_locked(
         try:
             outstanding = AgentBudgetManager.get_total_outstanding_work(agent_id=str(agent.id))
             publish_agent_event(
-                str(agent.id), 
+                str(agent.id),
                 AgentEventType.PROCESSING_COMPLETE,
                 {"outstanding_tasks": outstanding}
             )
@@ -2835,7 +2835,7 @@ def _run_agent_loop(
         logger.debug("Autotool heuristic check failed", exc_info=True)
 
     tools = get_agent_tools(agent)
-    
+
     # Track cumulative token usage across all iterations
     cumulative_token_usage = {
         "prompt_tokens": 0,
@@ -3001,7 +3001,7 @@ def _run_agent_loop(
                     completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
                     response=response,
                 )
-            
+
             # Use the fitted token count from promptree for LLM selection
             # This fixes the bug where we were using joined message token count
             # which could exceed thresholds even when fitted content was under limits
@@ -3010,7 +3010,7 @@ def _run_agent_loop(
                 fitted_token_count,
                 agent.id
             )
-            
+
             # Select provider tiers based on the fitted token count
             prefer_low_latency = has_active_web_session(agent)
             try:
@@ -3057,7 +3057,7 @@ def _run_agent_loop(
                 )
                 if heartbeat:
                     heartbeat.touch("llm_response")
-                
+
                 # Accumulate token usage
                 if token_usage:
                     cumulative_token_usage["prompt_tokens"] += token_usage.get("prompt_tokens", 0)
@@ -3075,7 +3075,7 @@ def _run_agent_loop(
                         token_usage.get("completion_tokens"),
                         token_usage.get("total_tokens"),
                     )
-                    
+
             except Exception as e:
                 current_span = trace.get_current_span()
                 mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
@@ -3751,5 +3751,5 @@ def _run_agent_loop(
 
     else:
         logger.warning("Agent %s reached max iterations.", agent.id)
-    
+
     return cumulative_token_usage
