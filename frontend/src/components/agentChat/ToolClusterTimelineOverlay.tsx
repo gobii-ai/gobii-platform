@@ -6,6 +6,7 @@ import { formatRelativeTimestamp } from '../../util/time'
 import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { ToolIconSlot } from './ToolIconSlot'
+import { ToolProviderBadge } from './ToolProviderBadge'
 import type { ToolClusterTransform, ToolEntryDisplay } from './tooling/types'
 
 type ToolClusterTimelineOverlayProps = {
@@ -119,7 +120,10 @@ export function ToolClusterTimelineOverlay({ open, cluster, onClose }: ToolClust
                       <ToolIconSlot entry={entry} />
                     </span>
                     <span className="tool-cluster-timeline-main">
-                      <span className="tool-cluster-timeline-label">{entry.label}</span>
+                      <span className="tool-cluster-timeline-label-row">
+                        <span className="tool-cluster-timeline-label">{entry.label}</span>
+                        <ToolProviderBadge entry={entry} className="tool-provider-badge--timeline" />
+                      </span>
                       {caption ? <span className="tool-cluster-timeline-caption">{caption}</span> : null}
                       {thinkingPreview ? (
                         <div className="tool-cluster-timeline-preview">
