@@ -5,7 +5,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("api", "0280_summarization_models"),
+        ("api", "0281_summarization_models"),
     ]
 
     operations = [

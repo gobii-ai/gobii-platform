@@ -8,7 +8,7 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0279_rename_service_partner_role'),
+        ('api', '0280_add_tool_call_status'),
     ]
 
     operations = [
