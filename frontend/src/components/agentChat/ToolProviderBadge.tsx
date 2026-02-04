@@ -7,26 +7,44 @@ type ToolProviderBadgeProps = {
 
 const BRIGHTDATA_SLUG = 'brightdata'
 
-function isBrightDataEntry(entry: ToolEntryDisplay): boolean {
+type ProviderInfo = {
+  label: string
+  slug: string
+  title: string
+}
+
+function getProviderInfo(entry: ToolEntryDisplay): ProviderInfo | null {
   const serverSlug = entry.mcpInfo?.serverSlug?.toLowerCase()
-  if (serverSlug) {
-    return serverSlug === BRIGHTDATA_SLUG
+  if (serverSlug === BRIGHTDATA_SLUG) {
+    return {
+      label: 'API',
+      slug: BRIGHTDATA_SLUG,
+      title: 'Bright Data tool',
+    }
   }
   const toolName = entry.toolName?.toLowerCase() ?? ''
-  return toolName.startsWith('mcp_brightdata_') || toolName.startsWith('mcp_bright_data_')
+  if (toolName.startsWith('mcp_brightdata_') || toolName.startsWith('mcp_bright_data_')) {
+    return {
+      label: 'API',
+      slug: BRIGHTDATA_SLUG,
+      title: 'Bright Data tool',
+    }
+  }
+  return null
 }
 
 export function ToolProviderBadge({ entry, className }: ToolProviderBadgeProps) {
-  if (!isBrightDataEntry(entry)) {
+  const provider = getProviderInfo(entry)
+  if (!provider) {
     return null
   }
-  const classes = ['tool-provider-badge', 'tool-provider-badge--brightdata']
+  const classes = ['tool-provider-badge', `tool-provider-badge--${provider.slug}`]
   if (className) {
     classes.push(className)
   }
   return (
-    <span className={classes.join(' ')} title="Bright Data tool">
-      Bright Data
+    <span className={classes.join(' ')} title={provider.title}>
+      {provider.label}
     </span>
   )
 }
