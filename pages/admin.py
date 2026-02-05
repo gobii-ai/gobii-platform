@@ -3,7 +3,7 @@ from django.contrib import admin
 from django.contrib.sites.models import Site
 from django.utils.html import format_html
 
-from .models import LandingPage
+from .models import LandingPage, MiniModeCampaignPattern
 from django.urls import reverse
 
 
@@ -49,3 +49,12 @@ class LandingPageAdmin(admin.ModelAdmin):
         absolute_url = f"{protocol}{current_site.domain}{rel}"
 
         return format_html(f'<a href="{absolute_url}" target="_blank">{absolute_url}</a>')
+
+
+@admin.register(MiniModeCampaignPattern)
+class MiniModeCampaignPatternAdmin(admin.ModelAdmin):
+    list_display = ("pattern", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("pattern", "notes")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("pattern", "is_active", "notes", "created_at", "updated_at")
