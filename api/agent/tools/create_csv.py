@@ -72,7 +72,7 @@ def execute_create_csv(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         return error
 
     if query:
-        include_headers = True if params.get("include_headers", True) else False
+        include_headers = bool(params.get("include_headers", True))
         rows, columns, err = run_sqlite_select(query)
         if err:
             return {"status": "error", "message": err}
