@@ -139,6 +139,7 @@ from console.views import (
     ApiKeyBlankFormView,
     ApiKeyCreateModalView,
     BillingView,
+    BillingPortalView,
     PersistentAgentsView,
     ConsoleDiagnosticsView,
     ConsoleUsageView,
@@ -252,6 +253,7 @@ urlpatterns = [
     ),
 
     path("console/billing/", BillingView.as_view(), name="billing"),
+    path("console/billing/portal/", BillingPortalView.as_view(), name="billing_portal"),
     path("console/profile/", ProfileView.as_view(), name="profile"),
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),

@@ -126,6 +126,7 @@ from util.subscription_helper import (
     allow_user_extra_tasks,
     calculate_extra_tasks_used_during_subscription_period,
     get_user_extra_task_limit,
+    get_stripe_customer,
     get_or_create_stripe_customer,
     get_organization_plan,
     has_unlimited_agents,
@@ -1393,6 +1394,7 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
         context['subscription'] = sub
         context['paid_subscriber'] = paid_subscriber
         context['personal_addons_disabled'] = not paid_subscriber
+        context['personal_can_open_stripe'] = paid_subscriber
 
         dedicated_plan = subscription_plan
         dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
@@ -1431,6 +1433,37 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
     def post(self, request, *args, **kwargs):
         # Handle any POST requests related to billing here
         return HttpResponseNotAllowed(['GET'])
+
+
+class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
+    """Open the Stripe billing portal for personal subscriptions."""
+
+    @tracer.start_as_current_span("CONSOLE Billing Portal")
+    def post(self, request, *args, **kwargs):
+        customer = get_stripe_customer(request.user)
+        if not customer or not getattr(customer, "id", None):
+            messages.error(
+                request,
+                "We couldn't find a Stripe customer for your account. Please contact support.",
+            )
+            return redirect("billing")
+
+        try:
+            _assign_stripe_api_key()
+            return_url = request.build_absolute_uri(reverse("billing"))
+            session = stripe.billing_portal.Session.create(
+                customer=customer.id,
+                api_key=stripe.api_key,
+                return_url=return_url,
+            )
+            return redirect(session.url)
+        except stripe.error.StripeError as exc:
+            logger.exception("Failed to create Stripe billing portal session for user %s: %s", request.user.id, exc)
+            messages.error(
+                request,
+                "We weren't able to open the Stripe billing portal. Please try again or contact support.",
+            )
+            return redirect("billing")
 
 
 class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
