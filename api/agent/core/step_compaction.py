@@ -50,6 +50,7 @@ from .token_usage import log_agent_completion, set_usage_span_attributes
 __all__ = [
     "ensure_steps_compacted",
     "RAW_STEP_LIMIT",
+    "STEP_COMPACTION_TAIL",
     "llm_summarise_steps",
 ]
 
@@ -61,6 +62,10 @@ RAW_STEP_LIMIT: int = getattr(settings, "PA_RAW_STEP_LIMIT", 100)
 """Number of raw steps allowed after the last snapshot before triggering
 compaction.  Override with ``PA_RAW_STEP_LIMIT`` in Django settings for
 experimentation."""
+
+STEP_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_STEP_COMPACTION_TAIL", 10))
+"""Number of most-recent steps to keep raw (uncompacted) after snapshotting.
+Override with ``PA_STEP_COMPACTION_TAIL`` in Django settings."""
 
 MAX_TOOL_RESULT_CHARS: int = 200_000
 """Maximum number of *trailing* characters retained from ``tool_call.result`` when
@@ -163,6 +168,7 @@ def ensure_steps_compacted(
     # `@override_settings(PA_RAW_STEP_LIMIT=...)` take effect even though
     # the module-level constant is evaluated at import time.
     raw_limit: int = getattr(settings, "PA_RAW_STEP_LIMIT", RAW_STEP_LIMIT)
+    tail_limit: int = max(0, getattr(settings, "PA_STEP_COMPACTION_TAIL", STEP_COMPACTION_TAIL))
 
     # ------------------------------ Phase 1 ------------------------------ #
     # Decide *if* compaction is needed under a short lock.
@@ -180,11 +186,13 @@ def ensure_steps_compacted(
 
         lower_bound = last_snap.snapshot_until if last_snap else agent_locked.created_at
 
-        raw_count = (
+        raw_qs = (
             PersistentAgentStep.objects
             .filter(agent=agent_locked, created_at__gt=lower_bound)
-            .count()
+            .order_by("created_at")
         )
+
+        raw_count = raw_qs.count()
 
         span.set_attribute("compaction.raw_steps", raw_count)
         span.set_attribute("compaction.raw_limit", raw_limit)
@@ -192,22 +200,21 @@ def ensure_steps_compacted(
         if raw_count <= raw_limit:
             return  # Nothing to summarise.
 
-        # Determine *upper* bound (created_at of last raw step) now so we can
-        # detect races later.
-        last_step_ts = (
-            PersistentAgentStep.objects
-            .filter(agent=agent_locked, created_at__gt=lower_bound)
-            .order_by("-created_at")
-            .values_list("created_at", flat=True)
-            .first()
+        # Keep the most recent steps raw; compact everything earlier.
+        tail_count = min(tail_limit, max(raw_count - 1, 0))
+        compacted_count = max(raw_count - tail_count, 0)
+        if compacted_count <= 0:
+            return
+
+        snapshot_until = (
+            raw_qs.values_list("created_at", flat=True)[compacted_count - 1]
         )
-        assert last_step_ts is not None  # raw_count > 0 so cannot be None
 
         previous_summary = last_snap.summary if last_snap else ""
 
     # ------------------------------ Phase 2 ------------------------------ #
     # Slow work: fetch & summarise *outside* the lock.
-    raw_steps_struct = _fetch_and_structurise_steps(agent, lower_bound, last_step_ts)
+    raw_steps_struct = _fetch_and_structurise_steps(agent, lower_bound, snapshot_until)
 
     try:
         with tracer.start_as_current_span("COMPACT Step Summarise") as summarise_span:
@@ -224,7 +231,7 @@ def ensure_steps_compacted(
 
         race = (
             PersistentAgentStepSnapshot.objects
-            .filter(agent=agent_locked, snapshot_until__gte=last_step_ts)
+            .filter(agent=agent_locked, snapshot_until__gte=snapshot_until)
             .exists()
         )
         if race:
@@ -241,11 +248,11 @@ def ensure_steps_compacted(
         PersistentAgentStepSnapshot.objects.create(
             agent=agent_locked,
             previous_snapshot=prev_snap,
-            snapshot_until=last_step_ts,
+            snapshot_until=snapshot_until,
             summary=new_summary,
         )
 
-        span.set_attribute("compaction.snapshot_until", last_step_ts.isoformat())
+        span.set_attribute("compaction.snapshot_until", snapshot_until.isoformat())
         span.set_attribute("compaction.created", True)
 
 

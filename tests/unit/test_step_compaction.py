@@ -18,7 +18,7 @@ from api.models import (
 User = get_user_model()
 
 
-@override_settings(PA_RAW_STEP_LIMIT=5)
+@override_settings(PA_RAW_STEP_LIMIT=5, PA_STEP_COMPACTION_TAIL=2)
 @tag("batch_step_compaction")
 class StepCompactionTests(TestCase):
     """Unit-tests for on-demand step history compaction."""
@@ -120,11 +120,18 @@ class StepCompactionTests(TestCase):
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.agent, self.agent)
         self.assertIsNone(snapshot.previous_snapshot)
-        self.assertIn(f"--- Recent Steps ({num_steps}) ---", snapshot.summary)
+        compacted_count = num_steps - settings.PA_STEP_COMPACTION_TAIL
+        self.assertIn(f"--- Recent Steps ({compacted_count}) ---", snapshot.summary)
 
-        # Check snapshot_until is correct (created_at of the last step)
-        last_step = PersistentAgentStep.objects.order_by("created_at").last()
-        self.assertEqual(snapshot.snapshot_until, last_step.created_at)
+        # Check snapshot_until is correct (timestamp of the last compacted step)
+        ordered = list(PersistentAgentStep.objects.order_by("created_at"))
+        expected_until = ordered[-(settings.PA_STEP_COMPACTION_TAIL + 1)].created_at
+        self.assertEqual(snapshot.snapshot_until, expected_until)
+
+        remaining = PersistentAgentStep.objects.filter(
+            created_at__gt=snapshot.snapshot_until
+        ).count()
+        self.assertEqual(remaining, settings.PA_STEP_COMPACTION_TAIL)
 
     @tag("batch_step_compaction")
     def test_no_compaction_when_at_or_below_limit(self):
@@ -177,11 +184,18 @@ class StepCompactionTests(TestCase):
 
         # Summary should include both the previous snapshot's content and the new content.
         self.assertIn(first_snapshot.summary, latest_snapshot.summary)
-        self.assertIn(f"--- Recent Steps ({second_batch}) ---", latest_snapshot.summary)
+        expected_compacted = (
+            PersistentAgentStep.objects.filter(
+                created_at__gt=first_snapshot.snapshot_until
+            ).count()
+            - settings.PA_STEP_COMPACTION_TAIL
+        )
+        self.assertIn(f"--- Recent Steps ({expected_compacted}) ---", latest_snapshot.summary)
 
-        # snapshot_until should correspond to the last step we've created
-        last_step = PersistentAgentStep.objects.order_by("created_at").last()
-        self.assertEqual(latest_snapshot.snapshot_until, last_step.created_at)
+        # snapshot_until should correspond to the last compacted step
+        ordered = list(PersistentAgentStep.objects.order_by("created_at"))
+        expected_until = ordered[-(settings.PA_STEP_COMPACTION_TAIL + 1)].created_at
+        self.assertEqual(latest_snapshot.snapshot_until, expected_until)
 
     def test_mixed_step_types_in_summary(self):
         """Test that different step types are correctly formatted in the summary."""
@@ -272,7 +286,8 @@ class StepCompactionTests(TestCase):
 
         snapshot = PersistentAgentStepSnapshot.objects.first()
         self.assertIsNotNone(snapshot)
-        self.assertEqual(snapshot.summary, f"CUSTOM: {settings.PA_RAW_STEP_LIMIT + 1} steps processed")
+        expected_compacted = settings.PA_RAW_STEP_LIMIT + 1 - settings.PA_STEP_COMPACTION_TAIL
+        self.assertEqual(snapshot.summary, f"CUSTOM: {expected_compacted} steps processed")
 
     def test_race_condition_detection(self):
         """Test that race conditions are properly detected and handled."""
@@ -284,14 +299,15 @@ class StepCompactionTests(TestCase):
             ts = self.agent.created_at + timedelta(seconds=i + 1)
             self._make_tool_call_step(ts, f"tool_{i}")
 
-        # Get the timestamp of the last step
-        last_step = PersistentAgentStep.objects.order_by("created_at").last()
+        # Get the timestamp of the last compacted step
+        ordered = list(PersistentAgentStep.objects.order_by("created_at"))
+        expected_until = ordered[-(settings.PA_STEP_COMPACTION_TAIL + 1)].created_at
 
         # Manually create a snapshot that would indicate another process beat us
         PersistentAgentStepSnapshot.objects.create(
             agent=self.agent,
             previous_snapshot=None,
-            snapshot_until=last_step.created_at,
+            snapshot_until=expected_until,
             summary="Manual snapshot",
         )
 
