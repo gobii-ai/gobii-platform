@@ -1625,9 +1625,9 @@ def handle_subscription_event(event, **kwargs):
         if licensed_item is None and fallback_item is not None:
             licensed_item = fallback_item
 
-        # Proceed only when the subscription is active and we found a licensed item
+        # Proceed when the subscription is active or trialing and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
-        if sub.status == 'active' and licensed_item is not None:
+        if sub.status in ("active", "trialing") and licensed_item is not None:
             price_info = licensed_item.get("price") or {}
             if not isinstance(price_info, Mapping):
                 price_info = {}
