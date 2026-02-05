@@ -3911,7 +3911,8 @@ def _get_system_instruction(
         "```\n"
         "# File exports\n"
         "Use create_file for text-based formats.\n"
-        "If exporting CSV or PDF, use create_csv or create_pdf instead. You may search for these tools if you need them. \n"
+        "If exporting CSV or PDF, use create_csv or create_pdf instead. You may need to search for these tools if you need them but don't have them available."
+        "create_csv can take raw CSV or query='SELECT ...' to export from SQLite. \n"
         "CSV export: create_csv(file_path='/exports/your-file.csv'); add to message as an attachment.\n"
         "```\n\n"
 
