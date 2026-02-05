@@ -817,8 +817,8 @@ export function AgentChatPage({
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
-  const spawnIntentFetchedRef = useRef(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
+  const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -871,22 +871,20 @@ export function AgentChatPage({
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow) {
-      spawnIntentFetchedRef.current = false
       spawnIntentAutoSubmittedRef.current = false
+      spawnIntentRequestIdRef.current = 0
       setSpawnIntent(null)
       setSpawnIntentStatus('idle')
       return
     }
-    if (spawnIntentFetchedRef.current) {
-      return
-    }
-    spawnIntentFetchedRef.current = true
+    spawnIntentRequestIdRef.current += 1
+    const requestId = spawnIntentRequestIdRef.current
+    const controller = new AbortController()
     setSpawnIntentStatus('loading')
-    let isActive = true
     const loadSpawnIntent = async () => {
       try {
-        const intent = await fetchAgentSpawnIntent()
-        if (!isActive) {
+        const intent = await fetchAgentSpawnIntent(controller.signal)
+        if (spawnIntentRequestIdRef.current !== requestId) {
           return
         }
         const charter = intent?.charter?.trim()
@@ -897,7 +895,7 @@ export function AgentChatPage({
         setSpawnIntent(intent)
         setSpawnIntentStatus('ready')
       } catch (err) {
-        if (!isActive) {
+        if (controller.signal.aborted || spawnIntentRequestIdRef.current !== requestId) {
           return
         }
         setSpawnIntentStatus('done')
@@ -905,7 +903,7 @@ export function AgentChatPage({
     }
     void loadSpawnIntent()
     return () => {
-      isActive = false
+      controller.abort()
     }
   }, [isNewAgent, spawnFlow])
 
