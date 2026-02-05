@@ -159,6 +159,49 @@ def get_existing_individual_subscriptions(customer_id: str) -> list[dict[str, An
     return subscriptions
 
 
+def customer_has_any_individual_subscription(customer_id: str) -> bool:
+    """Return True when a customer has ever held an individual (non-org) plan subscription."""
+    if not customer_id:
+        raise ValueError("customer_id is required")
+
+    _ensure_stripe_ready()
+
+    plan_products = _individual_plan_product_ids()
+    plan_price_ids = _individual_plan_price_ids()
+    if not plan_products and not plan_price_ids:
+        logger.info("No individual plan products or prices configured; skipping subscription history lookup")
+        return False
+
+    try:
+        iterator = stripe.Subscription.list(  # type: ignore[attr-defined]
+            customer=customer_id,
+            status="all",
+            limit=100,
+        ).auto_paging_iter()
+    except stripe.error.StripeError:
+        logger.exception(
+            "Failed to list subscriptions for customer %s; assuming prior history to skip trial",
+            customer_id,
+        )
+        return True
+
+    for sub in iterator:
+        sub_data = _normalize_stripe_object(sub) or {}
+        items = (sub_data.get("items") or {}).get("data", []) or []
+        for item in items:
+            price = _normalize_stripe_object(item.get("price") or {}) or {}
+            product = price.get("product")
+            if isinstance(product, dict):
+                product = product.get("id")
+
+            price_id = price.get("id")
+
+            if (product and product in plan_products) or (price_id and price_id in plan_price_ids):
+                return True
+
+    return False
+
+
 def ensure_single_individual_subscription(
     customer_id: str,
     *,

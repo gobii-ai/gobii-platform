@@ -159,6 +159,7 @@ class StripeConfigAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "startup_price_id",
+                    "startup_trial_days",
                     "startup_additional_task_price_id",
                     "startup_task_pack_product_id",
                     "startup_task_pack_price_ids",
@@ -180,6 +181,7 @@ class StripeConfigAdmin(admin.ModelAdmin):
                 "fields": (
                     "scale_product_id",
                     "scale_price_id",
+                    "scale_trial_days",
                     "scale_additional_task_price_id",
                     "scale_task_pack_product_id",
                     "scale_task_pack_price_ids",

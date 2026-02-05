@@ -14,9 +14,14 @@ from django.core.mail import send_mail, BadHeaderError, EmailMultiAlternatives
 
 from proprietary.forms import SupportForm, PrequalifyForm
 from proprietary.utils_blog import load_blog_post, get_all_blog_posts
-from util.subscription_helper import get_user_plan
+from util.subscription_helper import (
+    customer_has_any_individual_subscription,
+    get_stripe_customer,
+    get_user_plan,
+)
 from constants.plans import PlanNames
 from config.plans import PLAN_CONFIG, get_plan_config
+from config.stripe_config import get_stripe_settings
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +42,48 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         authenticated = self.request.user.is_authenticated
 
+        stripe_settings = get_stripe_settings()
+        startup_trial_days = max(int(getattr(stripe_settings, "startup_trial_days", 0) or 0), 0)
+        scale_trial_days = max(int(getattr(stripe_settings, "scale_trial_days", 0) or 0), 0)
+
+        def _is_trial_eligible() -> bool:
+            if not authenticated:
+                return True
+            try:
+                customer = get_stripe_customer(self.request.user)
+                if not customer or not getattr(customer, "id", None):
+                    return True
+                return not customer_has_any_individual_subscription(str(customer.id))
+            except Exception:
+                logger.warning(
+                    "Failed to resolve trial eligibility; defaulting to no trial for user %s",
+                    getattr(self.request.user, "id", None),
+                    exc_info=True,
+                )
+                return False
+
+        trial_eligible = _is_trial_eligible()
+
+        def _trial_cta(days: int, label: str) -> str:
+            if days > 0 and trial_eligible:
+                return f"Start {days}-day Free Trial"
+            return f"Choose {label}"
+
+        def _trial_pricing_model(days: int) -> str:
+            if days > 0 and trial_eligible:
+                return f"{days}-day free trial, then billed monthly"
+            return "Billed monthly"
+
+        if startup_trial_days > 0 or scale_trial_days > 0:
+            context["trial_note"] = "Free trials are for first-time customers only."
+
         # When true, we'll say Upgrade for Startup plan
-        startup_cta_text = "Choose Pro"
-        scale_cta_text = "Choose Scale"
-        free_cta = "Get started for free"
+        startup_cta_text = _trial_cta(startup_trial_days, "Pro")
+        scale_cta_text = _trial_cta(scale_trial_days, "Scale")
         startup_cta_disabled = False
         scale_cta_disabled = False
         startup_current = False
         scale_current = False
-        free_current = False
-        free_disabled = False
 
         current_plan_id = ""
         plan_id = ""
@@ -58,11 +95,8 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 current_plan_id = plan_id
 
                 if plan_id == PlanNames.FREE:
-                    free_cta = "Current Plan"
-                    startup_cta_text = "Upgrade to Pro"
-                    scale_cta_text = "Upgrade to Scale"
-                    free_current = True
-                    free_disabled = True
+                    startup_cta_text = _trial_cta(startup_trial_days, "Pro")
+                    scale_cta_text = _trial_cta(scale_trial_days, "Scale")
                 elif plan_id == PlanNames.STARTUP:
                     startup_cta_text = "Current Plan"
                     scale_cta_text = "Upgrade to Scale"
@@ -93,32 +127,37 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         scale_price = scale_config.get("price", 250)
 
         # Pricing cards data - new 3-tier structure
+        startup_features = []
+        if startup_trial_days > 0 and trial_eligible:
+            startup_features.append(f"{startup_trial_days}-day free trial")
+        startup_features.extend(
+            [
+                format_contacts(PlanNames.STARTUP),
+                "Unlimited always-on agents",
+                "No time limit for always-on agents",
+                "Agents never expire or turn off",
+                "$0.10 per task beyond 500",
+                "Priority support",
+                "Higher rate limits",
+            ]
+        )
+
+        scale_features = []
+        if scale_trial_days > 0 and trial_eligible:
+            scale_features.append(f"{scale_trial_days}-day free trial")
+        scale_features.extend(
+            [
+                format_contacts(PlanNames.SCALE),
+                "Unlimited always-on agents",
+                "Agents never expire or turn off",
+                "Highest intelligence levels available",
+                "$0.04 per task beyond 10,000",
+                "Priority work queue",
+                "1,500 requests/min API throughput",
+            ]
+        )
+
         context["pricing_plans"] = [
-            {
-                "code": PlanNames.FREE,
-                "name": "Free Tier",
-                "price": 0,
-                "price_label": "$0",
-                "desc": "Get started with core features",
-                "tasks": "100",
-                "pricing_model": "Free to start",
-                "highlight": False,
-                "badge": None,
-                "disabled": False,
-                "current_plan": free_current,
-                "cta_disabled": free_disabled,
-                "features": [
-                    format_contacts(PlanNames.FREE),
-                    "5 always-on agents",
-                    "Always-on agents run up to 30 days",
-                    "Keep your agents when you upgrade",
-                    "Basic API access",
-                    "Community support",
-                    "Standard rate limits",
-                ],
-                "cta": free_cta,
-                "cta_url": "/accounts/login/",
-            },
             {
                 "code": PlanNames.STARTUP,
                 "name": "Pro",
@@ -126,21 +165,13 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "price_label": f"${startup_price}",
                 "desc": "For growing teams",
                 "tasks": "500",
-                "pricing_model": "Billed monthly",
+                "pricing_model": _trial_pricing_model(startup_trial_days),
                 "highlight": False,
                 "badge": "Most teams",
                 "disabled": False,
                 "cta_disabled": startup_cta_disabled,
                 "current_plan": startup_current,
-                "features": [
-                    format_contacts(PlanNames.STARTUP),
-                    "Unlimited always-on agents",
-                    "No time limit for always-on agents",
-                    "Agents never expire or turn off",
-                    "$0.10 per task beyond 500",
-                    "Priority support",
-                    "Higher rate limits",
-                ],
+                "features": startup_features,
                 "cta": startup_cta_text,
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
             },
@@ -151,20 +182,12 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "price_label": f"${scale_price}",
                 "desc": "For teams scaling fast",
                 "tasks": "10,000",
-                "pricing_model": "Billed monthly",
+                "pricing_model": _trial_pricing_model(scale_trial_days),
                 "highlight": True,
                 "badge": "Best value",
                 "cta_disabled": scale_cta_disabled,
                 "current_plan": scale_current,
-                "features": [
-                    format_contacts(PlanNames.SCALE),
-                    "Unlimited always-on agents",
-                    "Agents never expire or turn off",
-                    "Highest intelligence levels available",
-                    "$0.04 per task beyond 10,000",
-                    "Priority work queue",
-                    "1,500 requests/min API throughput",
-                ],
+                "features": scale_features,
                 "cta": scale_cta_text,
                 "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",
                 "disabled": False,
@@ -173,21 +196,20 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
 
         # Plan limits pulled from plan configuration to keep the table in sync
         max_contacts_per_agent = [
-            str(PLAN_CONFIG.get(PlanNames.FREE, {}).get("max_contacts_per_agent", "—")),
             str(PLAN_CONFIG.get(PlanNames.STARTUP, {}).get("max_contacts_per_agent", "—")),
             str(PLAN_CONFIG.get(PlanNames.SCALE, {}).get("max_contacts_per_agent", "—")),
         ]
 
         # Comparison table rows - updated for new tiers
         context["comparison_rows"] = [
-            ["Tasks included", "100 (one-time, 30 days)", "500/month", "10,000/month"],
-            ["Cost per additional task", "—", "$0.10", "$0.04"],
-            ["API rate limit (requests/min)", "60", "600", "1,500"],
+            ["Tasks included", "500/month", "10,000/month"],
+            ["Cost per additional task", "$0.10", "$0.04"],
+            ["API rate limit (requests/min)", "600", "1,500"],
             ["Max contacts per agent", *max_contacts_per_agent],
-            ["Agents never expire or turn off", "—", "✓", "✓"],
-            ["Priority task execution", "—", "✓", "✓"],
-            ["Batch scheduling & queueing", "—", "—", "✓"],
-            ["Support", "Community", "Email & chat", "Dedicated channel"],
+            ["Agents never expire or turn off", "✓", "✓"],
+            ["Priority task execution", "✓", "✓"],
+            ["Batch scheduling & queueing", "—", "✓"],
+            ["Support", "Email & chat", "Dedicated channel"],
         ]
 
         # FAQs
@@ -198,15 +220,15 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
             ),
             (
                 "How does the pricing work?",
-                "The Free tier includes 100 tasks (one-time, valid for 30 days). The Pro tier includes 500 tasks per month, then charges $0.10 for each additional task. The Scale tier includes 10,000 tasks per month with $0.04 pricing after that.",
+                "Pro includes 500 tasks per month, then charges $0.10 for each additional task. Scale includes 10,000 tasks per month with $0.04 pricing after that.",
             ),
             (
                 "Is there any commitment?",
-                "No. Start on the Free tier and upgrade anytime. Pro and Scale are month-to-month and you can cancel anytime.",
+                "No. Pro and Scale are month-to-month, and you can cancel before your trial ends to avoid charges.",
             ),
             (
-                "What happens if I exceed my free tasks?",
-                "On the Free tier, you'll need to upgrade to run more tasks. On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
+                "What happens if I exceed my included tasks?",
+                "On the Pro tier, additional tasks are $0.10 each, while Scale brings that down to $0.04 once you pass the included 10,000 tasks.",
             ),
             (
                 "Do you offer enterprise features?",

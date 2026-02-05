@@ -29,6 +29,7 @@ from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import (
+    customer_has_any_individual_subscription,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
@@ -103,6 +104,15 @@ def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
         if price_id == target_price_id and usage_type == "metered":
             return True
     return False
+
+
+def _normalize_trial_days(value: int | str | None) -> int:
+    if value is None:
+        return 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
@@ -1192,6 +1202,15 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             raise
 
         # 2️⃣  Kick off Checkout with the *existing* customer
+        trial_days = _normalize_trial_days(getattr(stripe_settings, "startup_trial_days", 0))
+        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+
+        subscription_data = {
+            "metadata": metadata,
+        }
+        if include_trial:
+            subscription_data["trial_period_days"] = trial_days
+
         checkout_kwargs = {
             "customer": customer.id,
             "api_key": stripe.api_key,
@@ -1199,9 +1218,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "allow_promotion_codes": True,
-            "subscription_data": {
-                "metadata": metadata,
-            },
+            "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
         }
@@ -1333,6 +1350,15 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                     "Failed to upgrade subscription for customer %s; falling back to checkout", customer.id,
                 )
 
+        trial_days = _normalize_trial_days(getattr(stripe_settings, "scale_trial_days", 0))
+        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+
+        subscription_data = {
+            "metadata": metadata,
+        }
+        if include_trial:
+            subscription_data["trial_period_days"] = trial_days
+
         checkout_kwargs = {
             "customer": customer.id,
             "api_key": stripe.api_key,
@@ -1340,9 +1366,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "allow_promotion_codes": True,
-            "subscription_data": {
-                "metadata": metadata,
-            },
+            "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
         }

@@ -4,7 +4,7 @@
 {% block title %}Pricing - Gobii{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Compare Gobii's Free, Pro, and Enterprise plans to scale always-on pretrained workers with transparent pricing.">
+  <meta name="description" content="Compare Gobii's Pro, Scale, and Enterprise plans to scale always-on pretrained workers with transparent pricing.">
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
   <script>
     (function () {
@@ -84,7 +84,7 @@
   <section id="pricing" class="py-12">
     <div class="max-w-7xl mx-auto px-8">
       <!-- Cards -->
-      <div class="grid sm:grid-cols-3 gap-6">
+      <div class="grid sm:grid-cols-2 gap-6">
         {% comment %} Card component {% endcomment %}
         {% for plan in pricing_plans %}
         <div class="flex flex-col rounded-2xl border {% if plan.highlight %}border-violet-100 bg-gradient-to-br from-white via-violet-50/10 to-purple-50/20 shadow-md{% else %}border-slate-200 bg-white shadow-sm{% endif %} p-6 text-center relative">
@@ -108,7 +108,7 @@
 	          <p class="text-xs text-slate-500 mb-6">{{ plan.pricing_model }}</p>
 	          
 	          <ul class="text-sm text-slate-600 space-y-3 flex-1 mb-6">
-	            <li><span class="font-semibold">{{ plan.tasks }}</span> tasks included{% if plan.code == PlanNames.FREE %} (one-time, 30 days){% endif %}</li>
+	            <li><span class="font-semibold">{{ plan.tasks }}</span> tasks included</li>
 	            {% for feature in plan.features %}
 	            <li>{{ feature }}</li>
 	            {% endfor %}
@@ -129,6 +129,9 @@
         </div>
         {% endfor %}
       </div>
+      {% if trial_note %}
+      <p class="mt-6 text-xs text-slate-500 text-center">{{ trial_note }}</p>
+      {% endif %}
     </div>
   </section>
 
@@ -159,7 +162,6 @@
           <thead>
             <tr>
               <th class="p-2 sm:p-3 text-left font-semibold">Feature</th>
-              <th class="p-2 sm:p-3 font-semibold">Free</th>
               <th class="p-2 sm:p-3 font-semibold">Pro</th>
               <th class="p-2 sm:p-3 font-semibold">Scale</th>
             </tr>

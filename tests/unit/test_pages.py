@@ -404,6 +404,7 @@ class CheckoutRedirectTests(TestCase):
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.customer_has_any_individual_subscription")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
     @patch("pages.views.stripe.checkout.Session.create")
@@ -418,6 +419,7 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create,
         mock_existing_subs,
         mock_ensure,
+        mock_has_history,
         _,
     ):
         user = get_user_model().objects.create_user(
@@ -440,6 +442,7 @@ class CheckoutRedirectTests(TestCase):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
         mock_ensure.return_value = ({"id": "sub_updated"}, "updated")
         mock_existing_subs.return_value = []
+        mock_has_history.return_value = False
 
         resp = self.client.get(reverse("proprietary:pro_checkout"))
 
@@ -449,6 +452,97 @@ class CheckoutRedirectTests(TestCase):
 
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_applies_trial_when_eligible(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_ensure,
+        mock_has_history,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="trial@test.com",
+            password="pw",
+            username="trial_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+            startup_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_trial")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = (None, "absent")
+        mock_has_history.return_value = False
+
+        resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views.customer_has_any_individual_subscription")
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_scale_checkout_skips_trial_for_prior_customers(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        mock_existing_subs,
+        mock_ensure,
+        mock_has_history,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale_trial@test.com",
+            password="pw",
+            username="scale_trial_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+            scale_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale_trial")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_existing_subs.return_value = []
+        mock_ensure.return_value = (None, "absent")
+        mock_has_history.return_value = True
+
+        resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertNotIn("trial_period_days", kwargs["subscription_data"])
 
 
 @tag("batch_pages")
