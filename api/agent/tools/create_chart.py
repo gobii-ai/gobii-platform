@@ -12,8 +12,7 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 
 from api.models import PersistentAgent
-from .sqlite_state import _sqlite_db_path_var
-from .sqlite_guardrails import open_guarded_sqlite_connection, start_query_timer, stop_query_timer, clear_guarded_connection
+from .sqlite_query_runner import run_sqlite_select
 from .agent_variables import set_agent_variable
 
 logger = logging.getLogger(__name__)
@@ -41,42 +40,10 @@ CHART_TYPES = {
 
 
 def _execute_query_for_data(query: str) -> tuple[List[Dict], Optional[str]]:
-    """Execute a SQL query and return results as a list of dicts.
+    """Execute a SQL query and return results as a list of dicts."""
 
-    Returns (data, error_message). If error_message is not None, data will be empty.
-    """
-    db_path = _sqlite_db_path_var.get(None)
-    if not db_path:
-        return [], "SQLite database not available - create_chart requires an active agent session"
-
-    conn = None
-    try:
-        conn = open_guarded_sqlite_connection(db_path)
-        cursor = conn.cursor()
-        start_query_timer(conn)
-        cursor.execute(query)
-
-        if cursor.description is None:
-            return [], "Query must be a SELECT statement that returns rows"
-
-        columns = [col[0] for col in cursor.description]
-        rows = cursor.fetchall()
-        conn.commit()
-
-        # Convert to list of dicts
-        data = [dict(zip(columns, row)) for row in rows]
-        return data, None
-
-    except Exception as e:
-        return [], f"Query failed: {str(e)}"
-    finally:
-        if conn is not None:
-            stop_query_timer(conn)
-            try:
-                clear_guarded_connection(conn)
-                conn.close()
-            except Exception:
-                pass
+    data, _cols, error = run_sqlite_select(query)
+    return data, error
 
 
 def _extract_values(data: List[Dict], key: str) -> List[Any]:

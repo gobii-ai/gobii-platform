@@ -208,7 +208,7 @@ AUTOTOOL_HEURISTICS: list[dict] = [
     },
     # File exports
     {
-        "keywords": ["csv"],
+        "keywords": ["csv", "spreadsheet", "excel", "download csv", "export csv"],
         "tools": [
             "create_csv",
         ],
