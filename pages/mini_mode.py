@@ -11,10 +11,19 @@ MINI_MODE_COOKIE_NAME = "mini-mode"
 MINI_MODE_COOKIE_VALUE = "true"
 MINI_MODE_COOKIE_MAX_AGE = 60 * 24 * 60 * 60  # 60 days
 MINI_MODE_COOKIE_SAMESITE = "Lax"
+MINI_MODE_COOKIE_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def _normalize_campaign_value(value: str | None) -> str:
     return (value or "").strip().lower()
+
+
+def is_mini_mode_cookie_value(value: str | None) -> bool:
+    return _normalize_campaign_value(value) in MINI_MODE_COOKIE_TRUE_VALUES
+
+
+def is_mini_mode_enabled(request) -> bool:
+    return is_mini_mode_cookie_value(request.COOKIES.get(MINI_MODE_COOKIE_NAME))
 
 
 def campaign_matches_mini_mode(utm_campaign: str | None) -> bool:
@@ -66,4 +75,3 @@ def clear_mini_mode_cookie(response, request) -> None:
         secure=request.is_secure(),
         httponly=False,
     )
-
