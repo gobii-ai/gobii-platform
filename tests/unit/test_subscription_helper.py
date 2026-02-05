@@ -309,16 +309,19 @@ class EnsureSingleIndividualSubscriptionTests(TestCase):
         self.assertEqual(action, "updated")
         self.assertEqual(subscription, {"id": "sub_existing"})
         mock_delete.assert_not_called()
-        mock_modify.assert_called_once()
-        modify_kwargs = mock_modify.call_args.kwargs
-        items = modify_kwargs.get("items") or []
+        self.assertEqual(mock_modify.call_count, 2)
+        first_kwargs = mock_modify.call_args_list[0].kwargs
+        second_kwargs = mock_modify.call_args_list[1].kwargs
+        items = first_kwargs.get("items") or []
         base_item = next((i for i in items if i.get("price") == "price_new"), None)
         meter_item = next((i for i in items if i.get("price") == "price_meter_new"), None)
         self.assertIsNotNone(base_item)
         self.assertEqual(base_item.get("quantity"), 1)
         self.assertIsNotNone(meter_item)
-        self.assertEqual(modify_kwargs.get("metadata"), {"foo": "bar", "baz": "qux"})
-        self.assertEqual(modify_kwargs.get("idempotency_key"), "idem-456")
+        self.assertNotIn("metadata", first_kwargs)
+        self.assertEqual(first_kwargs.get("idempotency_key"), "idem-456")
+        self.assertEqual(second_kwargs.get("metadata"), {"foo": "bar", "baz": "qux"})
+        self.assertEqual(second_kwargs.get("idempotency_key"), "idem-456-meta")
 
     @patch("util.subscription_helper._ensure_stripe_ready")
     @patch("util.subscription_helper.stripe.Subscription.modify")

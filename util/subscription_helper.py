@@ -342,7 +342,8 @@ def ensure_single_individual_subscription(
     if metered_price_id and not meter_found:
         updated_items.append({"price": metered_price_id})
 
-    merged_metadata = {**(newest.get("metadata") or {}), **metadata}
+    existing_metadata = newest.get("metadata") or {}
+    merged_metadata = {**existing_metadata, **metadata}
 
     logger.info(
         "Updating existing individual subscription %s for customer %s (items=%s)",
@@ -357,12 +358,25 @@ def ensure_single_individual_subscription(
     updated_sub = stripe.Subscription.modify(  # type: ignore[attr-defined]
         sub_id,
         items=updated_items,
-        metadata=merged_metadata,
         idempotency_key=idempotency_token,
         expand=["items.data.price"],
         proration_behavior="always_invoice",
         payment_behavior="pending_if_incomplete",
     )
+
+    if metadata and merged_metadata != existing_metadata:
+        try:
+            stripe.Subscription.modify(  # type: ignore[attr-defined]
+                sub_id,
+                metadata=merged_metadata,
+                idempotency_key=f"{idempotency_token}-meta",
+            )
+        except Exception:
+            logger.warning(
+                "Failed to update metadata for subscription %s",
+                sub_id,
+                exc_info=True,
+            )
 
     return updated_sub, "updated"
 

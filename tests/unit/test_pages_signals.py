@@ -710,8 +710,8 @@ class SubscriptionSignalTests(TestCase):
             patch("pages.signals.get_plan_by_product_id", return_value=plan_payload), \
             patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
             patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
-            patch("pages.signals.Analytics.identify"), \
-            patch("pages.signals.Analytics.track_event"):
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track_event:
 
             handle_subscription_event(event)
 
@@ -727,6 +727,11 @@ class SubscriptionSignalTests(TestCase):
         props = capi_kwargs["properties"]
         self.assertEqual(props["value"], 0)
         self.assertEqual(props["currency"], "USD")
+
+        events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
+        self.assertIn(AnalyticsEvent.BILLING_TRIAL_STARTED, events)
+        identify_args, _identify_kwargs = mock_identify.call_args
+        self.assertTrue(identify_args[1].get("is_trial"))
 
     @tag("batch_pages")
     def test_trial_conversion_topoffs_credits(self):
@@ -838,6 +843,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(identify_args[0], self.user.id)
         self.assertIn("plan", identify_args[1])
         self.assertEqual(identify_args[1]["plan"], PlanNames.FREE)
+        self.assertFalse(identify_args[1]["is_trial"])
         self.assertEqual(identify_kwargs, {})
 
         mock_track_event.assert_called_once()
@@ -1549,6 +1555,41 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["subscription_id"], "sub_user_succeeded")
         self.assertEqual(props["currency"], "USD")
         self.assertEqual(props["event_id"], "evt-123")
+
+    def test_invoice_payment_succeeded_emits_trial_converted_event(self):
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=3000,
+            status="paid",
+            billing_reason="subscription_cycle",
+            product_id="prod_plan",
+        )
+        payload["lines"]["data"][0]["period"] = {
+            "start": int(trial_end.timestamp()),
+            "end": int((trial_end + timedelta(days=30)).timestamp()),
+        }
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user_succeeded", stripe_data={"trial_end": str(trial_end)}),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event") as mock_track_event, \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}):
+
+            handle_invoice_payment_succeeded(event)
+
+        events = [call.kwargs.get("event") for call in mock_track_event.call_args_list]
+        self.assertIn(AnalyticsEvent.BILLING_PAYMENT_SUCCEEDED, events)
+        self.assertIn(AnalyticsEvent.BILLING_TRIAL_CONVERTED, events)
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")

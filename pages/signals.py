@@ -275,6 +275,34 @@ def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         return []
 
 
+def _coerce_invoice_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    lines = payload.get("lines") if isinstance(payload, Mapping) else None
+    if isinstance(lines, Mapping) and not hasattr(lines, "auto_paging_iter"):
+        try:
+            return stripe.Invoice.construct_from(dict(payload), stripe.api_key)
+        except Exception:
+            logger.warning(
+                "Failed to coerce invoice payload %s to Stripe object",
+                payload.get("id"),
+                exc_info=True,
+            )
+    return payload
+
+
+def _coerce_subscription_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    items = payload.get("items") if isinstance(payload, Mapping) else None
+    if isinstance(items, Mapping) and not hasattr(items, "auto_paging_iter"):
+        try:
+            return stripe.Subscription.construct_from(dict(payload), stripe.api_key)
+        except Exception:
+            logger.warning(
+                "Failed to coerce subscription payload %s to Stripe object",
+                payload.get("id"),
+                exc_info=True,
+            )
+    return payload
+
+
 def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
     for line in lines:
         price_info = line.get("price") or {}
@@ -1222,6 +1250,8 @@ def handle_invoice_payment_failed(event, **kwargs):
 
         stripe.api_key = stripe_key
 
+        payload = _coerce_invoice_payload(payload)
+
         invoice = None
         try:
             invoice = Invoice.sync_from_stripe_data(payload)
@@ -1322,6 +1352,8 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
         stripe.api_key = stripe_key
 
+        payload = _coerce_invoice_payload(payload)
+
         invoice = None
         try:
             invoice = Invoice.sync_from_stripe_data(payload)
@@ -1397,19 +1429,42 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             span.add_event("analytics_failure")
             logger.exception("Failed to track invoice.payment_succeeded for invoice %s", payload.get("id"))
 
+        billing_reason = payload.get("billing_reason")
+        subscription_obj = getattr(invoice, "subscription", None) if invoice else None
+        subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
+        trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+        line_start_dt = _line_period_start(lines)
+        trial_conversion = bool(
+            billing_reason == "subscription_cycle"
+            and trial_end_dt
+            and line_start_dt
+            and trial_end_dt.date() == line_start_dt.date()
+        )
+
         try:
-            billing_reason = payload.get("billing_reason")
-            subscription_obj = getattr(invoice, "subscription", None) if invoice else None
-            subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
-            trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
-            line_start_dt = _line_period_start(lines)
-            trial_conversion = bool(
-                billing_reason == "subscription_cycle"
-                and trial_end_dt
-                and line_start_dt
-                and trial_end_dt.date() == line_start_dt.date()
+            if trial_conversion and owner_type == "user" and owner:
+                trial_properties = {
+                    "plan": plan_value,
+                    "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
+                }
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.BILLING_TRIAL_CONVERTED,
+                    source=AnalyticsSource.API,
+                    properties=trial_properties,
+                )
+                traits = {"is_trial": False}
+                if plan_value:
+                    traits["plan"] = plan_value
+                Analytics.identify(owner.id, traits)
+        except Exception:
+            logger.exception(
+                "Failed to track trial conversion analytics for invoice %s",
+                payload.get("id"),
             )
 
+        try:
             should_subscribe = billing_reason == "subscription_create" or trial_conversion
             if should_subscribe and owner_type == "user" and owner:
                 marketing_properties = {
@@ -1473,6 +1528,8 @@ def handle_subscription_event(event, **kwargs):
             return
 
         stripe.api_key = stripe_key
+
+        payload = _coerce_subscription_payload(payload)
 
         # Note: do not early-return on hard-deleted payloads; we still need to
         # downgrade the user to the free plan when a subscription is deleted.
@@ -1635,6 +1692,7 @@ def handle_subscription_event(event, **kwargs):
                         owner.id,
                         {
                             'plan': PlanNames.FREE,
+                            'is_trial': False,
                         },
                     )
                 except Exception:
@@ -1931,6 +1989,7 @@ def handle_subscription_event(event, **kwargs):
 
                 Analytics.identify(owner.id, {
                     'plan': plan_value,
+                    'is_trial': sub.status == "trialing",
                 })
 
                 event_properties = {
@@ -1959,6 +2018,23 @@ def handle_subscription_event(event, **kwargs):
                         source=AnalyticsSource.WEB,
                         properties=event_properties,
                     )
+                    if (
+                        analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
+                        and sub.status == "trialing"
+                        and event_type == "customer.subscription.created"
+                    ):
+                        trial_properties = {
+                            "plan": plan_value,
+                            "subscription_id": subscription_id,
+                        }
+                        if invoice_id:
+                            trial_properties["stripe.invoice_id"] = invoice_id
+                        Analytics.track_event(
+                            user_id=owner.id,
+                            event=AnalyticsEvent.BILLING_TRIAL_STARTED,
+                            source=AnalyticsSource.WEB,
+                            properties=trial_properties,
+                        )
                     marketing_properties = {
                         "plan": plan_value,
                         "subscription_id": subscription_id,
