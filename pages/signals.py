@@ -294,30 +294,7 @@ def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
 
 def _calculate_subscription_value_from_lines(lines: list[Mapping[str, Any]]) -> tuple[float | None, str | None]:
     """Return estimated total value (in major units) and currency from invoice lines."""
-    if not isinstance(lines, list):
-        return None, None
-
-    plan_price_ids, plan_product_ids = _plan_version_primary_ids()
-    plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
-    plan_products |= plan_product_ids
-
-    candidate = None
-    for line in lines:
-        price_info = line.get("price") or {}
-        if not price_info:
-            price_info = (line.get("pricing") or {}).get("price_details") or {}
-        price_id = price_info.get("id") or price_info.get("price")
-        product_id = price_info.get("product")
-        if isinstance(product_id, Mapping):
-            product_id = product_id.get("id")
-
-        if (price_id and str(price_id) in plan_price_ids) or (product_id and str(product_id) in plan_products):
-            candidate = line
-            break
-
-        if candidate is None:
-            candidate = line
-
+    candidate = _select_plan_line(lines)
     if not candidate:
         return None, None
 
@@ -351,6 +328,33 @@ def _calculate_subscription_value_from_lines(lines: list[Mapping[str, Any]]) -> 
     return value, currency
 
 
+def _select_plan_line(lines: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    if not isinstance(lines, list):
+        return None
+
+    plan_price_ids, plan_product_ids = _plan_version_primary_ids()
+    plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+    plan_products |= plan_product_ids
+
+    candidate = None
+    for line in lines:
+        price_info = line.get("price") or {}
+        if not price_info:
+            price_info = (line.get("pricing") or {}).get("price_details") or {}
+        price_id = price_info.get("id") or price_info.get("price")
+        product_id = price_info.get("product")
+        if isinstance(product_id, Mapping):
+            product_id = product_id.get("id")
+
+        if (price_id and str(price_id) in plan_price_ids) or (product_id and str(product_id) in plan_products):
+            return line
+
+        if candidate is None:
+            candidate = line
+
+    return candidate
+
+
 def _extract_subscription_id(payload: Mapping[str, Any], invoice: Invoice | None) -> str | None:
     subscription_id = None
     if invoice and getattr(invoice, "subscription", None):
@@ -376,16 +380,14 @@ def _extract_subscription_id(payload: Mapping[str, Any], invoice: Invoice | None
 
 
 def _line_period_start(lines: list[Mapping[str, Any]]) -> datetime | None:
-    if not isinstance(lines, list):
+    candidate = _select_plan_line(lines)
+    if not candidate:
         return None
-    for line in lines:
-        period = line.get("period") or {}
-        if not isinstance(period, Mapping):
-            continue
-        start = _get_stripe_data_value(period, "start")
-        candidate = _coerce_datetime(start)
-        if candidate:
-            return candidate
+    period = candidate.get("period") or {}
+    if not isinstance(period, Mapping):
+        return None
+    start = _get_stripe_data_value(period, "start")
+    return _coerce_datetime(start)
     return None
 
 
