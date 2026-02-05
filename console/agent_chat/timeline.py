@@ -65,6 +65,7 @@ def _build_html_cleaner() -> Cleaner:
             "br",
             "div",
             "span",
+            "img",
             "ul",
             "ol",
             "li",
@@ -85,6 +86,7 @@ def _build_html_cleaner() -> Cleaner:
     anchor_attrs = set(allowed_attributes.get("a", ())).union({"href", "title", "target", "rel"})
     allowed_attributes["a"] = sorted(anchor_attrs)
     allowed_attributes.setdefault("span", [])
+    allowed_attributes["img"] = ["src", "alt", "width", "height"]
     # Table cell attributes
     allowed_attributes["th"] = ["colspan", "rowspan", "scope", "headers"]
     allowed_attributes["td"] = ["colspan", "rowspan", "headers"]

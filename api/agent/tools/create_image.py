@@ -293,8 +293,8 @@ def execute_create_image(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     return {
         "status": "ok",
         "file": var_ref,
-        "inline": f"![Generated image]({var_ref})",
-        "inline_html": f"<img src='{var_ref}' alt='Generated image' />",
+        "inline": f"![Generated image]({signed_url})",
+        "inline_html": f"<img src='{signed_url}' alt='Generated image' />",
         "attach": var_ref,
         "endpoint_key": selected_config.endpoint_key,
         "model": selected_config.model,

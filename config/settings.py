@@ -946,6 +946,7 @@ TOOL_CREDIT_COSTS = {
     "update_charter": Decimal("0.04"),
     "update_schedule": Decimal("0.04"),
     "sqlite_batch": Decimal("0.2"),
+    "create_image": Decimal("2"),
 }
 
 # Analytics

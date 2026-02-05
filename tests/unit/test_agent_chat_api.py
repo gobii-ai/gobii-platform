@@ -223,7 +223,12 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_html_email_body(self):
-        html_body = "<p>Email intro</p><p><strong>Bold</strong> value</p><ul><li>Bullet</li></ul>"
+        html_body = (
+            "<p>Email intro</p>"
+            "<p><strong>Bold</strong> value</p>"
+            "<ul><li>Bullet</li></ul>"
+            "<p><img src='https://example.com/generated.png' alt='Generated image' /></p>"
+        )
         email_address = "louise@example.com"
 
         email_sender = PersistentAgentCommsEndpoint.objects.create(
@@ -258,6 +263,8 @@ class AgentChatAPITests(TestCase):
         rendered_html = html_event["message"]["bodyHtml"]
         self.assertIn("<strong>Bold</strong>", rendered_html)
         self.assertIn("<li>Bullet</li>", rendered_html)
+        self.assertIn("https://example.com/generated.png", rendered_html)
+        self.assertIn("<img", rendered_html)
         self.assertNotIn("&lt;", rendered_html)
 
     @tag("batch_agent_chat")
