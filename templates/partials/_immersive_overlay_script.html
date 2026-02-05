@@ -186,6 +186,9 @@
     });
 
     document.addEventListener('submit', (event) => {
+      if (event.defaultPrevented) {
+        return;
+      }
       if (!(event.target instanceof HTMLFormElement)) {
         return;
       }
