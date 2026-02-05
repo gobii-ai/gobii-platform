@@ -495,30 +495,20 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNamesChoices.STARTUP.value)
         mock_logger_exception.assert_not_called()
 
-        self.mock_capi.assert_called_once()
-        capi_kwargs = self.mock_capi.call_args.kwargs
-        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
-        self.assertIsNone(capi_kwargs["request"])
-        props = capi_kwargs["properties"]
-        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
-        self.assertEqual(props["subscription_id"], "sub_123")
-        self.assertAlmostEqual(props["value"], 29.99, places=2)
-        self.assertEqual(props["currency"], "USD")
-        self.assertNotIn("renewal", props)
-        self.assertEqual(props["event_id"], event_id)
-        context = capi_kwargs["context"]
-        self.assertIsNotNone(context)
-        self.assertTrue(context.get("consent"))
+        self.mock_capi.assert_not_called()
 
     @tag("batch_pages")
     @override_settings(CAPI_LTV_MULTIPLE=2.0)
     def test_subscription_capi_value_applies_ltv_multiple(self):
         self.mock_capi.reset_mock()
-        payload = _build_event_payload(billing_reason="subscription_create")
+        payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         fresh_user = User.objects.get(pk=self.user.pk)
         sub = self._mock_subscription(current_period_day=17, subscriber=fresh_user)
+        sub.status = "trialing"
+        sub.latest_invoice = None
+        sub.stripe_data["latest_invoice"] = None
         sub.stripe_data["billing_reason"] = "subscription_create"
         sub.billing_reason = "subscription_create"
 
@@ -535,7 +525,9 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_called_once()
         props = self.mock_capi.call_args.kwargs["properties"]
         # Base value from payload is 29.99; with 2x multiplier expect ~59.98
-        self.assertAlmostEqual(props["value"], 59.98, places=2)
+        self.assertAlmostEqual(props["predicted_ltv"], 59.98, places=2)
+        self.assertEqual(props["value"], 0)
+        self.assertEqual(props["currency"], "USD")
 
     @tag("batch_pages")
     @patch("pages.signals.ensure_single_individual_subscription")
@@ -585,7 +577,7 @@ class SubscriptionSignalTests(TestCase):
     @tag("batch_pages")
     def test_subscription_event_includes_client_ip_from_attribution(self):
         self.mock_capi.reset_mock()
-        payload = _build_event_payload(billing_reason="subscription_create")
+        payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
 
         UserAttribution.objects.update_or_create(
@@ -595,6 +587,9 @@ class SubscriptionSignalTests(TestCase):
 
         fresh_user = User.objects.get(pk=self.user.pk)
         sub = self._mock_subscription(current_period_day=12, subscriber=fresh_user)
+        sub.status = "trialing"
+        sub.latest_invoice = None
+        sub.stripe_data["latest_invoice"] = None
         sub.stripe_data['billing_reason'] = "subscription_create"
         sub.billing_reason = "subscription_create"
 
@@ -725,6 +720,13 @@ class SubscriptionSignalTests(TestCase):
         self.assertIsNone(grant_kwargs["credit_override"])
         self.assertTrue(grant_kwargs["invoice_id"].startswith("trial:sub_123"))
         self.assertEqual(grant_kwargs["expiration_date"], end_dt + relativedelta(months=1))
+
+        self.mock_capi.assert_called_once()
+        capi_kwargs = self.mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "StartTrial")
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["value"], 0)
+        self.assertEqual(props["currency"], "USD")
 
     @tag("batch_pages")
     def test_trial_conversion_topoffs_credits(self):
@@ -1508,6 +1510,45 @@ class PaymentSucceededSignalTests(TestCase):
         self.assertEqual(props["stripe.subscription_id"], payload["subscription"])
         self.assertEqual(props["amount_paid"], 30.0)
         self.assertEqual(props["receipt_number"], "rcpt-123")
+
+    def test_invoice_payment_succeeded_emits_subscribe_capi_for_first_payment(self):
+        payload = _build_invoice_payload(
+            customer_id="cus_user_succeeded",
+            subscription_id="sub_user_succeeded",
+            amount_paid=3000,
+            status="paid",
+            billing_reason="subscription_create",
+            product_id="prod_plan",
+        )
+        payload["lines"]["data"][0]["amount"] = 3000
+        payload["lines"]["data"][0]["price"]["unit_amount"] = 3000
+        payload["lines"]["data"][0]["price"]["currency"] = "usd"
+        event = _build_djstripe_event(payload, event_type="invoice.payment_succeeded")
+
+        invoice_obj = SimpleNamespace(
+            id=payload["id"],
+            customer=SimpleNamespace(id="cus_user_succeeded", subscriber=self.user),
+            subscription=SimpleNamespace(id="sub_user_succeeded", stripe_data={"metadata": {"gobii_event_id": "evt-123"}}),
+            number=payload["number"],
+        )
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.capi") as mock_capi:
+
+            handle_invoice_payment_succeeded(event)
+
+        mock_capi.assert_called_once()
+        capi_kwargs = mock_capi.call_args.kwargs
+        self.assertEqual(capi_kwargs["event_name"], "Subscribe")
+        props = capi_kwargs["properties"]
+        self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
+        self.assertEqual(props["subscription_id"], "sub_user_succeeded")
+        self.assertEqual(props["currency"], "USD")
+        self.assertEqual(props["event_id"], "evt-123")
 
     def test_invoice_payment_succeeded_for_org_tracks_creator(self):
         owner = User.objects.create_user(username="org-owner-success", email="org-success@example.com", password="pw")
