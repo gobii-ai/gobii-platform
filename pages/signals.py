@@ -27,6 +27,8 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
 from constants.plans import PlanNames
+from constants.grant_types import GrantTypeChoices
+from dateutil.relativedelta import relativedelta
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -171,6 +173,39 @@ def _normalize_currency_code(currency: Any) -> str | None:
     if isinstance(currency, str):
         return currency.upper()
     return None
+
+
+def _trial_paid_period_end(trial_end_dt: datetime | None, current_period_end_dt: datetime | None) -> datetime | None:
+    """Return the end of the first paid period following a trial."""
+    base = trial_end_dt or current_period_end_dt
+    if not base:
+        return None
+    try:
+        return base + relativedelta(months=1)
+    except Exception:
+        return base + timedelta(days=30)
+
+
+def _trial_topoff_amount(
+    *,
+    owner,
+    plan_id: str,
+    monthly_credits: int,
+    as_of: datetime,
+) -> Decimal:
+    TaskCredit = apps.get_model("api", "TaskCredit")
+    remaining = Decimal(0)
+    credits = TaskCredit.objects.filter(
+        user=owner,
+        plan=plan_id,
+        grant_type=GrantTypeChoices.PLAN,
+        additional_task=False,
+        voided=False,
+        expiration_date__gte=as_of,
+    )
+    for credit in credits:
+        remaining += (credit.credits or 0) - (credit.credits_used or 0)
+    return Decimal(monthly_credits) - remaining
 
 
 def _amount_major_units(*candidates: Any) -> float | None:
@@ -1538,11 +1573,15 @@ def handle_subscription_event(event, **kwargs):
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
+        trial_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_start"))
+        trial_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_end"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
         cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
 
         span.set_attribute('subscription.current_period_start', str(current_period_start_dt))
         span.set_attribute('subscription.current_period_end', str(current_period_end_dt))
+        span.set_attribute('subscription.trial_start', str(trial_start_dt))
+        span.set_attribute('subscription.trial_end', str(trial_end_dt))
         span.set_attribute('subscription.cancel_at', str(cancel_at_dt))
         span.set_attribute('subscription.cancel_at_period_end', str(cancel_at_period_end_flag))
 
@@ -1688,12 +1727,63 @@ def handle_subscription_event(event, **kwargs):
                 should_grant = billing_reason in {"subscription_create", "subscription_cycle"}
                 if billing_reason is None and event_type == "customer.subscription.created":
                     should_grant = True
+                trial_conversion = False
+                if sub.status == "active" and trial_end_dt and current_period_start_dt:
+                    trial_conversion = trial_end_dt.date() == current_period_start_dt.date()
+                if trial_conversion:
+                    should_grant = True
                 if should_grant:
-                    TaskCreditService.grant_subscription_credits(
-                        owner,
-                        plan=plan,
-                        invoice_id=invoice_id or ""
-                    )
+                    credit_override = None
+                    grant_invoice_id = invoice_id or ""
+                    expiration_override = None
+                    if sub.status == "trialing":
+                        expiration_override = _trial_paid_period_end(trial_end_dt, current_period_end_dt)
+                        if not grant_invoice_id:
+                            anchor_dt = trial_start_dt or current_period_start_dt
+                            anchor = anchor_dt.date().isoformat() if anchor_dt else "start"
+                            grant_invoice_id = f"trial:{subscription_id}:{anchor}"
+                    elif trial_conversion:
+                        monthly_credits = None
+                        if isinstance(plan, Mapping):
+                            monthly_credits = plan.get("monthly_task_credits")
+                        try:
+                            monthly_credits = int(monthly_credits) if monthly_credits is not None else None
+                        except (TypeError, ValueError):
+                            monthly_credits = None
+
+                        if monthly_credits is None:
+                            should_grant = False
+                        else:
+                            topoff = _trial_topoff_amount(
+                                owner=owner,
+                                plan_id=plan_value,
+                                monthly_credits=monthly_credits,
+                                as_of=current_period_start_dt or timezone.now(),
+                            )
+                            if topoff <= 0:
+                                should_grant = False
+                            else:
+                                credit_override = topoff
+                                if not grant_invoice_id:
+                                    anchor = (
+                                        current_period_start_dt.date().isoformat()
+                                        if current_period_start_dt
+                                        else "start"
+                                    )
+                                    grant_invoice_id = f"trial-topoff:{subscription_id}:{anchor}"
+                                expiration_override = current_period_end_dt
+
+                    if not should_grant:
+                        credit_override = None
+
+                    if should_grant:
+                        TaskCreditService.grant_subscription_credits(
+                            owner,
+                            plan=plan,
+                            invoice_id=grant_invoice_id,
+                            credit_override=credit_override,
+                            expiration_date=expiration_override,
+                        )
 
                 try:
                     ub = owner.billing

@@ -1,9 +1,11 @@
 import json
 from datetime import datetime, timedelta, timezone as dt_timezone
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
+from django.apps import apps
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from django.contrib.sessions.middleware import SessionMiddleware
@@ -11,6 +13,8 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from api.models import UserBilling, Organization, UserAttribution
 from api.models import UserBilling, Organization, ProxyServer, DedicatedProxyAllocation
 from constants.plans import PlanNames, PlanNamesChoices
+from constants.grant_types import GrantTypeChoices
+from dateutil.relativedelta import relativedelta
 from pages.signals import (
     handle_subscription_event,
     handle_user_signed_up,
@@ -684,6 +688,95 @@ class SubscriptionSignalTests(TestCase):
 
         mock_grant.assert_not_called()
         self.mock_capi.assert_not_called()
+
+    @tag("batch_pages")
+    def test_trialing_subscription_grants_full_credits(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=1, subscriber=fresh_user)
+        sub.status = "trialing"
+        sub.latest_invoice = None
+        sub.stripe_data["latest_invoice"] = None
+
+        start_dt = timezone.make_aware(datetime(2025, 9, 1, 8, 0, 0), timezone=dt_timezone.utc)
+        end_dt = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        sub.stripe_data["current_period_start"] = str(start_dt)
+        sub.stripe_data["current_period_end"] = str(end_dt)
+        sub.stripe_data["billing_reason"] = "subscription_create"
+        sub.billing_reason = "subscription_create"
+
+        plan_payload = {"id": PlanNamesChoices.STARTUP.value, "monthly_task_credits": 300}
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value=plan_payload), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.assertTrue(mock_grant.called)
+        grant_kwargs = mock_grant.call_args.kwargs
+        self.assertIsNone(grant_kwargs["credit_override"])
+        self.assertTrue(grant_kwargs["invoice_id"].startswith("trial:sub_123"))
+        self.assertEqual(grant_kwargs["expiration_date"], end_dt + relativedelta(months=1))
+
+    @tag("batch_pages")
+    def test_trial_conversion_topoffs_credits(self):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(status="active", billing_reason="subscription_cycle", invoice_id="in_paid")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
+
+        fresh_user = User.objects.get(pk=self.user.pk)
+        sub = self._mock_subscription(current_period_day=8, subscriber=fresh_user)
+        sub.status = "active"
+
+        trial_end = timezone.make_aware(datetime(2025, 9, 8, 8, 0, 0), timezone=dt_timezone.utc)
+        period_start = trial_end
+        period_end = timezone.make_aware(datetime(2025, 10, 8, 8, 0, 0), timezone=dt_timezone.utc)
+
+        sub.stripe_data["trial_end"] = str(trial_end)
+        sub.stripe_data["current_period_start"] = str(period_start)
+        sub.stripe_data["current_period_end"] = str(period_end)
+        sub.stripe_data["latest_invoice"] = "in_paid"
+        sub.stripe_data["billing_reason"] = "subscription_cycle"
+        sub.billing_reason = "subscription_cycle"
+
+        plan_payload = {"id": PlanNamesChoices.STARTUP.value, "monthly_task_credits": 300}
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        TaskCredit.objects.create(
+            user=fresh_user,
+            credits=300,
+            credits_used=200,
+            expiration_date=period_end,
+            stripe_invoice_id="trial:sub_123:2025-09-01",
+            granted_date=period_start,
+            plan=PlanNamesChoices.STARTUP,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+        )
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_plan_by_product_id", return_value=plan_payload), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.mark_user_billing_with_plan", wraps=real_mark_user_billing_with_plan), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"):
+
+            handle_subscription_event(event)
+
+        self.assertTrue(mock_grant.called)
+        grant_kwargs = mock_grant.call_args.kwargs
+        self.assertEqual(grant_kwargs["credit_override"], Decimal(200))
+        self.assertEqual(grant_kwargs["invoice_id"], "in_paid")
+        self.assertEqual(grant_kwargs["expiration_date"], period_end)
 
     @tag("batch_pages")
     def test_missing_user_billing_logs_exception(self):
