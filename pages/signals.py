@@ -12,6 +12,7 @@ from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.db import transaction
 from django.apps import apps
+from django.contrib.auth import get_user_model
 
 from allauth.account.signals import email_confirmed, user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
@@ -194,15 +195,20 @@ def _trial_topoff_amount(
     as_of: datetime,
 ) -> Decimal:
     TaskCredit = apps.get_model("api", "TaskCredit")
+    UserModel = get_user_model()
     remaining = Decimal(0)
-    credits = TaskCredit.objects.filter(
-        user=owner,
-        plan=plan_id,
-        grant_type=GrantTypeChoices.PLAN,
-        additional_task=False,
-        voided=False,
-        expiration_date__gte=as_of,
-    )
+    filters = {
+        "plan": plan_id,
+        "grant_type": GrantTypeChoices.PLAN,
+        "additional_task": False,
+        "voided": False,
+        "expiration_date__gte": as_of,
+    }
+    if isinstance(owner, UserModel):
+        filters["user"] = owner
+    else:
+        filters["organization"] = owner
+    credits = TaskCredit.objects.filter(**filters)
     for credit in credits:
         remaining += (credit.credits or 0) - (credit.credits_used or 0)
     return Decimal(monthly_credits) - remaining

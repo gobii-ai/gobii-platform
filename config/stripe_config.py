@@ -254,14 +254,10 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_price = config.org_team_additional_task_price_id or ""
     except Exception:
         org_team_additional_price = ""
-    try:
-        startup_trial_days = _parse_int(getattr(config, "startup_trial_days", None))
-    except (TypeError, ValueError):
-        startup_trial_days = 0
-    try:
-        scale_trial_days = _parse_int(getattr(config, "scale_trial_days", None))
-    except (TypeError, ValueError):
-        scale_trial_days = 0
+
+    startup_trial_days = _parse_int(getattr(config, "startup_trial_days", None))
+    scale_trial_days = _parse_int(getattr(config, "scale_trial_days", None))
+
     try:
         org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
     except Exception:
