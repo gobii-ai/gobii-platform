@@ -4614,13 +4614,22 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             structured_events.append((s.created_at, "tool_call", components))
         except ObjectDoesNotExist:
             description_text = s.description or "No description"
+            is_internal_reasoning = description_text.startswith(INTERNAL_REASONING_PREFIX)
+            if is_internal_reasoning:
+                raw_reasoning = description_text[len(INTERNAL_REASONING_PREFIX):].lstrip()
+                if len(raw_reasoning) > 3000:
+                    truncated_chars = len(raw_reasoning) - 3000
+                    raw_reasoning = f"[TRUNCATED {truncated_chars} CHARS] {raw_reasoning[-3000:]}"
+                description_text = (
+                    f"{INTERNAL_REASONING_PREFIX} {raw_reasoning}"
+                    if raw_reasoning
+                    else INTERNAL_REASONING_PREFIX
+                )
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"
             }
             event_type = (
-                "step_description_internal_reasoning"
-                if description_text.startswith(INTERNAL_REASONING_PREFIX)
-                else "step_description"
+                "step_description_internal_reasoning" if is_internal_reasoning else "step_description"
             )
             structured_events.append((s.created_at, event_type, components))
 
