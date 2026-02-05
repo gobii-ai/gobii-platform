@@ -19,6 +19,11 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEmailEndpoint,
 )
+from api.services.daily_credit_limits import (
+    calculate_daily_credit_slider_bounds,
+    get_tier_credit_multiplier,
+)
+from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from config import settings
 from constants.plans import PlanNamesChoices
 
@@ -163,8 +168,25 @@ class PersistentAgentProvisioningService:
                 soft_target_value = plan_default_targets.get(plan_choice)
                 if soft_target_value is not None:
                     soft_target_default = Decimal(str(soft_target_value))
-                    persistent_agent.daily_credit_limit = int(soft_target_default)
-                    persistent_agent.save(update_fields=["daily_credit_limit"])
+                    if soft_target_default <= Decimal("0"):
+                        persistent_agent.daily_credit_limit = int(soft_target_default)
+                        persistent_agent.save(update_fields=["daily_credit_limit"])
+                    else:
+                        tier_multiplier = get_tier_credit_multiplier(computed_tier)
+                        credit_settings = get_daily_credit_settings_for_owner(owner)
+                        slider_bounds = calculate_daily_credit_slider_bounds(
+                            credit_settings,
+                            tier_multiplier=tier_multiplier,
+                        )
+                        scaled = (soft_target_default * tier_multiplier).to_integral_value(
+                            rounding=ROUND_HALF_UP
+                        )
+                        if scaled < slider_bounds["slider_min"]:
+                            scaled = slider_bounds["slider_min"]
+                        if scaled > slider_bounds["slider_limit_max"]:
+                            scaled = slider_bounds["slider_limit_max"]
+                        persistent_agent.daily_credit_limit = int(scaled)
+                        persistent_agent.save(update_fields=["daily_credit_limit"])
 
             if template_code:
                 template = PretrainedWorkerTemplateService.get_template_by_code(template_code)
