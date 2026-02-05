@@ -63,7 +63,7 @@ RAW_STEP_LIMIT: int = getattr(settings, "PA_RAW_STEP_LIMIT", 100)
 compaction.  Override with ``PA_RAW_STEP_LIMIT`` in Django settings for
 experimentation."""
 
-STEP_COMPACTION_TAIL: int = max(0, getattr(settings, "PA_STEP_COMPACTION_TAIL", 10))
+STEP_COMPACTION_TAIL: int = getattr(settings, "PA_STEP_COMPACTION_TAIL", 10)
 """Number of most-recent steps to keep raw (uncompacted) after snapshotting.
 Override with ``PA_STEP_COMPACTION_TAIL`` in Django settings."""
 
