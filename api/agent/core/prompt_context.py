@@ -321,6 +321,16 @@ count            → COUNT(*) | COUNT({verified_column})
 aggregate        → SUM | AVG | MIN | MAX ({verified_column})
 filter_groups    → HAVING {condition}
 order            → ORDER BY {verified_column} [ASC|DESC]
+
+# sqlite_batch format (non-negotiable)
+sqlite_batch(sql="...", will_continue_work=true)  # sql must be a single STRING; separate statements with semicolons
+never: sqlite_batch({}) | sqlite_batch(sql=[...]) | sqlite_batch(queries=[...])
+
+# SQLite pitfalls
+UNION/UNION ALL → ORDER BY only at the END (or wrap in a subquery)
+ambiguous columns → qualify with table alias (t.col)
+UPDATE ... FROM → avoid; prefer correlated subqueries or temp tables
+unknown columns → PRAGMA table_info(table)
 ```
 
 ---
@@ -3901,7 +3911,8 @@ def _get_system_instruction(
         "```\n"
         "# File exports\n"
         "Use create_file for text-based formats.\n"
-        "If exporting CSV or PDF, use create_csv or create_pdf instead.\n"
+        "If exporting CSV or PDF, use create_csv or create_pdf instead. You may search for these tools if you need them. \n"
+        "CSV export: create_csv(file_path='/exports/your-file.csv'); add to message as an attachment.\n"
         "```\n\n"
 
         "```\n"
