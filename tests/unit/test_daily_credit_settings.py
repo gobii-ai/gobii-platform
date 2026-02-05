@@ -2,15 +2,18 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase, tag
+from unittest.mock import patch
 
 from api.models import DailyCreditConfig, PersistentAgent, BrowserUseAgent
 from django.contrib.auth import get_user_model
 import uuid
+from api.services.persistent_agents import PersistentAgentProvisioningService
 from api.services.daily_credit_settings import (
     get_daily_credit_settings_for_plan,
     invalidate_daily_credit_settings_cache,
 )
 from constants.plans import PlanNames
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 @tag("agent_credit_soft_target_batch")
@@ -93,3 +96,19 @@ class DailyCreditSettingsTests(TestCase):
         )
         hard_limit = agent.get_daily_credit_hard_limit()
         self.assertEqual(hard_limit, Decimal("6.00"))
+
+    def test_default_daily_credit_limit_scales_with_intelligence_tier(self):
+        with patch("config.settings.GOBII_PROPRIETARY_MODE", True), patch(
+            "config.settings.DEFAULT_AGENT_DAILY_CREDIT_TARGET", 5
+        ), patch("config.settings.PAID_AGENT_DAILY_CREDIT_TARGET", 10):
+            self.user.billing.subscription = PlanNames.STARTUP
+            self.user.billing.save(update_fields=["subscription"])
+
+            premium_tier = get_intelligence_tier("premium")
+            result = PersistentAgentProvisioningService.provision(
+                user=self.user,
+                name="Premium Tier Agent",
+                charter="Test premium tier daily credits",
+                preferred_llm_tier=premium_tier,
+            )
+            self.assertEqual(result.agent.daily_credit_limit, 20)

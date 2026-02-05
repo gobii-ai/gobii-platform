@@ -5,6 +5,6 @@ export type AgentSpawnIntent = {
   preferred_llm_tier: string | null
 }
 
-export async function fetchAgentSpawnIntent(): Promise<AgentSpawnIntent> {
-  return jsonFetch<AgentSpawnIntent>('/console/api/agents/spawn-intent/')
+export async function fetchAgentSpawnIntent(signal?: AbortSignal): Promise<AgentSpawnIntent> {
+  return jsonFetch<AgentSpawnIntent>('/console/api/agents/spawn-intent/', { signal })
 }

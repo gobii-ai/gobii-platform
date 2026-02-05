@@ -244,7 +244,7 @@
                         <path d="M6 18a4 4 0 0 1-1.967-.516"></path>
                         <path d="M19.967 17.484A4 4 0 0 1 18 18"></path>
                       </svg>
-                      <span data-intelligence-current>Smol Brain</span>
+                      <span data-intelligence-current>{{ preferred_llm_tier_label }}</span>
                       <svg class="h-3 w-3 text-slate-400 transition-transform group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true" data-intelligence-chevron>
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
                       </svg>
@@ -259,7 +259,7 @@
                         class="flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-slate-50 {% if option.key == preferred_llm_tier %}bg-indigo-50/50{% endif %}"
                         data-intelligence-option
                         data-tier="{{ option.key }}"
-                        data-label="{% if option.key == 'standard' %}Smol Brain{% elif option.key == 'premium' %}Mid Brain{% elif option.key == 'max' %}Big Brain{% elif option.key == 'ultra' %}Giga Brain{% elif option.key == 'ultra_max' %}Galaxy Brain{% else %}{{ option.label }}{% endif %}"
+                        data-label="{{ option.label }}"
                         data-multiplier="{{ option.multiplier|floatformat:-1 }}"
                         data-rank="{{ option.rank|default_if_none:'' }}"
                         {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}
@@ -269,7 +269,7 @@
                         {% endif %}
                       >
                         <span class="w-5 text-center text-sm">{% if option.key == 'standard' %}🌱{% elif option.key == 'premium' %}💭{% elif option.key == 'max' %}💡{% elif option.key == 'ultra' %}⚡{% elif option.key == 'ultra_max' %}🤯{% endif %}</span>
-                        <span class="flex-1 text-[13px] font-medium {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{% if option.key == 'standard' %}Smol{% elif option.key == 'premium' %}Mid{% elif option.key == 'max' %}Big{% elif option.key == 'ultra' %}Giga{% elif option.key == 'ultra_max' %}Galaxy{% else %}{{ option.label }}{% endif %}</span>
+                        <span class="flex-1 text-[13px] font-medium {% if option.key == preferred_llm_tier %}text-slate-900{% else %}text-slate-600{% endif %}">{{ option.label }}</span>
                         <span class="text-[11px] tabular-nums {% if option.key == preferred_llm_tier %}text-indigo-500 font-medium{% else %}text-slate-400{% endif %}">{{ option.multiplier|floatformat:-1 }}×</span>
                         <span class="ml-1 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 {% if llm_intelligence.maxAllowedTierRank is not None and option.rank is not None %}{% if option.rank > llm_intelligence.maxAllowedTierRank %}{% else %}hidden{% endif %}{% else %}{% if not llm_intelligence.canEdit and option.key != preferred_llm_tier %}{% else %}hidden{% endif %}{% endif %}" data-intelligence-lock>
                           <svg class="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -645,17 +645,22 @@
         return
       }
 
-      const labelMap = {
-        standard: 'Smol Brain',
-        premium: 'Mid Brain',
-        max: 'Big Brain',
-        ultra: 'Giga Brain',
-        ultra_max: 'Galaxy Brain',
+      const resolveLabel = (tier, fallback = 'this tier') => {
+        if (!tier) {
+          return fallback
+        }
+        const option = options.find((item) => item.dataset.tier === tier)
+        if (option && option.dataset.label) {
+          return option.dataset.label
+        }
+        return tier
+          .split('_')
+          .map((segment) => (segment ? segment[0].toUpperCase() + segment.slice(1) : segment))
+          .join(' ')
       }
 
       const applySelection = (tier) => {
-        const option = options.find((item) => item.dataset.tier === tier)
-        const label = (option && option.dataset.label) || labelMap[tier] || tier.replace('_', ' ')
+        const label = resolveLabel(tier)
         currentLabel.textContent = label
         options.forEach((item) => {
           const isSelected = item.dataset.tier === tier
@@ -835,10 +840,8 @@
           event.preventDefault()
 
           const selectedOption = options.find((item) => item.dataset.tier === input.value) || options[0]
-          const selectedLabel = selectedOption && selectedOption.dataset.label
-            ? selectedOption.dataset.label
-            : (labelMap[input.value] || 'this tier')
-          const allowedLabel = labelMap[maxAllowedTier] || 'Smol Brain'
+          const selectedLabel = resolveLabel(input.value, 'this tier')
+          const allowedLabel = resolveLabel(maxAllowedTier, 'this tier')
           const locked = selectedOption ? selectedOption.dataset.locked === 'true' : false
 
           let lowCredits = false

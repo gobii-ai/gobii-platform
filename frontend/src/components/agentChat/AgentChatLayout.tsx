@@ -120,7 +120,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onUpgrade?: (plan: PlanTier) => void
   llmIntelligence?: LlmIntelligenceConfig | null
   currentLlmTier?: string | null
-  onLlmTierChange?: (tier: string) => void
+  onLlmTierChange?: (tier: string) => Promise<boolean>
   allowLockedIntelligenceSelection?: boolean
   llmTierSaving?: boolean
   llmTierError?: string | null
@@ -319,6 +319,8 @@ export function AgentChatLayout({
     setAddonsMode(null)
     setContactCapDismissed(false)
   }, [agentId])
+
+  const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
 
   useEffect(() => {
     if (!contactCapDismissKey || typeof window === 'undefined') {
@@ -519,7 +521,7 @@ export function AgentChatLayout({
           kanbanSnapshot={kanbanSnapshot}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
-          onSettingsOpen={onUpdateDailyCredits ? handleSettingsOpen : undefined}
+          onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
           onClose={onClose}
           onShare={onShare}
           sidebarCollapsed={sidebarCollapsed}
@@ -535,6 +537,12 @@ export function AgentChatLayout({
         error={dailyCreditsError}
         updating={dailyCreditsUpdating}
         onSave={onUpdateDailyCredits}
+        llmIntelligence={llmIntelligence}
+        currentLlmTier={currentLlmTier}
+        onLlmTierChange={onLlmTierChange}
+        llmTierSaving={llmTierSaving}
+        llmTierError={llmTierError}
+        canManageAgent={canManageAgent}
       />
       <AgentChatAddonsPanel
         open={addonsOpen}

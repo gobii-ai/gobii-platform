@@ -804,14 +804,21 @@ export function AgentChatPage({
     rosterQuery.refetch,
   ])
   const llmIntelligence = rosterQuery.data?.llmIntelligence ?? null
+  const tierLabels = useMemo(() => {
+    const map: Partial<Record<IntelligenceTierKey, string>> = {}
+    for (const option of llmIntelligence?.options ?? []) {
+      map[option.key] = option.label
+    }
+    return map
+  }, [llmIntelligence?.options])
   const [draftIntelligenceTier, setDraftIntelligenceTier] = useState<string>('standard')
   const [intelligenceOverrides, setIntelligenceOverrides] = useState<Record<string, string>>({})
   const [intelligenceBusy, setIntelligenceBusy] = useState(false)
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
-  const spawnIntentFetchedRef = useRef(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
+  const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
   const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(events), [events])
   const hasSelectedAgent = Boolean(activeAgentId)
@@ -864,22 +871,20 @@ export function AgentChatPage({
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow) {
-      spawnIntentFetchedRef.current = false
       spawnIntentAutoSubmittedRef.current = false
+      spawnIntentRequestIdRef.current = 0
       setSpawnIntent(null)
       setSpawnIntentStatus('idle')
       return
     }
-    if (spawnIntentFetchedRef.current) {
-      return
-    }
-    spawnIntentFetchedRef.current = true
+    spawnIntentRequestIdRef.current += 1
+    const requestId = spawnIntentRequestIdRef.current
+    const controller = new AbortController()
     setSpawnIntentStatus('loading')
-    let isActive = true
     const loadSpawnIntent = async () => {
       try {
-        const intent = await fetchAgentSpawnIntent()
-        if (!isActive) {
+        const intent = await fetchAgentSpawnIntent(controller.signal)
+        if (spawnIntentRequestIdRef.current !== requestId) {
           return
         }
         const charter = intent?.charter?.trim()
@@ -890,7 +895,7 @@ export function AgentChatPage({
         setSpawnIntent(intent)
         setSpawnIntentStatus('ready')
       } catch (err) {
-        if (!isActive) {
+        if (controller.signal.aborted || spawnIntentRequestIdRef.current !== requestId) {
           return
         }
         setSpawnIntentStatus('done')
@@ -898,7 +903,7 @@ export function AgentChatPage({
     }
     void loadSpawnIntent()
     return () => {
-      isActive = false
+      controller.abort()
     }
   }, [isNewAgent, spawnFlow])
 
@@ -1113,13 +1118,13 @@ export function AgentChatPage({
   )
 
   const handleIntelligenceChange = useCallback(
-    async (tier: string) => {
+    async (tier: string): Promise<boolean> => {
       if (isNewAgent) {
         setDraftIntelligenceTier(tier)
-        return
+        return true
       }
       if (!activeAgentId) {
-        return
+        return false
       }
       const previousTier = resolvedIntelligenceTier
       setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: tier }))
@@ -1128,9 +1133,11 @@ export function AgentChatPage({
       try {
         await updateAgent(activeAgentId, { preferred_llm_tier: tier })
         void queryClient.invalidateQueries({ queryKey: ['agent-roster'], exact: false })
+        return true
       } catch (err) {
         setIntelligenceOverrides((current) => ({ ...current, [activeAgentId]: previousTier }))
         setIntelligenceError('Unable to update intelligence level.')
+        return false
       } finally {
         setIntelligenceBusy(false)
       }
@@ -1592,6 +1599,7 @@ export function AgentChatPage({
           reason={intelligenceGate.reason}
           selectedTier={intelligenceGate.selectedTier}
           allowedTier={intelligenceGate.allowedTier}
+          tierLabels={tierLabels}
           multiplier={intelligenceGate.multiplier}
           estimatedDaysRemaining={intelligenceGate.estimatedDaysRemaining}
           burnRatePerDay={intelligenceGate.burnRatePerDay}

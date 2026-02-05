@@ -12,6 +12,7 @@ type AgentIntelligenceGateModalProps = {
   reason: GateReason
   selectedTier: IntelligenceTierKey
   allowedTier: IntelligenceTierKey
+  tierLabels?: Partial<Record<IntelligenceTierKey, string>>
   multiplier?: number | null
   estimatedDaysRemaining?: number | null
   burnRatePerDay?: number | null
@@ -24,16 +25,18 @@ type AgentIntelligenceGateModalProps = {
   onClose: () => void
 }
 
-const LABEL_OVERRIDES: Record<IntelligenceTierKey, string> = {
-  standard: 'Smol Brain',
-  premium: 'Mid Brain',
-  max: 'Big Brain',
-  ultra: 'Giga Brain',
-  ultra_max: 'Galaxy Brain',
-}
-
-function formatTierLabel(tier: IntelligenceTierKey): string {
-  return LABEL_OVERRIDES[tier] ?? tier.replace('_', ' ')
+const formatTierLabel = (
+  tier: IntelligenceTierKey,
+  tierLabels?: Partial<Record<IntelligenceTierKey, string>>,
+): string => {
+  const label = tierLabels?.[tier]
+  if (label) {
+    return label
+  }
+  return tier
+    .split('_')
+    .map((segment) => (segment ? segment[0].toUpperCase() + segment.slice(1) : segment))
+    .join(' ')
 }
 
 function formatRemaining(value: number | null | undefined): string {
@@ -50,6 +53,7 @@ export function AgentIntelligenceGateModal({
   reason,
   selectedTier,
   allowedTier,
+  tierLabels,
   multiplier,
   estimatedDaysRemaining,
   burnRatePerDay,
@@ -67,8 +71,8 @@ export function AgentIntelligenceGateModal({
 
   const needsPlanUpgrade = reason === 'plan' || reason === 'both'
   const creditsTight = reason === 'credits' || reason === 'both'
-  const selectedLabel = formatTierLabel(selectedTier)
-  const allowedLabel = formatTierLabel(allowedTier)
+  const selectedLabel = formatTierLabel(selectedTier, tierLabels)
+  const allowedLabel = formatTierLabel(allowedTier, tierLabels)
   const remainingLabel = formatRemaining(estimatedDaysRemaining)
   const burnRateLabel = burnRatePerDay && Number.isFinite(burnRatePerDay)
     ? burnRatePerDay.toFixed(1)

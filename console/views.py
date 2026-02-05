@@ -54,6 +54,8 @@ from api.services.persistent_agents import maybe_sync_agent_email_display_name
 from api.agent.core.llm_config import (
     AgentLLMTier,
     TIER_ORDER,
+    get_llm_tier_description,
+    get_llm_tier_label,
     get_llm_tier_multipliers,
     get_llm_tier_ranks,
     max_allowed_tier_for_plan,
@@ -293,13 +295,6 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
     if not can_edit and settings.GOBII_PROPRIETARY_MODE:
         disabled_reason = "Upgrade to a paid plan to adjust intelligence levels."
 
-    tier_descriptions = {
-        AgentLLMTier.STANDARD.value: "Balanced routing that uses 1× credits.",
-        AgentLLMTier.PREMIUM.value: "Premium routing with improved reasoning.",
-        AgentLLMTier.MAX.value: "Top-tier models with the best reasoning.",
-        AgentLLMTier.ULTRA.value: "Ultra-tier models for advanced reasoning.",
-        AgentLLMTier.ULTRA_MAX.value: "Highest tier for maximum reasoning depth.",
-    }
     tiers = list(IntelligenceTier.objects.order_by("credit_multiplier", "rank"))
     expected_keys = {tier.value for tier in AgentLLMTier}
     tier_keys = {tier.key for tier in tiers}
@@ -319,8 +314,8 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
             options.append(
                 {
                     "key": tier.key,
-                    "label": tier.display_name,
-                    "description": tier_descriptions.get(tier.key, ""),
+                    "label": get_llm_tier_label(tier.key, tier.display_name),
+                    "description": get_llm_tier_description(tier.key),
                     "multiplier": float(tier.credit_multiplier),
                     "rank": rank_value,
                 }
@@ -332,8 +327,8 @@ def build_llm_intelligence_props(owner, owner_type: str, organization, upgrade_u
             options.append(
                 {
                     "key": tier.value,
-                    "label": tier.value.replace("_", " ").title(),
-                    "description": tier_descriptions.get(tier.value, ""),
+                    "label": get_llm_tier_label(tier.value),
+                    "description": get_llm_tier_description(tier.value),
                     "multiplier": float(multipliers.get(tier.value, 1)),
                     "rank": TIER_ORDER.get(tier),
                 }

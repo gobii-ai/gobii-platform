@@ -52,6 +52,7 @@ from .homepage_cache import get_homepage_pretrained_payload
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
 from console.views import build_llm_intelligence_props
+from api.agent.core.llm_config import default_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
@@ -339,8 +340,6 @@ class HomePage(TemplateView):
                 .order_by('org__name')
             )
 
-        preferred_llm_tier = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY) or 'standard'
-        context['preferred_llm_tier'] = preferred_llm_tier
         intelligence_upgrade_url = None
         if settings.GOBII_PROPRIETARY_MODE:
             try:
@@ -360,6 +359,12 @@ class HomePage(TemplateView):
                 organization = resolved.current_membership.org
                 owner = organization
                 owner_type = 'organization'
+
+        preferred_llm_tier = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
+        if not preferred_llm_tier:
+            preferred_llm_tier = default_preferred_tier_for_owner(owner).value
+        context['preferred_llm_tier'] = preferred_llm_tier
+        context['preferred_llm_tier_label'] = get_llm_tier_label(preferred_llm_tier)
 
         context['llm_intelligence'] = build_llm_intelligence_props(
             owner,
