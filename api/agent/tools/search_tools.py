@@ -22,8 +22,9 @@ from ..core.token_usage import log_agent_completion, set_usage_span_attributes
 from .mcp_manager import get_mcp_manager
 from .tool_manager import (
     enable_tools,
-    BUILTIN_TOOL_REGISTRY,
+    CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
+    get_available_builtin_tool_entries,
     get_enabled_tool_limit,
 )
 from .autotool_heuristics import find_matching_tools
@@ -98,6 +99,29 @@ def _fallback_builtin_selection(
     if wants_api and HTTP_REQUEST_TOOL_NAME in available_names:
         if HTTP_REQUEST_TOOL_NAME not in candidates:
             candidates.append(HTTP_REQUEST_TOOL_NAME)
+
+    wants_image = any(
+        keyword in text
+        for keyword in [
+            "generate image",
+            "generate an image",
+            "image generation",
+            "create image",
+            "make image",
+            "render image",
+            "illustration",
+            "illustrate",
+            "create logo",
+            "logo design",
+            "poster design",
+            "thumbnail design",
+            "concept art",
+            "artwork",
+        ]
+    )
+    if wants_image and CREATE_IMAGE_TOOL_NAME in available_names:
+        if CREATE_IMAGE_TOOL_NAME not in candidates:
+            candidates.append(CREATE_IMAGE_TOOL_NAME)
 
     if candidates:
         logger.info(
@@ -258,6 +282,12 @@ def _search_with_llm(
 
     examples_text = _build_tool_examples(available_names)
     examples_block = f"## Examples\n\n{examples_text}\n\n" if examples_text else ""
+    image_generation_rules = ""
+    if CREATE_IMAGE_TOOL_NAME in available_names:
+        image_generation_rules = (
+            f"- If the user asks to generate or design a NEW image asset, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
+            f"- Do not include `{CREATE_IMAGE_TOOL_NAME}` for image analysis, OCR, or extracting information from existing images.\n"
+        )
 
     system_prompt = (
         "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
@@ -270,6 +300,7 @@ def _search_with_llm(
         "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
+        f"{image_generation_rules}"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
@@ -541,21 +572,14 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
 
     mcp_tools = manager.get_tools_for_agent(agent)
 
-    builtin_catalog: List[Dict[str, Any]] = []
-    for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
-        try:
-            tool_def = registry_entry["definition"]()
-        except Exception:  # pragma: no cover - defensive logging
-            logger.exception("search_tools: failed to build builtin tool definition for %s", name)
-            continue
-        function_block = tool_def.get("function") if isinstance(tool_def, dict) else {}
-        builtin_catalog.append(
-            {
-                "full_name": function_block.get("name", name),
-                "description": function_block.get("description", ""),
-                "parameters": function_block.get("parameters", {}),
-            }
-        )
+    builtin_catalog: List[Dict[str, Any]] = [
+        {
+            "full_name": entry.full_name,
+            "description": entry.description,
+            "parameters": entry.parameters,
+        }
+        for entry in get_available_builtin_tool_entries(agent).values()
+    ]
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog
 

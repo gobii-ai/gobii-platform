@@ -2874,6 +2874,92 @@ class FileHandlerTierEndpoint(models.Model):
         return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
 
 
+class ImageGenerationModelEndpoint(models.Model):
+    """Image generation endpoint configuration used by the create_image tool."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    key = models.SlugField(max_length=96, unique=True, help_text="Endpoint key, e.g., 'openrouter_flux_schnell'")
+    provider = models.ForeignKey(
+        LLMProvider,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="image_generation_endpoints",
+        help_text="Optional link to the provider supplying credentials for this endpoint.",
+    )
+    enabled = models.BooleanField(default=True)
+    low_latency = models.BooleanField(
+        default=False,
+        help_text="Marks this endpoint as low latency/high performance.",
+    )
+
+    litellm_model = models.CharField(max_length=256, help_text="Model identifier passed to LiteLLM.")
+    api_base = models.CharField(
+        max_length=256,
+        blank=True,
+        help_text="Optional OpenAI-compatible base URL for proxy endpoints.",
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["provider__display_name", "litellm_model"]
+        indexes = [
+            models.Index(fields=["key"]),
+            models.Index(fields=["enabled"]),
+            models.Index(fields=["provider"]),
+        ]
+
+    def __str__(self):
+        provider = self.provider.display_name if self.provider else "no-provider"
+        return f"{self.key} → {self.litellm_model} ({provider})"
+
+
+class ImageGenerationLLMTier(models.Model):
+    """Fallback tier ordering for image generation endpoints."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.PositiveIntegerField(unique=True, help_text="1-based order across all image generation tiers.")
+    description = models.CharField(max_length=256, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["order"]
+
+    def __str__(self):
+        return f"Tier {self.order}"
+
+
+class ImageGenerationTierEndpoint(models.Model):
+    """Weighted association between an image-generation tier and an endpoint."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    tier = models.ForeignKey(
+        ImageGenerationLLMTier,
+        on_delete=models.CASCADE,
+        related_name="tier_endpoints",
+    )
+    endpoint = models.ForeignKey(
+        ImageGenerationModelEndpoint,
+        on_delete=models.CASCADE,
+        related_name="in_tiers",
+    )
+    weight = models.FloatField(help_text="Relative weight within the tier; must be > 0.")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["tier__order", "endpoint__key"]
+        unique_together = (("tier", "endpoint"),)
+
+    def __str__(self):
+        return f"{self.tier} → {self.endpoint.key} (w={self.weight})"
+
+
 class BrowserModelEndpoint(models.Model):
     """Model endpoint for browser-use agents (Chat clients)."""
 

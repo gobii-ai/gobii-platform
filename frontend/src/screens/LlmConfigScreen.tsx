@@ -65,6 +65,7 @@ const addEndpointOptions: Array<{ id: llmApi.ProviderEndpoint['type']; label: st
   { id: 'browser', label: 'Browser' },
   { id: 'embedding', label: 'Embedding' },
   { id: 'file_handler', label: 'File handler' },
+  { id: 'image_generation', label: 'Image generation' },
 ]
 
 const reasoningEffortOptions = [
@@ -201,7 +202,87 @@ type ProviderCardData = {
   endpoints: ProviderEndpointCard[]
 }
 
-type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler'
+type TierScope = 'persistent' | 'browser' | 'embedding' | 'file_handler' | 'image_generation'
+type ProfileTierScope = Exclude<TierScope, 'file_handler' | 'image_generation'>
+type EndpointKind = Extract<llmApi.ProviderEndpoint['type'], TierScope>
+type TierEndpointWeightPayload = { weight: number }
+type TierEndpointCreatePayload = { endpoint_id: string; weight: number }
+
+const ENDPOINT_KIND_MAP: Record<llmApi.ProviderEndpoint['type'], EndpointKind> = {
+  persistent: 'persistent',
+  browser: 'browser',
+  embedding: 'embedding',
+  file_handler: 'file_handler',
+  image_generation: 'image_generation',
+}
+
+const endpointKindFromType = (type: llmApi.ProviderEndpoint['type']): EndpointKind => ENDPOINT_KIND_MAP[type]
+
+const updateTierEndpointByScope: Record<TierScope, (tierEndpointId: string, payload: TierEndpointWeightPayload) => Promise<unknown>> = {
+  persistent: (tierEndpointId, payload) => llmApi.updatePersistentTierEndpoint(tierEndpointId, payload),
+  browser: (tierEndpointId, payload) => llmApi.updateBrowserTierEndpoint(tierEndpointId, payload),
+  embedding: (tierEndpointId, payload) => llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload),
+  file_handler: (tierEndpointId, payload) => llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload),
+  image_generation: (tierEndpointId, payload) => llmApi.updateImageGenerationTierEndpoint(tierEndpointId, payload),
+}
+
+const deleteTierEndpointByScope: Record<TierScope, (tierEndpointId: string) => Promise<unknown>> = {
+  persistent: (tierEndpointId) => llmApi.deletePersistentTierEndpoint(tierEndpointId),
+  browser: (tierEndpointId) => llmApi.deleteBrowserTierEndpoint(tierEndpointId),
+  embedding: (tierEndpointId) => llmApi.deleteEmbeddingTierEndpoint(tierEndpointId),
+  file_handler: (tierEndpointId) => llmApi.deleteFileHandlerTierEndpoint(tierEndpointId),
+  image_generation: (tierEndpointId) => llmApi.deleteImageGenerationTierEndpoint(tierEndpointId),
+}
+
+const addTierEndpointByScope: Record<TierScope, (
+  tierId: string,
+  payload: TierEndpointCreatePayload,
+  extractionEndpointId?: string | null,
+) => Promise<{ tier_endpoint_id?: string }>> = {
+  persistent: async (tierId, payload) => llmApi.addPersistentTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  browser: async (tierId, payload, extractionEndpointId) => {
+    const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
+      ...payload,
+    }
+    if (typeof extractionEndpointId !== 'undefined') {
+      browserPayload.extraction_endpoint_id = extractionEndpointId || null
+    }
+    return llmApi.addBrowserTierEndpoint(tierId, browserPayload) as { tier_endpoint_id?: string }
+  },
+  embedding: async (tierId, payload) => llmApi.addEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  file_handler: async (tierId, payload) => llmApi.addFileHandlerTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  image_generation: async (tierId, payload) => llmApi.addImageGenerationTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+}
+
+const updateProfileTierEndpointByScope: Record<ProfileTierScope, (tierEndpointId: string, payload: TierEndpointWeightPayload) => Promise<unknown>> = {
+  persistent: (tierEndpointId, payload) => llmApi.updateProfilePersistentTierEndpoint(tierEndpointId, payload),
+  browser: (tierEndpointId, payload) => llmApi.updateProfileBrowserTierEndpoint(tierEndpointId, payload),
+  embedding: (tierEndpointId, payload) => llmApi.updateProfileEmbeddingTierEndpoint(tierEndpointId, payload),
+}
+
+const deleteProfileTierEndpointByScope: Record<ProfileTierScope, (tierEndpointId: string) => Promise<unknown>> = {
+  persistent: (tierEndpointId) => llmApi.deleteProfilePersistentTierEndpoint(tierEndpointId),
+  browser: (tierEndpointId) => llmApi.deleteProfileBrowserTierEndpoint(tierEndpointId),
+  embedding: (tierEndpointId) => llmApi.deleteProfileEmbeddingTierEndpoint(tierEndpointId),
+}
+
+const addProfileTierEndpointByScope: Record<ProfileTierScope, (
+  tierId: string,
+  payload: TierEndpointCreatePayload,
+  extractionEndpointId?: string | null,
+) => Promise<{ tier_endpoint_id?: string }>> = {
+  persistent: async (tierId, payload) => llmApi.addProfilePersistentTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+  browser: async (tierId, payload, extractionEndpointId) => {
+    const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
+      ...payload,
+    }
+    if (typeof extractionEndpointId !== 'undefined') {
+      browserPayload.extraction_endpoint_id = extractionEndpointId || null
+    }
+    return llmApi.addProfileBrowserTierEndpoint(tierId, browserPayload) as { tier_endpoint_id?: string }
+  },
+  embedding: async (tierId, payload) => llmApi.addProfileEmbeddingTierEndpoint(tierId, payload) as { tier_endpoint_id?: string },
+}
 
 const getTierStyle = (tierKey?: string | null) => TIER_STYLE_MAP[tierKey ?? 'standard'] ?? TIER_STYLE_MAP.standard
 
@@ -729,6 +810,27 @@ function mapFileHandlerTiers(tiers: llmApi.FileHandlerTier[] = []): Tier[] {
   return mapped
 }
 
+function mapImageGenerationTiers(tiers: llmApi.ImageGenerationTier[] = []): Tier[] {
+  const mapped = tiers.map((tier) => {
+    const normalized = normalizeTierEndpointWeights(tier.endpoints)
+    return {
+      id: tier.id,
+      name: (tier.description || '').trim(),
+      order: tier.order,
+      rangeId: 'image_generation',
+      intelligenceTier: null,
+      endpoints: tier.endpoints.map((endpoint) => ({
+        id: endpoint.id,
+        endpointId: endpoint.endpoint_id,
+        label: endpoint.label,
+        weight: normalized[endpoint.id] ?? 0,
+      })),
+    }
+  })
+  applySequentialFallbackNames(mapped, () => 'image_generation')
+  return mapped
+}
+
 // Profile-based mapping functions
 function mapBrowserTiersFromProfile(tiers: llmApi.ProfileBrowserTier[] = []): Tier[] {
   const mapped = tiers.map((tier) => {
@@ -796,7 +898,9 @@ function AddEndpointModal({
       ? choices.embedding_endpoints
       : scope === 'file_handler'
         ? choices.file_handler_endpoints
-        : choices.persistent_endpoints
+        : scope === 'image_generation'
+          ? choices.image_generation_endpoints
+          : choices.persistent_endpoints
   const [selected, setSelected] = useState(endpoints[0]?.id || '')
   const [extractionSelected, setExtractionSelected] = useState<string>('')
   const [submitting, setSubmitting] = useState(false)
@@ -1213,7 +1317,9 @@ function ProviderCard({ provider, handlers, isBusy, testStatuses, showModal, clo
                     ? 'Edit browser endpoint'
                     : endpoint.type === 'file_handler'
                       ? 'Edit file handler endpoint'
-                      : 'Edit embedding endpoint'}
+                      : endpoint.type === 'image_generation'
+                        ? 'Edit image generation endpoint'
+                        : 'Edit embedding endpoint'}
               </h3>
               <button
                 onClick={() => {
@@ -1466,8 +1572,9 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
   const isBrowser = endpoint.type === 'browser'
   const isEmbedding = endpoint.type === 'embedding'
   const isFileHandler = endpoint.type === 'file_handler'
+  const isImageGeneration = endpoint.type === 'image_generation'
   const isPersistent = endpoint.type === 'persistent'
-  const isToolingEndpoint = !isEmbedding && !isFileHandler
+  const isToolingEndpoint = !isEmbedding && !isFileHandler && !isImageGeneration
 
   return (
     <div className="space-y-3">
@@ -1476,7 +1583,7 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
           <label className="text-xs text-slate-500">Model identifier</label>
           <input value={model} onChange={(event) => setModel(event.target.value)} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm" />
         </div>
-        {!isBrowser && (
+        {!isBrowser && !isImageGeneration && (
           <div>
             <label className="text-xs text-slate-500">Temperature override</label>
             <input type="number" value={temperature} onChange={(event) => setTemperature(event.target.value)} placeholder="auto" disabled={!supportsTemperature} className="mt-1 block w-full rounded-lg border-slate-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm disabled:bg-slate-50 disabled:text-slate-400" />
@@ -1511,14 +1618,18 @@ function EndpointEditor({ endpoint, onSave, onCancel, saving }: EndpointEditorPr
         )}
       </div>
       <div className="flex flex-wrap gap-4 text-sm">
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-          Supports temperature
-        </label>
-        <label className="inline-flex items-center gap-2">
-          <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-          Vision
-        </label>
+        {!isImageGeneration && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Supports temperature
+          </label>
+        )}
+        {!isImageGeneration && (
+          <label className="inline-flex items-center gap-2">
+            <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+            Vision
+          </label>
+        )}
         {!isBrowser && isToolingEndpoint && (
           <label className="inline-flex items-center gap-2">
             <input
@@ -1606,6 +1717,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
     browser: 'Add browser endpoint',
     embedding: 'Add embedding endpoint',
     file_handler: 'Add file handler endpoint',
+    image_generation: 'Add image generation endpoint',
   }[type]
 
   const handleSubmit = async () => {
@@ -1688,14 +1800,18 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
             )}
           </div>
           <div className="flex flex-wrap gap-4 text-sm">
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-              Supports temperature
-            </label>
-            <label className="inline-flex items-center gap-2">
-              <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
-              Vision
-            </label>
+            {type !== 'image_generation' && (
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={supportsTemperature} onChange={(event) => setSupportsTemperature(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                Supports temperature
+              </label>
+            )}
+            {type !== 'image_generation' && (
+              <label className="inline-flex items-center gap-2">
+                <input type="checkbox" checked={supportsVision} onChange={(event) => setSupportsVision(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
+                Vision
+              </label>
+            )}
             {type === 'persistent' && (
               <label className="inline-flex items-center gap-2">
                 <input
@@ -1710,7 +1826,7 @@ function AddProviderEndpointModal({ providerName, type, onSubmit, onClose, busy 
                 Reasoning
               </label>
             )}
-            {type !== 'embedding' && type !== 'file_handler' && (
+            {type !== 'embedding' && type !== 'file_handler' && type !== 'image_generation' && (
               <>
                 <label className="inline-flex items-center gap-2">
                   <input type="checkbox" checked={supportsTools} onChange={(event) => setSupportsTools(event.target.checked)} className="rounded border-slate-300 text-blue-600 shadow-sm" />
@@ -2368,6 +2484,10 @@ export function LlmConfigScreen() {
     () => mapFileHandlerTiers(overviewQuery.data?.file_handlers?.tiers),
     [overviewQuery.data?.file_handlers?.tiers],
   )
+  const imageGenerationTiers = useMemo(
+    () => mapImageGenerationTiers(overviewQuery.data?.image_generations?.tiers),
+    [overviewQuery.data?.image_generations?.tiers],
+  )
 
   const browserTierGroups = useMemo(
     () => buildTierGroups(browserTiers, intelligenceTiers),
@@ -2378,6 +2498,7 @@ export function LlmConfigScreen() {
     browser_endpoints: [],
     embedding_endpoints: [],
     file_handler_endpoints: [],
+    image_generation_endpoints: [],
   }
 
   useEffect(() => {
@@ -2531,13 +2652,7 @@ export function LlmConfigScreen() {
     type: llmApi.ProviderEndpoint['type'],
     values: EndpointFormValues & { key: string },
   ) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = type === 'browser'
-      ? 'browser'
-      : type === 'embedding'
-        ? 'embedding'
-        : type === 'file_handler'
-          ? 'file_handler'
-          : 'persistent'
+    const kind = endpointKindFromType(type)
     const payload: Record<string, unknown> = {
       provider_id: provider.id,
       key: values.key,
@@ -2561,6 +2676,11 @@ export function LlmConfigScreen() {
       payload.litellm_model = values.model
       payload.api_base = values.api_base || ''
       payload.supports_vision = values.supportsVision ?? false
+      payload.enabled = true
+    } else if (type === 'image_generation') {
+      payload.model = values.model
+      payload.litellm_model = values.model
+      payload.api_base = values.api_base || ''
       payload.enabled = true
     } else {
       payload.model = values.model
@@ -2594,13 +2714,7 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderSaveEndpoint = (endpoint: ProviderEndpointCard, values: EndpointFormValues) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
-      ? 'browser'
-      : endpoint.type === 'embedding'
-        ? 'embedding'
-        : endpoint.type === 'file_handler'
-          ? 'file_handler'
-          : 'persistent'
+    const kind = endpointKindFromType(endpoint.type)
     const payload: Record<string, unknown> = {}
     if (values.model) {
       payload.model = values.model
@@ -2618,14 +2732,14 @@ export function LlmConfigScreen() {
       const parsed = parseNumber(values.max_output_tokens)
       payload.max_output_tokens = parsed ?? null
     }
-    if (kind !== 'browser' && values.temperature !== undefined) {
+    if (kind !== 'browser' && kind !== 'image_generation' && values.temperature !== undefined) {
       const parsed = parseNumber(values.temperature)
       payload.temperature_override = parsed ?? null
     }
-    if (values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
-    if (values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
-    if (values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
-    if (values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
+    if (kind !== 'image_generation' && values.supportsTemperature !== undefined) payload.supports_temperature = values.supportsTemperature
+    if (kind !== 'image_generation' && values.supportsVision !== undefined) payload.supports_vision = values.supportsVision
+    if (kind === 'persistent' && values.supportsToolChoice !== undefined) payload.supports_tool_choice = values.supportsToolChoice
+    if (kind === 'persistent' && values.useParallelToolCalls !== undefined) payload.use_parallel_tool_calls = values.useParallelToolCalls
     if (values.lowLatency !== undefined) payload.low_latency = values.lowLatency
     if (kind === 'persistent') {
       if (values.supportsReasoning !== undefined) payload.supports_reasoning = values.supportsReasoning
@@ -2648,13 +2762,7 @@ export function LlmConfigScreen() {
   }
 
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
-    const kind: 'persistent' | 'browser' | 'embedding' | 'file_handler' = endpoint.type === 'browser'
-      ? 'browser'
-      : endpoint.type === 'embedding'
-        ? 'embedding'
-        : endpoint.type === 'file_handler'
-          ? 'file_handler'
-          : 'persistent'
+    const kind = endpointKindFromType(endpoint.type)
     const displayName = endpoint.name || endpoint.api_base || endpoint.browser_base_url || endpoint.id
     return confirmDestructiveAction({
       title: `Delete endpoint "${displayName}"?`,
@@ -2775,16 +2883,7 @@ export function LlmConfigScreen() {
       )
       const ops = staged.updates.map((entry) => {
         const payload = { weight: encodeServerWeight(normalized[entry.id] ?? entry.weight) }
-        if (scope === 'browser') {
-          return llmApi.updateBrowserTierEndpoint(entry.id, payload)
-        }
-        if (scope === 'embedding') {
-          return llmApi.updateEmbeddingTierEndpoint(entry.id, payload)
-        }
-        if (scope === 'file_handler') {
-          return llmApi.updateFileHandlerTierEndpoint(entry.id, payload)
-        }
-        return llmApi.updatePersistentTierEndpoint(entry.id, payload)
+        return updateTierEndpointByScope[scope](entry.id, payload)
       })
       return Promise.all(ops)
     }
@@ -2812,31 +2911,7 @@ export function LlmConfigScreen() {
       message: 'This tier will lose access to the endpoint until it is added again.',
       confirmLabel: 'Remove endpoint',
       onConfirm: () => {
-        if (scope === 'browser') {
-          return runMutation(() => llmApi.deleteBrowserTierEndpoint(endpoint.id), {
-            successMessage: 'Endpoint removed',
-            label: 'Removing endpoint…',
-            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
-            context: tier.name,
-          })
-        }
-        if (scope === 'embedding') {
-          return runMutation(() => llmApi.deleteEmbeddingTierEndpoint(endpoint.id), {
-            successMessage: 'Endpoint removed',
-            label: 'Removing endpoint…',
-            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
-            context: tier.name,
-          })
-        }
-        if (scope === 'file_handler') {
-          return runMutation(() => llmApi.deleteFileHandlerTierEndpoint(endpoint.id), {
-            successMessage: 'Endpoint removed',
-            label: 'Removing endpoint…',
-            busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
-            context: tier.name,
-          })
-        }
-        return runMutation(() => llmApi.deletePersistentTierEndpoint(endpoint.id), {
+        return runMutation(() => deleteTierEndpointByScope[scope](endpoint.id), {
           successMessage: 'Endpoint removed',
           label: 'Removing endpoint…',
           busyKey: actionKey('tier-endpoint', endpoint.id, 'remove'),
@@ -2960,8 +3035,34 @@ export function LlmConfigScreen() {
       }),
     })
 
+  const handleImageGenerationTierAdd = () => runMutation(() => llmApi.createImageGenerationTier({}), {
+    successMessage: 'Image generation tier added',
+    label: 'Creating image generation tier…',
+    busyKey: actionKey('image_generation', 'add'),
+    context: 'Image generation tiers',
+  })
+  const handleImageGenerationTierMove = (tierId: string, direction: 'up' | 'down') =>
+    runMutation(() => llmApi.updateImageGenerationTier(tierId, { move: direction }), {
+      label: direction === 'up' ? 'Moving image generation tier up…' : 'Moving image generation tier down…',
+      busyKey: actionKey('image_generation', tierId, 'move', direction),
+      busyKeys: [actionKey('image_generation', tierId, 'move')],
+      context: 'Image generation tiers',
+    })
+  const handleImageGenerationTierRemove = (tier: Tier) =>
+    confirmDestructiveAction({
+      title: `Delete image generation tier "${tier.name}"?`,
+      message: 'Any weighting rules tied to this tier will be lost.',
+      confirmLabel: 'Delete tier',
+      onConfirm: () => runMutation(() => llmApi.deleteImageGenerationTier(tier.id), {
+        successMessage: 'Image generation tier removed',
+        label: 'Removing image generation tier…',
+        busyKey: actionKey('image_generation', tier.id, 'remove'),
+        context: tier.name,
+      }),
+    })
+
   const handleTierEndpointAdd = (tier: Tier, scope: TierScope) => {
-    const useProfile = Boolean(selectedProfile && scope !== 'file_handler')
+    const useProfile = Boolean(selectedProfile && scope !== 'file_handler' && scope !== 'image_generation')
     showModal((onClose) => createPortal(
       <AddEndpointModal
         tier={tier}
@@ -2984,27 +3085,11 @@ export function LlmConfigScreen() {
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
-        endpoint_id: endpointId,
-        weight: encodeServerWeight(initialUnit),
-      }
-      if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
-        browserPayload.extraction_endpoint_id = extractionEndpointId || null
-      }
       const basePayload: { endpoint_id: string; weight: number } = {
         endpoint_id: endpointId,
         weight: encodeServerWeight(initialUnit),
       }
-      let response: { tier_endpoint_id?: string } = {}
-      if (scope === 'browser') {
-        response = await llmApi.addBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
-      } else if (scope === 'embedding') {
-        response = await llmApi.addEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
-      } else if (scope === 'file_handler') {
-        response = await llmApi.addFileHandlerTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
-      } else {
-        response = await llmApi.addPersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
-      }
+      const response = await addTierEndpointByScope[scope](tier.id, basePayload, extractionEndpointId)
       const newTierEndpointId = response?.tier_endpoint_id
       if (!newTierEndpointId) {
         return
@@ -3024,16 +3109,7 @@ export function LlmConfigScreen() {
       )
       const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
         const payload = { weight: encodeServerWeight(normalized[tierEndpointId] ?? weight) }
-        if (scope === 'browser') {
-          return llmApi.updateBrowserTierEndpoint(tierEndpointId, payload)
-        }
-        if (scope === 'embedding') {
-          return llmApi.updateEmbeddingTierEndpoint(tierEndpointId, payload)
-        }
-        if (scope === 'file_handler') {
-          return llmApi.updateFileHandlerTierEndpoint(tierEndpointId, payload)
-        }
-        return llmApi.updatePersistentTierEndpoint(tierEndpointId, payload)
+        return updateTierEndpointByScope[scope](tierEndpointId, payload)
       })
 
       await Promise.all(updates)
@@ -3436,6 +3512,7 @@ export function LlmConfigScreen() {
   // Profile-specific tier endpoint handlers
   const commitProfileTierEndpointWeights = (tier: Tier, scope: TierScope) => {
     if (!selectedProfile) return commitTierEndpointWeights(tier, scope)
+    if (scope === 'file_handler' || scope === 'image_generation') return
 
     const key = `${scope}:${tier.id}`
     const staged = stagedWeightsRef.current[key]
@@ -3452,13 +3529,7 @@ export function LlmConfigScreen() {
       )
       const ops = staged.updates.map((entry) => {
         const payload = { weight: encodeServerWeight(normalized[entry.id] ?? entry.weight) }
-        if (scope === 'browser') {
-          return llmApi.updateProfileBrowserTierEndpoint(entry.id, payload)
-        }
-        if (scope === 'embedding') {
-          return llmApi.updateProfileEmbeddingTierEndpoint(entry.id, payload)
-        }
-        return llmApi.updateProfilePersistentTierEndpoint(entry.id, payload)
+        return updateProfileTierEndpointByScope[scope](entry.id, payload)
       })
       await Promise.all(ops)
       await invalidateProfileDetail()
@@ -3483,6 +3554,7 @@ export function LlmConfigScreen() {
 
   const handleProfileTierEndpointRemove = (tier: Tier, endpoint: TierEndpoint, scope: TierScope) => {
     if (!selectedProfile) return handleTierEndpointRemove(tier, endpoint, scope)
+    if (scope === 'file_handler' || scope === 'image_generation') return
 
     return confirmDestructiveAction({
       title: `Remove "${endpoint.label}" from ${tier.name}?`,
@@ -3491,13 +3563,7 @@ export function LlmConfigScreen() {
       onConfirm: () =>
         runWithFeedback(
           async () => {
-            if (scope === 'browser') {
-              await llmApi.deleteProfileBrowserTierEndpoint(endpoint.id)
-            } else if (scope === 'embedding') {
-              await llmApi.deleteProfileEmbeddingTierEndpoint(endpoint.id)
-            } else {
-              await llmApi.deleteProfilePersistentTierEndpoint(endpoint.id)
-            }
+            await deleteProfileTierEndpointByScope[scope](endpoint.id)
             await invalidateProfileDetail()
           },
           {
@@ -3516,29 +3582,16 @@ export function LlmConfigScreen() {
     selection: { endpointId: string; extractionEndpointId?: string | null },
   ) => {
     if (!selectedProfile) return submitTierEndpoint(tier, scope, selection)
+    if (scope === 'file_handler' || scope === 'image_generation') return
     const { endpointId, extractionEndpointId } = selection
     let stagedWeights: Record<string, number> | null = null
     const mutation = async () => {
       const initialUnit = tier.endpoints.length === 0 ? 1 : MIN_SERVER_UNIT
-      const browserPayload: { endpoint_id: string; weight: number; extraction_endpoint_id?: string | null } = {
-        endpoint_id: endpointId,
-        weight: encodeServerWeight(initialUnit),
-      }
-      if (scope === 'browser' && typeof extractionEndpointId !== 'undefined') {
-        browserPayload.extraction_endpoint_id = extractionEndpointId || null
-      }
       const basePayload: { endpoint_id: string; weight: number } = {
         endpoint_id: endpointId,
         weight: encodeServerWeight(initialUnit),
       }
-      let response: { tier_endpoint_id?: string } = {}
-      if (scope === 'browser') {
-        response = await llmApi.addProfileBrowserTierEndpoint(tier.id, browserPayload) as { tier_endpoint_id?: string }
-      } else if (scope === 'embedding') {
-        response = await llmApi.addProfileEmbeddingTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
-      } else {
-        response = await llmApi.addProfilePersistentTierEndpoint(tier.id, basePayload) as { tier_endpoint_id?: string }
-      }
+      const response = await addProfileTierEndpointByScope[scope](tier.id, basePayload, extractionEndpointId)
       const newTierEndpointId = response?.tier_endpoint_id
       if (!newTierEndpointId) {
         return
@@ -3559,13 +3612,7 @@ export function LlmConfigScreen() {
       )
       const updates = Object.entries(evenWeights).map(([tierEndpointId, weight]) => {
         const payload = { weight: encodeServerWeight(normalized[tierEndpointId] ?? weight) }
-        if (scope === 'browser') {
-          return llmApi.updateProfileBrowserTierEndpoint(tierEndpointId, payload)
-        }
-        if (scope === 'embedding') {
-          return llmApi.updateProfileEmbeddingTierEndpoint(tierEndpointId, payload)
-        }
-        return llmApi.updateProfilePersistentTierEndpoint(tierEndpointId, payload)
+        return updateProfileTierEndpointByScope[scope](tierEndpointId, payload)
       })
 
       await Promise.all(updates)
@@ -3874,7 +3921,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, and file handling.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, file handling, and image generation.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4009,6 +4056,43 @@ export function LlmConfigScreen() {
                 )
               })}
               {fileHandlerTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No file handler tiers configured.</p>}
+            </div>
+            <div className="rounded-xl border border-slate-200/80 bg-white p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-start gap-3">
+                  <Atom className="size-5 text-blue-500 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="font-semibold text-slate-900/90">Image generation tiers</h4>
+                    <p className="text-sm text-slate-600">Fallback order for image generation models used by the create_image tool.</p>
+                  </div>
+                </div>
+                <button type="button" className={button.secondary} onClick={handleImageGenerationTierAdd}>
+                  <PlusCircle className="size-4" /> Add tier
+                </button>
+              </div>
+              {imageGenerationTiers.map((tier, index) => {
+                const lastIndex = imageGenerationTiers.length - 1
+                return (
+                  <TierCard
+                    key={tier.id}
+                    tier={tier}
+                    pendingWeights={pendingWeights}
+                    scope="image_generation"
+                    canMoveUp={index > 0}
+                    canMoveDown={index < lastIndex}
+                    isDirty={dirtyTierIds.has(`image_generation:${tier.id}`)}
+                    isSaving={savingTierIds.has(`image_generation:${tier.id}`)}
+                    onMove={(direction) => handleImageGenerationTierMove(tier.id, direction)}
+                    onRemove={handleImageGenerationTierRemove}
+                    onAddEndpoint={() => handleTierEndpointAdd(tier, 'image_generation')}
+                    onStageEndpointWeight={(currentTier, tierEndpointId, weight) => stageTierEndpointWeight(currentTier, tierEndpointId, weight, 'image_generation')}
+                    onCommitEndpointWeights={(currentTier) => commitTierEndpointWeights(currentTier, 'image_generation')}
+                    onRemoveEndpoint={(currentTier, endpoint) => handleTierEndpointRemove(currentTier, endpoint, 'image_generation')}
+                    isActionBusy={isBusy}
+                  />
+                )
+              })}
+              {imageGenerationTiers.length === 0 && <p className="text-center text-xs text-slate-400 py-4">No image generation tiers configured.</p>}
             </div>
           </div>
         </SectionCard>
