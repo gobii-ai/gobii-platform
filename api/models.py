@@ -4111,6 +4111,25 @@ class StripeConfig(models.Model):
         self.set_value("startup_price_id", value)
 
     @property
+    def startup_trial_days(self) -> int:
+        raw = self.get_value("startup_trial_days")
+        try:
+            return max(int(raw), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @startup_trial_days.setter
+    def startup_trial_days(self, value: int | str | None) -> None:
+        if value is None:
+            self.set_value("startup_trial_days", None)
+            return
+        try:
+            normalized = max(int(value), 0)
+        except (TypeError, ValueError):
+            normalized = 0
+        self.set_value("startup_trial_days", str(normalized))
+
+    @property
     def startup_additional_task_price_id(self) -> str:
         return self.get_value("startup_additional_task_price_id")
 
@@ -4207,6 +4226,25 @@ class StripeConfig(models.Model):
     @scale_price_id.setter
     def scale_price_id(self, value: str | None) -> None:
         self.set_value("scale_price_id", value)
+
+    @property
+    def scale_trial_days(self) -> int:
+        raw = self.get_value("scale_trial_days")
+        try:
+            return max(int(raw), 0)
+        except (TypeError, ValueError):
+            return 0
+
+    @scale_trial_days.setter
+    def scale_trial_days(self, value: int | str | None) -> None:
+        if value is None:
+            self.set_value("scale_trial_days", None)
+            return
+        try:
+            normalized = max(int(value), 0)
+        except (TypeError, ValueError):
+            normalized = 0
+        self.set_value("scale_trial_days", str(normalized))
 
     @property
     def scale_additional_task_price_id(self) -> str:

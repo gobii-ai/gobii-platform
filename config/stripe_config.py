@@ -26,6 +26,7 @@ class StripeSettings:
     test_secret_key: Optional[str]
     webhook_secret: Optional[str]
     startup_price_id: str
+    startup_trial_days: int
     startup_additional_task_price_id: str
     startup_task_pack_product_id: str
     startup_task_pack_price_ids: tuple[str, ...]
@@ -37,6 +38,7 @@ class StripeSettings:
     startup_advanced_captcha_resolution_price_id: str
     startup_product_id: str
     scale_price_id: str
+    scale_trial_days: int
     scale_additional_task_price_id: str
     scale_task_pack_product_id: str
     scale_task_pack_price_ids: tuple[str, ...]
@@ -115,6 +117,7 @@ def _env_defaults() -> StripeSettings:
         test_secret_key=getattr(settings, "STRIPE_TEST_SECRET_KEY", None),
         webhook_secret=getattr(settings, "STRIPE_WEBHOOK_SECRET", None),
         startup_price_id=env("STRIPE_STARTUP_PRICE_ID", default="price_dummy_startup"),
+        startup_trial_days=env.int("STRIPE_STARTUP_TRIAL_DAYS", default=0),
         startup_task_pack_product_id=env("STRIPE_STARTUP_TASK_PACK_PRODUCT_ID", default="prod_dummy_startup_task_pack_product"),
         startup_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_STARTUP_TASK_PACK_PRICE_IDS", default=[])),
         startup_additional_task_price_id=env("STRIPE_STARTUP_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_startup_additional_task"),
@@ -141,6 +144,7 @@ def _env_defaults() -> StripeSettings:
         ),
         startup_product_id=env("STRIPE_STARTUP_PRODUCT_ID", default="prod_dummy_startup"),
         scale_price_id=env("STRIPE_SCALE_PRICE_ID", default="price_dummy_scale"),
+        scale_trial_days=env.int("STRIPE_SCALE_TRIAL_DAYS", default=0),
         scale_task_pack_product_id=env("STRIPE_SCALE_TASK_PACK_PRODUCT_ID", default="prod_dummy_scale_task_pack_product"),
         scale_task_pack_price_ids=_parse_price_id_list(env.list("STRIPE_SCALE_TASK_PACK_PRICE_IDS", default=[])),
         scale_additional_task_price_id=env("STRIPE_SCALE_ADDITIONAL_TASK_PRICE_ID", default="price_dummy_scale_additional_task"),
@@ -213,6 +217,17 @@ def _coalesce(value: str | None) -> Optional[str]:
     return value
 
 
+def _parse_int(value: str | int | None, default: int = 0) -> int:
+    if value is None:
+        return default
+    if isinstance(value, int):
+        return max(value, 0)
+    try:
+        return max(int(str(value).strip()), 0)
+    except (TypeError, ValueError):
+        return default
+
+
 def _load_from_database() -> Optional[StripeSettings]:
     try:
         StripeConfig = apps.get_model("api", "StripeConfig")
@@ -239,6 +254,14 @@ def _load_from_database() -> Optional[StripeSettings]:
         org_team_additional_price = config.org_team_additional_task_price_id or ""
     except Exception:
         org_team_additional_price = ""
+    try:
+        startup_trial_days = _parse_int(getattr(config, "startup_trial_days", None))
+    except (TypeError, ValueError):
+        startup_trial_days = 0
+    try:
+        scale_trial_days = _parse_int(getattr(config, "scale_trial_days", None))
+    except (TypeError, ValueError):
+        scale_trial_days = 0
     try:
         org_team_contact_cap_product_id = config.org_team_contact_cap_product_id or ""
     except Exception:
@@ -340,6 +363,7 @@ def _load_from_database() -> Optional[StripeSettings]:
         live_mode=bool(config.live_mode),
         webhook_secret=webhook_secret,
         startup_price_id=config.startup_price_id or "",
+        startup_trial_days=startup_trial_days,
         startup_task_pack_product_id=config.startup_task_pack_product_id or "",
         startup_task_pack_price_ids=startup_task_pack_price_ids or env_defaults.startup_task_pack_price_ids,
         startup_additional_task_price_id=config.startup_additional_task_price_id or "",
@@ -358,6 +382,7 @@ def _load_from_database() -> Optional[StripeSettings]:
         ),
         startup_product_id=config.startup_product_id or "",
         scale_price_id=config.scale_price_id or "",
+        scale_trial_days=scale_trial_days,
         scale_task_pack_product_id=config.scale_task_pack_product_id or "",
         scale_task_pack_price_ids=scale_task_pack_price_ids or env_defaults.scale_task_pack_price_ids,
         scale_additional_task_price_id=config.scale_additional_task_price_id or "",
