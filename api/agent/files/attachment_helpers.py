@@ -1,7 +1,10 @@
+import ipaddress
+import logging
 from dataclasses import dataclass
 from typing import Iterable, List
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
+from django.conf import settings
 from django.contrib.sites.models import Site
 from django.core import signing
 from django.urls import reverse
@@ -11,6 +14,8 @@ from api.services.system_settings import get_max_file_size
 from .filespace_service import get_or_create_default_filespace
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
+logger = logging.getLogger(__name__)
+
 
 class AttachmentResolutionError(Exception):
     pass
@@ -18,6 +23,8 @@ class AttachmentResolutionError(Exception):
 
 SIGNED_FILES_DOWNLOAD_SALT = "agent-filespace-download"
 SIGNED_FILES_DOWNLOAD_TTL_SECONDS = 7 * 24 * 60 * 60
+_LOCAL_HOSTNAMES = {"localhost", "127.0.0.1", "::1"}
+_CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 
 @dataclass(frozen=True)
@@ -389,11 +396,95 @@ def build_signed_filespace_download_url(agent_id, node_id) -> str:
         compress=True,
     )
     path = reverse("signed_agent_fs_download", kwargs={"token": token})
+    base = _resolve_signed_download_base_url()
+    return f"{base}{path}"
 
+
+def _resolve_signed_download_base_url() -> str:
     current_site = Site.objects.get_current()
-    domain = current_site.domain
-    protocol = "http" if domain.startswith("localhost") or domain.startswith("127.0.0.1") else "https"
-    return f"{protocol}://{domain}{path}"
+    domain, explicit_scheme = _extract_domain_and_scheme(getattr(current_site, "domain", ""))
+    if not domain:
+        domain = "localhost:8000"
+
+    scheme = (
+        explicit_scheme
+        or _scheme_from_public_site_url(domain)
+        or _infer_scheme_for_domain(domain)
+    )
+    return f"{scheme}://{domain}"
+
+
+def _extract_domain_and_scheme(raw_domain: str) -> tuple[str, str | None]:
+    value = (raw_domain or "").strip()
+    if not value:
+        return "", None
+    if "://" not in value:
+        return value, None
+
+    parsed = urlparse(value)
+    domain = (parsed.netloc or parsed.path or "").strip()
+    scheme = (parsed.scheme or "").strip().lower() or None
+    return domain, scheme
+
+
+def _hostname_from_domain(domain: str) -> str:
+    value = (domain or "").strip()
+    if not value:
+        return ""
+
+    if value.startswith("["):
+        end = value.find("]")
+        if end > 1:
+            return value[1:end].lower()
+
+    # Preserve non-bracketed IPv6 literals by avoiding split when multiple colons are present.
+    if value.count(":") == 1:
+        return value.split(":", 1)[0].lower()
+    return value.lower()
+
+
+def _is_local_or_private_host(hostname: str) -> bool:
+    host = (hostname or "").strip().strip("[]").lower()
+    if not host:
+        return False
+    if host in _LOCAL_HOSTNAMES:
+        return True
+
+    try:
+        parsed_ip = ipaddress.ip_address(host)
+    except ValueError:
+        return host.endswith(".local")
+
+    return bool(
+        parsed_ip.is_private
+        or parsed_ip.is_loopback
+        or parsed_ip.is_link_local
+        or parsed_ip in _CGNAT_NETWORK
+    )
+
+
+def _scheme_from_public_site_url(domain: str) -> str | None:
+    public_site_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip()
+    if not public_site_url:
+        return None
+
+    parsed = urlparse(public_site_url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        return None
+
+    public_host = (parsed.hostname or "").lower()
+    domain_host = _hostname_from_domain(domain)
+    if public_host in _LOCAL_HOSTNAMES and not _is_local_or_private_host(domain_host):
+        return None
+    return scheme
+
+
+def _infer_scheme_for_domain(domain: str) -> str:
+    domain_host = _hostname_from_domain(domain)
+    if _is_local_or_private_host(domain_host):
+        return "http"
+    return "https"
 
 
 def load_signed_filespace_download_payload(token: str) -> dict | None:
