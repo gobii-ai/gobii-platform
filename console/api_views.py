@@ -78,7 +78,7 @@ from api.models import (
 )
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
@@ -236,11 +236,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             if cookie_value:
                 try:
                     stashed = signing.loads(cookie_value, max_age=3600)
-                    for key in (
-                        "agent_charter",
-                        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
-                        "agent_charter_source",
-                    ):
+                    for key in OAUTH_CHARTER_SESSION_KEYS:
                         if key in stashed:
                             request.session[key] = stashed[key]
                     request.session.modified = True

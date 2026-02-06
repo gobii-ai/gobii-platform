@@ -13,15 +13,23 @@ from django.urls import reverse
 
 from agents.services import PretrainedWorkerTemplateService
 from api.services.system_settings import get_account_allow_social_signup
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
 
 
 logger = logging.getLogger(__name__)
 
 # Session keys to preserve during social auth flow
-_PRESERVE_SESSION_KEYS = (
+OAUTH_CHARTER_SESSION_KEYS = (
     "agent_charter",
     PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
     "agent_charter_source",
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
 )
 
 # Cookie name for stashing charter data during OAuth
@@ -46,7 +54,7 @@ class GobiiSocialAccountAdapter(DefaultSocialAccountAdapter):
             if cookie_value:
                 try:
                     stashed = signing.loads(cookie_value, max_age=3600)  # 1 hour max
-                    for key in _PRESERVE_SESSION_KEYS:
+                    for key in OAUTH_CHARTER_SESSION_KEYS:
                         if key in stashed and key not in request.session:
                             request.session[key] = stashed[key]
                     request.session.modified = True

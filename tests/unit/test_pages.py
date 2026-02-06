@@ -6,9 +6,11 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from api.models import BrowserUseAgent, PersistentAgent
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -471,6 +473,15 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+
+        cookie_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=3600)
+        self.assertTrue(cookie_payload.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            cookie_payload.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(cookie_payload.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
 
 @tag("batch_pages")
@@ -640,6 +651,46 @@ class AgentSpawnIntentApiTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("charter"), "Draft charter")
         self.assertEqual(payload.get("preferred_llm_tier"), "premium")
+        self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+        self.assertTrue(payload.get("requires_plan_selection"))
+
+    @tag("batch_pages")
+    def test_spawn_intent_restores_onboarding_fields_from_oauth_cookie(self):
+        user = get_user_model().objects.create_user(
+            email="spawn-intent-cookie@test.com",
+            password="pw",
+            username="spawn_intent_cookie_user",
+        )
+        self.client.force_login(user)
+
+        session = self.client.session
+        for key in (
+            "agent_charter",
+            "agent_preferred_llm_tier",
+            TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+            TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+            TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+        ):
+            session.pop(key, None)
+        session.save()
+
+        self.client.cookies[OAUTH_CHARTER_COOKIE] = signing.dumps(
+            {
+                "agent_charter": "Cookie charter",
+                "agent_preferred_llm_tier": "premium",
+                PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: "sales-pipeline-whisperer",
+                "agent_charter_source": "template",
+                TRIAL_ONBOARDING_PENDING_SESSION_KEY: True,
+                TRIAL_ONBOARDING_TARGET_SESSION_KEY: TRIAL_ONBOARDING_TARGET_AGENT_UI,
+                TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY: True,
+            },
+            compress=True,
+        )
+
+        response = self.client.get(reverse("console_agent_spawn_intent"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("charter"), "Cookie charter")
         self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
         self.assertTrue(payload.get("requires_plan_selection"))
 

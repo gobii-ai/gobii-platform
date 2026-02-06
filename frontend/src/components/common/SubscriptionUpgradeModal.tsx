@@ -30,7 +30,7 @@ export function SubscriptionUpgradeModal({
   const isTrialOnboarding = source === 'trial_onboarding'
   const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
   const title = isTrialOnboarding
-    ? (maxTrialDays > 0 ? `Start ${maxTrialDays}-day Free Trial` : 'Start Free Trial')
+    ? (maxTrialDays > 0 ? `Start ${maxTrialDays}-day Free Trial` : 'Choose your plan')
     : 'Upgrade your plan'
   const subtitle = isTrialOnboarding
     ? 'Choose your plan to continue'

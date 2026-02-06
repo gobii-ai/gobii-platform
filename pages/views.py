@@ -21,7 +21,7 @@ from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -174,6 +174,25 @@ def _login_url_with_utms(request) -> str:
         separator = "&" if "?" in base_url else "?"
         return f"{base_url}{separator}{utm_qs}"
     return base_url
+
+
+def _build_oauth_charter_cookie_payload(
+    request,
+    *,
+    charter: str,
+    template_code: str,
+) -> dict[str, str | bool]:
+    payload: dict[str, str | bool] = {
+        "agent_charter": charter,
+        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template_code,
+        "agent_charter_source": "template",
+    }
+    for key in OAUTH_CHARTER_SESSION_KEYS:
+        if key in payload:
+            continue
+        if key in request.session:
+            payload[key] = request.session.get(key)
+    return payload
 
 
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
@@ -705,11 +724,11 @@ class PretrainedWorkerHireView(View):
 
         # Also store charter in a signed cookie for OAuth flows where session
         # data might be lost during the redirect chain
-        charter_data = {
-            "agent_charter": template.charter,
-            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
-            "agent_charter_source": "template",
-        }
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            template_code=template.code,
+        )
         response.set_cookie(
             OAUTH_CHARTER_COOKIE,
             signing.dumps(charter_data, compress=True),
@@ -853,11 +872,11 @@ class PublicTemplateHireView(View):
             login_url=_login_url_with_utms(request),
         )
 
-        charter_data = {
-            "agent_charter": template.charter,
-            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
-            "agent_charter_source": "template",
-        }
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            template_code=template.code,
+        )
         response.set_cookie(
             OAUTH_CHARTER_COOKIE,
             signing.dumps(charter_data, compress=True),

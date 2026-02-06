@@ -42,7 +42,7 @@ from functools import cached_property, wraps
 import uuid
 
 from agents.services import AgentService, PretrainedWorkerTemplateService
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from billing.services import BillingService
 from api.services.agent_transfer import AgentTransferService, AgentTransferError, AgentTransferDenied
 from api.services.dedicated_proxy_service import (
@@ -2493,7 +2493,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             if cookie_value:
                 try:
                     stashed = signing.loads(cookie_value, max_age=3600)
-                    for key in ("agent_charter", PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, "agent_charter_source"):
+                    for key in OAUTH_CHARTER_SESSION_KEYS:
                         if key in stashed:
                             request.session[key] = stashed[key]
                     request.session.modified = True

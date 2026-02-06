@@ -105,7 +105,7 @@ export function SubscriptionUpgradePlans({
             const canUpgrade = isUpgrade(plan.id)
             const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
             const ctaLabel = isTrialOnboarding
-              ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : 'Start Free Trial')
+              ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : `Get ${plan.name}`)
               : `Get ${plan.name}`
 
             return (
