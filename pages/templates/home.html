@@ -291,7 +291,7 @@
                     class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
-                    Start Free Trial
+                    {% if user.is_authenticated %}Spawn Agent{% else %}Start Free Trial{% endif %}
                     <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                     </svg>

@@ -4,6 +4,7 @@ import re
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
 
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -23,6 +24,12 @@ from util.onboarding import (
 
 @tag("batch_pages")
 class HomePageTests(TestCase):
+    @staticmethod
+    def _normalized_button_text(button) -> str:
+        return " ".join(
+            segment for segment in button.stripped_strings if segment and segment != "→"
+        ).strip()
+
     @tag("batch_pages")
     def test_home_page_renders(self):
         """Basic smoke test for home page."""
@@ -124,6 +131,77 @@ class HomePageTests(TestCase):
 
         self.assertEqual(len(workers), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
+
+    @tag("batch_pages")
+    def test_home_cta_text_changes_for_authenticated_users(self):
+        unauth_response = self.client.get("/")
+        self.assertEqual(unauth_response.status_code, 200)
+        unauth_soup = BeautifulSoup(unauth_response.content, "html.parser")
+        unauth_hero_form = unauth_soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(unauth_hero_form)
+        unauth_hero_button = unauth_hero_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(unauth_hero_button)
+        self.assertEqual(self._normalized_button_text(unauth_hero_button), "Start Free Trial")
+
+        unauth_card_source = unauth_soup.find(
+            "input",
+            {"name": "source_page", "value": "home_pretrained_workers"},
+        )
+        self.assertIsNotNone(unauth_card_source)
+        unauth_card_form = unauth_card_source.find_parent("form")
+        self.assertIsNotNone(unauth_card_form)
+        unauth_card_button = unauth_card_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(unauth_card_button)
+        self.assertEqual(self._normalized_button_text(unauth_card_button), "Start Free Trial")
+
+        user = get_user_model().objects.create_user(
+            username="home_cta_auth@example.com",
+            email="home_cta_auth@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        auth_response = self.client.get("/")
+        self.assertEqual(auth_response.status_code, 200)
+        auth_soup = BeautifulSoup(auth_response.content, "html.parser")
+        auth_hero_form = auth_soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(auth_hero_form)
+        auth_hero_button = auth_hero_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(auth_hero_button)
+        self.assertEqual(self._normalized_button_text(auth_hero_button), "Spawn Agent")
+
+        auth_card_source = auth_soup.find(
+            "input",
+            {"name": "source_page", "value": "home_pretrained_workers"},
+        )
+        self.assertIsNotNone(auth_card_source)
+        auth_card_form = auth_card_source.find_parent("form")
+        self.assertIsNotNone(auth_card_form)
+        auth_card_button = auth_card_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(auth_card_button)
+        self.assertEqual(self._normalized_button_text(auth_card_button), "Spawn This Worker")
+
+    @tag("batch_pages")
+    def test_home_pretrained_worker_cards_include_trial_onboarding_fields(self):
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        card_forms = []
+        for form in soup.find_all("form"):
+            hidden_source = form.find("input", {"name": "source_page", "value": "home_pretrained_workers"})
+            if hidden_source is not None:
+                card_forms.append(form)
+
+        self.assertGreater(len(card_forms), 0)
+        for form in card_forms:
+            self.assertIsNotNone(form.find("input", {"name": "trial_onboarding", "value": "1"}))
+            self.assertIsNotNone(
+                form.find(
+                    "input",
+                    {"name": "trial_onboarding_target", "value": TRIAL_ONBOARDING_TARGET_AGENT_UI},
+                )
+            )
 
     @tag("batch_pages")
     def test_custom_spawn_clears_pretrained_worker_selection(self):
@@ -393,6 +471,92 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             TRIAL_ONBOARDING_TARGET_AGENT_UI,
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+
+@tag("batch_pages")
+class SolutionCtaCopyTests(TestCase):
+    @staticmethod
+    def _normalized_button_text(button) -> str:
+        return " ".join(
+            segment for segment in button.stripped_strings if segment and segment != "→"
+        ).strip()
+
+    @tag("batch_pages")
+    def test_solution_cta_text_changes_for_authenticated_users(self):
+        unauth_recruiting = self.client.get("/solutions/recruiting/")
+        self.assertEqual(unauth_recruiting.status_code, 200)
+        recruiting_soup = BeautifulSoup(unauth_recruiting.content, "html.parser")
+        recruiting_source = recruiting_soup.find("input", {"name": "source_page", "value": "recruiting_hero"})
+        self.assertIsNotNone(recruiting_source)
+        recruiting_form = recruiting_source.find_parent("form")
+        self.assertIsNotNone(recruiting_form)
+        recruiting_button = recruiting_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(recruiting_button)
+        self.assertEqual(self._normalized_button_text(recruiting_button), "Start Free Trial")
+
+        unauth_sales = self.client.get("/solutions/sales/")
+        self.assertEqual(unauth_sales.status_code, 200)
+        sales_soup = BeautifulSoup(unauth_sales.content, "html.parser")
+        sales_source = sales_soup.find("input", {"name": "source_page", "value": "sales_hero"})
+        self.assertIsNotNone(sales_source)
+        sales_form = sales_source.find_parent("form")
+        self.assertIsNotNone(sales_form)
+        sales_button = sales_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(sales_button)
+        self.assertEqual(self._normalized_button_text(sales_button), "Start Free Trial")
+
+        unauth_engineering = self.client.get("/solutions/engineering/")
+        self.assertEqual(unauth_engineering.status_code, 200)
+        engineering_soup = BeautifulSoup(unauth_engineering.content, "html.parser")
+        engineering_form = engineering_soup.find("form", {"action": reverse("pages:engineering_pro_signup")})
+        self.assertIsNotNone(engineering_form)
+        engineering_button = engineering_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(engineering_button)
+        self.assertEqual(self._normalized_button_text(engineering_button), "Start Free Trial")
+
+        user = get_user_model().objects.create_user(
+            username="solution_cta_auth@example.com",
+            email="solution_cta_auth@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        auth_recruiting = self.client.get("/solutions/recruiting/")
+        self.assertEqual(auth_recruiting.status_code, 200)
+        auth_recruiting_soup = BeautifulSoup(auth_recruiting.content, "html.parser")
+        auth_recruiting_source = auth_recruiting_soup.find(
+            "input",
+            {"name": "source_page", "value": "recruiting_hero"},
+        )
+        self.assertIsNotNone(auth_recruiting_source)
+        auth_recruiting_form = auth_recruiting_source.find_parent("form")
+        self.assertIsNotNone(auth_recruiting_form)
+        auth_recruiting_button = auth_recruiting_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(auth_recruiting_button)
+        self.assertEqual(self._normalized_button_text(auth_recruiting_button), "Spawn Agent")
+
+        auth_sales = self.client.get("/solutions/sales/")
+        self.assertEqual(auth_sales.status_code, 200)
+        auth_sales_soup = BeautifulSoup(auth_sales.content, "html.parser")
+        auth_sales_source = auth_sales_soup.find("input", {"name": "source_page", "value": "sales_hero"})
+        self.assertIsNotNone(auth_sales_source)
+        auth_sales_form = auth_sales_source.find_parent("form")
+        self.assertIsNotNone(auth_sales_form)
+        auth_sales_button = auth_sales_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(auth_sales_button)
+        self.assertEqual(self._normalized_button_text(auth_sales_button), "Spawn Agent")
+
+        auth_engineering = self.client.get("/solutions/engineering/")
+        self.assertEqual(auth_engineering.status_code, 200)
+        auth_engineering_soup = BeautifulSoup(auth_engineering.content, "html.parser")
+        auth_engineering_form = auth_engineering_soup.find(
+            "form",
+            {"action": reverse("pages:engineering_pro_signup")},
+        )
+        self.assertIsNotNone(auth_engineering_form)
+        auth_engineering_button = auth_engineering_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(auth_engineering_button)
+        self.assertEqual(self._normalized_button_text(auth_engineering_button), "Get API Keys")
 
 
 @tag("batch_pages")
