@@ -2,7 +2,7 @@ import { useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 
-import type { PlanTier } from '../../stores/subscriptionStore'
+import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { SubscriptionUpgradePlans } from './SubscriptionUpgradePlans'
 
 type SubscriptionUpgradeModalProps = {
@@ -20,11 +20,21 @@ export function SubscriptionUpgradeModal({
   source,
   dismissible = true,
 }: SubscriptionUpgradeModalProps) {
+  const { trialDaysByPlan } = useSubscriptionStore()
   const handleClose = useCallback(() => {
     if (dismissible) {
       onClose()
     }
   }, [dismissible, onClose])
+
+  const isTrialOnboarding = source === 'trial_onboarding'
+  const maxTrialDays = Math.max(trialDaysByPlan.startup, trialDaysByPlan.scale)
+  const title = isTrialOnboarding
+    ? (maxTrialDays > 0 ? `Start ${maxTrialDays}-day Free Trial` : 'Start Free Trial')
+    : 'Upgrade your plan'
+  const subtitle = isTrialOnboarding
+    ? 'Choose your plan to continue'
+    : 'Choose the plan that fits your needs'
 
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
@@ -71,10 +81,10 @@ export function SubscriptionUpgradeModal({
                   id="upgrade-modal-title"
                   className="text-xl font-semibold text-slate-900"
                 >
-                  Upgrade your plan
+                  {title}
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Choose the plan that fits your needs
+                  {subtitle}
                 </p>
               </div>
               {dismissible && (

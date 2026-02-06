@@ -196,6 +196,8 @@
             {% csrf_token %}
             <input type="hidden" name="return_to" id="agent-return-to" value="">
             <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
+            <input type="hidden" name="trial_onboarding" value="1">
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui">
             
             <!-- Charter Input with inline CTA button -->
             <div class="space-y-4">
@@ -289,7 +291,7 @@
                     class="magic-cta group inline-flex items-center justify-center gap-x-2 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 border border-transparent text-white text-sm font-semibold rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500 focus:ring-offset-2 py-3 px-4 shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-[1.02]"
 
                   >
-                    Create Your Worker
+                    Start Free Trial
                     <svg class="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 18l6-6-6-6"></path>
                     </svg>

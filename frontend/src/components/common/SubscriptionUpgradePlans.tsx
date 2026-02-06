@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { Check, Sparkles, Rocket } from 'lucide-react'
 
-import type { PlanTier } from '../../stores/subscriptionStore'
+import { useSubscriptionStore, type PlanTier } from '../../stores/subscriptionStore'
 import { appendReturnTo } from '../../util/returnTo'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
@@ -68,6 +68,7 @@ export function SubscriptionUpgradePlans({
   pricingLinkLabel = 'View full comparison',
   source,
 }: SubscriptionUpgradePlansProps) {
+  const { trialDaysByPlan } = useSubscriptionStore()
   const isCurrentPlan = useCallback((planId: PlanTier) => currentPlan === planId, [currentPlan])
   const isUpgrade = useCallback(
     (planId: PlanTier) => {
@@ -93,6 +94,7 @@ export function SubscriptionUpgradePlans({
   const footerClass = variant === 'inline'
     ? 'mt-4 text-center'
     : 'border-t border-slate-200 bg-white px-6 py-4 sm:px-8'
+  const isTrialOnboarding = source === 'trial_onboarding'
 
   return (
     <>
@@ -101,6 +103,10 @@ export function SubscriptionUpgradePlans({
           {PLANS.map((plan) => {
             const isCurrent = isCurrentPlan(plan.id)
             const canUpgrade = isUpgrade(plan.id)
+            const trialDays = plan.id === 'startup' ? trialDaysByPlan.startup : trialDaysByPlan.scale
+            const ctaLabel = isTrialOnboarding
+              ? (trialDays > 0 ? `Start ${trialDays}-day Free Trial` : 'Start Free Trial')
+              : `Get ${plan.name}`
 
             return (
               <div
@@ -182,7 +188,7 @@ export function SubscriptionUpgradePlans({
                         ) : (
                           <Sparkles className="h-4 w-4" />
                         )}
-                        Get {plan.name}
+                        {ctaLabel}
                       </button>
                     ) : (
                       <span className="inline-flex w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-400">

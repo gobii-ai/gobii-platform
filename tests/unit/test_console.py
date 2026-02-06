@@ -3,6 +3,7 @@ from decimal import Decimal
 from datetime import timedelta
 import shutil
 import tempfile
+from types import SimpleNamespace
 
 from django.utils import timezone
 
@@ -38,6 +39,48 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNotNone(script, "Agent list payload script tag missing")
         self.assertTrue(script.string, "Agent list payload script is empty")
         return json.loads(script.string)
+
+    @tag("batch_console_agents")
+    @patch("console.views.get_stripe_settings")
+    def test_user_plan_api_includes_trial_days(self, mock_get_stripe_settings):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=14,
+            scale_trial_days=30,
+        )
+
+        response = self.client.get(reverse("get_user_plan"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("startup_trial_days"), 14)
+        self.assertEqual(payload.get("scale_trial_days"), 30)
+
+    @tag("batch_console_agents")
+    @patch("console.views.get_stripe_settings")
+    def test_agent_chat_shell_exposes_trial_days_in_data_attributes(self, mock_get_stripe_settings):
+        from api.models import BrowserUseAgent, PersistentAgent
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=9,
+            scale_trial_days=18,
+        )
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Trial Days Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Trial Days Agent",
+            charter="Trial days charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": persistent_agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-startup-trial-days="9"')
+        self.assertContains(response, 'data-scale-trial-days="18"')
 
     @tag("batch_console_agents")
     def test_delete_persistent_agent_also_deletes_browser_agent(self):

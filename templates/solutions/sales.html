@@ -150,8 +150,10 @@
           <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_hero" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-              Get started
+              Start Free Trial
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -247,8 +249,10 @@
               <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="inline-flex">
                 {% csrf_token %}
                 <input type="hidden" name="source_page" value="sales_lead_hunter" />
+                <input type="hidden" name="trial_onboarding" value="1" />
+                <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
                 <button type="submit" class="group/btn inline-flex items-center justify-center gap-2 px-6 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200/50 hover:shadow-xl transition-all duration-200">
-                  Deploy Lead Hunter
+                  Start Free Trial
                   <svg class="w-4 h-4 group-hover/btn:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
                   </svg>
@@ -325,8 +329,10 @@
           <form method="post" action="{% url 'pages:pretrained_worker_hire' 'account-researcher' %}" class="inline-flex">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_account_researcher" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="inline-flex items-center text-sm font-medium text-indigo-600 hover:text-indigo-700">
-              Deploy agent
+              Start Free Trial
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -372,8 +378,10 @@
           <form method="post" action="{% url 'pages:pretrained_worker_hire' 'outreach-agent' %}" class="inline-flex">
             {% csrf_token %}
             <input type="hidden" name="source_page" value="sales_outreach_agent" />
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
             <button type="submit" class="inline-flex items-center text-sm font-medium text-emerald-600 hover:text-emerald-700">
-              Deploy agent
+              Start Free Trial
               <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -671,8 +679,10 @@
       <form method="post" action="{% url 'pages:pretrained_worker_hire' 'lead-hunter' %}" class="w-full sm:w-auto">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="sales_final_cta" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
         <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-300/50 hover:shadow-xl hover:shadow-indigo-300/60 transition-all duration-200 hover:-translate-y-0.5">
-          Get started
+          Start Free Trial
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>

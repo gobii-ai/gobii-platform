@@ -119,6 +119,7 @@ from billing.addons import AddonEntitlementService
 from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
+from util.onboarding import clear_trial_onboarding_intent
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
     get_user_plan,
@@ -435,6 +436,31 @@ def _assign_stripe_api_key() -> str:
         raise ImproperlyConfigured("Stripe secret key missing while billing is enabled.")
     stripe.api_key = key
     return key
+
+
+def _normalize_non_negative_int(value: int | str | None) -> int:
+    if value is None:
+        return 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _get_checkout_trial_days() -> tuple[int, int]:
+    try:
+        stripe_settings = get_stripe_settings()
+    except Exception:
+        logger.warning("Failed to load Stripe settings for checkout trial-day config.", exc_info=True)
+        return 0, 0
+
+    startup_trial_days = _normalize_non_negative_int(
+        getattr(stripe_settings, "startup_trial_days", 0)
+    )
+    scale_trial_days = _normalize_non_negative_int(
+        getattr(stripe_settings, "scale_trial_days", 0)
+    )
+    return startup_trial_days, scale_trial_days
 
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
@@ -845,6 +871,10 @@ class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
     context_object_name = 'api_keys'
     form_class = ApiKeyForm
     success_url = reverse_lazy('api_keys')
+
+    def dispatch(self, request, *args, **kwargs):
+        clear_trial_onboarding_intent(request)
+        return super().dispatch(request, *args, **kwargs)
 
     @tracer.start_as_current_span("CONSOLE API Key List - get_queryset")
     def get_queryset(self):
@@ -1647,6 +1677,8 @@ def get_user_plan_api(request):
     from util.subscription_helper import get_user_plan
     from constants.plans import PlanNames
 
+    startup_trial_days, scale_trial_days = _get_checkout_trial_days()
+
     try:
         plan = get_user_plan(request.user)
         plan_id = str(plan.get("id", "")).lower() if plan else ""
@@ -1659,11 +1691,15 @@ def get_user_plan_api(request):
         return JsonResponse({
             'plan': plan_map.get(plan_id, 'free'),
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
+            'startup_trial_days': startup_trial_days,
+            'scale_trial_days': scale_trial_days,
         })
     except Exception as e:
         return JsonResponse({
             'plan': 'free',
             'is_proprietary_mode': settings.GOBII_PROPRIETARY_MODE,
+            'startup_trial_days': startup_trial_days,
+            'scale_trial_days': scale_trial_days,
             'error': str(e),
         })
 
@@ -5107,10 +5143,13 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         agent = self.object
+        startup_trial_days, scale_trial_days = _get_checkout_trial_days()
         immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
         context["immersive"] = immersive
         context["can_manage_collaborators"] = self.can_manage_collaborators
         context["is_collaborator"] = self.is_collaborator
+        context["startup_trial_days"] = startup_trial_days
+        context["scale_trial_days"] = scale_trial_days
         if immersive:
             context["body_class"] = "min-h-screen bg-white"
 

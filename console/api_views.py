@@ -95,6 +95,7 @@ from api.services.web_sessions import (
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.onboarding import get_trial_onboarding_state
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -247,9 +248,12 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                 except (signing.BadSignature, signing.SignatureExpired):
                     logger.debug("Invalid or expired OAuth charter cookie")
 
+        pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
         payload = {
             "charter": request.session.get("agent_charter"),
             "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
+            "onboarding_target": onboarding_target if pending_onboarding else None,
+            "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
         }
         response = JsonResponse(payload)
         if restored_cookie:

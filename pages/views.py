@@ -36,6 +36,13 @@ from util.subscription_helper import (
     get_user_plan,
 )
 from util.integrations import stripe_status, IntegrationDisabledError
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_API_KEYS,
+    is_truthy_flag,
+    normalize_trial_onboarding_target,
+    set_trial_onboarding_intent,
+)
 from constants.plans import PlanNames
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
@@ -488,6 +495,11 @@ class HomeAgentSpawnView(TemplateView):
         from django.contrib.auth.views import redirect_to_login
         
         form = PersistentAgentCharterForm(request.POST)
+        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
         
         if form.is_valid():
             return_to = normalize_return_to(request, request.POST.get("return_to"))
@@ -531,6 +543,11 @@ class HomeAgentSpawnView(TemplateView):
             if request.user.is_authenticated:
                 # User is already logged in, go directly to agent creation
                 return redirect(next_url)
+            if trial_onboarding_requested:
+                set_trial_onboarding_intent(
+                    request,
+                    target=trial_onboarding_target,
+                )
             # User needs to log in first, then continue to agent creation in the app
             app_redirect_params = {**redirect_params, "spawn": "1"}
             app_next_url = append_query_params(
@@ -624,6 +641,11 @@ class PretrainedWorkerHireView(View):
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
         flow = (request.POST.get("flow") or "").strip().lower()
+        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
         analytics_properties = {
             "source_page": source_page,
             "template_code": template.code,
@@ -662,6 +684,11 @@ class PretrainedWorkerHireView(View):
 
         app_next_url = next_url
         if flow != "pro":
+            if trial_onboarding_requested:
+                set_trial_onboarding_intent(
+                    request,
+                    target=trial_onboarding_target,
+                )
             return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
             app_params = {"spawn": "1"}
             if return_to:
@@ -851,6 +878,31 @@ class EngineeringProSignupView(View):
         return self._handle(request)
 
     def _handle(self, request):
+        trial_onboarding_requested = is_truthy_flag(
+            request.POST.get("trial_onboarding") or request.GET.get("trial_onboarding")
+        )
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target") or request.GET.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_API_KEYS,
+        )
+        if trial_onboarding_requested:
+            if request.user.is_authenticated:
+                return redirect("api_keys")
+            set_trial_onboarding_intent(
+                request,
+                target=trial_onboarding_target,
+            )
+            from django.contrib.auth.views import redirect_to_login
+
+            app_next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                {"spawn": "1"},
+            )
+            return redirect_to_login(
+                next=app_next_url,
+                login_url=_login_url_with_utms(request),
+            )
+
         next_url = reverse("proprietary:pro_checkout")
         request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
         request.session.modified = True

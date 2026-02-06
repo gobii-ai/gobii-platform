@@ -12,6 +12,13 @@ from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from constants.plans import PlanNames
+from util.onboarding import (
+    TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_API_KEYS,
+    TRIAL_ONBOARDING_TARGET_SESSION_KEY,
+)
 
 
 @tag("batch_pages")
@@ -153,6 +160,26 @@ class HomePageTests(TestCase):
         next_params = parse_qs(next_parts.query)
         self.assertEqual(next_params.get("spawn"), ["1"])
         self.assertEqual(params.get("utm_source"), ["newsletter"])
+
+    @tag("batch_pages")
+    def test_home_spawn_trial_onboarding_sets_session_intent(self):
+        response = self.client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
@@ -345,6 +372,112 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
             reverse("agent_quick_spawn"),
         )
+
+    @tag("batch_pages")
+    def test_hire_trial_onboarding_sets_session_intent(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.post(
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": template.code}),
+            {
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+
+@tag("batch_pages")
+class EngineeringProSignupTests(TestCase):
+    @tag("batch_pages")
+    def test_engineering_trial_onboarding_redirects_anon_to_login(self):
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        response = self.client.post(
+            reverse("pages:engineering_pro_signup"),
+            {
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_API_KEYS,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_medium"), ["ads"])
+
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_API_KEYS,
+        )
+        self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
+
+    @tag("batch_pages")
+    def test_engineering_trial_onboarding_redirects_authenticated_to_api_keys(self):
+        user = get_user_model().objects.create_user(
+            email="engineer@test.com",
+            password="pw",
+            username="engineer_user",
+        )
+        self.client.force_login(user)
+
+        response = self.client.post(
+            reverse("pages:engineering_pro_signup"),
+            {
+                "trial_onboarding": "1",
+                "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_API_KEYS,
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("api_keys"))
+
+
+@tag("batch_pages")
+class AgentSpawnIntentApiTests(TestCase):
+    @tag("batch_pages")
+    def test_spawn_intent_includes_trial_onboarding_fields(self):
+        user = get_user_model().objects.create_user(
+            email="spawn-intent@test.com",
+            password="pw",
+            username="spawn_intent_user",
+        )
+        self.client.force_login(user)
+
+        session = self.client.session
+        session["agent_charter"] = "Draft charter"
+        session["agent_preferred_llm_tier"] = "premium"
+        session[TRIAL_ONBOARDING_PENDING_SESSION_KEY] = True
+        session[TRIAL_ONBOARDING_TARGET_SESSION_KEY] = TRIAL_ONBOARDING_TARGET_AGENT_UI
+        session[TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY] = True
+        session.save()
+
+        response = self.client.get(reverse("console_agent_spawn_intent"))
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload.get("charter"), "Draft charter")
+        self.assertEqual(payload.get("preferred_llm_tier"), "premium")
+        self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+        self.assertTrue(payload.get("requires_plan_selection"))
 
 
 @tag("batch_pages")
