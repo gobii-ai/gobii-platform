@@ -109,6 +109,28 @@ class OrganizationInvitesTest(TestCase):
         self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
 
     @tag("batch_organizations")
+    @patch("console.views.logger.warning")
+    def test_invite_validation_htmx_returns_422_and_logs(self, mock_warning):
+        billing = self.org.billing
+        billing.purchased_seats = 0
+        billing.save(update_fields=["purchased_seats"])
+
+        self.client.force_login(self.inviter)
+        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
+        resp = self.client.post(
+            detail_url,
+            {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.OWNER},
+            HTTP_HX_REQUEST="true",
+        )
+
+        self.assertEqual(resp.status_code, 422)
+        self.assertContains(resp, "No seats available", status_code=422)
+        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
+
+        mock_warning.assert_called_once()
+        self.assertIn("Organization invite validation failed", mock_warning.call_args.args[0])
+
+    @tag("batch_organizations")
     def test_invite_blocked_when_pending_invite_exists(self):
         self.client.force_login(self.inviter)
         detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
