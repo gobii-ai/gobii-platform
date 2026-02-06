@@ -23,6 +23,8 @@ from api.models import (
     PersistentAgentEmailEndpoint,
     PersistentAgentMessage,
     PersistentAgentSmsEndpoint,
+    build_web_agent_address,
+    build_web_user_address,
 )
 from api.services.persistent_agents import PersistentAgentProvisioningError, PersistentAgentProvisioningService
 from config import settings
@@ -88,6 +90,7 @@ def create_persistent_agent_from_charter(
     email_enabled: bool,
     sms_enabled: bool,
     preferred_contact_method: str,
+    web_enabled: bool = False,
     preferred_llm_tier_key: str | None = None,
 ) -> AgentCreationResult:
     initial_message = (initial_message or "").strip()
@@ -139,6 +142,8 @@ def create_persistent_agent_from_charter(
     user_contact_email = contact_email if email_enabled else None
     user_contact_sms = None
     sms_preferred = preferred_contact_method == "sms"
+    web_preferred = preferred_contact_method == "web"
+    web_enabled = bool(web_enabled or web_preferred)
 
     preferred_llm_tier = None
     if preferred_llm_tier_key:
@@ -178,8 +183,11 @@ def create_persistent_agent_from_charter(
 
         user_sms_comms_endpoint = None
         user_email_comms_endpoint = None
+        user_web_comms_endpoint = None
         agent_sms_endpoint = None
         agent_email_endpoint = None
+        agent_web_endpoint = None
+        user_web_address = None
 
         if sms_enabled:
             user_primary_sms = get_user_primary_sms_number(user=request.user)
@@ -231,12 +239,48 @@ def create_persistent_agent_from_charter(
                 defaults={"owner_agent": None},
             )
 
+        if web_enabled:
+            user_web_address = build_web_user_address(request.user.id, persistent_agent.id)
+            agent_web_address = build_web_agent_address(persistent_agent.id)
+            user_web_comms_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.WEB,
+                address=user_web_address,
+                defaults={"owner_agent": None, "is_primary": False},
+            )
+            agent_web_comms_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+                channel=CommsChannel.WEB,
+                address=agent_web_address,
+                defaults={
+                    "owner_agent": persistent_agent,
+                    "is_primary": web_preferred,
+                },
+            )
+            web_endpoint_updates = []
+            if agent_web_comms_endpoint.owner_agent_id != persistent_agent.id:
+                agent_web_comms_endpoint.owner_agent = persistent_agent
+                web_endpoint_updates.append("owner_agent")
+            if web_preferred and not agent_web_comms_endpoint.is_primary:
+                agent_web_comms_endpoint.is_primary = True
+                web_endpoint_updates.append("is_primary")
+            if web_endpoint_updates:
+                agent_web_comms_endpoint.save(update_fields=web_endpoint_updates)
+            agent_web_endpoint = agent_web_comms_endpoint
+
         if sms_preferred:
             preferred_endpoint = user_sms_comms_endpoint
             user_contact = user_contact_sms
+            conversation_channel = CommsChannel.SMS.value
+            agent_channel_endpoint = agent_sms_endpoint
+        elif web_preferred:
+            preferred_endpoint = user_web_comms_endpoint
+            user_contact = user_web_address
+            conversation_channel = CommsChannel.WEB.value
+            agent_channel_endpoint = agent_web_endpoint
         else:
             preferred_endpoint = user_email_comms_endpoint
             user_contact = user_contact_email
+            conversation_channel = CommsChannel.EMAIL.value
+            agent_channel_endpoint = agent_email_endpoint
 
         if preferred_endpoint is None or not user_contact:
             raise ValidationError("We could not determine your preferred contact channel.")
@@ -258,7 +302,7 @@ def create_persistent_agent_from_charter(
                 pass
 
         conversation = _get_or_create_conversation(
-            channel=CommsChannel.SMS.value if sms_preferred else CommsChannel.EMAIL.value,
+            channel=conversation_channel,
             address=user_contact,
             owner_agent=persistent_agent,
         )
@@ -275,7 +319,12 @@ def create_persistent_agent_from_charter(
                 user_email_comms_endpoint,
                 PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
             )
-        agent_channel_endpoint = agent_sms_endpoint if sms_preferred else agent_email_endpoint
+        if user_web_comms_endpoint:
+            _ensure_participant(
+                conversation,
+                user_web_comms_endpoint,
+                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
+            )
         if agent_channel_endpoint is not None:
             _ensure_participant(
                 conversation,
@@ -286,6 +335,7 @@ def create_persistent_agent_from_charter(
         PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=preferred_endpoint,
+            to_endpoint=agent_channel_endpoint,
             conversation=conversation,
             body=initial_message,
             owner_agent=persistent_agent,

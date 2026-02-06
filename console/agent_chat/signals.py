@@ -58,6 +58,21 @@ def _send(group: str, message_type: str, payload: dict) -> None:
     async_to_sync(channel_layer.group_send)(group, {"type": message_type, "payload": payload})
 
 
+def emit_agent_profile_update(agent: PersistentAgent) -> None:
+    """Broadcast latest agent identity metadata to connected chat clients."""
+    if not agent or not getattr(agent, "id", None):
+        return
+
+    payload = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name or "Agent",
+        "agent_color_hex": agent.get_display_color(),
+        "agent_avatar_url": agent.get_avatar_url(),
+        "timestamp": timezone.now().isoformat(),
+    }
+    _send(_group_name(agent.id), "agent_profile_event", payload)
+
+
 def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     if not step.agent_id:
         return
@@ -205,6 +220,29 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
         _broadcast_audit_event(str(instance.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgent)
+def broadcast_agent_profile_update(sender, instance: PersistentAgent, created: bool, **kwargs):
+    tracked_fields = {"name", "avatar", "agent_color", "agent_color_id"}
+    update_fields = kwargs.get("update_fields")
+    if not created and update_fields is not None:
+        changed_fields = {str(field) for field in update_fields}
+        if tracked_fields.isdisjoint(changed_fields):
+            return
+
+    def _on_commit():
+        refreshed = (
+            PersistentAgent.objects
+            .filter(id=instance.id)
+            .only("id", "name", "avatar", "agent_color_id")
+            .first()
+        )
+        if refreshed is None:
+            return
+        emit_agent_profile_update(refreshed)
+
+    transaction.on_commit(_on_commit)
 
 
 @receiver(post_save, sender=PersistentAgentSystemStep)

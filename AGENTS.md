@@ -34,6 +34,9 @@ Code quality:
 - Prefer direct settings access (e.g., `settings.MY_SETTING`) instead of `getattr`, since defaults are centralized in `settings.py`.
 - Comments should explain *why* (intent/constraints), not *what* (obvious code behavior).
 
+Task lists:
+- Only create task lists when the work genuinely benefits from tracking multiple independent pieces. For straightforward work, just do it directly without ceremony.
+
 Debugging:
 - Never guess what the issue is. Aim to *prove it* via running unit tests, adding new tests when needed (if it's something that should be covered by unit tests), running one off code with uv run django shell, etc.
 

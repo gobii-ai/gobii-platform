@@ -5,6 +5,7 @@ import asyncio
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
+from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
 from api.models import (
@@ -94,3 +95,16 @@ class AgentChatSignalTests(TestCase):
         payload = timeline.get("payload", {})
         self.assertEqual(payload.get("kind"), "thinking")
         self.assertEqual(payload.get("completionId"), str(completion.id))
+
+    @tag("batch_agent_chat")
+    def test_avatar_update_emits_agent_profile_event(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            self.agent.avatar.save("avatar.png", ContentFile(b"fake-avatar-bytes"), save=False)
+            self.agent.save(update_fields=["avatar"])
+
+        profile_event = self._receive_with_timeout()
+        self.assertEqual(profile_event.get("type"), "agent_profile_event")
+        payload = profile_event.get("payload", {})
+        self.assertEqual(payload.get("agent_id"), str(self.agent.id))
+        self.assertEqual(payload.get("agent_name"), self.agent.name)
+        self.assertIn("/console/agents/", payload.get("agent_avatar_url", ""))

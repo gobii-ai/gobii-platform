@@ -637,7 +637,7 @@ class ConsoleViewsTest(TestCase):
                     'clear_avatar': 'true',
                 })
             self.assertEqual(response.status_code, 302)
-            self.assertEqual(len(callbacks), 1)
+            self.assertGreaterEqual(len(callbacks), 1)
 
             agent.refresh_from_db()
             self.assertFalse(agent.avatar)

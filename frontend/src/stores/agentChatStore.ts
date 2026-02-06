@@ -303,6 +303,12 @@ export type AgentChatState = {
   receiveStreamEvent: (payload: StreamEventPayload) => void
   finalizeStreaming: () => void
   updateProcessing: (snapshot: ProcessingUpdateInput) => void
+  updateAgentIdentity: (update: {
+    agentId?: string | null
+    agentName?: string | null
+    agentColorHex?: string | null
+    agentAvatarUrl?: string | null
+  }) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
@@ -1072,6 +1078,57 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         processingWebTasks: snapshot.webTasks,
         hasUnseenActivity: !state.autoScrollPinned && snapshot.active ? true : state.hasUnseenActivity,
         awaitingResponse: snapshot.active ? false : state.awaitingResponse,
+      }
+    })
+  },
+
+  updateAgentIdentity(update) {
+    set((state) => {
+      const targetAgentId = update.agentId ?? state.agentId
+      if (!targetAgentId) {
+        return state
+      }
+
+      const hasName = Object.prototype.hasOwnProperty.call(update, 'agentName')
+      const hasColor = Object.prototype.hasOwnProperty.call(update, 'agentColorHex')
+      const hasAvatar = Object.prototype.hasOwnProperty.call(update, 'agentAvatarUrl')
+
+      if (!hasName && !hasColor && !hasAvatar) {
+        return state
+      }
+
+      let nextCache = state.agentStateCache
+      const cachedState = state.agentStateCache[targetAgentId]
+      if (cachedState) {
+        nextCache = {
+          ...state.agentStateCache,
+          [targetAgentId]: {
+            ...cachedState,
+            ...(hasName ? { agentName: update.agentName ?? null } : {}),
+            ...(hasColor
+              ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
+              : {}),
+            ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
+          },
+        }
+      }
+
+      const isCurrentAgent = state.agentId === targetAgentId
+      if (!isCurrentAgent && nextCache === state.agentStateCache) {
+        return state
+      }
+
+      return {
+        ...(nextCache !== state.agentStateCache ? { agentStateCache: nextCache } : {}),
+        ...(isCurrentAgent
+          ? {
+            ...(hasName ? { agentName: update.agentName ?? null } : {}),
+            ...(hasColor
+              ? { agentColorHex: update.agentColorHex ? normalizeHexColor(update.agentColorHex) : null }
+              : {}),
+            ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
+          }
+          : {}),
       }
     })
   },

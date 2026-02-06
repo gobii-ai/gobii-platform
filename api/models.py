@@ -4998,6 +4998,30 @@ class PersistentAgent(models.Model):
         null=True,
         help_text="Optional avatar image displayed for this agent.",
     )
+    avatar_charter_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter used to generate or intentionally clear the current avatar state.",
+    )
+    avatar_requested_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter currently pending avatar generation.",
+    )
+    visual_description = models.TextField(
+        blank=True,
+        help_text="Generated detailed visual identity description used to render authentic avatar portraits.",
+    )
+    visual_description_charter_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter used to generate visual_description.",
+    )
+    visual_description_requested_hash = models.CharField(
+        max_length=64,
+        blank=True,
+        help_text="SHA256 of the charter currently pending visual description generation.",
+    )
     mini_description = models.CharField(
         max_length=80,
         blank=True,
@@ -5250,12 +5274,18 @@ class PersistentAgent(models.Model):
         file_field = getattr(self, "avatar", None)
         if not file_field or not getattr(file_field, "name", None) or not self.pk:
             return None
+        version = hashlib.sha256(file_field.name.encode("utf-8")).hexdigest()[:12]
         try:
             from django.urls import reverse, NoReverseMatch
-            return reverse("agent_avatar", kwargs={"pk": self.pk})
+            base_url = reverse("agent_avatar", kwargs={"pk": self.pk})
+            return f"{base_url}?v={version}" if version else base_url
         except NoReverseMatch:
             try:
-                return file_field.url
+                direct_url = file_field.url
+                if version:
+                    separator = "&" if "?" in direct_url else "?"
+                    return f"{direct_url}{separator}v={version}"
+                return direct_url
             except ValueError:
                 return None
 
@@ -8395,6 +8425,7 @@ class PersistentAgentCompletion(models.Model):
         TAG = ("tag", "Tag Generation")
         SHORT_DESCRIPTION = ("short_description", "Short Description")
         MINI_DESCRIPTION = ("mini_description", "Mini Description")
+        AVATAR_VISUAL_DESCRIPTION = ("avatar_visual_description", "Avatar Visual Description")
         TOOL_SEARCH = ("tool_search", "Tool Search")
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
         OTHER = ("other", "Other")

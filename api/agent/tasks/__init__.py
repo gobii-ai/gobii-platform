@@ -12,3 +12,7 @@ from .email_polling import poll_imap_inboxes, poll_imap_inbox  # noqa: F401
 from .short_description import generate_agent_short_description_task  # noqa: F401
 from .mini_description import generate_agent_mini_description_task  # noqa: F401
 from .agent_tags import generate_agent_tags_task  # noqa: F401
+from .agent_avatar import (  # noqa: F401
+    generate_agent_avatar_task,
+    generate_agent_visual_description_task,
+)

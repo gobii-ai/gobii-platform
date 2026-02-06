@@ -60,8 +60,14 @@ from api.agent.core.llm_config import (
     get_llm_tier_ranks,
     max_allowed_tier_for_plan,
 )
-from api.agent.short_description import build_listing_description, build_mini_description, \
-    maybe_schedule_short_description
+from api.agent.avatar import maybe_schedule_agent_avatar
+from api.agent.short_description import (
+    build_listing_description,
+    build_mini_description,
+    compute_charter_hash,
+    maybe_schedule_mini_description,
+    maybe_schedule_short_description,
+)
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_limits import (
     get_agent_credit_multiplier,
@@ -4486,10 +4492,18 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if avatar_file:
                     agent.avatar = avatar_file
                     agent_fields_to_update.append('avatar')
+                    agent.avatar_charter_hash = compute_charter_hash(agent.charter or "")
+                    agent.avatar_requested_hash = ""
+                    agent_fields_to_update.append('avatar_charter_hash')
+                    agent_fields_to_update.append('avatar_requested_hash')
                     avatar_changed = True
                 elif clear_avatar_flag and agent.avatar:
                     agent.avatar = None
                     agent_fields_to_update.append('avatar')
+                    agent.avatar_charter_hash = compute_charter_hash(agent.charter or "")
+                    agent.avatar_requested_hash = ""
+                    agent_fields_to_update.append('avatar_charter_hash')
+                    agent_fields_to_update.append('avatar_requested_hash')
                     avatar_changed = True
 
                 if browser_agent is not None:
@@ -4525,10 +4539,24 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                                 agent.id,
                             )
                         try:
+                            maybe_schedule_mini_description(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule mini description generation after charter update for agent %s",
+                                agent.id,
+                            )
+                        try:
                             maybe_schedule_agent_tags(agent)
                         except Exception:
                             logger.exception(
                                 "Failed to schedule tag generation after charter update for agent %s",
+                                agent.id,
+                            )
+                        try:
+                            maybe_schedule_agent_avatar(agent)
+                        except Exception:
+                            logger.exception(
+                                "Failed to schedule avatar generation after charter update for agent %s",
                                 agent.id,
                             )
 

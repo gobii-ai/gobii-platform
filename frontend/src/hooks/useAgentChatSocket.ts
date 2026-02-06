@@ -63,19 +63,25 @@ function isPageActive(): boolean {
 
 export function useAgentChatSocket(
   agentId: string | null,
-  options: { onCreditEvent?: (payload: Record<string, unknown>) => void } = {},
+  options: {
+    onCreditEvent?: (payload: Record<string, unknown>) => void
+    onAgentProfileEvent?: (payload: Record<string, unknown>) => void
+  } = {},
 ): AgentChatSocketSnapshot {
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
+  const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
   const refreshLatestRef = useRef(useAgentChatStore.getState().refreshLatest)
   const refreshProcessingRef = useRef(useAgentChatStore.getState().refreshProcessing)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
+  const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
 
   useEffect(() =>
     useAgentChatStore.subscribe((state) => {
       receiveEventRef.current = state.receiveRealtimeEvent
       updateProcessingRef.current = state.updateProcessing
+      updateAgentIdentityRef.current = state.updateAgentIdentity
       receiveStreamRef.current = state.receiveStreamEvent
       refreshLatestRef.current = state.refreshLatest
       refreshProcessingRef.current = state.refreshProcessing
@@ -84,7 +90,8 @@ export function useAgentChatSocket(
 
   useEffect(() => {
     creditEventRef.current = options.onCreditEvent ?? null
-  }, [options.onCreditEvent])
+    profileEventRef.current = options.onAgentProfileEvent ?? null
+  }, [options.onCreditEvent, options.onAgentProfileEvent])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -437,6 +444,28 @@ export function useAgentChatSocket(
             updateProcessingRef.current(payload.payload as Partial<ProcessingSnapshot>)
           } else if (payload?.type === 'stream.event' && payload.payload) {
             receiveStreamRef.current(payload.payload)
+          } else if (payload?.type === 'agent.profile' && payload.payload) {
+            const profilePayload = payload.payload as Record<string, unknown>
+            const nextIdentity: {
+              agentId?: string | null
+              agentName?: string | null
+              agentColorHex?: string | null
+              agentAvatarUrl?: string | null
+            } = {}
+            if (typeof profilePayload.agent_id === 'string') {
+              nextIdentity.agentId = profilePayload.agent_id
+            }
+            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_name')) {
+              nextIdentity.agentName = typeof profilePayload.agent_name === 'string' ? profilePayload.agent_name : null
+            }
+            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_color_hex')) {
+              nextIdentity.agentColorHex = typeof profilePayload.agent_color_hex === 'string' ? profilePayload.agent_color_hex : null
+            }
+            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_avatar_url')) {
+              nextIdentity.agentAvatarUrl = typeof profilePayload.agent_avatar_url === 'string' ? profilePayload.agent_avatar_url : null
+            }
+            updateAgentIdentityRef.current(nextIdentity)
+            profileEventRef.current?.(profilePayload)
           } else if (payload?.type === 'credit.event' && payload.payload) {
             creditEventRef.current?.(payload.payload as Record<string, unknown>)
           }

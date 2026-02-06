@@ -99,6 +99,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onShare?: () => void
   onSendMessage?: (body: string, attachments?: File[]) => void | Promise<void>
   onComposerFocus?: () => void
+  autoScrollPinned?: boolean
   isNearBottom?: boolean
   hasUnseenActivity?: boolean
   timelineRef?: Ref<HTMLDivElement>
@@ -201,6 +202,7 @@ export function AgentChatLayout({
   onShare,
   onSendMessage,
   onComposerFocus,
+  autoScrollPinned = true,
   isNearBottom = true,
   hasUnseenActivity = false,
   timelineRef,
@@ -446,10 +448,10 @@ export function AgentChatLayout({
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showBottomSentinel = !initialLoading && !hasMoreNewer
-  const showLoadOlderButton = !initialLoading && (hasMoreOlder || loadingOlder)
-  const showLoadNewerButton = !initialLoading && (hasMoreNewer || loadingNewer)
-
-  const showJumpButton = hasMoreNewer || hasUnseenActivity || !isNearBottom
+  const hasTimelineEvents = events.length > 0
+  const showLoadOlderButton = !initialLoading && hasTimelineEvents && (hasMoreOlder || loadingOlder)
+  const showLoadNewerButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || loadingNewer)
+  const showJumpButton = !initialLoading && hasTimelineEvents && (hasMoreNewer || hasUnseenActivity || (!autoScrollPinned && !isNearBottom))
 
   const showBanner = Boolean(agentName)
   const composerPalette = useMemo(() => buildAgentComposerPalette(agentColorHex), [agentColorHex])
@@ -568,7 +570,7 @@ export function AgentChatLayout({
           style={composerPalette.cssVars}
         >
           {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={isNearBottom ? 'true' : 'false'}>
+          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
             {/* Spacer pushes content to bottom when there's extra space */}
             <div id="timeline-spacer" aria-hidden="true" />
             <div id="timeline-inner">

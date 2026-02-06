@@ -1780,17 +1780,16 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         preferred_llm_tier_key = (body.get("preferred_llm_tier") or "").strip() or None
 
         contact_email = (request.user.email or "").strip()
-        if not contact_email:
-            return JsonResponse({"error": "Please add an email address to continue"}, status=400)
 
         try:
             result = create_persistent_agent_from_charter(
                 request,
                 initial_message=initial_message,
                 contact_email=contact_email,
-                email_enabled=True,
+                email_enabled=bool(contact_email),
                 sms_enabled=False,
-                preferred_contact_method="email",
+                preferred_contact_method="web",
+                web_enabled=True,
                 preferred_llm_tier_key=preferred_llm_tier_key,
             )
         except ValidationError as exc:

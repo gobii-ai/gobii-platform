@@ -2364,13 +2364,15 @@ class PersistentAgentAdmin(admin.ModelAdmin):
         'message_count', 'created_at'
     )
     list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'execution_environment', 'created_at')
-    search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description')
+    search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description', 'visual_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
         'id', 'ownership_scope', 'created_at', 'updated_at',
         'browser_use_agent_link', 'agent_actions', 'messages_summary_link', 'audit_link',
         'last_expired_at', 'sleep_email_sent_at',
         'short_description', 'short_description_charter_hash', 'short_description_requested_hash',
+        'avatar_charter_hash', 'avatar_requested_hash',
+        'visual_description', 'visual_description_charter_hash', 'visual_description_requested_hash',
     )
     inlines = [
         PersistentAgentCommsEndpointInline,
@@ -2392,7 +2394,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
             'fields': (
                 'id', 'name', 'user', 'organization', 'ownership_scope',
                 'charter', 'short_description', 'short_description_charter_hash',
-                'short_description_requested_hash', 'created_at', 'updated_at',
+                'short_description_requested_hash', 'avatar',
+                'avatar_charter_hash', 'avatar_requested_hash',
+                'visual_description', 'visual_description_charter_hash',
+                'visual_description_requested_hash', 'created_at', 'updated_at',
             )
         }),
         ('Configuration', {

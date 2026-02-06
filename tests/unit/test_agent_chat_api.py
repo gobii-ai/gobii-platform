@@ -101,6 +101,74 @@ class AgentChatAPITests(TestCase):
         self.client.force_login(self.user)
 
     @tag("batch_agent_chat")
+    def test_quick_create_prefers_web_channel(self):
+        message_text = "Plan my weekly operating cadence"
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": message_text, "preferred_llm_tier": "standard"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_contact_endpoint)
+        self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.WEB)
+
+        expected_sender = build_web_user_address(self.user.id, created_agent.id)
+        expected_recipient = build_web_agent_address(created_agent.id)
+        self.assertEqual(created_agent.preferred_contact_endpoint.address, expected_sender)
+
+        seeded_message = (
+            PersistentAgentMessage.objects.filter(owner_agent=created_agent, body=message_text)
+            .order_by("-timestamp")
+            .first()
+        )
+        self.assertIsNotNone(seeded_message)
+        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(seeded_message.from_endpoint.address, expected_sender)
+        self.assertIsNotNone(seeded_message.to_endpoint)
+        self.assertEqual(seeded_message.to_endpoint.address, expected_recipient)
+        self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(seeded_message.conversation.address, expected_sender)
+
+    @tag("batch_agent_chat")
+    def test_quick_create_without_account_email(self):
+        user_model = get_user_model()
+        no_email_user = user_model.objects.create_user(
+            username="quick-create-no-email",
+            email="",
+            password="password123",
+        )
+        client = Client()
+        client.force_login(no_email_user)
+
+        message_text = "Build a deeply reliable research assistant"
+        response = client.post(
+            "/console/api/agents/create/",
+            data=json.dumps({"message": message_text, "preferred_llm_tier": "standard"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        self.assertIsNotNone(created_agent.preferred_contact_endpoint)
+        self.assertEqual(created_agent.preferred_contact_endpoint.channel, CommsChannel.WEB)
+
+        expected_sender = build_web_user_address(no_email_user.id, created_agent.id)
+        self.assertEqual(created_agent.preferred_contact_endpoint.address, expected_sender)
+
+        seeded_message = (
+            PersistentAgentMessage.objects.filter(owner_agent=created_agent, body=message_text)
+            .order_by("-timestamp")
+            .first()
+        )
+        self.assertIsNotNone(seeded_message)
+        self.assertEqual(seeded_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
+
+    @tag("batch_agent_chat")
     def test_timeline_endpoint_returns_expected_events(self):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
