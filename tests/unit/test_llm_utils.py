@@ -1,14 +1,14 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, override_settings, tag
+from django.test import TestCase, override_settings, tag
 import litellm
 
-from api.agent.core.llm_utils import run_completion
+from api.agent.core.llm_utils import InvalidLiteLLMResponseError, run_completion
 from tests.utils.token_usage import make_completion_response
 
 
-class RunCompletionReasoningTests(SimpleTestCase):
+class RunCompletionReasoningTests(TestCase):
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_reasoning_effort_omitted_when_not_supported(self, mock_completion):
@@ -110,3 +110,36 @@ class RunCompletionReasoningTests(SimpleTestCase):
 
         self.assertIs(result, non_empty_response)
         self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_retries_on_forbidden_marker_response(self, mock_completion):
+        forbidden_response = make_completion_response(content="ok <\uFF5CDSML\uFF5Cfunction_calls>")
+        valid_response = make_completion_response(content="All clear")
+        mock_completion.side_effect = [forbidden_response, valid_response]
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+        )
+
+        self.assertIs(result, valid_response)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_raises_on_forbidden_marker_response(self, mock_completion):
+        forbidden_response = make_completion_response(content="ok <\uFF5CDSML\uFF5Cfunction_calls>")
+        mock_completion.return_value = forbidden_response
+
+        with self.assertRaises(InvalidLiteLLMResponseError):
+            run_completion(
+                model="mock-model",
+                messages=[],
+                params={},
+            )
+
+        self.assertEqual(mock_completion.call_count, 1)
