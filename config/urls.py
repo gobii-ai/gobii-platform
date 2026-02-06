@@ -210,6 +210,7 @@ from console.views import (
     task_detail_view,
     AgentEmailSettingsView,
     AgentFilesView,
+    console_billing_update,
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
@@ -254,6 +255,7 @@ urlpatterns = [
 
     path("console/billing/", BillingView.as_view(), name="billing"),
     path("console/billing/portal/", BillingPortalView.as_view(), name="billing_portal"),
+    path("console/api/billing/update/", console_billing_update, name="console_billing_update"),
     path("console/profile/", ProfileView.as_view(), name="profile"),
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
