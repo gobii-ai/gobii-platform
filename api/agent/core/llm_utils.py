@@ -22,36 +22,28 @@ _HINT_KEYS = (
 logger = logging.getLogger(__name__)
 
 
-class EmptyLiteLLMResponseError(RuntimeError):
+class LiteLLMResponseError(RuntimeError):
+    """Base class for LiteLLM response validation errors."""
+
+    def __init__(self, message: str, *, model: str | None = None, provider: str | None = None) -> None:
+        details = []
+        if provider:
+            details.append(f"provider={provider}")
+        if model:
+            details.append(f"model={model}")
+        if details:
+            message = f"{message} ({', '.join(details)})"
+        super().__init__(message)
+        self.model = model
+        self.provider = provider
+
+
+class EmptyLiteLLMResponseError(LiteLLMResponseError):
     """Raised when LiteLLM returns a response without content, reasoning, or tools."""
 
-    def __init__(self, message: str, *, model: str | None = None, provider: str | None = None) -> None:
-        details = []
-        if provider:
-            details.append(f"provider={provider}")
-        if model:
-            details.append(f"model={model}")
-        if details:
-            message = f"{message} ({', '.join(details)})"
-        super().__init__(message)
-        self.model = model
-        self.provider = provider
 
-
-class InvalidLiteLLMResponseError(RuntimeError):
+class InvalidLiteLLMResponseError(LiteLLMResponseError):
     """Raised when LiteLLM returns a response containing forbidden markers."""
-
-    def __init__(self, message: str, *, model: str | None = None, provider: str | None = None) -> None:
-        details = []
-        if provider:
-            details.append(f"provider={provider}")
-        if model:
-            details.append(f"model={model}")
-        if details:
-            message = f"{message} ({', '.join(details)})"
-        super().__init__(message)
-        self.model = model
-        self.provider = provider
 
 
 _RETRYABLE_ERRORS = (
@@ -185,9 +177,7 @@ def _response_has_forbidden_markers(response: Any) -> bool:
     if _contains_forbidden_marker(content_text):
         return True
     reasoning_text = extract_reasoning_content(response)
-    if isinstance(reasoning_text, str) and _contains_forbidden_marker(reasoning_text):
-        return True
-    return False
+    return isinstance(reasoning_text, str) and _contains_forbidden_marker(reasoning_text)
 
 
 def is_empty_litellm_response(response: Any) -> bool:
