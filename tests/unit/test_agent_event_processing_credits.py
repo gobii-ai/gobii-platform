@@ -44,11 +44,6 @@ class PersistentAgentCreditGateTests(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._short_desc_patcher = patch(
-            "api.agent.tasks.short_description.generate_agent_short_description_task.delay",
-            return_value=None,
-        )
-        cls._short_desc_patcher.start()
         cls._mini_desc_patcher = patch(
             "api.agent.tasks.mini_description.generate_agent_mini_description_task.delay",
             return_value=None,
@@ -62,7 +57,6 @@ class PersistentAgentCreditGateTests(TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls._short_desc_patcher.stop()
         cls._mini_desc_patcher.stop()
         cls._tags_patcher.stop()
         super().tearDownClass()

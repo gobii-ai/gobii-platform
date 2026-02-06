@@ -4,7 +4,7 @@ export type AgentRosterEntry = {
   avatarUrl: string | null
   displayColorHex: string | null
   isActive: boolean
-  shortDescription: string
+  miniDescription: string
   isOrgOwned?: boolean
   isCollaborator?: boolean
   canManageAgent?: boolean

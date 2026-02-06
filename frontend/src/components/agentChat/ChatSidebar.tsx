@@ -46,7 +46,7 @@ export const ChatSidebar = memo(function ChatSidebar({
     return agents.filter(
       (agent) =>
         agent.name?.toLowerCase().includes(query) ||
-        agent.shortDescription?.toLowerCase().includes(query),
+        agent.miniDescription?.toLowerCase().includes(query),
     )
   }, [agents, searchQuery])
 

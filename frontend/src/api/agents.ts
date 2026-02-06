@@ -22,7 +22,7 @@ type AgentRosterPayload = {
     avatar_url: string | null
     display_color_hex: string | null
     is_active: boolean
-    short_description: string
+    mini_description: string
     is_org_owned: boolean
     is_collaborator: boolean
     can_manage_agent: boolean
@@ -44,7 +44,7 @@ export async function fetchAgentRoster(
     avatarUrl: agent.avatar_url,
     displayColorHex: agent.display_color_hex,
     isActive: agent.is_active,
-    shortDescription: agent.short_description,
+    miniDescription: agent.mini_description,
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,
     canManageAgent: agent.can_manage_agent,

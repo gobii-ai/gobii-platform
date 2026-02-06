@@ -953,7 +953,7 @@ export function AgentChatPage({
       avatarUrl: resolvedAvatarUrl,
       displayColorHex: resolvedAgentColorHex ?? null,
       isActive: true,
-      shortDescription: '',
+      miniDescription: '',
       isOrgOwned: false,
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
@@ -1122,7 +1122,7 @@ export function AgentChatPage({
             avatarUrl: null,
             displayColorHex: null,
             isActive: true,
-            shortDescription: '',
+            miniDescription: '',
             email: createdAgentEmail,
           }),
         )

@@ -173,8 +173,8 @@ export function AgentListItem({
       {showMeta ? (
         <span className={styles.metaClass}>
           <span className={styles.nameClass}>{agent.name || 'Agent'}</span>
-          {agent.shortDescription ? (
-            <span className={styles.descClass}>{agent.shortDescription}</span>
+          {agent.miniDescription ? (
+            <span className={styles.descClass}>{agent.miniDescription}</span>
           ) : !agent.isActive ? (
             <span className={styles.stateClass}>Paused</span>
           ) : null}

@@ -10,7 +10,7 @@ from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
 
 from api.agent.core.llm_config import default_preferred_tier_for_owner
-from api.agent.short_description import maybe_schedule_short_description
+from api.agent.short_description import maybe_schedule_mini_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.models import (
     BrowserUseAgent,
@@ -221,10 +221,10 @@ class PersistentAgentProvisioningService:
 
             def _schedule_charter_artifacts() -> None:
                 try:
-                    maybe_schedule_short_description(persistent_agent)
+                    maybe_schedule_mini_description(persistent_agent)
                 except Exception:
                     logger.exception(
-                        "Failed to schedule short description generation during provisioning for agent %s",
+                        "Failed to schedule mini description generation during provisioning for agent %s",
                         persistent_agent.id,
                     )
                 try:

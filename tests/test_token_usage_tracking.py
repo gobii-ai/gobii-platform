@@ -18,7 +18,6 @@ from api.agent.core.event_processing import _completion_with_failover
 from api.agent.core.compaction import llm_summarise_comms
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.tasks.agent_tags import _generate_via_llm as generate_tags_via_llm
-from api.agent.tasks.short_description import _generate_via_llm as generate_short_desc_via_llm
 from api.agent.tasks.mini_description import _generate_via_llm as generate_mini_desc_via_llm
 from api.agent.tools.search_tools import _search_with_llm
 from tests.utils.token_usage import make_completion_response
@@ -378,29 +377,6 @@ class TokenUsageTrackingTest(TestCase):
         ).latest("created_at")
         self.assertEqual(completion.llm_model, "tag-model")
         self.assertEqual(completion.total_tokens, 10)
-
-    @patch("api.agent.tasks.short_description.run_completion")
-    @patch("api.agent.tasks.short_description.get_summarization_llm_config")
-    def test_short_description_completion_logged(self, mock_config, mock_run_completion):
-        mock_config.return_value = ("provider-key", "short-model", {})
-        mock_run_completion.return_value = make_completion_response(
-            content="Short summary",
-            prompt_tokens=6,
-            completion_tokens=3,
-            cached_tokens=1,
-            provider="provider-key",
-            model="short-model",
-        )
-
-        result = generate_short_desc_via_llm(self.agent, self.agent.charter)
-
-        self.assertEqual(result, "Short summary")
-        completion = PersistentAgentCompletion.objects.filter(
-            agent=self.agent,
-            completion_type=PersistentAgentCompletion.CompletionType.SHORT_DESCRIPTION,
-        ).latest("created_at")
-        self.assertEqual(completion.total_tokens, 9)
-        self.assertEqual(completion.llm_provider, "provider-key")
 
     @patch("api.agent.tasks.mini_description.run_completion")
     @patch("api.agent.tasks.mini_description.get_summarization_llm_config")

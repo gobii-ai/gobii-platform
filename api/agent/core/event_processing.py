@@ -71,10 +71,7 @@ from .token_usage import (
     set_usage_span_attributes,
     usage_attribute as _usage_attribute,
 )
-from ..short_description import (
-    maybe_schedule_mini_description,
-    maybe_schedule_short_description,
-)
+from ..short_description import maybe_schedule_mini_description
 from ..tags import maybe_schedule_agent_tags
 from tasks.services import TaskCreditService
 from util.tool_costs import (
@@ -2582,14 +2579,6 @@ def _process_agent_events_locked(
         # Extract routing profile ID for metadata tasks
         routing_profile = get_current_eval_routing_profile()
         routing_profile_id = str(routing_profile.id) if routing_profile else None
-
-        try:
-            maybe_schedule_short_description(agent, routing_profile_id=routing_profile_id)
-        except Exception:
-            logger.exception(
-                "Failed to evaluate short description scheduling for agent %s",
-                persistent_agent_id,
-            )
 
         try:
             maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)

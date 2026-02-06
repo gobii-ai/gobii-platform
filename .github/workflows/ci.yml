@@ -206,8 +206,8 @@ jobs:
             tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
-          - batch: agent_short_description
-            tag: batch_agent_short_description
+          - batch: agent_mini_description
+            tag: batch_agent_mini_description
           - batch: agent_colors
             tag: batch_agent_colors
           - batch: agent_tags

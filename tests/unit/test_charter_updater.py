@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from unittest.mock import patch
@@ -28,11 +26,11 @@ class CharterUpdaterToolTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
-    def test_execute_update_charter_schedules_short_description(self) -> None:
+    def test_execute_update_charter_schedules_mini_description(self) -> None:
         new_charter = "Provide executive summaries"
 
         with patch(
-            "api.agent.tools.charter_updater.maybe_schedule_short_description",
+            "api.agent.tools.charter_updater.maybe_schedule_mini_description",
             return_value=True,
         ) as mock_schedule:
             response = execute_update_charter(

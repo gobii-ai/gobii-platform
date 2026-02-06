@@ -2510,8 +2510,8 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
                 else "pending"
             )
             desc_part = ""
-            if counterpart.short_description:
-                desc_part = f" - {counterpart.short_description}"
+            if counterpart.mini_description:
+                desc_part = f" - {counterpart.mini_description}"
             peer_lines.append(
                 "- {} (id: {}){}| quota {} msgs / {} h | remaining: {} | next reset: {}".format(
                     counterpart.name,

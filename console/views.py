@@ -61,7 +61,7 @@ from api.agent.core.llm_config import (
     max_allowed_tier_for_plan,
 )
 from api.agent.short_description import build_listing_description, build_mini_description, \
-    maybe_schedule_short_description
+    maybe_schedule_mini_description
 from api.agent.tags import maybe_schedule_agent_tags
 from api.services.daily_credit_limits import (
     get_agent_credit_multiplier,
@@ -4518,10 +4518,10 @@ class AgentDetailView(ConsoleViewMixin, DetailView):
                 if 'charter' in agent_fields_to_update:
                     def _schedule_charter_artifacts() -> None:
                         try:
-                            maybe_schedule_short_description(agent)
+                            maybe_schedule_mini_description(agent)
                         except Exception:
                             logger.exception(
-                                "Failed to schedule short description generation after charter update for agent %s",
+                                "Failed to schedule mini description generation after charter update for agent %s",
                                 agent.id,
                             )
                         try:

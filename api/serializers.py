@@ -412,7 +412,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'id',
             'name',
             'charter',
-            'short_description',
+            'mini_description',
             'schedule',
             'schedule_snapshot',
             'is_active',
@@ -436,7 +436,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = (
             'id',
-            'short_description',
+            'mini_description',
             'last_interaction_at',
             'created_at',
             'updated_at',

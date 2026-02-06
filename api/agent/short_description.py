@@ -1,5 +1,4 @@
-"""Utilities for managing short descriptions of persistent agents."""
-from __future__ import annotations
+"""Utilities for managing mini descriptions of persistent agents."""
 
 import hashlib
 import logging
@@ -45,14 +44,6 @@ def _truncate_words(text: str, max_words: int) -> str:
     return " ".join(limited)
 
 
-def prepare_short_description(text: str, max_length: int = 160) -> str:
-    """Normalize and truncate LLM output for storage/display."""
-    normalized = _normalize_text(text)
-    if not normalized:
-        return ""
-    return _truncate_text(normalized, max_length)
-
-
 def prepare_mini_description(text: str, *, max_words: int = 5, max_length: int = 60) -> str:
     """Normalize and aggressively trim text to a short word phrase."""
     normalized = _normalize_text(text)
@@ -76,15 +67,11 @@ def build_listing_description(
 ) -> Tuple[str, str]:
     """Return a tuple of (description, source) for UI listings.
 
-    Source values: "short", "charter", or "placeholder".
+    Source values: "mini" or "placeholder".
     """
-    short_desc = prepare_short_description(getattr(agent, "short_description", ""), max_length)
-    if short_desc:
-        return short_desc, "short"
-
-    charter = _normalize_text(getattr(agent, "charter", ""))
-    if charter:
-        return _truncate_text(charter, max_length), "charter"
+    mini_desc = prepare_mini_description(getattr(agent, "mini_description", ""))
+    if mini_desc:
+        return _truncate_text(mini_desc, max_length), "mini"
 
     return fallback_message, "placeholder"
 
@@ -100,58 +87,6 @@ def build_mini_description(
         return mini, "mini"
 
     return fallback_message, "placeholder"
-
-
-def maybe_schedule_short_description(
-    agent: PersistentAgent,
-    routing_profile_id: str | None = None,
-) -> bool:
-    """Schedule short description generation if needed.
-
-    Args:
-        agent: The agent to generate a short description for.
-        routing_profile_id: Optional routing profile ID to use for LLM calls.
-
-    Returns True when a task was enqueued, False otherwise.
-    """
-    charter = (agent.charter or "").strip()
-    if not charter:
-        return False
-
-    charter_hash = compute_charter_hash(charter)
-
-    if agent.short_description and agent.short_description_charter_hash == charter_hash:
-        return False
-
-    if agent.short_description_requested_hash == charter_hash:
-        return False
-
-    updated = PersistentAgent.objects.filter(id=agent.id).update(
-        short_description_requested_hash=charter_hash
-    )
-    if not updated:
-        return False
-
-    try:
-        from api.agent.tasks.short_description import (
-            generate_agent_short_description_task,
-        )
-
-        generate_agent_short_description_task.delay(str(agent.id), charter_hash, routing_profile_id)
-        logger.debug(
-            "Queued short description generation for agent %s (hash=%s)",
-            agent.id,
-            charter_hash,
-        )
-        return True
-    except Exception:
-        logger.exception(
-            "Failed to enqueue short description generation for agent %s", agent.id
-        )
-        PersistentAgent.objects.filter(id=agent.id).update(
-            short_description_requested_hash=""
-        )
-        return False
 
 
 def maybe_schedule_mini_description(
@@ -209,7 +144,5 @@ __all__ = [
     "build_listing_description",
     "compute_charter_hash",
     "prepare_mini_description",
-    "prepare_short_description",
     "maybe_schedule_mini_description",
-    "maybe_schedule_short_description",
 ]

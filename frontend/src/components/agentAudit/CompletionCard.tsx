@@ -59,8 +59,6 @@ export function CompletionCard({
         return 'Step Compaction'
       case 'tag':
         return 'Tag Generation'
-      case 'short_description':
-        return 'Short Description Generation'
       case 'mini_description':
         return 'Mini Description Generation'
       case 'tool_search':

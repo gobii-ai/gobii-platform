@@ -1728,7 +1728,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "avatar_url": agent.get_avatar_url(),
                 "display_color_hex": agent.get_display_color(),
                 "is_active": bool(agent.is_active),
-                "short_description": agent.short_description or "",
+                "mini_description": agent.mini_description or "",
                 "is_org_owned": agent.organization_id is not None,
                 "is_collaborator": agent.id in collaborators_by_agent_id,
                 "can_manage_agent": (
@@ -5715,7 +5715,7 @@ class MCPServerAssignmentsAPIView(LoginRequiredMixin, View):
                 {
                     "id": agent_id,
                     "name": agent.name,
-                    "description": agent.short_description or "",
+                    "description": agent.mini_description or "",
                     "is_active": agent.is_active,
                     "assigned": is_assigned,
                     "organization_id": str(agent.organization_id) if agent.organization_id else None,
