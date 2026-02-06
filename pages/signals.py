@@ -12,6 +12,7 @@ from django.utils.dateparse import parse_datetime
 from django.conf import settings
 from django.db import transaction
 from django.apps import apps
+from django.contrib.auth import get_user_model
 
 from allauth.account.signals import email_confirmed, user_signed_up, user_logged_in, user_logged_out
 from django.dispatch import receiver
@@ -27,6 +28,8 @@ from constants.stripe import (
     ORG_OVERAGE_STATE_DETACHED_PENDING,
 )
 from constants.plans import PlanNames
+from constants.grant_types import GrantTypeChoices
+from dateutil.relativedelta import relativedelta
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -173,6 +176,44 @@ def _normalize_currency_code(currency: Any) -> str | None:
     return None
 
 
+def _trial_paid_period_end(trial_end_dt: datetime | None, current_period_end_dt: datetime | None) -> datetime | None:
+    """Return the end of the first paid period following a trial."""
+    base = trial_end_dt or current_period_end_dt
+    if not base:
+        return None
+    try:
+        return base + relativedelta(months=1)
+    except Exception:
+        return base + timedelta(days=30)
+
+
+def _trial_topoff_amount(
+    *,
+    owner,
+    plan_id: str,
+    monthly_credits: int,
+    as_of: datetime,
+) -> Decimal:
+    TaskCredit = apps.get_model("api", "TaskCredit")
+    UserModel = get_user_model()
+    remaining = Decimal(0)
+    filters = {
+        "plan": plan_id,
+        "grant_type": GrantTypeChoices.PLAN,
+        "additional_task": False,
+        "voided": False,
+        "expiration_date__gte": as_of,
+    }
+    if isinstance(owner, UserModel):
+        filters["user"] = owner
+    else:
+        filters["organization"] = owner
+    credits = TaskCredit.objects.filter(**filters)
+    for credit in credits:
+        remaining += (credit.credits or 0) - (credit.credits_used or 0)
+    return Decimal(monthly_credits) - remaining
+
+
 def _amount_major_units(*candidates: Any) -> float | None:
     """Return the first currency amount (in cents) converted to major units."""
     for cand in candidates:
@@ -234,6 +275,34 @@ def _invoice_lines(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         return []
 
 
+def _coerce_invoice_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    lines = payload.get("lines") if isinstance(payload, Mapping) else None
+    if isinstance(lines, Mapping) and not hasattr(lines, "auto_paging_iter"):
+        try:
+            return stripe.Invoice.construct_from(dict(payload), stripe.api_key)
+        except Exception:
+            logger.warning(
+                "Failed to coerce invoice payload %s to Stripe object",
+                payload.get("id"),
+                exc_info=True,
+            )
+    return payload
+
+
+def _coerce_subscription_payload(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+    items = payload.get("items") if isinstance(payload, Mapping) else None
+    if isinstance(items, Mapping) and not hasattr(items, "auto_paging_iter"):
+        try:
+            return stripe.Subscription.construct_from(dict(payload), stripe.api_key)
+        except Exception:
+            logger.warning(
+                "Failed to coerce subscription payload %s to Stripe object",
+                payload.get("id"),
+                exc_info=True,
+            )
+    return payload
+
+
 def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
     for line in lines:
         price_info = line.get("price") or {}
@@ -255,6 +324,69 @@ def _extract_plan_from_lines(lines: list[Mapping[str, Any]]) -> str | None:
             if plan and plan.get("id"):
                 return plan.get("id")
     return None
+
+
+def _calculate_subscription_value_from_lines(lines: list[Mapping[str, Any]]) -> tuple[float | None, str | None]:
+    """Return estimated total value (in major units) and currency from invoice lines."""
+    candidate = _select_plan_line(lines)
+    if not candidate:
+        return None, None
+
+    price_info = candidate.get("price") or {}
+    if not price_info:
+        price_info = (candidate.get("pricing") or {}).get("price_details") or {}
+
+    currency = price_info.get("currency")
+    amount = price_info.get("unit_amount")
+    if amount is None:
+        amount = price_info.get("unit_amount_decimal")
+    if amount is None:
+        amount = candidate.get("amount") or candidate.get("amount_excluding_tax")
+
+    quantity = candidate.get("quantity")
+    if quantity in (None, ""):
+        quantity = 1
+
+    value = None
+    if amount is not None:
+        try:
+            amount_dec = Decimal(str(amount))
+            quantity_dec = Decimal(str(quantity))
+            value = float((amount_dec * quantity_dec) / Decimal("100"))
+        except (InvalidOperation, TypeError, ValueError):
+            value = None
+
+    if isinstance(currency, str):
+        currency = currency.upper()
+
+    return value, currency
+
+
+def _select_plan_line(lines: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    if not isinstance(lines, list):
+        return None
+
+    plan_price_ids, plan_product_ids = _plan_version_primary_ids()
+    plan_products = {str(cfg.get("product_id")) for cfg in PLAN_CONFIG.values() if cfg.get("product_id")}
+    plan_products |= plan_product_ids
+
+    candidate = None
+    for line in lines:
+        price_info = line.get("price") or {}
+        if not price_info:
+            price_info = (line.get("pricing") or {}).get("price_details") or {}
+        price_id = price_info.get("id") or price_info.get("price")
+        product_id = price_info.get("product")
+        if isinstance(product_id, Mapping):
+            product_id = product_id.get("id")
+
+        if (price_id and str(price_id) in plan_price_ids) or (product_id and str(product_id) in plan_products):
+            return line
+
+        if candidate is None:
+            candidate = line
+
+    return candidate
 
 
 def _extract_subscription_id(payload: Mapping[str, Any], invoice: Invoice | None) -> str | None:
@@ -279,6 +411,18 @@ def _extract_subscription_id(payload: Mapping[str, Any], invoice: Invoice | None
             subscription_id = None
 
     return subscription_id
+
+
+def _line_period_start(lines: list[Mapping[str, Any]]) -> datetime | None:
+    candidate = _select_plan_line(lines)
+    if not candidate:
+        return None
+    period = candidate.get("period") or {}
+    if not isinstance(period, Mapping):
+        return None
+    start = _get_stripe_data_value(period, "start")
+    return _coerce_datetime(start)
+    return None
 
 
 def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
@@ -1106,6 +1250,8 @@ def handle_invoice_payment_failed(event, **kwargs):
 
         stripe.api_key = stripe_key
 
+        payload = _coerce_invoice_payload(payload)
+
         invoice = None
         try:
             invoice = Invoice.sync_from_stripe_data(payload)
@@ -1206,6 +1352,8 @@ def handle_invoice_payment_succeeded(event, **kwargs):
 
         stripe.api_key = stripe_key
 
+        payload = _coerce_invoice_payload(payload)
+
         invoice = None
         try:
             invoice = Invoice.sync_from_stripe_data(payload)
@@ -1281,6 +1429,80 @@ def handle_invoice_payment_succeeded(event, **kwargs):
             span.add_event("analytics_failure")
             logger.exception("Failed to track invoice.payment_succeeded for invoice %s", payload.get("id"))
 
+        billing_reason = payload.get("billing_reason")
+        subscription_obj = getattr(invoice, "subscription", None) if invoice else None
+        subscription_data = getattr(subscription_obj, "stripe_data", {}) if subscription_obj else {}
+        trial_end_dt = _coerce_datetime(_get_stripe_data_value(subscription_data, "trial_end"))
+        line_start_dt = _line_period_start(lines)
+        trial_conversion = bool(
+            billing_reason == "subscription_cycle"
+            and trial_end_dt
+            and line_start_dt
+            and trial_end_dt.date() == line_start_dt.date()
+        )
+
+        try:
+            if trial_conversion and owner_type == "user" and owner:
+                trial_properties = {
+                    "plan": plan_value,
+                    "subscription_id": subscription_id,
+                    "stripe.invoice_id": payload.get("id"),
+                }
+                Analytics.track_event(
+                    user_id=owner.id,
+                    event=AnalyticsEvent.BILLING_TRIAL_CONVERTED,
+                    source=AnalyticsSource.API,
+                    properties=trial_properties,
+                )
+                traits = {"is_trial": False}
+                if plan_value:
+                    traits["plan"] = plan_value
+                Analytics.identify(owner.id, traits)
+        except Exception:
+            logger.exception(
+                "Failed to track trial conversion analytics for invoice %s",
+                payload.get("id"),
+            )
+
+        try:
+            should_subscribe = billing_reason == "subscription_create" or trial_conversion
+            if should_subscribe and owner_type == "user" and owner:
+                marketing_properties = {
+                    "plan": plan_value,
+                    "subscription_id": subscription_id,
+                }
+
+                metadata = {}
+                if subscription_data:
+                    metadata = _coerce_metadata_dict(subscription_data.get("metadata"))
+                if not metadata:
+                    metadata = _coerce_metadata_dict(payload.get("metadata"))
+                event_id_override = metadata.get("gobii_event_id")
+                if isinstance(event_id_override, str) and event_id_override.strip():
+                    marketing_properties["event_id"] = event_id_override.strip()
+
+                value, currency = _calculate_subscription_value_from_lines(lines)
+                ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
+                if value is not None:
+                    marketing_properties["value"] = value * ltv_multiple
+                if currency:
+                    marketing_properties["currency"] = currency
+
+                marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
+
+                capi(
+                    user=owner,
+                    event_name="Subscribe",
+                    properties=marketing_properties,
+                    request=None,
+                    context=_build_marketing_context_from_user(owner) if owner_type == "user" else {},
+                )
+        except Exception:
+            logger.exception(
+                "Failed to enqueue marketing Subscribe event for invoice %s",
+                payload.get("id"),
+            )
+
 @djstripe_receiver(["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted"])
 def handle_subscription_event(event, **kwargs):
     """Update user status and quota based on subscription events."""
@@ -1306,6 +1528,8 @@ def handle_subscription_event(event, **kwargs):
             return
 
         stripe.api_key = stripe_key
+
+        payload = _coerce_subscription_payload(payload)
 
         # Note: do not early-return on hard-deleted payloads; we still need to
         # downgrade the user to the free plan when a subscription is deleted.
@@ -1468,6 +1692,7 @@ def handle_subscription_event(event, **kwargs):
                         owner.id,
                         {
                             'plan': PlanNames.FREE,
+                            'is_trial': False,
                         },
                     )
                 except Exception:
@@ -1538,11 +1763,15 @@ def handle_subscription_event(event, **kwargs):
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
+        trial_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_start"))
+        trial_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_end"))
         cancel_at_dt = _coerce_datetime(_get_stripe_data_value(source_data, "cancel_at"))
         cancel_at_period_end_flag = _coerce_bool(_get_stripe_data_value(source_data, "cancel_at_period_end"))
 
         span.set_attribute('subscription.current_period_start', str(current_period_start_dt))
         span.set_attribute('subscription.current_period_end', str(current_period_end_dt))
+        span.set_attribute('subscription.trial_start', str(trial_start_dt))
+        span.set_attribute('subscription.trial_end', str(trial_end_dt))
         span.set_attribute('subscription.cancel_at', str(cancel_at_dt))
         span.set_attribute('subscription.cancel_at_period_end', str(cancel_at_period_end_flag))
 
@@ -1625,9 +1854,9 @@ def handle_subscription_event(event, **kwargs):
         if licensed_item is None and fallback_item is not None:
             licensed_item = fallback_item
 
-        # Proceed only when the subscription is active and we found a licensed item
+        # Proceed when the subscription is active or trialing and we found a licensed item
         span.set_attribute('subscription.status', str(sub.status))
-        if sub.status == 'active' and licensed_item is not None:
+        if sub.status in ("active", "trialing") and licensed_item is not None:
             price_info = licensed_item.get("price") or {}
             if not isinstance(price_info, Mapping):
                 price_info = {}
@@ -1688,12 +1917,63 @@ def handle_subscription_event(event, **kwargs):
                 should_grant = billing_reason in {"subscription_create", "subscription_cycle"}
                 if billing_reason is None and event_type == "customer.subscription.created":
                     should_grant = True
+                trial_conversion = False
+                if sub.status == "active" and trial_end_dt and current_period_start_dt:
+                    trial_conversion = trial_end_dt.date() == current_period_start_dt.date()
+                if trial_conversion:
+                    should_grant = True
                 if should_grant:
-                    TaskCreditService.grant_subscription_credits(
-                        owner,
-                        plan=plan,
-                        invoice_id=invoice_id or ""
-                    )
+                    credit_override = None
+                    grant_invoice_id = invoice_id or ""
+                    expiration_override = None
+                    if sub.status == "trialing":
+                        expiration_override = _trial_paid_period_end(trial_end_dt, current_period_end_dt)
+                        if not grant_invoice_id:
+                            anchor_dt = trial_start_dt or current_period_start_dt
+                            anchor = anchor_dt.date().isoformat() if anchor_dt else "start"
+                            grant_invoice_id = f"trial:{subscription_id}:{anchor}"
+                    elif trial_conversion:
+                        monthly_credits = None
+                        if isinstance(plan, Mapping):
+                            monthly_credits = plan.get("monthly_task_credits")
+                        try:
+                            monthly_credits = int(monthly_credits) if monthly_credits is not None else None
+                        except (TypeError, ValueError):
+                            monthly_credits = None
+
+                        if monthly_credits is None:
+                            should_grant = False
+                        else:
+                            topoff = _trial_topoff_amount(
+                                owner=owner,
+                                plan_id=plan_value,
+                                monthly_credits=monthly_credits,
+                                as_of=current_period_start_dt or timezone.now(),
+                            )
+                            if topoff <= 0:
+                                should_grant = False
+                            else:
+                                credit_override = topoff
+                                if not grant_invoice_id:
+                                    anchor = (
+                                        current_period_start_dt.date().isoformat()
+                                        if current_period_start_dt
+                                        else "start"
+                                    )
+                                    grant_invoice_id = f"trial-topoff:{subscription_id}:{anchor}"
+                                expiration_override = current_period_end_dt
+
+                    if not should_grant:
+                        credit_override = None
+
+                    if should_grant:
+                        TaskCreditService.grant_subscription_credits(
+                            owner,
+                            plan=plan,
+                            invoice_id=grant_invoice_id,
+                            credit_override=credit_override,
+                            expiration_date=expiration_override,
+                        )
 
                 try:
                     ub = owner.billing
@@ -1709,6 +1989,7 @@ def handle_subscription_event(event, **kwargs):
 
                 Analytics.identify(owner.id, {
                     'plan': plan_value,
+                    'is_trial': sub.status == "trialing",
                 })
 
                 event_properties = {
@@ -1737,7 +2018,23 @@ def handle_subscription_event(event, **kwargs):
                         source=AnalyticsSource.WEB,
                         properties=event_properties,
                     )
-
+                    if (
+                        analytics_event == AnalyticsEvent.SUBSCRIPTION_CREATED
+                        and sub.status == "trialing"
+                        and event_type == "customer.subscription.created"
+                    ):
+                        trial_properties = {
+                            "plan": plan_value,
+                            "subscription_id": subscription_id,
+                        }
+                        if invoice_id:
+                            trial_properties["stripe.invoice_id"] = invoice_id
+                        Analytics.track_event(
+                            user_id=owner.id,
+                            event=AnalyticsEvent.BILLING_TRIAL_STARTED,
+                            source=AnalyticsSource.WEB,
+                            properties=trial_properties,
+                        )
                     marketing_properties = {
                         "plan": plan_value,
                         "subscription_id": subscription_id,
@@ -1746,28 +2043,28 @@ def handle_subscription_event(event, **kwargs):
                         event_id_override = subscription_metadata.get("gobii_event_id")
                         if isinstance(event_id_override, str) and event_id_override.strip():
                             marketing_properties["event_id"] = event_id_override.strip()
-                    value, currency = _calculate_subscription_value(licensed_item)
-                    ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
-                    if value is not None:
-                        marketing_properties["value"] = value * ltv_multiple
-                    if currency:
-                        marketing_properties["currency"] = currency
-                    if analytics_event == AnalyticsEvent.SUBSCRIPTION_RENEWED:
-                        marketing_properties["renewal"] = True
+
+                    if sub.status == "trialing":
+                        value, currency = _calculate_subscription_value(licensed_item)
+                        ltv_multiple = float(getattr(settings, "CAPI_LTV_MULTIPLE", 1.0) or 1.0)
+                        if value is not None:
+                            marketing_properties["predicted_ltv"] = value * ltv_multiple
+                        marketing_properties["value"] = 0
+                        marketing_properties["currency"] = "USD"
 
                     marketing_properties = {k: v for k, v in marketing_properties.items() if v is not None}
 
                     if not suppress_marketing_event:
                         try:
-                            if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED:
+                            if analytics_event != AnalyticsEvent.SUBSCRIPTION_RENEWED and sub.status == "trialing":
                                 capi(
                                     user=owner,
-                                    event_name="Subscribe",
+                                    event_name="StartTrial",
                                     properties=marketing_properties,
                                     request=None,
                                     context=marketing_context,
                                 )
-                            # Renewal marketing events temporarily disabled.
+                            # Subscribe event is sent on first payment (invoice.payment_succeeded).
                         except Exception:
                             logger.exception(
                                 "Failed to enqueue marketing subscription event for user %s",

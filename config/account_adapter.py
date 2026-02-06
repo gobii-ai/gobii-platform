@@ -17,6 +17,7 @@ from api.services.system_settings import (
     get_account_allow_social_login,
     get_account_allow_social_signup,
 )
+from util.onboarding import set_trial_onboarding_requires_plan_selection
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,12 @@ class GobiiAccountAdapter(DefaultAccountAdapter):
         )
         if response:
             return response
+
+        if signup:
+            set_trial_onboarding_requires_plan_selection(
+                request,
+                required=True,
+            )
 
         if signup:
             return None

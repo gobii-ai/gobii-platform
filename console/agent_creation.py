@@ -29,6 +29,7 @@ from config import settings
 from console.context_helpers import build_console_context
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.onboarding import clear_trial_onboarding_intent
 from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import get_owner_plan
 
@@ -307,6 +308,7 @@ def create_persistent_agent_from_charter(
         for key in ("agent_charter", "agent_charter_source", PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY):
             if key in request.session:
                 del request.session[key]
+        clear_trial_onboarding_intent(request)
 
         base_props = {
             "agent_id": str(persistent_agent.id),

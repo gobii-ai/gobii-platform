@@ -229,6 +229,7 @@ export function AgentChatLayout({
     isUpgradeModalOpen,
     closeUpgradeModal,
     upgradeModalSource,
+    upgradeModalDismissible,
     isProprietaryMode,
   } = useSubscriptionStore()
   const [isMobileUpgrade, setIsMobileUpgrade] = useState(() => {
@@ -293,12 +294,15 @@ export function AgentChatLayout({
   }, [closeUpgradeModal, isCollaborator, isProprietaryMode, isUpgradeModalOpen])
 
   const handleUpgradeModalDismiss = useCallback(() => {
+    if (!upgradeModalDismissible) {
+      return
+    }
     track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
       currentPlan: subscriptionPlan,
       source: upgradeModalSource ?? 'unknown',
     })
     closeUpgradeModal()
-  }, [closeUpgradeModal, subscriptionPlan, upgradeModalSource])
+  }, [closeUpgradeModal, subscriptionPlan, upgradeModalDismissible, upgradeModalSource])
 
   const handleUpgradeSelection = useCallback((plan: PlanTier) => {
     onUpgrade?.(plan)
@@ -736,7 +740,7 @@ export function AgentChatLayout({
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
-        isMobileUpgrade ? (
+        isMobileUpgrade && upgradeModalDismissible ? (
           <AgentChatMobileSheet
             open={isUpgradeModalOpen}
             onClose={handleUpgradeModalDismiss}
@@ -758,7 +762,7 @@ export function AgentChatLayout({
             onClose={handleUpgradeModalDismiss}
             onUpgrade={handleUpgradeSelection}
             source={upgradeModalSource ?? undefined}
-            dismissible
+            dismissible={upgradeModalDismissible}
           />
         )
       ) : null}

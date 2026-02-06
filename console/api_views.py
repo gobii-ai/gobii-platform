@@ -78,7 +78,7 @@ from api.models import (
 )
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
@@ -95,6 +95,7 @@ from api.services.web_sessions import (
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.onboarding import get_trial_onboarding_state
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -235,11 +236,7 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
             if cookie_value:
                 try:
                     stashed = signing.loads(cookie_value, max_age=3600)
-                    for key in (
-                        "agent_charter",
-                        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
-                        "agent_charter_source",
-                    ):
+                    for key in OAUTH_CHARTER_SESSION_KEYS:
                         if key in stashed:
                             request.session[key] = stashed[key]
                     request.session.modified = True
@@ -247,9 +244,12 @@ class AgentSpawnIntentAPIView(LoginRequiredMixin, View):
                 except (signing.BadSignature, signing.SignatureExpired):
                     logger.debug("Invalid or expired OAuth charter cookie")
 
+        pending_onboarding, onboarding_target, requires_plan_selection = get_trial_onboarding_state(request)
         payload = {
             "charter": request.session.get("agent_charter"),
             "preferred_llm_tier": request.session.get("agent_preferred_llm_tier"),
+            "onboarding_target": onboarding_target if pending_onboarding else None,
+            "requires_plan_selection": bool(pending_onboarding and requires_plan_selection),
         }
         response = JsonResponse(payload)
         if restored_cookie:

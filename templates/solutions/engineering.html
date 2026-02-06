@@ -174,8 +174,10 @@
         <div class="mt-10 flex flex-col sm:flex-row gap-4">
           <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
             {% csrf_token %}
+            <input type="hidden" name="trial_onboarding" value="1" />
+            <input type="hidden" name="trial_onboarding_target" value="api_keys" />
             <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-7 py-3.5 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-200/50 hover:shadow-xl transition-all duration-200">
-              Get API key
+              {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
               <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
               </svg>
@@ -524,6 +526,8 @@ agent = response.<span class="function">json</span>()
       <!-- Console / Get Started - Primary -->
       <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="group block p-8 rounded-2xl bg-gradient-to-br from-violet-100 to-purple-100 border border-violet-200 hover:border-violet-300 transition-all hover:shadow-lg hover:shadow-violet-200/50 ring-2 ring-violet-200/50">
         {% csrf_token %}
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="api_keys" />
         <button type="submit" class="text-left w-full">
           <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center mb-5 shadow-lg shadow-violet-300/30">
             <i data-lucide="key" class="w-6 h-6 text-white"></i>
@@ -533,7 +537,7 @@ agent = response.<span class="function">json</span>()
             Create an account and generate your API key in seconds.
           </p>
           <span class="inline-flex items-center text-sm font-medium text-violet-700 group-hover:text-violet-800">
-            Start Pro
+            {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
             <svg class="w-4 h-4 ml-1 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
             </svg>
@@ -683,8 +687,10 @@ agent = response.<span class="function">json</span>()
     <div class="mt-10 flex flex-col sm:flex-row gap-4 justify-center">
       <form method="post" action="{% url 'pages:engineering_pro_signup' %}" class="w-full sm:w-auto">
         {% csrf_token %}
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="api_keys" />
         <button type="submit" class="w-full group inline-flex items-center justify-center gap-2 px-8 py-4 bg-gradient-to-r from-violet-600 to-purple-500 hover:from-violet-700 hover:to-purple-600 text-white font-medium rounded-xl shadow-lg shadow-violet-300/50 hover:shadow-xl hover:shadow-violet-300/60 transition-all duration-200 hover:-translate-y-0.5">
-          Get API key
+          {% if user.is_authenticated %}Get API Keys{% else %}Start Free Trial{% endif %}
           <svg class="w-4 h-4 group-hover:translate-x-0.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
           </svg>

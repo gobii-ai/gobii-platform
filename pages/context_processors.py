@@ -11,6 +11,7 @@ from api.agent.core.llm_config import is_llm_bootstrap_required
 from config import settings
 from config.plans import AGENTS_UNLIMITED
 from constants.plans import PlanNames
+from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
 from util.subscription_helper import (
@@ -191,6 +192,14 @@ def show_signup_tracking(request):
         'signup_event_id': request.session.get('signup_event_id'),
         'signup_user_id': request.session.get('signup_user_id'),
         'signup_email_hash': request.session.get('signup_email_hash'),
+    }
+
+
+def mini_mode(request):
+    mini_mode_enabled = is_mini_mode_enabled(request)
+    return {
+        "mini_mode_enabled": mini_mode_enabled,
+        "mini_mode_solutions_header": mini_mode_enabled and request.path.startswith("/solutions/"),
     }
 
 

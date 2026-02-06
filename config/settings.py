@@ -333,6 +333,7 @@ TEMPLATES = [
                 "pages.context_processors.account_info",
                 "pages.context_processors.environment_info",
                 "pages.context_processors.show_signup_tracking",
+                "pages.context_processors.mini_mode",
                 "pages.context_processors.analytics",
                 "pages.context_processors.llm_bootstrap",
                 "pages.context_processors.canonical_url",

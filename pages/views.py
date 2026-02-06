@@ -21,7 +21,7 @@ from api.models import PaidPlanIntent, PersistentAgent, PersistentAgentTemplate
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
-from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE
+from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, OAUTH_CHARTER_SESSION_KEYS
 from config.stripe_config import get_stripe_settings
 
 import stripe
@@ -29,12 +29,20 @@ from djstripe.models import Customer, Subscription, Price
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.payments_helper import PaymentsHelper
 from util.subscription_helper import (
+    customer_has_any_individual_subscription,
     ensure_single_individual_subscription,
     get_existing_individual_subscriptions,
     get_or_create_stripe_customer,
     get_user_plan,
 )
 from util.integrations import stripe_status, IntegrationDisabledError
+from util.onboarding import (
+    TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    TRIAL_ONBOARDING_TARGET_API_KEYS,
+    is_truthy_flag,
+    normalize_trial_onboarding_target,
+    set_trial_onboarding_intent,
+)
 from constants.plans import PlanNames
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
@@ -105,6 +113,15 @@ def _subscription_contains_meter_price(sub: dict, target_price_id: str) -> bool:
     return False
 
 
+def _normalize_trial_days(value: int | str | None) -> int:
+    if value is None:
+        return 0
+    try:
+        return max(int(value), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _customer_has_price_subscription(customer_id: str, target_price_id: str) -> bool:
     """Check if the customer already has an active individual subscription for the price."""
     return _customer_has_price_subscription_with_cache(customer_id, target_price_id)[0]
@@ -157,6 +174,25 @@ def _login_url_with_utms(request) -> str:
         separator = "&" if "?" in base_url else "?"
         return f"{base_url}{separator}{utm_qs}"
     return base_url
+
+
+def _build_oauth_charter_cookie_payload(
+    request,
+    *,
+    charter: str,
+    template_code: str,
+) -> dict[str, str | bool]:
+    payload: dict[str, str | bool] = {
+        "agent_charter": charter,
+        PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template_code,
+        "agent_charter_source": "template",
+    }
+    for key in OAUTH_CHARTER_SESSION_KEYS:
+        if key in payload:
+            continue
+        if key in request.session:
+            payload[key] = request.session.get(key)
+    return payload
 
 
 POST_CHECKOUT_REDIRECT_SESSION_KEY = "post_checkout_redirect"
@@ -478,6 +514,11 @@ class HomeAgentSpawnView(TemplateView):
         from django.contrib.auth.views import redirect_to_login
         
         form = PersistentAgentCharterForm(request.POST)
+        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
         
         if form.is_valid():
             return_to = normalize_return_to(request, request.POST.get("return_to"))
@@ -521,6 +562,11 @@ class HomeAgentSpawnView(TemplateView):
             if request.user.is_authenticated:
                 # User is already logged in, go directly to agent creation
                 return redirect(next_url)
+            if trial_onboarding_requested:
+                set_trial_onboarding_intent(
+                    request,
+                    target=trial_onboarding_target,
+                )
             # User needs to log in first, then continue to agent creation in the app
             app_redirect_params = {**redirect_params, "spawn": "1"}
             app_next_url = append_query_params(
@@ -614,6 +660,11 @@ class PretrainedWorkerHireView(View):
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
         flow = (request.POST.get("flow") or "").strip().lower()
+        trial_onboarding_requested = is_truthy_flag(request.POST.get("trial_onboarding"))
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
         analytics_properties = {
             "source_page": source_page,
             "template_code": template.code,
@@ -652,6 +703,11 @@ class PretrainedWorkerHireView(View):
 
         app_next_url = next_url
         if flow != "pro":
+            if trial_onboarding_requested:
+                set_trial_onboarding_intent(
+                    request,
+                    target=trial_onboarding_target,
+                )
             return_to = normalize_return_to(request, request.META.get("HTTP_REFERER"))
             app_params = {"spawn": "1"}
             if return_to:
@@ -668,11 +724,11 @@ class PretrainedWorkerHireView(View):
 
         # Also store charter in a signed cookie for OAuth flows where session
         # data might be lost during the redirect chain
-        charter_data = {
-            "agent_charter": template.charter,
-            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
-            "agent_charter_source": "template",
-        }
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            template_code=template.code,
+        )
         response.set_cookie(
             OAUTH_CHARTER_COOKIE,
             signing.dumps(charter_data, compress=True),
@@ -816,11 +872,11 @@ class PublicTemplateHireView(View):
             login_url=_login_url_with_utms(request),
         )
 
-        charter_data = {
-            "agent_charter": template.charter,
-            PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY: template.code,
-            "agent_charter_source": "template",
-        }
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            template_code=template.code,
+        )
         response.set_cookie(
             OAUTH_CHARTER_COOKIE,
             signing.dumps(charter_data, compress=True),
@@ -841,6 +897,31 @@ class EngineeringProSignupView(View):
         return self._handle(request)
 
     def _handle(self, request):
+        trial_onboarding_requested = is_truthy_flag(
+            request.POST.get("trial_onboarding") or request.GET.get("trial_onboarding")
+        )
+        trial_onboarding_target = normalize_trial_onboarding_target(
+            request.POST.get("trial_onboarding_target") or request.GET.get("trial_onboarding_target"),
+            default=TRIAL_ONBOARDING_TARGET_API_KEYS,
+        )
+        if trial_onboarding_requested:
+            if request.user.is_authenticated:
+                return redirect("api_keys")
+            set_trial_onboarding_intent(
+                request,
+                target=trial_onboarding_target,
+            )
+            from django.contrib.auth.views import redirect_to_login
+
+            app_next_url = append_query_params(
+                f"{IMMERSIVE_APP_BASE_PATH}/agents/new",
+                {"spawn": "1"},
+            )
+            return redirect_to_login(
+                next=app_next_url,
+                login_url=_login_url_with_utms(request),
+            )
+
         next_url = reverse("proprietary:pro_checkout")
         request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
         request.session.modified = True
@@ -1192,6 +1273,15 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             raise
 
         # 2️⃣  Kick off Checkout with the *existing* customer
+        trial_days = _normalize_trial_days(getattr(stripe_settings, "startup_trial_days", 0))
+        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+
+        subscription_data = {
+            "metadata": metadata,
+        }
+        if include_trial:
+            subscription_data["trial_period_days"] = trial_days
+
         checkout_kwargs = {
             "customer": customer.id,
             "api_key": stripe.api_key,
@@ -1199,9 +1289,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "allow_promotion_codes": True,
-            "subscription_data": {
-                "metadata": metadata,
-            },
+            "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-startup-{customer.id}-{event_id}",
         }
@@ -1333,6 +1421,15 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
                     "Failed to upgrade subscription for customer %s; falling back to checkout", customer.id,
                 )
 
+        trial_days = _normalize_trial_days(getattr(stripe_settings, "scale_trial_days", 0))
+        include_trial = trial_days > 0 and not customer_has_any_individual_subscription(str(customer.id))
+
+        subscription_data = {
+            "metadata": metadata,
+        }
+        if include_trial:
+            subscription_data["trial_period_days"] = trial_days
+
         checkout_kwargs = {
             "customer": customer.id,
             "api_key": stripe.api_key,
@@ -1340,9 +1437,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             "cancel_url": request.build_absolute_uri(reverse("pages:home")),
             "mode": "subscription",
             "allow_promotion_codes": True,
-            "subscription_data": {
-                "metadata": metadata,
-            },
+            "subscription_data": subscription_data,
             "line_items": line_items,
             "idempotency_key": f"checkout-scale-{customer.id}-{event_id}",
         }

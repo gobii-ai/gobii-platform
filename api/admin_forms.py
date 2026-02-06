@@ -394,6 +394,12 @@ class StripeConfigForm(ModelForm):
         label="Startup base price ID",
         required=False,
     )
+    startup_trial_days = forms.IntegerField(
+        label="Startup trial days",
+        required=False,
+        min_value=0,
+        help_text="Number of trial days for Startup checkout (0 disables trials).",
+    )
     startup_additional_task_price_id = forms.CharField(
         label="Startup ad-hoc price ID",
         required=False,
@@ -439,6 +445,12 @@ class StripeConfigForm(ModelForm):
     scale_price_id = forms.CharField(
         label="Scale base price ID",
         required=False,
+    )
+    scale_trial_days = forms.IntegerField(
+        label="Scale trial days",
+        required=False,
+        min_value=0,
+        help_text="Number of trial days for Scale checkout (0 disables trials).",
     )
     scale_additional_task_price_id = forms.CharField(
         label="Scale ad-hoc task price ID",
@@ -601,6 +613,7 @@ class StripeConfigForm(ModelForm):
 
             self.fields["startup_product_id"].initial = instance.startup_product_id
             self.fields["startup_price_id"].initial = instance.startup_price_id
+            self.fields["startup_trial_days"].initial = instance.startup_trial_days
             self.fields["startup_additional_task_price_id"].initial = instance.startup_additional_task_price_id
 
             self.fields["startup_task_pack_product_id"].initial = instance.startup_task_pack_product_id
@@ -622,6 +635,7 @@ class StripeConfigForm(ModelForm):
             )
 
             self.fields["scale_price_id"].initial = instance.scale_price_id
+            self.fields["scale_trial_days"].initial = instance.scale_trial_days
             self.fields["scale_additional_task_price_id"].initial = instance.scale_additional_task_price_id
             self.fields["scale_product_id"].initial = instance.scale_product_id
 
@@ -719,6 +733,7 @@ class StripeConfigForm(ModelForm):
         simple_fields = [
             "startup_product_id",
             "startup_price_id",
+            "startup_trial_days",
             "startup_additional_task_price_id",
 
             "startup_task_pack_product_id",
@@ -734,6 +749,7 @@ class StripeConfigForm(ModelForm):
 
             "scale_product_id",
             "scale_price_id",
+            "scale_trial_days",
             "scale_additional_task_price_id",
 
             "scale_task_pack_product_id",

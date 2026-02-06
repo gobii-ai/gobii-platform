@@ -1,8 +1,12 @@
-from __future__ import annotations
-
 import logging
 from typing import Dict, Iterable, Tuple
 from urllib.parse import urlencode
+
+from pages.mini_mode import (
+    campaign_matches_mini_mode,
+    set_mini_mode_cookie,
+    set_request_mini_mode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,17 +46,23 @@ class UTMTrackingMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
+        should_set_mini_mode_cookie = False
         if request.method == "GET":
-            self._capture_params(request)
-        return self.get_response(request)
+            should_set_mini_mode_cookie = self._capture_params(request)
 
-    def _capture_params(self, request) -> None:
+        response = self.get_response(request)
+        if should_set_mini_mode_cookie and hasattr(response, "set_cookie"):
+            set_mini_mode_cookie(response, request)
+        return response
+
+    def _capture_params(self, request) -> bool:
         params = request.GET
         if not params:
-            return
+            return False
 
         session = request.session
         session_modified = False
+        should_set_mini_mode_cookie = False
 
         utm_values = self._clean_params(params, self.UTM_PARAMS)
         if utm_values:
@@ -62,6 +72,9 @@ class UTMTrackingMiddleware:
                 self.SESSION_UTM_LAST,
                 utm_values,
             )
+            if campaign_matches_mini_mode(utm_values.get("utm_campaign")):
+                set_request_mini_mode(request)
+                should_set_mini_mode_cookie = True
 
         click_values = self._clean_params(params, self.CLICK_ID_PARAMS)
         if click_values:
@@ -112,6 +125,7 @@ class UTMTrackingMiddleware:
         if session_modified:
             session[self.SESSION_QUERYSTRING] = self._build_querystring(session)
             session.modified = True
+        return should_set_mini_mode_cookie
 
     def _clean_params(
         self, query_params, keys: Iterable[str]

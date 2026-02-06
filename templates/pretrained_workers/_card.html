@@ -56,8 +56,10 @@
       <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents">
         {% csrf_token %}
         <input type="hidden" name="source_page" value="home_pretrained_workers" />
+        <input type="hidden" name="trial_onboarding" value="1" />
+        <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
         <button type="submit" class="inline-flex items-center justify-center gap-2 px-5 py-3 bg-gradient-to-r from-indigo-600 to-blue-600 text-white font-semibold rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-blue-500 transition">
-          Spawn this worker
+          {% if user.is_authenticated %}Spawn This Worker{% else %}Start Free Trial{% endif %}
           <span aria-hidden="true">→</span>
         </button>
       </form>

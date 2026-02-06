@@ -289,7 +289,13 @@ export function AgentChatPage({
     updating: addonsUpdating,
   } = useAgentAddons(agentId)
   const queryClient = useQueryClient()
-  const { currentPlan, isProprietaryMode, ensureAuthenticated, upgradeModalSource } = useSubscriptionStore()
+  const {
+    currentPlan,
+    isProprietaryMode,
+    ensureAuthenticated,
+    upgradeModalSource,
+    openUpgradeModal,
+  } = useSubscriptionStore()
   const isNewAgent = agentId === null
   const isSelectionView = agentId === undefined
   const timelineRef = useRef<HTMLDivElement | null>(null)
@@ -868,6 +874,8 @@ export function AgentChatPage({
     const flag = (params.get('spawn') || '').toLowerCase()
     return flag === '1' || flag === 'true' || flag === 'yes' || flag === 'on'
   }, [isNewAgent])
+  const onboardingTarget = spawnIntent?.onboarding_target ?? null
+  const requiresTrialPlanSelection = Boolean(spawnIntent?.requires_plan_selection)
 
   useEffect(() => {
     if (!isNewAgent || !spawnFlow) {
@@ -887,13 +895,16 @@ export function AgentChatPage({
         if (spawnIntentRequestIdRef.current !== requestId) {
           return
         }
+        setSpawnIntent(intent)
         const charter = intent?.charter?.trim()
+        if (intent?.requires_plan_selection || charter) {
+          setSpawnIntentStatus('ready')
+          return
+        }
         if (!charter) {
           setSpawnIntentStatus('done')
           return
         }
-        setSpawnIntent(intent)
-        setSpawnIntentStatus('ready')
       } catch (err) {
         if (controller.signal.aborted || spawnIntentRequestIdRef.current !== requestId) {
           return
@@ -1080,9 +1091,16 @@ export function AgentChatPage({
       plan,
       source: resolvedSource,
     })
-    const checkoutUrl = appendReturnTo(plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/')
+    const checkoutPath = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
+    let returnToPath: string | undefined
+    if (requiresTrialPlanSelection) {
+      returnToPath = onboardingTarget === 'api_keys'
+        ? '/console/api-keys/'
+        : '/console/agents/create/quick/'
+    }
+    const checkoutUrl = appendReturnTo(checkoutPath, returnToPath)
     window.open(checkoutUrl, '_top')
-  }, [ensureAuthenticated, upgradeModalSource])
+  }, [ensureAuthenticated, onboardingTarget, requiresTrialPlanSelection, upgradeModalSource])
 
   const createNewAgent = useCallback(
     async (body: string, tier: IntelligenceTierKey) => {
@@ -1543,7 +1561,30 @@ export function AgentChatPage({
   ])
 
   useEffect(() => {
-    if (!isNewAgent || !spawnFlow || !spawnIntent?.charter?.trim()) {
+    if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
+      return
+    }
+    openUpgradeModal('trial_onboarding', { dismissible: false })
+  }, [isNewAgent, openUpgradeModal, requiresTrialPlanSelection, spawnFlow])
+
+  useEffect(() => {
+    if (!isNewAgent || !spawnFlow || spawnIntentStatus === 'loading') {
+      return
+    }
+    if (!spawnIntent || spawnIntent.requires_plan_selection) {
+      return
+    }
+    if (spawnIntent.onboarding_target !== 'api_keys') {
+      return
+    }
+    window.location.assign('/console/api-keys/')
+  }, [isNewAgent, spawnFlow, spawnIntent, spawnIntentStatus])
+
+  useEffect(() => {
+    if (!isNewAgent || !spawnFlow || requiresTrialPlanSelection || !spawnIntent?.charter?.trim()) {
+      return
+    }
+    if (spawnIntent.onboarding_target === 'api_keys') {
       return
     }
     if (!contextReady || rosterQuery.isLoading) {
@@ -1582,6 +1623,7 @@ export function AgentChatPage({
     spawnFlow,
     spawnIntent,
     spawnIntentStatus,
+    requiresTrialPlanSelection,
   ])
 
   const showSpawnIntentLoader = Boolean(

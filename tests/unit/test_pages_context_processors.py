@@ -10,6 +10,7 @@ from pages.context_processors import (
     ACCOUNT_INFO_CACHE_STALE_SECONDS,
     _account_info_cache_key,
     account_info,
+    mini_mode,
 )
 
 User = get_user_model()
@@ -87,3 +88,35 @@ class AccountInfoCacheTests(TestCase):
         self.assertEqual(result, cached_data)
         mock_build.assert_not_called()
         mock_enqueue.assert_called_once_with(self.user.id)
+
+
+@tag("batch_pages")
+class MiniModeContextProcessorTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+
+    def test_sets_solution_header_flag_when_cookie_is_enabled(self):
+        request = self.factory.get("/solutions/engineering/")
+        request.COOKIES["mini-mode"] = "true"
+
+        context = mini_mode(request)
+
+        self.assertTrue(context["mini_mode_enabled"])
+        self.assertTrue(context["mini_mode_solutions_header"])
+
+    def test_disables_solution_header_flag_when_cookie_missing(self):
+        request = self.factory.get("/solutions/engineering/")
+
+        context = mini_mode(request)
+
+        self.assertFalse(context["mini_mode_enabled"])
+        self.assertFalse(context["mini_mode_solutions_header"])
+
+    def test_disables_solution_header_flag_outside_solutions_path(self):
+        request = self.factory.get("/pricing/")
+        request.COOKIES["mini-mode"] = "true"
+
+        context = mini_mode(request)
+
+        self.assertTrue(context["mini_mode_enabled"])
+        self.assertFalse(context["mini_mode_solutions_header"])

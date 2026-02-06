@@ -56,3 +56,37 @@ class LandingPage(models.Model):
 
     def __str__(self):
         return self.title or (self.charter[:50] + ('...' if len(self.charter) > 50 else ''))
+
+
+class MiniModeCampaignPattern(models.Model):
+    """Pattern used to enable mini mode when matched against utm_campaign."""
+
+    pattern = models.CharField(
+        max_length=256,
+        unique=True,
+        help_text=(
+            "Case-insensitive pattern for utm_campaign. "
+            "Use '*' as a wildcard (examples: agents_202602, c-*, bigcampaign)."
+        ),
+    )
+    is_active = models.BooleanField(default=True)
+    notes = models.CharField(
+        max_length=512,
+        blank=True,
+        help_text="Optional internal notes about when to use this pattern.",
+    )
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("pattern",)
+        verbose_name = "Mini mode campaign pattern"
+        verbose_name_plural = "Mini mode campaign patterns"
+
+    def save(self, *args, **kwargs):
+        # Store normalized patterns so matching is deterministic.
+        self.pattern = (self.pattern or "").strip().lower()
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return self.pattern
