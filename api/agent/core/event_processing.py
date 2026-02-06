@@ -59,6 +59,7 @@ from .processing_flags import (
 )
 from .llm_utils import (
     raise_if_empty_litellm_response,
+    raise_if_invalid_litellm_response,
     run_completion,
 )
 from .llm_streaming import StreamAccumulator
@@ -1339,6 +1340,7 @@ def _stream_completion_with_broadcast(
     response = accumulator.build_response(model=model, provider=provider)
     response.request_duration_ms = int(round((time.monotonic() - start_time) * 1000))
     raise_if_empty_litellm_response(response, model=model, provider=provider)
+    raise_if_invalid_litellm_response(response, model=model, provider=provider)
     return response
 
 

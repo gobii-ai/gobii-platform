@@ -38,12 +38,29 @@ class EmptyLiteLLMResponseError(RuntimeError):
         self.provider = provider
 
 
+class InvalidLiteLLMResponseError(RuntimeError):
+    """Raised when LiteLLM returns a response containing forbidden markers."""
+
+    def __init__(self, message: str, *, model: str | None = None, provider: str | None = None) -> None:
+        details = []
+        if provider:
+            details.append(f"provider={provider}")
+        if model:
+            details.append(f"model={model}")
+        if details:
+            message = f"{message} ({', '.join(details)})"
+        super().__init__(message)
+        self.model = model
+        self.provider = provider
+
+
 _RETRYABLE_ERRORS = (
     litellm.Timeout,
     litellm.APIConnectionError,
     litellm.ServiceUnavailableError,
     litellm.RateLimitError,
     EmptyLiteLLMResponseError,
+    InvalidLiteLLMResponseError,
 )
 
 
@@ -149,6 +166,30 @@ def _message_has_tool_calls(message: Any) -> bool:
     return False
 
 
+_FORBIDDEN_COMPLETION_MARKERS = (
+    "<\uFF5CDSML\uFF5Cfunction_calls>",
+)
+
+
+def _contains_forbidden_marker(text: str | None) -> bool:
+    if not text:
+        return False
+    return any(marker in text for marker in _FORBIDDEN_COMPLETION_MARKERS)
+
+
+def _response_has_forbidden_markers(response: Any) -> bool:
+    message = _first_message_from_response(response)
+    if message is None:
+        return False
+    content_text = _extract_message_content(message)
+    if _contains_forbidden_marker(content_text):
+        return True
+    reasoning_text = extract_reasoning_content(response)
+    if isinstance(reasoning_text, str) and _contains_forbidden_marker(reasoning_text):
+        return True
+    return False
+
+
 def is_empty_litellm_response(response: Any) -> bool:
     message = _first_message_from_response(response)
     if message is None:
@@ -173,6 +214,20 @@ def raise_if_empty_litellm_response(
     if is_empty_litellm_response(response):
         raise EmptyLiteLLMResponseError(
             "LiteLLM returned an empty response",
+            model=model,
+            provider=provider,
+        )
+
+
+def raise_if_invalid_litellm_response(
+    response: Any,
+    *,
+    model: str | None = None,
+    provider: str | None = None,
+) -> None:
+    if _response_has_forbidden_markers(response):
+        raise InvalidLiteLLMResponseError(
+            "LiteLLM returned a response with forbidden markers",
             model=model,
             provider=provider,
         )
@@ -271,6 +326,7 @@ def run_completion(
                 response = litellm.completion(**kwargs)
             if not kwargs.get("stream"):
                 raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
+                raise_if_invalid_litellm_response(response, model=model, provider=provider_hint)
                 _attach_response_duration(response, duration_ms)
             return response
         except _RETRYABLE_ERRORS as exc:
@@ -288,7 +344,9 @@ def run_completion(
 
 __all__ = [
     "EmptyLiteLLMResponseError",
+    "InvalidLiteLLMResponseError",
     "is_empty_litellm_response",
     "raise_if_empty_litellm_response",
+    "raise_if_invalid_litellm_response",
     "run_completion",
 ]
