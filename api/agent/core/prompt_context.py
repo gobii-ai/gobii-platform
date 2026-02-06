@@ -72,7 +72,7 @@ from .llm_config import (
     get_llm_config,
     get_llm_config_with_failover,
 )
-from .promptree import Prompt
+from .promptree import Prompt, hmt
 from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import get_agent_filesystem_prompt
@@ -114,6 +114,8 @@ tracer = trace.get_tracer("gobii.utils")
 
 DEFAULT_MAX_AGENT_LOOP_ITERATIONS = 100
 INTERNAL_REASONING_PREFIX = "Internal reasoning:"
+# Keep internal reasoning previews short in unified history; shrink with HMT instead of dropping early context.
+INTERNAL_REASONING_DISPLAY_LIMIT_BYTES = 3000
 KANBAN_DONE_SUMMARY_LIMIT = 5
 KANBAN_DONE_DESC_LIMIT = 140
 KANBAN_DONE_TITLE_LIMIT = 80
@@ -200,6 +202,21 @@ def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
         return min(tier_budget, endpoint_budget)
 
     return tier_budget
+
+
+def _shrink_internal_reasoning(raw_reasoning: str) -> str:
+    """Shrink internal reasoning with HMT to fit within the display byte budget."""
+
+    reasoning = raw_reasoning.lstrip()
+    if not reasoning:
+        return ""
+
+    byte_length = len(reasoning.encode())
+    if byte_length <= INTERNAL_REASONING_DISPLAY_LIMIT_BYTES:
+        return reasoning
+
+    keep_fraction = INTERNAL_REASONING_DISPLAY_LIMIT_BYTES / byte_length
+    return hmt(reasoning, keep_fraction)
 
 
 def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
@@ -4616,13 +4633,11 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             description_text = s.description or "No description"
             is_internal_reasoning = description_text.startswith(INTERNAL_REASONING_PREFIX)
             if is_internal_reasoning:
-                raw_reasoning = description_text[len(INTERNAL_REASONING_PREFIX):].lstrip()
-                if len(raw_reasoning) > 3000:
-                    truncated_chars = len(raw_reasoning) - 3000
-                    raw_reasoning = f"[TRUNCATED {truncated_chars} CHARS] {raw_reasoning[-3000:]}"
+                raw_reasoning = description_text[len(INTERNAL_REASONING_PREFIX):]
+                shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
                 description_text = (
-                    f"{INTERNAL_REASONING_PREFIX} {raw_reasoning}"
-                    if raw_reasoning
+                    f"{INTERNAL_REASONING_PREFIX} {shrunk_reasoning}"
+                    if shrunk_reasoning
                     else INTERNAL_REASONING_PREFIX
                 )
             components = {
